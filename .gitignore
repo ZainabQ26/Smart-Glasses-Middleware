@@ -78,3 +78,31 @@ artifacts/
 *.swp
 *.swo
 *~
+
+# IDE folders
+.vscode/
+.idea/
+
+# User-specific and local settings
+Properties/launchSettings.json
+appsettings.Development.json
+appsettings.*.Local.json
+.env
+.env.*
+
+# Rider
+.idea/
+*.sln.iml
+
+# Publish output
+/publish/
+
+# Certificate files
+*.pfx
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Secrets directory (if using docker secrets files locally)
+secrets/

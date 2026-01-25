@@ -59,8 +59,48 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    # Allow GPU access when available (requires NVIDIA Container Toolkit / Docker configured for GPUs)
+    device_requests:
+      - driver: nvidia
+        count: all
+        capabilities: [gpu]
+
+  app:
+    build:
+      context: .
+      dockerfile: src/SmartGlassesMiddleware/Dockerfile
+    container_name: smartglasses-app
+    env_file:
+      - secrets/.env
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DefaultConnection=Host=postgres;Database=smartglasses;Username=postgres;Password=${POSTGRES_PASSWORD:-postgres}
+      - ConnectionStrings__Redis=${REDIS_HOST:-redis:6379}
+      - MinIO__Endpoint=${MINIO_ENDPOINT:-minio:9000}
+      - MinIO__AccessKey=${MINIO_ACCESS_KEY:-minioadmin}
+      - MinIO__SecretKey=${MINIO_SECRET_KEY:-minioadmin}
+      - AI__OllamaEndpoint=${AI_OLLAMA_ENDPOINT:-http://ollama:11434}
+      - AI__StrongerModelEndpoint=${AI_STRONGER_ENDPOINT:-http://localhost:5000/api/chat}
+      - AI__StrongerModelName=${AI_STRONGER_MODEL_NAME:-gpt-4}
+    ports:
+      - "5000:5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      minio:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
 volumes:
   postgres-data:
   minio-data:
   ollama-data:
+

@@ -115,4 +115,40 @@ app.UseCors();
 
 app.MapControllers();
 
+// Health endpoint to allow Docker healthchecks to verify service dependencies
+app.MapGet("/health", async (IServiceProvider services) =>
+{
+    using var scope = services.CreateScope();
+    var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+    var redis = scope.ServiceProvider.GetRequiredService<IConnectionMultiplexer>();
+
+    var dbOk = false;
+    try
+    {
+        dbOk = await db.Database.CanConnectAsync();
+    }
+    catch
+    {
+        dbOk = false;
+    }
+
+    var redisOk = false;
+    try
+    {
+        await redis.GetDatabase().PingAsync();
+        redisOk = true;
+    }
+    catch
+    {
+        redisOk = false;
+    }
+
+    if (dbOk && redisOk)
+    {
+        return Results.Ok(new { status = "Healthy" });
+    }
+
+    return Results.StatusCode(503);
+});
+
 app.Run();
