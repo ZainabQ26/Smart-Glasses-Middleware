@@ -1,6 +1,50 @@
-@SmartGlassesMiddleware_HostAddress = http://localhost:5298
+@SmartGlassesMiddleware_HostAddress = http://localhost:5000
 
-GET {{SmartGlassesMiddleware_HostAddress}}/weatherforecast/
-Accept: application/json
+### Text Request Example
+POST {{SmartGlassesMiddleware_HostAddress}}/api/text
+Content-Type: application/json
+
+{
+  "text": "What's the weather like today?"
+}
 
 ###
+
+### Audio Request Example
+POST {{SmartGlassesMiddleware_HostAddress}}/api/audio
+Content-Type: application/json
+
+{
+  "audioBase64": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=",
+  "transcription": "What time is it?"
+}
+
+###
+
+### Media Upload Example (image)
+POST {{SmartGlassesMiddleware_HostAddress}}/api/media
+Content-Type: multipart/form-data; boundary=----WebKitFormBoundary7MA4YWxkTrZu0gW
+
+------WebKitFormBoundary7MA4YWxkTrZu0gW
+Content-Disposition: form-data; name="file"; filename="test.jpg"
+Content-Type: image/jpeg
+
+< ./test.jpg
+------WebKitFormBoundary7MA4YWxkTrZu0gW
+Content-Disposition: form-data; name="description"
+
+What's in this image?
+------WebKitFormBoundary7MA4YWxkTrZu0gW--
+
+###
+
+### Get Recent History
+GET {{SmartGlassesMiddleware_HostAddress}}/api/history?count=10
+
+###
+
+### Get History by ID
+GET {{SmartGlassesMiddleware_HostAddress}}/api/history/00000000-0000-0000-0000-000000000000
+
+###
+
