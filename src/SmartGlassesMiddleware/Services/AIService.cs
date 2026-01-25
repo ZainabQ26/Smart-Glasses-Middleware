@@ -16,6 +16,7 @@ public class OllamaAIService : IAIService
     private readonly HttpClient _httpClient;
     private readonly ILogger<OllamaAIService> _logger;
     private readonly string _strongerModelEndpoint;
+    private readonly string _strongerModelName;
     private readonly List<string> _knownTasks;
 
     public OllamaAIService(Kernel kernel, HttpClient httpClient, IConfiguration configuration, ILogger<OllamaAIService> logger)
@@ -24,6 +25,7 @@ public class OllamaAIService : IAIService
         _httpClient = httpClient;
         _logger = logger;
         _strongerModelEndpoint = configuration["AI:StrongerModelEndpoint"] ?? "http://localhost:5000/api/chat";
+        _strongerModelName = configuration["AI:StrongerModelName"] ?? "gpt-4";
         
         // Define known tasks that the local model can handle
         _knownTasks = new List<string>
@@ -95,7 +97,7 @@ Please provide a helpful and concise response:";
             var requestBody = new
             {
                 message = input,
-                model = "gpt-4"
+                model = _strongerModelName
             };
 
             var content = new StringContent(

@@ -35,8 +35,8 @@ public class TextController : ControllerBase
                 return BadRequest("Text cannot be empty");
             }
 
-            // Check cache first
-            var cacheKey = $"text:{request.Text.GetHashCode()}";
+            // Check cache first - use SHA256 hash for reliable cache key
+            var cacheKey = $"text:{ComputeSha256Hash(request.Text)}";
             var cachedResponse = await _cacheService.GetAsync<TaskResponse>(cacheKey);
             if (cachedResponse != null)
             {
@@ -76,5 +76,13 @@ public class TextController : ControllerBase
             _logger.LogError(ex, "Error processing text request");
             return StatusCode(500, "An error occurred processing your request");
         }
+    }
+
+    private static string ComputeSha256Hash(string text)
+    {
+        using var sha256 = System.Security.Cryptography.SHA256.Create();
+        var bytes = System.Text.Encoding.UTF8.GetBytes(text);
+        var hash = sha256.ComputeHash(bytes);
+        return Convert.ToBase64String(hash);
     }
 }

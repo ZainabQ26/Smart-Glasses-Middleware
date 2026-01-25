@@ -51,9 +51,11 @@ builder.Services.AddSingleton<Kernel>(sp =>
     var ollamaModel = builder.Configuration["AI:OllamaModel"] ?? "llama2";
     
     // Add Ollama chat completion service using OpenAI-compatible endpoint
+    // Ollama doesn't require an API key, so we use a placeholder
+    const string placeholderApiKey = "not-needed";
     kernelBuilder.AddOpenAIChatCompletion(
         modelId: ollamaModel,
-        apiKey: "not-needed", // Ollama doesn't require API key
+        apiKey: placeholderApiKey,
         endpoint: new Uri(ollamaEndpoint));
     
     return kernelBuilder.Build();
@@ -73,9 +75,23 @@ builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
-        policy.AllowAnyOrigin()
-              .AllowAnyMethod()
-              .AllowAnyHeader();
+        var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() 
+            ?? new[] { "http://localhost:3000", "http://localhost:5000" };
+        
+        if (builder.Environment.IsDevelopment())
+        {
+            // In development, allow any origin for easier testing
+            policy.AllowAnyOrigin()
+                  .AllowAnyMethod()
+                  .AllowAnyHeader();
+        }
+        else
+        {
+            // In production, restrict to specific origins
+            policy.WithOrigins(allowedOrigins)
+                  .AllowAnyMethod()
+                  .AllowAnyHeader();
+        }
     });
 });
 
