@@ -1,0 +1,6 @@
+@SmartGlassesMiddleware_HostAddress = http://localhost:5298
+
+GET {{SmartGlassesMiddleware_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
