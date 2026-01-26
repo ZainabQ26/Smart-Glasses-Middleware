@@ -31,9 +31,24 @@ Content-Type: image/jpeg
 
 < ./test.jpg
 ------WebKitFormBoundary7MA4YWxkTrZu0gW
-Content-Disposition: form-data; name="description"
+Content-Disposition: form-data; name="prompt"
 
 What's in this image?
+------WebKitFormBoundary7MA4YWxkTrZu0gW--
+
+------WebKitFormBoundary7MA4YWxkTrZu0gW
+Content-Disposition: form-data; name="file"; filename="note.wav"
+Content-Type: audio/wav
+
+< ./note.wav
+------WebKitFormBoundary7MA4YWxkTrZu0gW
+Content-Disposition: form-data; name="prompt"
+
+Transcribe and summarize this audio
+------WebKitFormBoundary7MA4YWxkTrZu0gW
+Content-Disposition: form-data; name="transcription"
+
+Call Alice at 4 PM
 ------WebKitFormBoundary7MA4YWxkTrZu0gW--
 
 ###

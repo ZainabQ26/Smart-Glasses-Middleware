@@ -138,6 +138,9 @@ builder.Services.AddScoped<IAIService, OllamaAIService>();
 builder.Services.AddScoped<IHistoryService, HistoryService>();
 builder.Services.AddScoped<IMediaStorageService, MinioMediaStorageService>();
 builder.Services.AddScoped<ICacheService, RedisCacheService>();
+// Transcription service (server-side)
+builder.Services.AddHttpClient<ITranscriptionService, HttpTranscriptionService>();
+builder.Services.AddScoped<ITranscriptionService, HttpTranscriptionService>();
 
 // Add CORS
 builder.Services.AddCors(options =>
