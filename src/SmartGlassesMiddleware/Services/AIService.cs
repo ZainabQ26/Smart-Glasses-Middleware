@@ -2,6 +2,7 @@ using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
 using Microsoft.SemanticKernel.Connectors.OpenAI;
 using System.Text.Json;
+using System.Linq;
 
 namespace SmartGlassesMiddleware.Services;
 
@@ -18,27 +19,17 @@ public class OllamaAIService : IAIService
     private readonly string _strongerModelEndpoint;
     private readonly string _strongerModelName;
     private readonly List<string> _knownTasks;
+    private readonly ITaskDispatcher _dispatcher;
 
-    public OllamaAIService(Kernel kernel, HttpClient httpClient, IConfiguration configuration, ILogger<OllamaAIService> logger)
+    public OllamaAIService(Kernel kernel, HttpClient httpClient, IConfiguration configuration, ILogger<OllamaAIService> logger, ITaskDispatcher dispatcher)
     {
         _kernel = kernel;
         _httpClient = httpClient;
         _logger = logger;
         _strongerModelEndpoint = configuration["AI:StrongerModelEndpoint"] ?? "http://localhost:5000/api/chat";
         _strongerModelName = configuration["AI:StrongerModelName"] ?? "gpt-4";
-        
-        // Define known tasks that the local model can handle
-        _knownTasks = new List<string>
-        {
-            "weather",
-            "time",
-            "reminder",
-            "alarm",
-            "timer",
-            "note",
-            "translation",
-            "calculation"
-        };
+        _dispatcher = dispatcher;
+        _knownTasks = _dispatcher.KnownTasks.ToList();
     }
 
     public async Task<(string task, string response, bool usedStrongerModel)> ProcessRequestAsync(string input)
@@ -70,6 +61,16 @@ Task:";
                 var strongerResponse = await CallStrongerModelAsync(input);
                 return ("unknown", strongerResponse, true);
             }
+            // If we have a concrete handler for the detected task, invoke it via dispatcher
+            try
+            {
+                var (handled, handlerResponse) = await _dispatcher.TryHandleAsync(detectedTask, input);
+                if (handled) return (detectedTask, handlerResponse ?? string.Empty, false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Handler for task {Task} failed, falling back to model processing", detectedTask);
+            }
 
             // Otherwise, process with local Ollama model
             var processingPrompt = $@"
@@ -80,7 +81,7 @@ User request: {input}
 Please provide a helpful and concise response:";
 
             var response = await chatService.GetChatMessageContentAsync(processingPrompt);
-            
+
             return (detectedTask, response.Content ?? "I couldn't process that request.", false);
         }
         catch (Exception ex)

@@ -5,6 +5,10 @@ using SmartGlassesMiddleware.Data;
 using SmartGlassesMiddleware.Services;
 using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
+using System.Reflection;
+using System.Runtime.Loader;
+using System.Collections.Generic;
+using System.Linq;
 
 #pragma warning disable SKEXP0010
 
@@ -162,6 +166,150 @@ builder.Services.AddScoped<IMediaStorageService, MinioMediaStorageService>();
 builder.Services.AddScoped<ICacheService, RedisCacheService>();
 // Transcription service (server-side) — registered as a typed HTTP client above
 builder.Services.AddHttpClient<ITranscriptionService, HttpTranscriptionService>();
+
+// Auto-register ITaskHandler implementations from this assembly and optional plugin DLLs in the 'tasks' folder.
+
+var handlerAssemblies = new List<Assembly> { Assembly.GetExecutingAssembly() };
+var pluginsPath = Path.Combine(builder.Environment.ContentRootPath ?? string.Empty, "tasks");
+if (Directory.Exists(pluginsPath))
+{
+    // Load precompiled DLL plugins
+    foreach (var dll in Directory.GetFiles(pluginsPath, "*.dll"))
+    {
+        try
+        {
+            var asm = AssemblyLoadContext.Default.LoadFromAssemblyPath(dll);
+            handlerAssemblies.Add(asm);
+        }
+        catch (Exception ex)
+        {
+            var loggerFactory = LoggerFactory.Create(lb => lb.AddConsole());
+            var tmpLogger = loggerFactory.CreateLogger("Startup");
+            tmpLogger.LogWarning(ex, "Failed to load task plugin '{Dll}'", dll);
+        }
+    }
+
+    // Compile any .cs source files in the tasks folder into an in-memory assembly
+    var csFiles = Directory.GetFiles(pluginsPath, "*.cs", SearchOption.AllDirectories);
+    if (csFiles.Length > 0)
+    {
+        try
+        {
+            var compiled = CompileSourceFiles(csFiles, _startupLogger);
+            if (compiled != null) handlerAssemblies.Add(compiled);
+        }
+        catch (Exception ex)
+        {
+            _startupLogger.LogWarning(ex, "Failed to compile source task files in '{Path}'", pluginsPath);
+        }
+    }
+}
+
+var handlerTypes = handlerAssemblies
+    .SelectMany(a => a.GetTypesSafe())
+    .Where(t => typeof(ITaskHandler).IsAssignableFrom(t) && t.IsClass && !t.IsAbstract)
+    .ToList();
+
+foreach (var ht in handlerTypes)
+{
+    builder.Services.AddScoped(typeof(ITaskHandler), ht);
+}
+
+// Local function to compile source files into a disk-cached assembly using Roslyn
+Assembly? CompileSourceFiles(string[] filePaths, ILogger logger)
+{
+    try
+    {
+        // compute a simple cache key based on file paths and last write times
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        var entries = filePaths.Select(fp => fp + ":" + File.GetLastWriteTimeUtc(fp).Ticks.ToString()).OrderBy(s => s);
+        var keyBytes = System.Text.Encoding.UTF8.GetBytes(string.Join("|", entries));
+        var hash = BitConverter.ToString(sha.ComputeHash(keyBytes)).Replace("-", "").ToLowerInvariant();
+
+        var compiledDir = Path.Combine(pluginsPath, "compiled");
+        Directory.CreateDirectory(compiledDir);
+        var outPath = Path.Combine(compiledDir, $"plugins_{hash}.dll");
+
+        // Remove other cached assemblies that don't match current key (cleanup outdated caches)
+        try
+        {
+            foreach (var file in Directory.GetFiles(compiledDir, "plugins_*.dll"))
+            {
+                if (string.Equals(Path.GetFullPath(file), Path.GetFullPath(outPath), StringComparison.OrdinalIgnoreCase)) continue;
+                try
+                {
+                    File.Delete(file);
+                    logger.LogInformation("Removed outdated compiled plugin cache: {File}", file);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogDebug(ex, "Failed to remove cached plugin '{File}'", file);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Error while cleaning compiled plugin cache directory");
+        }
+
+        if (File.Exists(outPath))
+        {
+            try
+            {
+                return AssemblyLoadContext.Default.LoadFromAssemblyPath(outPath);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to load cached plugin assembly '{Path}', will recompile", outPath);
+                // fall through to recompile
+            }
+        }
+
+        var syntaxTrees = filePaths.Select(fp => Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(File.ReadAllText(fp), path: fp)).ToArray();
+
+        var refs = AppDomain.CurrentDomain.GetAssemblies()
+            .Where(a => !a.IsDynamic && !string.IsNullOrEmpty(a.Location))
+            .Select(a => Microsoft.CodeAnalysis.MetadataReference.CreateFromFile(a.Location))
+            .ToList();
+
+        var compilation = Microsoft.CodeAnalysis.CSharp.CSharpCompilation.Create(
+            assemblyName: "TaskPlugins_" + Guid.NewGuid().ToString("N"),
+            syntaxTrees: syntaxTrees,
+            references: refs,
+            options: new Microsoft.CodeAnalysis.CSharp.CSharpCompilationOptions(Microsoft.CodeAnalysis.OutputKind.DynamicallyLinkedLibrary)
+        );
+
+        using var ms = new MemoryStream();
+        var emitResult = compilation.Emit(ms);
+        if (!emitResult.Success)
+        {
+            foreach (var diag in emitResult.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error))
+            {
+                logger.LogWarning("Plugin compile error: {Diag}", diag.ToString());
+            }
+            return null;
+        }
+
+        // write compiled assembly to disk for caching
+        ms.Seek(0, SeekOrigin.Begin);
+        using (var fs = File.Open(outPath, FileMode.Create, FileAccess.Write, FileShare.None))
+        {
+            ms.CopyTo(fs);
+        }
+
+        return AssemblyLoadContext.Default.LoadFromAssemblyPath(outPath);
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning(ex, "Compilation failed");
+        return null;
+    }
+}
+
+// Task dispatcher (configurable handler selection)
+builder.Services.AddScoped<ITaskDispatcher, TaskDispatcher>();
+
+// (AssemblyExtensions moved to a dedicated file)
 
 // Add CORS
 builder.Services.AddCors(options =>
