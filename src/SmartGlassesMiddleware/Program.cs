@@ -9,6 +9,75 @@ using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Load any Docker secret files from /run/secrets into configuration.
+// Filename convention: use double-underscore to indicate nesting, e.g.
+//   ConnectionStrings__DefaultConnection -> Configuration["ConnectionStrings:DefaultConnection"]
+// This makes it easy to provide any configuration key via a secret file.
+try
+{
+    var secretsPath = "/run/secrets";
+    if (Directory.Exists(secretsPath))
+    {
+        foreach (var file in Directory.GetFiles(secretsPath))
+        {
+            try
+            {
+                var name = Path.GetFileName(file);
+                if (string.IsNullOrWhiteSpace(name)) continue;
+                var key = name.Replace("__", ":");
+                var value = File.ReadAllText(file).Trim();
+                if (!string.IsNullOrEmpty(value))
+                {
+                    builder.Configuration[key] = value;
+                }
+            }
+            catch { /* ignore individual secret read errors */ }
+        }
+    }
+}
+catch { }
+
+// Map common simple secret filenames to configuration keys to keep secrets easy to understand
+try
+{
+    // Postgres password: update connection string password
+    var pgPass = builder.Configuration["postgres_password"];
+    if (!string.IsNullOrEmpty(pgPass))
+    {
+        var current = builder.Configuration.GetConnectionString("DefaultConnection")
+                      ?? "Host=localhost;Database=smartglasses;Username=postgres;Password=REPLACE_WITH_ENV_VARIABLE";
+        if (current.IndexOf("Password=", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            var parts = current.Split(';').Where(p => !p.TrimStart().StartsWith("Password=", StringComparison.OrdinalIgnoreCase)).ToList();
+            parts.Add($"Password={pgPass}");
+            builder.Configuration["ConnectionStrings:DefaultConnection"] = string.Join(";", parts);
+        }
+        else
+        {
+            builder.Configuration["ConnectionStrings:DefaultConnection"] = current + $";Password={pgPass}";
+        }
+        // remove the raw key to avoid duplication
+        builder.Configuration["postgres_password"] = null;
+    }
+
+    // MinIO keys
+    var minioAccess = builder.Configuration["minio_access_key"];
+    var minioSecret = builder.Configuration["minio_secret_key"];
+    if (!string.IsNullOrEmpty(minioAccess)) builder.Configuration["MinIO:AccessKey"] = minioAccess;
+    if (!string.IsNullOrEmpty(minioSecret)) builder.Configuration["MinIO:SecretKey"] = minioSecret;
+    if (!string.IsNullOrEmpty(minioAccess)) builder.Configuration["minio_access_key"] = null;
+    if (!string.IsNullOrEmpty(minioSecret)) builder.Configuration["minio_secret_key"] = null;
+
+    // Stronger model endpoint
+    var stronger = builder.Configuration["ai_stronger_endpoint"];
+    if (!string.IsNullOrEmpty(stronger))
+    {
+        builder.Configuration["AI:StrongerModelEndpoint"] = stronger;
+        builder.Configuration["ai_stronger_endpoint"] = null;
+    }
+}
+catch { }
+
 // Add services to the container.
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();

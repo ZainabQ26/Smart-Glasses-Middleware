@@ -7,7 +7,7 @@ services:
     environment:
       POSTGRES_DB: smartglasses
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
     ports:
       - "5432:5432"
     volumes:
@@ -17,6 +17,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    secrets:
+      - postgres_password
 
   redis:
     image: redis:latest
@@ -32,10 +34,10 @@ services:
   minio:
     image: quay.io/minio/minio:latest
     container_name: smartglasses-minio
-    command: server /data --console-address ":9001"
+    # Read MinIO credentials from secrets mounted at /run/secrets and then start
+    command: sh -c "export MINIO_ROOT_USER=$(cat /run/secrets/minio_access_key) && export MINIO_ROOT_PASSWORD=$(cat /run/secrets/minio_secret_key) && exec minio server /data --console-address ':9001'"
     environment:
       MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -46,6 +48,9 @@ services:
       interval: 30s
       timeout: 20s
       retries: 3
+    secrets:
+      - minio_access_key
+      - minio_secret_key
 
   ollama:
     image: ollama/ollama:latest
@@ -70,15 +75,13 @@ services:
       context: .
       dockerfile: src/SmartGlassesMiddleware/Dockerfile
     container_name: smartglasses-app
-    env_file:
-      - secrets/.env
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
-      - ConnectionStrings__DefaultConnection=Host=postgres;Database=smartglasses;Username=postgres;Password=${POSTGRES_PASSWORD:-postgres}
+      - ConnectionStrings__DefaultConnection=Host=postgres;Database=smartglasses;Username=postgres;Password=REPLACE_WITH_SECRET
       - ConnectionStrings__Redis=${REDIS_HOST:-redis:6379}
       - MinIO__Endpoint=${MINIO_ENDPOINT:-minio:9000}
-      - MinIO__AccessKey=${MINIO_ACCESS_KEY:-minioadmin}
-      - MinIO__SecretKey=${MINIO_SECRET_KEY:-minioadmin}
+      - MinIO__AccessKey=REPLACE_WITH_SECRET
+      - MinIO__SecretKey=REPLACE_WITH_SECRET
       - AI__OllamaEndpoint=${AI_OLLAMA_ENDPOINT:-http://ollama:11434}
       - AI__StrongerModelEndpoint=${AI_STRONGER_ENDPOINT:-http://localhost:5000/api/chat}
       - AI__StrongerModelName=${AI_STRONGER_MODEL_NAME:-gpt-4}
@@ -98,6 +101,21 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    secrets:
+      - postgres_password
+      - minio_access_key
+      - minio_secret_key
+      - ai_stronger_endpoint
+
+secrets:
+  postgres_password:
+    file: secrets/postgres_password
+  minio_access_key:
+    file: secrets/minio_access_key
+  minio_secret_key:
+    file: secrets/minio_secret_key
+  ai_stronger_endpoint:
+    file: secrets/ai_stronger_endpoint
 
 volumes:
   postgres-data:
