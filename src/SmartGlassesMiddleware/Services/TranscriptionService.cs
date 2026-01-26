@@ -47,7 +47,10 @@ public class HttpTranscriptionService : ITranscriptionService
                     if (json.TryGetProperty("result", out var r)) return r.GetString();
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to parse transcription JSON; falling back to raw response.");
+            }
 
             // Fallback: return raw body
             return responseContent;

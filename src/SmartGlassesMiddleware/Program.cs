@@ -3,11 +3,24 @@ using Microsoft.SemanticKernel;
 using Minio;
 using SmartGlassesMiddleware.Data;
 using SmartGlassesMiddleware.Services;
+using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
 
 #pragma warning disable SKEXP0010
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Configure basic logging providers early so we can log during startup
+builder.Logging.ClearProviders();
+builder.Logging.AddConsole();
+
+// Create a lightweight LoggerFactory for startup logging (avoids BuildServiceProvider)
+using var _preLoggerFactory = LoggerFactory.Create(lb =>
+{
+    lb.AddConfiguration(builder.Configuration.GetSection("Logging"));
+    lb.AddConsole();
+});
+var _startupLogger = _preLoggerFactory.CreateLogger("Startup");
 
 // Load any Docker secret files from /run/secrets into configuration.
 // Filename convention: use double-underscore to indicate nesting, e.g.
@@ -31,11 +44,17 @@ try
                     builder.Configuration[key] = value;
                 }
             }
-            catch { /* ignore individual secret read errors */ }
+            catch (Exception ex)
+            {
+                _startupLogger.LogWarning(ex, "Failed to read secret file '{File}'", file);
+            }
         }
     }
 }
-catch { }
+catch (Exception ex)
+{
+    _startupLogger.LogWarning(ex, "Error loading secrets");
+}
 
 // Map common simple secret filenames to configuration keys to keep secrets easy to understand
 try
@@ -76,7 +95,10 @@ try
         builder.Configuration["ai_stronger_endpoint"] = null;
     }
 }
-catch { }
+catch (Exception ex)
+{
+    _startupLogger.LogWarning(ex, "Error mapping secret names");
+}
 
 // Add services to the container.
 builder.Services.AddControllers();
@@ -119,12 +141,13 @@ builder.Services.AddSingleton<Kernel>(sp =>
     var ollamaEndpoint = builder.Configuration["AI:OllamaEndpoint"] ?? "http://localhost:11434";
     var ollamaModel = builder.Configuration["AI:OllamaModel"] ?? "llama2";
     
-    // Add Ollama chat completion service using OpenAI-compatible endpoint
-    // Ollama doesn't require an API key, so we use a placeholder
-    const string placeholderApiKey = "not-needed";
+    // Add Ollama chat completion service using OpenAI-compatible endpoint.
+    // Note: Ollama doesn't require an API key for local endpoints; the API key
+    // parameter is present for OpenAI-compatible overloads and is unused here.
+    const string notUsedPlaceholderApiKey = "not-needed";
     kernelBuilder.AddOpenAIChatCompletion(
         modelId: ollamaModel,
-        apiKey: placeholderApiKey,
+        apiKey: notUsedPlaceholderApiKey,
         endpoint: new Uri(ollamaEndpoint));
     
     return kernelBuilder.Build();
@@ -134,13 +157,11 @@ builder.Services.AddSingleton<Kernel>(sp =>
 builder.Services.AddHttpClient<IAIService, OllamaAIService>();
 
 // Register application services
-builder.Services.AddScoped<IAIService, OllamaAIService>();
 builder.Services.AddScoped<IHistoryService, HistoryService>();
 builder.Services.AddScoped<IMediaStorageService, MinioMediaStorageService>();
 builder.Services.AddScoped<ICacheService, RedisCacheService>();
-// Transcription service (server-side)
+// Transcription service (server-side) — registered as a typed HTTP client above
 builder.Services.AddHttpClient<ITranscriptionService, HttpTranscriptionService>();
-builder.Services.AddScoped<ITranscriptionService, HttpTranscriptionService>();
 
 // Add CORS
 builder.Services.AddCors(options =>
