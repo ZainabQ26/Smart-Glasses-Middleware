@@ -30,44 +30,23 @@ The application is built with:
 - PostgreSQL database
 - Redis server
 - MinIO server
-- Ollama server
+- Ollama server (local model runtime)
+
+Note: a lightweight server-side transcription service (`vosk-transcriber`) is included in the provided `docker-compose.yml` and will auto-download a small Vosk model at startup. No external transcription keys are required for that service.
 
 ## Quick Start with Docker
 
-1. Start the required services using Docker:
+The repository includes a `docker-compose.yml` that starts the full stack (Postgres, Redis, MinIO, Ollama, Vosk transcriber, and the app). To start everything locally run:
 
 ```bash
-# PostgreSQL
-docker run -d --name postgres \
-  -e POSTGRES_DB=smartglasses \
-  -e POSTGRES_USER=postgres \
-  -e POSTGRES_PASSWORD=postgres \
-  -p 5432:5432 \
-  postgres:latest
-
-# Redis
-docker run -d --name redis \
-  -p 6379:6379 \
-  redis:latest
-
-# MinIO
-docker run -d --name minio \
-  -p 9000:9000 -p 9001:9001 \
-  -e MINIO_ROOT_USER=minioadmin \
-  -e MINIO_ROOT_PASSWORD=minioadmin \
-  quay.io/minio/minio server /data --console-address ":9001"
-
-# Ollama
-docker run -d --name ollama \
-  -p 11434:11434 \
-  -v ollama:/root/.ollama \
-  ollama/ollama
-
-# Pull the llama2 model
-docker exec ollama ollama pull llama2
+# from the repository root
+docker compose pull
+docker compose up --build
 ```
 
-2. Build and run the application:
+The `vosk-transcriber` service auto-downloads a small Vosk model into the shared `models` Docker volume on first start; no extra steps or API keys are required for basic transcription.
+
+Build/run the application locally (dev):
 
 ```bash
 cd src/SmartGlassesMiddleware
@@ -76,11 +55,11 @@ dotnet build
 dotnet run
 ```
 
-The API will be available at `https://localhost:5001` or `http://localhost:5000`.
+The API will be available at `https://localhost:5001` or `http://localhost:5000` (or `http://localhost:5000` when run via Docker compose).
 
 ## Configuration
 
-Edit `appsettings.json` to configure the services:
+Edit `appsettings.json` to configure the services. In addition to the existing settings, the app reads a `Transcription:Endpoint` configuration key (or the environment variable `Transcription__Endpoint`) to know where to send audio for server-side transcription. By default the docker-compose sets this to the Vosk transcriber:
 
 ```json
 {
@@ -98,9 +77,14 @@ Edit `appsettings.json` to configure the services:
     "OllamaEndpoint": "http://localhost:11434",
     "OllamaModel": "llama2",
     "StrongerModelEndpoint": "http://localhost:5000/api/chat"
+  },
+  "Transcription": {
+    "Endpoint": "http://vosk-transcriber:8080/transcribe"
   }
 }
 ```
+
+If you prefer to point to another transcription service, override `Transcription__Endpoint` or set the `Transcription:Endpoint` key.
 
 ## API Endpoints
 
@@ -131,7 +115,7 @@ POST /api/media
 Content-Type: multipart/form-data
 
 file: <file-upload>
-description: "What's in this image?"
+prompt: "What's in this image?"
 ```
 
 ### History

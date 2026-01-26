@@ -1,220 +1,106 @@
-# API Usage Examples
+# API Usage Examples (simplified)
 
-This document provides practical examples of using the Smart Glasses Middleware API.
+These examples show the minimal requests your client should send. The service will decide what to do: it auto-detects the user's intent and will route to a stronger model when needed.
 
-## Prerequisites
+Prerequisite: the app is running. See [GETTING_STARTED.md](GETTING_STARTED.md).
 
-Ensure the application is running. See [GETTING_STARTED.md](GETTING_STARTED.md) for setup instructions.
+1) Text
 
-## Text Processing
+Send plain text; the AI decides the task (e.g., time, reminder) or forwards to the stronger model if required.
 
-### Simple Query
+Example:
 ```bash
-curl -X POST http://localhost:5000/api/text \
+curl -s -X POST http://localhost:5000/api/text \
   -H "Content-Type: application/json" \
-  -d '{
-    "text": "What time is it?"
-  }'
+  -d '{"text":"What's the weather like today?"}'
 ```
 
-**Response:**
+Typical response:
 ```json
 {
-  "task": "time",
-  "response": "I can help you with the current time...",
+  "task": "weather",
+  "response": "It's sunny and 72°F in your area.",
   "usedStrongerModel": false,
-  "requestId": "550e8400-e29b-41d4-a716-446655440000"
+  "requestId": "..."
 }
 ```
 
-### Complex Query (Routes to Stronger Model)
+2) Audio
+
+Send base64 audio; provide `transcription` if available. The AI will use the transcription or a placeholder.
+
+Example:
 ```bash
-curl -X POST http://localhost:5000/api/text \
+curl -s -X POST http://localhost:5000/api/audio \
   -H "Content-Type: application/json" \
-  -d '{
-    "text": "Can you explain quantum computing in detail?"
-  }'
+  -d '{"audioBase64":"<BASE64>", "transcription":"Call Alice at 4 PM"}'
 ```
 
-**Response:**
-```json
-{
-  "task": "unknown",
-  "response": "Quantum computing is a type of computation...",
-  "usedStrongerModel": true,
-  "requestId": "550e8400-e29b-41d4-a716-446655440001"
-}
-```
+Or upload audio directly via `/api/media` (multipart):
 
-## Audio Processing
-
-### Audio with Transcription
 ```bash
-curl -X POST http://localhost:5000/api/audio \
-  -H "Content-Type: application/json" \
-  -d '{
-    "audioBase64": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=",
-    "transcription": "Set a reminder for 3 PM"
-  }'
+curl -s -X POST http://localhost:5000/api/media \
+  -F "file=@/path/to/recording.wav" \
+  -F "prompt=Transcribe and summarize this message" \
+  -F "transcription=Call Alice at 4 PM" \
+  http://localhost:5000/api/media
 ```
 
-**Response:**
-```json
-{
-  "task": "reminder",
-  "response": "I'll help you set a reminder for 3 PM...",
-  "usedStrongerModel": false,
-  "requestId": "550e8400-e29b-41d4-a716-446655440002"
-}
-```
+When you upload audio via `/api/media` you can optionally include `transcription`; the server forwards both `prompt` and `transcription` together with the media metadata to the AI.
 
-## Media Processing
+3) Media (images/videos)
 
-### Image Upload
+Upload the file; optional `prompt` helps the AI. The AI will analyze and decide whether to use the local model or the stronger model.
+
+Example (image):
 ```bash
-curl -X POST http://localhost:5000/api/media \
+curl -s -X POST http://localhost:5000/api/media \
   -F "file=@/path/to/image.jpg" \
-  -F "description=What's in this image?"
+  -F "prompt=Describe this image and identify main objects" \
+  http://localhost:5000/api/media
 ```
 
-**Response:**
-```json
-{
-  "task": "unknown",
-  "response": "I can see that this image contains...",
-  "usedStrongerModel": true,
-  "requestId": "550e8400-e29b-41d4-a716-446655440003"
-}
+What the server sends to the AI
+- The server uploads the media to MinIO and then forwards a single text payload to the AI that contains:
+  - your `prompt` (or a generated placeholder)
+  - `MediaStorageKey` (the MinIO object key)
+  - `MediaFileName` and `MediaContentType`
+
+Example of the text forwarded to the AI (for illustration):
+```
+Describe this image and identify main objects
+
+MediaStorageKey: 3f1b2c4d-.../image.jpg
+MediaFileName: image.jpg
+MediaContentType: image/jpeg
 ```
 
-### Video Upload
+The AI can use the `MediaStorageKey` to fetch the object from MinIO (server-side) if you implement that retrieval in the AI pipeline; at minimum the AI will have both your text and the media metadata together when deciding how to respond.
+
+4) History
+
+Get recent history:
 ```bash
-curl -X POST http://localhost:5000/api/media \
-  -F "file=@/path/to/video.mp4" \
-  -F "description=Analyze this video"
+curl -s http://localhost:5000/api/history?count=5
 ```
 
-## History Retrieval
+Notes
+- The service auto-detects tasks and routes queries; clients should send natural requests only.
+- Keep secrets in `secrets/` or environment variables; do not include credentials in requests.
+- Text responses are cached for 5 minutes; audio/media are stored and referenced by key.
 
-### Get Recent History
-```bash
-curl http://localhost:5000/api/history?count=5
-```
+Examples in code (quick)
 
-**Response:**
-```json
-[
-  {
-    "id": "550e8400-e29b-41d4-a716-446655440003",
-    "timestamp": "2024-01-25T10:30:00Z",
-    "requestType": "Image",
-    "inputText": "What's in this image?",
-    "detectedTask": "unknown",
-    "response": "I can see that this image contains...",
-    "usedStrongerModel": true,
-    "mediaStorageKey": "abc123/image.jpg"
-  },
-  {
-    "id": "550e8400-e29b-41d4-a716-446655440002",
-    "timestamp": "2024-01-25T10:25:00Z",
-    "requestType": "Audio",
-    "inputText": "Set a reminder for 3 PM",
-    "detectedTask": "reminder",
-    "response": "I'll help you set a reminder for 3 PM...",
-    "usedStrongerModel": false,
-    "mediaStorageKey": "xyz789/audio.wav"
-  }
-]
-```
-
-### Get Specific History Item
-```bash
-curl http://localhost:5000/api/history/550e8400-e29b-41d4-a716-446655440000
-```
-
-## Known Tasks
-
-The following tasks are processed locally by the Ollama model:
-
-| Task | Example Query |
-|------|---------------|
-| Weather | "What's the weather like?" |
-| Time | "What time is it?" |
-| Reminder | "Set a reminder for 5 PM" |
-| Alarm | "Set an alarm for 7 AM" |
-| Timer | "Start a 10-minute timer" |
-| Note | "Take a note: Buy groceries" |
-| Translation | "Translate 'hello' to Spanish" |
-| Calculation | "What's 25 + 17?" |
-
-All other queries are automatically routed to the stronger model.
-
-## Error Handling
-
-### Invalid Request
-```bash
-curl -X POST http://localhost:5000/api/text \
-  -H "Content-Type: application/json" \
-  -d '{
-    "text": ""
-  }'
-```
-
-**Response (400 Bad Request):**
-```json
-{
-  "error": "Text cannot be empty"
-}
-```
-
-### Server Error
-If the AI service is unavailable, you'll receive a 500 Internal Server Error:
-
-```json
-{
-  "error": "An error occurred processing your request"
-}
-```
-
-## Caching Behavior
-
-- Text requests are cached for 5 minutes
-- Identical text queries will return cached responses instantly
-- Audio and media requests are not cached due to their unique nature
-
-## Rate Limiting
-
-Currently, there are no rate limits implemented. Consider adding rate limiting for production use.
-
-## Testing with Different Tools
-
-### Using Postman
-1. Import the requests from `SmartGlassesMiddleware.http`
-2. Update the base URL to `http://localhost:5000`
-3. Execute requests
-
-### Using JavaScript (Browser)
+JavaScript:
 ```javascript
 fetch('http://localhost:5000/api/text', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  body: JSON.stringify({
-    text: 'What time is it?'
-  })
-})
-.then(response => response.json())
-.then(data => console.log(data));
+  method: 'POST', headers: {'Content-Type':'application/json'},
+  body: JSON.stringify({ text: 'Set a reminder for tomorrow 9am' })
+}).then(r=>r.json()).then(console.log)
 ```
 
-### Using Python
+Python:
 ```python
 import requests
-
-response = requests.post(
-    'http://localhost:5000/api/text',
-    json={'text': 'What time is it?'}
-)
-print(response.json())
+print(requests.post('http://localhost:5000/api/text', json={'text':'What time is it?'}).json())
 ```

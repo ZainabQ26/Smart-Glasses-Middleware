@@ -14,7 +14,8 @@ public class AudioRequest
 public class MediaRequest
 {
     public IFormFile? File { get; set; }
-    public string? Description { get; set; }
+    public string? Prompt { get; set; }
+    public string? Transcription { get; set; }
 }
 
 public class TaskResponse
