@@ -5,7 +5,7 @@ using SmartGlassesMiddleware.Services;
 namespace SmartGlassesMiddleware.Controllers;
 
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/transcribe")]
 public class AudioController : ControllerBase
 {
     private readonly IMediaStorageService _mediaStorageService;

@@ -27,26 +27,27 @@ Typical response:
 
 2) Audio
 
-Send base64 audio; provide `transcription` if available. The AI will use the transcription or a placeholder.
+Send base64 audio. The server will transcribe audio when needed; alternatively upload via `/api/ask` and use the `input` field for transcription-only requests.
 
 Example:
 ```bash
-curl -s -X POST http://localhost:5000/api/audio \
+curl -s -X POST http://localhost:5000/api/transcribe \
   -H "Content-Type: application/json" \
-  -d '{"audioBase64":"<BASE64>", "transcription":"Call Alice at 4 PM"}'
+  -d '{"audioBase64":"<BASE64>"}'
 ```
 
-Or upload audio directly via `/api/media` (multipart):
+Or upload audio directly via `/api/ask` (multipart):
 
 ```bash
-curl -s -X POST http://localhost:5000/api/media \
-  -F "file=@/path/to/recording.wav" \
-  -F "prompt=Transcribe and summarize this message" \
-  -F "transcription=Call Alice at 4 PM" \
-  http://localhost:5000/api/media
+curl -s -X POST http://localhost:5000/api/ask \
+  -F "input=@/path/to/recording.wav;filename=recording.wav" \
+  -F "files[]=@/path/to/image.jpg;filename=image.jpg" \
+  -F 'manifest=["recording.wav","image.jpg"]' \
+  -F "prompt=Transcribe and summarize then describe image" \
+  http://localhost:5000/api/ask
 ```
 
-When you upload audio via `/api/media` you can optionally include `transcription`; the server forwards both `prompt` and `transcription` together with the media metadata to the AI.
+When you upload audio via `/api/ask` you can either send the audio file in the `input` field or provide a transcription string in the `input` field; for multiple files use `files[]` and a `manifest` to control order.
 
 3) Media (images/videos)
 
@@ -54,10 +55,10 @@ Upload the file; optional `prompt` helps the AI. The AI will analyze and decide 
 
 Example (image):
 ```bash
-curl -s -X POST http://localhost:5000/api/media \
+curl -s -X POST http://localhost:5000/api/ask \
   -F "file=@/path/to/image.jpg" \
   -F "prompt=Describe this image and identify main objects" \
-  http://localhost:5000/api/media
+  http://localhost:5000/api/ask
 ```
 
 What the server sends to the AI

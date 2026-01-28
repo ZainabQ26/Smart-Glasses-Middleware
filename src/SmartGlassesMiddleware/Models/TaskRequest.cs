@@ -13,9 +13,21 @@ public class AudioRequest
 
 public class MediaRequest
 {
-    public IFormFile? File { get; set; }
+    // Accept multiple files in a single upload. Clients should send file parts named `files`.
+    public List<IFormFile>? Files { get; set; }
+
+    // Optional overall prompt for the AI
     public string? Prompt { get; set; }
+
+    // Optional overall transcription (if provided by client); otherwise server will transcribe audio files.
     public string? Transcription { get; set; }
+
+    // Optional manifest JSON: an array of filenames (strings) indicating desired processing order.
+    // Example: ["audio.wav","image.jpg"]
+    public string? Manifest { get; set; }
+    // Optional per-file transcriptions as JSON object mapping filename -> transcription.
+    // Example: { "recording.wav": "Call Alice at 4 PM", "image.jpg": "Photo of a dog" }
+    public string? PerFileTranscriptions { get; set; }
 }
 
 public class TaskResponse
