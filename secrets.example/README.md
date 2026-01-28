@@ -16,7 +16,7 @@ Usage
    - `postgres_password` — Postgres password (used by Postgres image via `POSTGRES_PASSWORD_FILE` and by the app)
    - `minio_access_key` — MinIO access key
    - `minio_secret_key` — MinIO secret key
-   - `ai_stronger_endpoint` — Stronger model endpoint URL
+   - `ai_advanced_endpoint` — Advanced model endpoint URL
 
    These names are intentionally simple and unique; the application loads them from `/run/secrets/` and maps them into configuration automatically.
 

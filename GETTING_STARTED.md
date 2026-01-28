@@ -127,7 +127,7 @@ You can customize the configuration in `appsettings.json`:
   "AI": {
     "OllamaEndpoint": "http://localhost:11434",
     "OllamaModel": "llama2",
-    "StrongerModelEndpoint": "http://localhost:5000/api/chat"
+    "AdvancedModelEndpoint": "http://localhost:5000/api/chat"
   }
 }
 ```

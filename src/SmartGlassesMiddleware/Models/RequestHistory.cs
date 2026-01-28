@@ -8,6 +8,6 @@ public class RequestHistory
     public string InputText { get; set; } = string.Empty;
     public string? DetectedTask { get; set; }
     public string? Response { get; set; }
-    public bool UsedStrongerModel { get; set; }
+    public bool UsedAdvancedModel { get; set; }
     public string? MediaStorageKey { get; set; }
 }

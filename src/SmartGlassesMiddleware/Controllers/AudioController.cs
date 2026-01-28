@@ -8,25 +8,25 @@ namespace SmartGlassesMiddleware.Controllers;
 [Route("api/[controller]")]
 public class AudioController : ControllerBase
 {
-    private readonly IAIService _aiService;
-    private readonly IHistoryService _historyService;
     private readonly IMediaStorageService _mediaStorageService;
+    private readonly ITranscriptionService _transcriptionService;
+    private readonly IHistoryService _historyService;
     private readonly ILogger<AudioController> _logger;
 
     public AudioController(
-        IAIService aiService,
-        IHistoryService historyService,
         IMediaStorageService mediaStorageService,
+        ITranscriptionService transcriptionService,
+        IHistoryService historyService,
         ILogger<AudioController> logger)
     {
-        _aiService = aiService;
-        _historyService = historyService;
         _mediaStorageService = mediaStorageService;
+        _transcriptionService = transcriptionService;
+        _historyService = historyService;
         _logger = logger;
     }
 
     [HttpPost]
-    public async Task<ActionResult<TaskResponse>> ProcessAudio([FromBody] AudioRequest request)
+    public async Task<ActionResult> ProcessAudio([FromBody] AudioRequest request)
     {
         try
         {
@@ -38,36 +38,42 @@ public class AudioController : ControllerBase
             // Store audio in MinIO
             var audioBytes = Convert.FromBase64String(request.AudioBase64);
             using var audioStream = new MemoryStream(audioBytes);
+            var fileName = $"audio_{DateTime.UtcNow:yyyyMMddHHmmss}.wav";
             var storageKey = await _mediaStorageService.UploadMediaAsync(
                 audioStream,
-                $"audio_{DateTime.UtcNow:yyyyMMddHHmmss}.wav",
+                fileName,
                 "audio/wav");
 
-            // Use transcription if provided, otherwise use a placeholder
-            var textToProcess = request.Transcription ?? "[Audio content - transcription needed]";
-
-            // Process with AI
-            var (task, response, usedStrongerModel) = await _aiService.ProcessRequestAsync(textToProcess);
-
-            // Save to history
-            var history = new RequestHistory
+            // Download and transcribe
+            string transcription = string.Empty;
+            try
             {
-                RequestType = "Audio",
-                InputText = textToProcess,
-                DetectedTask = task,
-                Response = response,
-                UsedStrongerModel = usedStrongerModel,
-                MediaStorageKey = storageKey
-            };
-            history = await _historyService.SaveRequestAsync(history);
-
-            return Ok(new TaskResponse
+                using var downloaded = await _mediaStorageService.DownloadMediaAsync(storageKey);
+                transcription = await _transcriptionService.TranscribeAsync(downloaded, fileName, "audio/wav");
+            }
+            catch (Exception ex)
             {
-                Task = task,
-                Response = response,
-                UsedStrongerModel = usedStrongerModel,
-                RequestId = history.Id
-            });
+                _logger.LogWarning(ex, "Transcription failed for {Key}", storageKey);
+            }
+
+            // Save transcription to history
+            try
+            {
+                var history = new RequestHistory
+                {
+                    RequestType = "Audio",
+                    InputText = transcription ?? string.Empty,
+                    MediaStorageKey = storageKey
+                };
+                history = await _historyService.SaveRequestAsync(history);
+
+                return Ok(new { storageKey, transcription, requestId = history.Id });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to save history for audio {Key}", storageKey);
+                return Ok(new { storageKey, transcription });
+            }
         }
         catch (Exception ex)
         {
