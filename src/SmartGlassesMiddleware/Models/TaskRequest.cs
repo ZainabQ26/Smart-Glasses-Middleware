@@ -22,6 +22,6 @@ public class TaskResponse
 {
     public string Task { get; set; } = string.Empty;
     public string Response { get; set; } = string.Empty;
-    public bool UsedStrongerModel { get; set; }
+    public bool UsedAdvancedModel { get; set; }
     public Guid RequestId { get; set; }
 }

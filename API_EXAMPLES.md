@@ -1,12 +1,12 @@
 # API Usage Examples (simplified)
 
-These examples show the minimal requests your client should send. The service will decide what to do: it auto-detects the user's intent and will route to a stronger model when needed.
+These examples show the minimal requests your client should send. The service will decide what to do: it auto-detects the user's intent and will route to an advanced model when needed.
 
 Prerequisite: the app is running. See [GETTING_STARTED.md](GETTING_STARTED.md).
 
 1) Text
 
-Send plain text; the AI decides the task (e.g., time, reminder) or forwards to the stronger model if required.
+Send plain text; the AI decides the task (e.g., time, reminder) or forwards to the advanced model if required.
 
 Example:
 ```bash
@@ -20,7 +20,7 @@ Typical response:
 {
   "task": "weather",
   "response": "It's sunny and 72°F in your area.",
-  "usedStrongerModel": false,
+  "usedAdvancedModel": false,
   "requestId": "..."
 }
 ```
@@ -50,7 +50,7 @@ When you upload audio via `/api/media` you can optionally include `transcription
 
 3) Media (images/videos)
 
-Upload the file; optional `prompt` helps the AI. The AI will analyze and decide whether to use the local model or the stronger model.
+Upload the file; optional `prompt` helps the AI. The AI will analyze and decide whether to use the local model or the advanced model.
 
 Example (image):
 ```bash

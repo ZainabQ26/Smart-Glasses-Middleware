@@ -1,12 +1,12 @@
 # Smart-Glasses-Middleware
 
-The middleware for the smart glasses that will run the small AI to complete simple tasks, and for other tasks it will send it to the stronger AI model.
+The middleware for the smart glasses that will run the small AI to complete simple tasks, and for other tasks it will send it to the advanced AI model.
 
 ## Features
 
 - **Multi-format API**: Accepts text, audio, images, and video requests
 - **AI Task Detection**: Uses Ollama with Microsoft Semantic Kernel to classify and process tasks
-- **Intelligent Routing**: Automatically detects if a task requires a stronger model and routes accordingly
+- **Intelligent Routing**: Automatically detects if a task requires an advanced model and routes accordingly
 - **Storage**: 
   - PostgreSQL for request history
   - MinIO for media storage (images, videos, audio)
@@ -73,10 +73,10 @@ Edit `appsettings.json` to configure the services. In addition to the existing s
     "SecretKey": "minioadmin",
     "BucketName": "smart-glasses-media"
   },
-  "AI": {
+    "AI": {
     "OllamaEndpoint": "http://localhost:11434",
     "OllamaModel": "llama2",
-    "StrongerModelEndpoint": "http://localhost:5000/api/chat"
+    "AdvancedModelEndpoint": "http://localhost:5000/api/chat"
   },
   "Transcription": {
     "Endpoint": "http://vosk-transcriber:8080/transcribe"
@@ -129,8 +129,8 @@ GET /api/history/{id}
 1. **Request Reception**: The API receives a request (text, audio, or media)
 2. **Task Detection**: Ollama analyzes the request to determine the task type
 3. **Task Classification**: 
-   - Known tasks (weather, time, reminder, etc.) are processed by Ollama locally
-   - Unknown or complex tasks are forwarded to a stronger model via REST API
+  - Known tasks (weather, time, reminder, etc.) are processed by Ollama locally
+  - Unknown or complex tasks are forwarded to an advanced model via REST API
 4. **Response Generation**: The appropriate AI model generates a response
 5. **Storage**: 
    - Request history is saved to PostgreSQL
@@ -149,7 +149,7 @@ The local Ollama model can handle these tasks:
 - Translation
 - Calculations
 
-Other tasks are automatically routed to the stronger model.
+Other tasks are automatically routed to the advanced model.
 
 ## Development
 

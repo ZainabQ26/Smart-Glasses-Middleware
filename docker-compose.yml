@@ -13,8 +13,8 @@ services:
       - VOSK_MODEL_URL=${VOSK_MODEL_URL:-https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip}
       - PORT=8080
     command: sh -c "apt-get update && apt-get install -y libsndfile1 && pip install --no-cache-dir flask requests vosk soundfile && python /scripts/vosk_server.py"
-    ports:
-      - "8080:8080"
+    expose:
+      - "8080"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health" ]
       interval: 20s
@@ -29,8 +29,8 @@ services:
       POSTGRES_DB: smartglasses
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
-    ports:
-      - "5432:5432"
+    expose:
+      - "5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -44,8 +44,8 @@ services:
   redis:
     image: redis:latest
     container_name: smartglasses-redis
-    ports:
-      - "6379:6379"
+    expose:
+      - "6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -59,9 +59,9 @@ services:
     command: sh -c "export MINIO_ROOT_USER=$(cat /run/secrets/minio_access_key) && export MINIO_ROOT_PASSWORD=$(cat /run/secrets/minio_secret_key) && exec minio server /data --console-address ':9001'"
     environment:
       MINIO_ROOT_USER: minioadmin
-    ports:
-      - "9000:9000"
-      - "9001:9001"
+    expose:
+      - "9000"
+      - "9001"
     volumes:
       - minio-data:/data
     healthcheck:
@@ -76,8 +76,8 @@ services:
   ollama:
     image: ollama/ollama:latest
     container_name: smartglasses-ollama
-    ports:
-      - "11434:11434"
+    expose:
+      - "11434"
     volumes:
       - ollama-data:/root/.ollama
     healthcheck:
@@ -101,8 +101,8 @@ services:
       - MinIO__AccessKey=REPLACE_WITH_SECRET
       - MinIO__SecretKey=REPLACE_WITH_SECRET
       - AI__OllamaEndpoint=${AI_OLLAMA_ENDPOINT:-http://ollama:11434}
-      - AI__StrongerModelEndpoint=${AI_STRONGER_ENDPOINT:-http://localhost:5000/api/chat}
-      - AI__StrongerModelName=${AI_STRONGER_MODEL_NAME:-gpt-4}
+      - AI__AdvancedModelEndpoint=${AI_ADVANCED_ENDPOINT:-http://localhost:5000/api/chat}
+      - AI__AdvancedModelName=${AI_ADVANCED_MODEL_NAME:-gpt-4}
       - Transcription__Endpoint=http://vosk-transcriber:8080/transcribe
     ports:
       - "5000:5000"
@@ -125,7 +125,7 @@ services:
       - postgres_password
       - minio_access_key
       - minio_secret_key
-      - ai_stronger_endpoint
+      - ai_advanced_endpoint
 
 secrets:
   postgres_password:
@@ -134,8 +134,8 @@ secrets:
     file: secrets/minio_access_key
   minio_secret_key:
     file: secrets/minio_secret_key
-  ai_stronger_endpoint:
-    file: secrets/ai_stronger_endpoint
+  ai_advanced_endpoint:
+    file: secrets/ai_advanced_endpoint
   # huggingface_token removed (no longer required)
 
 volumes:

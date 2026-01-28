@@ -91,12 +91,14 @@ try
     if (!string.IsNullOrEmpty(minioAccess)) builder.Configuration["minio_access_key"] = null;
     if (!string.IsNullOrEmpty(minioSecret)) builder.Configuration["minio_secret_key"] = null;
 
-    // Stronger model endpoint
-    var stronger = builder.Configuration["ai_stronger_endpoint"];
-    if (!string.IsNullOrEmpty(stronger))
+    // Advanced model endpoint (mapped from legacy secret key name if present)
+    var advanced = builder.Configuration["ai_advanced_endpoint"] ?? builder.Configuration["ai_stronger_endpoint"];
+    if (!string.IsNullOrEmpty(advanced))
     {
-        builder.Configuration["AI:StrongerModelEndpoint"] = stronger;
+        builder.Configuration["AI:AdvancedModelEndpoint"] = advanced;
+        // remove legacy keys to avoid duplication
         builder.Configuration["ai_stronger_endpoint"] = null;
+        builder.Configuration["ai_advanced_endpoint"] = null;
     }
 }
 catch (Exception ex)
@@ -157,7 +159,7 @@ builder.Services.AddSingleton<Kernel>(sp =>
     return kernelBuilder.Build();
 });
 
-// Add HttpClient for stronger model calls
+// Add HttpClient for advanced model calls
 builder.Services.AddHttpClient<IAIService, OllamaAIService>();
 
 // Register application services
