@@ -100,18 +100,17 @@ Content-Type: application/json
 
 ### Audio Processing
 ```
-POST /api/audio
+POST /api/transcribe
 Content-Type: application/json
 
 {
-  "audioBase64": "<base64-encoded-audio>",
-  "transcription": "What time is it?"
+  "audioBase64": "<base64-encoded-audio>"
 }
 ```
 
 ### Media Processing (Images/Videos)
 ```
-POST /api/media
+POST /api/ask
 Content-Type: multipart/form-data
 
 file: <file-upload>

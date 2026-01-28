@@ -15,9 +15,9 @@
       }
     },
     
-    "/api/audio": {
+    "/api/transcribe": {
       "post": {
-        "summary": "Upload audio and return transcription",
+        "summary": "Transcribe audio",
         "requestBody": {
           "required": true,
           "content": {
@@ -33,7 +33,7 @@
         }
       }
     },
-    "/api/media": {
+    "/api/ask": {
       "post": {
         "summary": "Upload media (multipart)",
         "requestBody": {
@@ -43,11 +43,22 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "file": { "type": "string", "format": "binary" },
+                  "files": {
+                    "type": "array",
+                    "items": { "type": "string", "format": "binary" }
+                  },
+                  "input": {
+                    "description": "Either a file part (binary) or a plain transcription string. If provided as text and no files are uploaded, it will be treated as a transcription-only ask.",
+                    "oneOf": [
+                      { "type": "string" },
+                      { "type": "string", "format": "binary" }
+                    ]
+                  },
                   "prompt": { "type": "string" },
-                  "transcription": { "type": "string" }
+                  "perFileTranscriptions": { "type": "string", "description": "JSON object mapping filename->transcription" },
+                  "manifest": { "type": "string", "description": "JSON array of filenames to indicate processing order" }
                 },
-                "required": ["file"]
+              
               }
             }
           }
@@ -80,7 +91,7 @@
     "schemas": {
       "AudioRequest": {
         "type": "object",
-        "properties": { "audioBase64": { "type": "string" }, "transcription": { "type": "string" } },
+        "properties": { "audioBase64": { "type": "string" } },
         "required": ["audioBase64"]
       },
       "AudioUploadResponse": {
@@ -89,7 +100,24 @@
       },
       "MediaUploadResponse": {
         "type": "object",
-        "properties": { "task": { "type": "string" }, "response": { "type": "string" }, "usedAdvancedModel": { "type": "boolean" }, "requestId": { "type": "string", "format": "uuid" }, "transcription": { "type": "string" } }
+        "properties": {
+          "task": { "type": "string" },
+          "response": { "type": "string" },
+          "usedAdvancedModel": { "type": "boolean" },
+          "requestId": { "type": "string", "format": "uuid" },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "fileName": { "type": "string" },
+                "contentType": { "type": "string" },
+                "storageKey": { "type": "string" },
+                "transcription": { "type": "string" }
+              }
+            }
+          }
+        }
       },
       "RequestHistory": {
         "type": "object",
