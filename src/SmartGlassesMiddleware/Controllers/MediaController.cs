@@ -121,7 +121,7 @@ public class MediaController : ControllerBase
                 var missing = manifestOrder.Where(n => !uploadedNames.Contains(n)).ToList();
                 if (missing.Count > 0)
                 {
-                    return BadRequest($"Manifest names not found in uploaded files: {string.Join(", ", missing)}");
+                    return BadRequest(new ProblemDetails { Title = "Bad Request", Detail = $"Manifest names not found in uploaded files: {string.Join(", ", missing)}", Status = StatusCodes.Status400BadRequest });
                 }
 
                 foreach (var name in manifestOrder)
@@ -159,7 +159,7 @@ public class MediaController : ControllerBase
                 var unknown = perFileTrans.Keys.Where(k => !uploadedNames.Contains(k)).ToList();
                 if (unknown.Count > 0)
                 {
-                    return BadRequest($"PerFileTranscriptions contains keys not present in uploaded files: {string.Join(", ", unknown)}");
+                    return BadRequest(new ProblemDetails { Title = "Bad Request", Detail = $"PerFileTranscriptions contains keys not present in uploaded files: {string.Join(", ", unknown)}", Status = StatusCodes.Status400BadRequest });
                 }
             }
 
@@ -179,7 +179,7 @@ public class MediaController : ControllerBase
                 var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
                 if (!allowedExtensions.Contains(extension))
                 {
-                    return BadRequest($"Invalid file type: {file.FileName}");
+                    return BadRequest(new ProblemDetails { Title = "Bad Request", Detail = $"Invalid file type: {file.FileName}", Status = StatusCodes.Status400BadRequest });
                 }
 
                 using var uploadStream = file.OpenReadStream();
@@ -247,7 +247,9 @@ public class MediaController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing media request");
-            return StatusCode(500, "An error occurred processing your request");
+            var pd = new ProblemDetails { Title = "Internal Server Error", Detail = "An error occurred processing your request", Status = StatusCodes.Status500InternalServerError };
+            pd.Extensions["requestId"] = HttpContext.TraceIdentifier;
+            return StatusCode(500, pd);
         }
     }
 }

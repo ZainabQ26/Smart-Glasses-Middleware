@@ -28,7 +28,9 @@ public class HistoryController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error getting recent history");
-            return StatusCode(500, "An error occurred retrieving history");
+            var pd = new ProblemDetails { Title = "Internal Server Error", Detail = "An error occurred retrieving history", Status = StatusCodes.Status500InternalServerError };
+            pd.Extensions["requestId"] = HttpContext.TraceIdentifier;
+            return StatusCode(500, pd);
         }
     }
 
@@ -40,14 +42,16 @@ public class HistoryController : ControllerBase
             var history = await _historyService.GetHistoryByIdAsync(id);
             if (history == null)
             {
-                return NotFound();
+                return NotFound(new ProblemDetails { Title = "Not Found", Detail = "History entry not found", Status = StatusCodes.Status404NotFound });
             }
             return Ok(history);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error getting history by ID: {Id}", id);
-            return StatusCode(500, "An error occurred retrieving history");
+            var pd = new ProblemDetails { Title = "Internal Server Error", Detail = "An error occurred retrieving history", Status = StatusCodes.Status500InternalServerError };
+            pd.Extensions["requestId"] = HttpContext.TraceIdentifier;
+            return StatusCode(500, pd);
         }
     }
 }

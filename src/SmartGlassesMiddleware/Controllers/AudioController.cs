@@ -32,7 +32,7 @@ public class AudioController : ControllerBase
         {
             if (string.IsNullOrWhiteSpace(request.AudioBase64))
             {
-                return BadRequest("Audio data cannot be empty");
+                return BadRequest(new ProblemDetails { Title = "Bad Request", Detail = "Audio data cannot be empty", Status = StatusCodes.Status400BadRequest });
             }
 
             // Store audio in MinIO
@@ -78,7 +78,9 @@ public class AudioController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing audio request");
-            return StatusCode(500, "An error occurred processing your request");
+            var pd = new ProblemDetails { Title = "Internal Server Error", Detail = "An error occurred processing your request", Status = StatusCodes.Status500InternalServerError };
+            pd.Extensions["requestId"] = HttpContext.TraceIdentifier;
+            return StatusCode(500, pd);
         }
     }
 }
