@@ -33,6 +33,8 @@ public class MediaController : ControllerBase
     {
         try
         {
+
+            string? promptAudioTranscription = null;
             // Aggregate files from the strongly-typed model or raw form parts (guard form access)
             var files = new List<IFormFile>();
             if (request.Files?.Any() == true)
@@ -42,6 +44,35 @@ public class MediaController : ControllerBase
             else if (Request.HasFormContentType && Request.Form.Files?.Count > 0)
             {
                 files.AddRange(Request.Form.Files.ToList());
+            }
+
+            // If a prompt audio file was uploaded as `promptAudio`, enforce exclusivity with text prompt, transcribe it, and remove it from uploads
+            if (Request.HasFormContentType)
+            {
+                var formFiles = Request.Form?.Files;
+                var promptAudioFile = formFiles?.FirstOrDefault(f => string.Equals(f.Name, "promptAudio", StringComparison.OrdinalIgnoreCase));
+                if (promptAudioFile != null)
+                {
+                    // If both a text prompt and promptAudio are provided, reject the request
+                    if (!string.IsNullOrWhiteSpace(request.Prompt))
+                    {
+                        return BadRequest(new ProblemDetails { Title = "Bad Request", Detail = "Provide either 'prompt' (text) or 'promptAudio' (file), not both.", Status = StatusCodes.Status400BadRequest });
+                    }
+
+                    try
+                    {
+                        using var promptStream = promptAudioFile.OpenReadStream();
+                        var transcribedPrompt = await _transcriptionService.TranscribeAsync(promptStream, promptAudioFile.FileName, promptAudioFile.ContentType);
+                        if (!string.IsNullOrWhiteSpace(transcribedPrompt)) promptAudioTranscription = transcribedPrompt;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to transcribe prompt audio");
+                    }
+
+                    // Ensure promptAudio is not treated as a normal media file to upload
+                    files.RemoveAll(f => string.Equals(f.Name, "promptAudio", StringComparison.OrdinalIgnoreCase));
+                }
             }
 
             // Support a single combined `input` form field which may be either a file part or a plain transcription string.
@@ -217,6 +248,30 @@ public class MediaController : ControllerBase
 
             // Build final prompt for AI
             var promptText = request.Prompt ?? string.Empty;
+
+            // If a prompt audio file was uploaded as `promptAudio`, transcribe it and use that as the prompt (override text prompt)
+            if (Request.HasFormContentType)
+            {
+                var formFiles = Request.Form?.Files;
+                var promptAudioFile = formFiles?.FirstOrDefault(f => string.Equals(f.Name, "promptAudio", StringComparison.OrdinalIgnoreCase));
+                if (promptAudioFile != null)
+                {
+                    try
+                    {
+                        using var promptStream = promptAudioFile.OpenReadStream();
+                        var transcribedPrompt = await _transcriptionService.TranscribeAsync(promptStream, promptAudioFile.FileName, promptAudioFile.ContentType);
+                        if (!string.IsNullOrWhiteSpace(transcribedPrompt))
+                        {
+                            promptText = transcribedPrompt;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to transcribe prompt audio");
+                    }
+                }
+            }
+
             var textToProcess = promptText + "\n\n" + string.Join("\n\n", partsForAi);
 
             // Process with AI
