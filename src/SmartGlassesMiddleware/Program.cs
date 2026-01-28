@@ -1,4 +1,8 @@
 using Microsoft.EntityFrameworkCore;
+using System.Diagnostics;
+using System.Text.Json;
+using Microsoft.AspNetCore.Diagnostics;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.SemanticKernel;
 using Minio;
 using SmartGlassesMiddleware.Data;
@@ -108,6 +112,22 @@ catch (Exception ex)
 
 // Add services to the container.
 builder.Services.AddControllers();
+// Use RFC7807 Problem Details for model validation responses
+builder.Services.Configure<ApiBehaviorOptions>(options =>
+{
+    options.InvalidModelStateResponseFactory = context =>
+    {
+        var pd = new ValidationProblemDetails(context.ModelState)
+        {
+            Status = StatusCodes.Status400BadRequest,
+            Title = "Validation Failed"
+        };
+        return new BadRequestObjectResult(pd)
+        {
+            ContentTypes = { "application/problem+json" }
+        };
+    };
+});
 builder.Services.AddOpenApi();
 
 // Configure PostgreSQL
@@ -355,6 +375,46 @@ using (var scope = app.Services.CreateScope())
 
 app.UseHttpsRedirection();
 app.UseCors();
+
+// Add a consistent request id header for all responses so clients can correlate errors with logs
+app.Use(async (context, next) =>
+{
+    var requestId = Activity.Current?.Id ?? context.TraceIdentifier;
+    // ensure header is added even if later middleware short-circuits
+    context.Response.OnStarting(() =>
+    {
+        context.Response.Headers["X-Request-Id"] = requestId;
+        return Task.CompletedTask;
+    });
+
+    // make available to controllers and exception handlers
+    context.Items["RequestId"] = requestId;
+    await next();
+});
+
+// Global exception handler returning RFC7807 ProblemDetails
+app.UseExceptionHandler(errorApp =>
+{
+    errorApp.Run(async context =>
+    {
+        var exFeature = context.Features.Get<IExceptionHandlerFeature>();
+        var ex = exFeature?.Error;
+        var traceId = Activity.Current?.Id ?? context.TraceIdentifier;
+
+        var pd = new ProblemDetails
+        {
+            Title = "An unexpected error occurred",
+            Detail = ex?.Message,
+            Status = StatusCodes.Status500InternalServerError,
+            Instance = context.Request.Path
+        };
+        pd.Extensions["requestId"] = traceId;
+
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        context.Response.ContentType = "application/problem+json";
+        await JsonSerializer.SerializeAsync(context.Response.Body, pd, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+    });
+});
 
 app.MapControllers();
 
