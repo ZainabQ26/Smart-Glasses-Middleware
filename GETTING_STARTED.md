@@ -71,11 +71,10 @@ curl -X POST http://localhost:5000/api/text \
 
 **Audio Request:**
 ```bash
-curl -X POST http://localhost:5000/api/audio \
+curl -X POST http://localhost:5000/api/transcribe \
   -H "Content-Type: application/json" \
   -d '{
-    "audioBase64": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=",
-    "transcription": "What is the weather?"
+    "audioBase64": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA="
   }'
 ```
 
