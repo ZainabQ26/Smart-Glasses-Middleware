@@ -21,8 +21,16 @@
         "requestBody": {
           "required": true,
           "content": {
-            "application/json": {
-              "schema": { "$ref": "#/components/schemas/AudioRequest" }
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": { "type": "string", "format": "binary", "description": "Binary audio file" }
+                }
+              },
+              "encoding": {
+                "file": { "contentType": "audio/*" }
+              }
             }
           }
         },
@@ -78,7 +86,7 @@
     },
     "/api/ask": {
       "post": {
-        "summary": "Upload media (multipart)",
+        "summary": "Ask AI",
         "requestBody": {
           "required": true,
           "content": {
@@ -87,29 +95,23 @@
                 "type": "object",
                 "properties": {
                   "files": {
-                    "type": "array",
-                    "items": { "type": "string", "format": "binary" },
-                    "description": "Allowed file extensions: .jpg, .jpeg, .png, .gif, .mp4, .avi, .mov, .wav, .mp3, .m4a, .flac, .aac"
+                    "type": "string",
+                    "format": "binary",
+                    "description": "Upload one or more files (client may allow selecting multiple files in the file picker). Allowed extensions: .jpg, .jpeg, .png, .gif, .mp4, .avi, .mov, .wav, .mp3, .m4a, .flac, .aac"
                   },
-                  "input": {
-                    "description": "Either a file part (binary) or a plain transcription string. If provided as text and no files are uploaded, it will be treated as a transcription-only ask.",
-                    "oneOf": [
-                      { "type": "string" },
-                      { "type": "string", "format": "binary" }
-                    ]
-                  },
+                  "inputText": { "type": "string", "description": "Plain transcription text (optional)" },
+                  "inputFile": { "type": "string", "format": "binary", "description": "Optional transcription file or media file (binary)" },
                   "prompt": { "type": "string" },
                   "perFileTranscriptions": { "type": "string", "description": "JSON object mapping filename->transcription" },
                   "manifest": { "type": "string", "description": "JSON array of filenames to indicate processing order" }
                 }
               },
               "encoding": {
-                "files": {
-                  "contentType": "image/jpeg, image/png, image/gif, video/mp4, video/avi, video/quicktime, audio/wav, audio/mpeg, audio/mp4, audio/flac, audio/aac"
-                },
-                "input": {
-                  "contentType": "text/plain, image/jpeg, image/png, image/gif, video/mp4, video/avi, video/quicktime, audio/wav, audio/mpeg, audio/mp4, audio/flac, audio/aac"
-                }
+                "files": { "contentType": "application/octet-stream" },
+                "inputFile": { "contentType": "application/octet-stream" },
+                "inputText": { "contentType": "text/plain" },
+                "perFileTranscriptions": { "contentType": "text/plain" },
+                "manifest": { "contentType": "text/plain" }
               }
             }
           }
