@@ -1,0 +1,142 @@
+meta {
+  name: Transcribe audio
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/transcribe
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "audioBase64": ""
+  }
+}
+
+example {
+  name: 200 Response
+  description: Audio upload result
+  
+  request: {
+    url: {{baseUrl}}/api/transcribe
+    method: POST
+    mode: json
+    body:json: {
+      {
+        "audioBase64": ""
+      }
+    }
+  }
+  
+  response: {
+    headers: {
+      Content-Type: application/json
+    }
+  
+    status: {
+      code: 200
+      text: OK
+    }
+  
+    body: {
+      type: json
+      content: '''
+        {
+          "storageKey": "",
+          "transcription": "",
+          "requestId": ""
+        }
+      '''
+    }
+  }
+}
+
+example {
+  name: Validation error
+  
+  request: {
+    url: {{baseUrl}}/api/transcribe
+    method: POST
+    mode: json
+    body:json: {
+      {
+        "audioBase64": ""
+      }
+    }
+  }
+  
+  response: {
+    headers: {
+      Content-Type: application/problem+json
+    }
+  
+    status: {
+      code: 400
+      text: Bad Request
+    }
+  
+    body: {
+      type: json
+      content: '''
+        {
+          "type": "https://example.com/probs/validation",
+          "title": "Validation Failed",
+          "status": 400,
+          "detail": "One or more fields are invalid.",
+          "instance": "/api/transcribe",
+          "errors": {
+            "audioBase64": [
+              "Audio data cannot be empty"
+            ]
+          },
+          "requestId": "00000000-0000-0000-0000-000000000000",
+          "timestamp": "2026-01-28T00:00:00Z"
+        }
+      '''
+    }
+  }
+}
+
+example {
+  name: Internal error
+  
+  request: {
+    url: {{baseUrl}}/api/transcribe
+    method: POST
+    mode: json
+    body:json: {
+      {
+        "audioBase64": ""
+      }
+    }
+  }
+  
+  response: {
+    headers: {
+      Content-Type: application/problem+json
+    }
+  
+    status: {
+      code: 500
+      text: Internal Server Error
+    }
+  
+    body: {
+      type: json
+      content: '''
+        {
+          "type": "about:blank",
+          "title": "Internal Server Error",
+          "status": 500,
+          "detail": "An unexpected error occurred.",
+          "instance": "/api/transcribe",
+          "requestId": "00000000-0000-0000-0000-000000000001",
+          "timestamp": "2026-01-28T00:00:00Z"
+        }
+      '''
+    }
+  }
+}
