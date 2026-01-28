@@ -23,6 +23,20 @@ public class HistoryController : ControllerBase
         try
         {
             var history = await _historyService.GetRecentHistoryAsync(count);
+            if (history == null || !history.Any())
+            {
+                var pd = new ProblemDetails
+                {
+                    Type = "https://example.com/probs/not-found",
+                    Title = "Not Found",
+                    Status = StatusCodes.Status404NotFound,
+                    Detail = "No history entries found.",
+                    Instance = HttpContext?.Request?.Path
+                };
+                pd.Extensions["requestId"] = HttpContext?.TraceIdentifier ?? Guid.NewGuid().ToString();
+                pd.Extensions["timestamp"] = DateTime.UtcNow.ToString("o");
+                return NotFound(pd);
+            }
             return Ok(history);
         }
         catch (Exception ex)

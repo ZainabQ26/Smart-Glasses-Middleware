@@ -11,7 +11,72 @@
     "/health": {
       "get": {
         "summary": "Health check",
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "All services healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string", "example": "Healthy" },
+                    "checks": {
+                      "type": "object",
+                      "properties": {
+                        "postgres": { "$ref": "#/components/schemas/ServiceHealthCheck" },
+                        "redis": { "$ref": "#/components/schemas/ServiceHealthCheck" },
+                        "minio": { "$ref": "#/components/schemas/ServiceHealthCheck" },
+                        "ollama": { "$ref": "#/components/schemas/ServiceHealthCheck" },
+                        "vosk-transcriber": { "$ref": "#/components/schemas/ServiceHealthCheck" }
+                      }
+                    },
+                    "timestamp": { "type": "string", "format": "date-time" }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "One or more services unhealthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string", "example": "Unhealthy" },
+                    "checks": {
+                      "type": "object",
+                      "properties": {
+                        "postgres": { "$ref": "#/components/schemas/ServiceHealthCheck" },
+                        "redis": { "$ref": "#/components/schemas/ServiceHealthCheck" },
+                        "minio": { "$ref": "#/components/schemas/ServiceHealthCheck" },
+                        "ollama": { "$ref": "#/components/schemas/ServiceHealthCheck" },
+                        "vosk-transcriber": { "$ref": "#/components/schemas/ServiceHealthCheck" }
+                      }
+                    },
+                    "timestamp": { "type": "string", "format": "date-time" }
+                  }
+                },
+                "examples": {
+                  "partialFailure": {
+                    "summary": "Some services down",
+                    "value": {
+                      "status": "Unhealthy",
+                      "checks": {
+                        "postgres": { "healthy": true, "error": null },
+                        "redis": { "healthy": true, "error": null },
+                        "minio": { "healthy": true, "error": null },
+                        "ollama": { "healthy": false, "error": "Connection refused" },
+                        "vosk-transcriber": { "healthy": true, "error": null }
+                      },
+                      "timestamp": "2026-01-28T00:00:00Z"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     
@@ -162,24 +227,242 @@
           }
         }
       }
+    }
     },
+    
     "/api/history": {
       "get": {
         "summary": "Get recent history",
         "parameters": [
-          { "name": "count", "in": "query", "schema": { "type": "integer", "default": 10 } }
+          { "name": "count", "in": "query", "schema": { "type": "integer", "default": 10 }, "description": "Number of recent history entries to retrieve" }
         ],
-        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/RequestHistory" } } } } } }
+        "responses": {
+          "200": {
+            "description": "List of recent history entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/RequestHistory" }
+                },
+                "examples": {
+                  "recentHistory": {
+                    "summary": "Recent history entries",
+                    "value": [
+                      {
+                        "id": "550e8400-e29b-41d4-a716-446655440001",
+                        "requestType": "Audio",
+                        "inputText": "Set a reminder for tomorrow at 3 PM",
+                        "detectedTask": "reminder",
+                        "response": "Reminder set for tomorrow at 3 PM",
+                        "usedAdvancedModel": false,
+                        "mediaStorageKey": null,
+                        "timestamp": "2026-01-28T10:30:00Z"
+                      },
+                      {
+                        "id": "550e8400-e29b-41d4-a716-446655440002",
+                        "requestType": "Media",
+                        "inputText": "What is in this image?",
+                        "detectedTask": "general",
+                        "response": "The image shows a sunset over the ocean with birds flying in the distance.",
+                        "usedAdvancedModel": true,
+                        "mediaStorageKey": "media/2026-01-28/image123.jpg",
+                        "timestamp": "2026-01-28T09:15:00Z"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No history entries found",
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" },
+                "examples": {
+                  "noHistory": {
+                    "summary": "No history available",
+                    "value": {
+                      "type": "https://example.com/probs/not-found",
+                      "title": "Not Found",
+                      "status": 404,
+                      "detail": "No history entries found.",
+                      "instance": "/api/history",
+                      "requestId": "550e8400-e29b-41d4-a716-446655440020",
+                      "timestamp": "2026-01-28T00:00:00Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" },
+                "examples": {
+                  "invalidCount": {
+                    "summary": "Invalid count parameter",
+                    "value": {
+                      "type": "https://example.com/probs/validation",
+                      "title": "Validation Failed",
+                      "status": 400,
+                      "detail": "Count parameter must be a positive integer",
+                      "instance": "/api/history",
+                      "requestId": "550e8400-e29b-41d4-a716-446655440010",
+                      "timestamp": "2026-01-28T00:00:00Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server Error",
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" },
+                "examples": {
+                  "serverError": {
+                    "summary": "Internal error",
+                    "value": {
+                      "type": "about:blank",
+                      "title": "Internal Server Error",
+                      "status": 500,
+                      "detail": "An unexpected error occurred while retrieving history.",
+                      "instance": "/api/history",
+                      "requestId": "550e8400-e29b-41d4-a716-446655440011",
+                      "timestamp": "2026-01-28T00:00:00Z"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/history/{id}": {
       "get": {
         "summary": "Get history by id",
-        "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } } ],
-        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RequestHistory" } } } }, "404": { "description": "Not Found", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" }, "examples": { "notFound": { "summary": "History not found", "value": { "type": "https://example.com/probs/not-found", "title": "Not Found", "status": 404, "detail": "History entry not found", "instance": "/api/history/{id}", "requestId": "00000000-0000-0000-0000-000000000004", "timestamp": "2026-01-28T00:00:00Z" } } } } } } }
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" },
+            "description": "Unique identifier of the history entry",
+            "example": "550e8400-e29b-41d4-a716-446655440001"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "History entry found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RequestHistory" },
+                "examples": {
+                  "audioHistory": {
+                    "summary": "Audio transcription history",
+                    "value": {
+                      "id": "550e8400-e29b-41d4-a716-446655440001",
+                      "requestType": "Audio",
+                      "inputText": "What time is it in Tokyo?",
+                      "detectedTask": "time",
+                      "response": "The current time in Tokyo is 7:30 PM JST.",
+                      "usedAdvancedModel": false,
+                      "mediaStorageKey": null,
+                      "timestamp": "2026-01-28T10:30:00Z"
+                    }
+                  },
+                  "mediaHistory": {
+                    "summary": "Media processing history",
+                    "value": {
+                      "id": "550e8400-e29b-41d4-a716-446655440002",
+                      "requestType": "Media",
+                      "inputText": "Describe this photo",
+                      "detectedTask": "general",
+                      "response": "The photo shows a scenic mountain landscape with snow-capped peaks and a lake in the foreground.",
+                      "usedAdvancedModel": true,
+                      "mediaStorageKey": "media/2026-01-28/photo456.jpg",
+                      "timestamp": "2026-01-28T09:15:00Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" },
+                "examples": {
+                  "invalidId": {
+                    "summary": "Invalid UUID format",
+                    "value": {
+                      "type": "https://example.com/probs/validation",
+                      "title": "Validation Failed",
+                      "status": 400,
+                      "detail": "The id parameter must be a valid UUID.",
+                      "instance": "/api/history/invalid-id",
+                      "requestId": "550e8400-e29b-41d4-a716-446655440012",
+                      "timestamp": "2026-01-28T00:00:00Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" },
+                "examples": {
+                  "notFound": {
+                    "summary": "History entry not found",
+                    "value": {
+                      "type": "https://example.com/probs/not-found",
+                      "title": "Not Found",
+                      "status": 404,
+                      "detail": "History entry not found",
+                      "instance": "/api/history/550e8400-e29b-41d4-a716-446655440099",
+                      "requestId": "550e8400-e29b-41d4-a716-446655440013",
+                      "timestamp": "2026-01-28T00:00:00Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server Error",
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" },
+                "examples": {
+                  "serverError": {
+                    "summary": "Internal error",
+                    "value": {
+                      "type": "about:blank",
+                      "title": "Internal Server Error",
+                      "status": 500,
+                      "detail": "An unexpected error occurred while retrieving the history entry.",
+                      "instance": "/api/history/550e8400-e29b-41d4-a716-446655440001",
+                      "requestId": "550e8400-e29b-41d4-a716-446655440014",
+                      "timestamp": "2026-01-28T00:00:00Z"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     }
-  }
   },
   "components": {
     "schemas": {
@@ -227,6 +510,14 @@
           "instance": { "type": "string", "description": "A URI reference that identifies the specific occurrence of the problem" }
         },
         "additionalProperties": true
+      },
+      "ServiceHealthCheck": {
+        "type": "object",
+        "properties": {
+          "healthy": { "type": "boolean", "description": "Whether the service is healthy" },
+          "error": { "type": "string", "nullable": true, "description": "Error message if service is unhealthy" }
+        },
+        "required": ["healthy"]
       }
     },
     "examples": {

@@ -56,7 +56,24 @@ public class MediaController : ControllerBase
                     // If both a text prompt and promptAudio are provided, reject the request
                     if (!string.IsNullOrWhiteSpace(request.Prompt))
                     {
-                        return BadRequest(new ProblemDetails { Title = "Bad Request", Detail = "Provide either 'prompt' (text) or 'promptAudio' (file), not both.", Status = StatusCodes.Status400BadRequest });
+                        var errors = new Dictionary<string, string[]>
+                        {
+                            ["prompt"] = new[] { "Mutually exclusive with promptAudio" }
+                        };
+
+                        var pd = new ValidationProblemDetails(errors)
+                        {
+                            Type = "https://example.com/probs/validation",
+                            Title = "Validation Failed",
+                            Status = StatusCodes.Status400BadRequest,
+                            Detail = "Provide either 'prompt' (text) or 'promptAudio' (file), not both.",
+                            Instance = HttpContext?.Request?.Path
+                        };
+
+                        pd.Extensions["requestId"] = Guid.NewGuid().ToString();
+                        pd.Extensions["timestamp"] = DateTime.UtcNow.ToString("o");
+
+                        return BadRequest(pd);
                     }
 
                     try

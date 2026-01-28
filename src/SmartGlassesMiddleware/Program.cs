@@ -424,34 +424,108 @@ app.MapGet("/health", async (IServiceProvider services) =>
     using var scope = services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
     var redis = scope.ServiceProvider.GetRequiredService<IConnectionMultiplexer>();
+    var httpClientFactory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
+    var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
 
+    var checks = new Dictionary<string, object>();
+    var allHealthy = true;
+
+    // Check Postgres
     var dbOk = false;
+    string? dbError = null;
     try
     {
         dbOk = await db.Database.CanConnectAsync();
     }
-    catch
+    catch (Exception ex)
     {
-        dbOk = false;
+        dbError = ex.Message;
     }
+    checks["postgres"] = new { healthy = dbOk, error = dbError };
+    allHealthy &= dbOk;
 
+    // Check Redis
     var redisOk = false;
+    string? redisError = null;
     try
     {
         await redis.GetDatabase().PingAsync();
         redisOk = true;
     }
-    catch
+    catch (Exception ex)
     {
-        redisOk = false;
+        redisError = ex.Message;
+    }
+    checks["redis"] = new { healthy = redisOk, error = redisError };
+    allHealthy &= redisOk;
+
+    // Check MinIO
+    var minioOk = false;
+    string? minioError = null;
+    try
+    {
+        var minioEndpoint = configuration["MinIO:Endpoint"] ?? "minio:9000";
+        using var httpClient = httpClientFactory.CreateClient();
+        httpClient.Timeout = TimeSpan.FromSeconds(5);
+        var response = await httpClient.GetAsync($"http://{minioEndpoint}/minio/health/live");
+        minioOk = response.IsSuccessStatusCode;
+    }
+    catch (Exception ex)
+    {
+        minioError = ex.Message;
+    }
+    checks["minio"] = new { healthy = minioOk, error = minioError };
+    allHealthy &= minioOk;
+
+    // Check Ollama
+    var ollamaOk = false;
+    string? ollamaError = null;
+    try
+    {
+        var ollamaEndpoint = configuration["AI:Endpoint"] ?? "http://ollama:11434";
+        using var httpClient = httpClientFactory.CreateClient();
+        httpClient.Timeout = TimeSpan.FromSeconds(5);
+        var response = await httpClient.GetAsync(ollamaEndpoint);
+        ollamaOk = response.IsSuccessStatusCode;
+    }
+    catch (Exception ex)
+    {
+        ollamaError = ex.Message;
+    }
+    checks["ollama"] = new { healthy = ollamaOk, error = ollamaError };
+    allHealthy &= ollamaOk;
+
+    // Check Vosk Transcriber
+    var voskOk = false;
+    string? voskError = null;
+    try
+    {
+        var voskEndpoint = configuration["Transcription:Endpoint"] ?? "http://vosk-transcriber:8080";
+        using var httpClient = httpClientFactory.CreateClient();
+        httpClient.Timeout = TimeSpan.FromSeconds(5);
+        var response = await httpClient.GetAsync($"{voskEndpoint}/health");
+        voskOk = response.IsSuccessStatusCode;
+    }
+    catch (Exception ex)
+    {
+        voskError = ex.Message;
+    }
+    checks["vosk-transcriber"] = new { healthy = voskOk, error = voskError };
+    allHealthy &= voskOk;
+
+    var result = new
+    {
+        status = allHealthy ? "Healthy" : "Unhealthy",
+        checks = checks,
+        timestamp = DateTime.UtcNow
+    };
+
+    if (allHealthy)
+    {
+        return Results.Ok(result);
     }
 
-    if (dbOk && redisOk)
-    {
-        return Results.Ok(new { status = "Healthy" });
-    }
-
-    return Results.StatusCode(503);
+    return Results.Json(result, statusCode: 503);
 });
 
 app.Run();
