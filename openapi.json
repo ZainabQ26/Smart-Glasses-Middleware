@@ -99,23 +99,17 @@
                     "format": "binary",
                     "description": "Upload one or more files (client may allow selecting multiple files in the file picker). Allowed extensions: .jpg, .jpeg, .png, .gif, .mp4, .avi, .mov, .wav, .mp3, .m4a, .flac, .aac"
                   },
-                  "inputText": { "type": "string", "description": "Plain transcription text (optional)" },
-                  "inputFile": { "type": "string", "format": "binary", "description": "Optional transcription file or media file (binary)" },
-                  "prompt": { "type": "string" },
-                  "perFileTranscriptions": { "type": "string", "description": "JSON object mapping filename->transcription" },
-                  "manifest": { "type": "string", "description": "JSON array of filenames to indicate processing order" }
+                  "prompt": { "type": "string", "description": "Prompt text (optional). Mutually exclusive with `promptAudio`: provide either a text prompt or an audio prompt file, not both." },
+                  "promptAudio": { "type": "string", "format": "binary", "description": "Prompt audio file (optional)" }
                 }
               },
               "encoding": {
                 "files": { "contentType": "application/octet-stream" },
-                "inputFile": { "contentType": "application/octet-stream" },
-                "inputText": { "contentType": "text/plain" },
-                "perFileTranscriptions": { "contentType": "text/plain" },
-                "manifest": { "contentType": "text/plain" }
+                "promptAudio": { "contentType": "audio/*" },
+                  "prompt": { "contentType": "text/plain" }
+                }
               }
-            }
-          }
-        },
+            },
         "responses": {
           "200": { "description": "Media upload result", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MediaUploadResponse" } } } },
           "400": {
@@ -136,6 +130,9 @@
                       "requestId": "00000000-0000-0000-0000-000000000002",
                       "timestamp": "2026-01-28T00:00:00Z"
                     }
+                  },
+                  "promptConflict": {
+                    "$ref": "#/components/examples/promptConflict"
                   }
                 }
               }
@@ -179,9 +176,10 @@
       "get": {
         "summary": "Get history by id",
         "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } } ],
-        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RequestHistory" } } } }, "404": { "description": "Not Found", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" }, "examples": { "notFound": { "summary": "History not found", "value": { "type": "https://example.com/probs/not-found", "title": "Not Found", "status": 404, "detail": "History entry not found", "instance": "/api/history/{id}", "requestId": "00000000-0000-0000-0000-000000000004", "timestamp": "2026-01-28T00:00:00Z" } } } } } }
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RequestHistory" } } } }, "404": { "description": "Not Found", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" }, "examples": { "notFound": { "summary": "History not found", "value": { "type": "https://example.com/probs/not-found", "title": "Not Found", "status": 404, "detail": "History entry not found", "instance": "/api/history/{id}", "requestId": "00000000-0000-0000-0000-000000000004", "timestamp": "2026-01-28T00:00:00Z" } } } } } } }
       }
     }
+  }
   },
   "components": {
     "schemas": {
@@ -218,7 +216,6 @@
       "RequestHistory": {
         "type": "object",
         "properties": { "id": { "type": "string", "format": "uuid" }, "requestType": { "type": "string" }, "inputText": { "type": "string" }, "detectedTask": { "type": "string" }, "response": { "type": "string" }, "usedAdvancedModel": { "type": "boolean" }, "mediaStorageKey": { "type": "string" }, "timestamp": { "type": "string", "format": "date-time" } }
-      }
       },
       "ProblemDetails": {
         "type": "object",
@@ -230,6 +227,21 @@
           "instance": { "type": "string", "description": "A URI reference that identifies the specific occurrence of the problem" }
         },
         "additionalProperties": true
+      }
+    },
+    "examples": {
+      "promptConflict": {
+        "summary": "Prompt conflict error",
+        "value": {
+          "type": "https://example.com/probs/validation",
+          "title": "Validation Failed",
+          "status": 400,
+          "detail": "Provide either 'prompt' (text) or 'promptAudio' (file), not both.",
+          "instance": "/api/ask",
+          "errors": { "prompt": [ "Mutually exclusive with promptAudio" ] },
+          "requestId": "00000000-0000-0000-0000-000000000009",
+          "timestamp": "2026-01-28T00:00:00Z"
+        }
       }
     }
   }
