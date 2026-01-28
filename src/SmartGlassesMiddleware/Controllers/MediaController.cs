@@ -56,7 +56,7 @@ public class MediaController : ControllerBase
             // Known audio/video extensions
             var audioExtensions = new[] { ".wav", ".mp3", ".m4a", ".flac", ".aac" };
 
-            string transcription = string.Empty;
+            string? transcription = null;
             // If this is audio and no transcription provided, call the transcription service
             if (audioExtensions.Contains(extension) && string.IsNullOrWhiteSpace(request.Transcription))
             {

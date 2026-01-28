@@ -45,7 +45,7 @@ public class AudioController : ControllerBase
                 "audio/wav");
 
             // Download and transcribe
-            string transcription = string.Empty;
+            string? transcription = null;
             try
             {
                 using var downloaded = await _mediaStorageService.DownloadMediaAsync(storageKey);
