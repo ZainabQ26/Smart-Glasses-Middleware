@@ -8,7 +8,7 @@ namespace SmartGlassesMiddleware.Services;
 
 public interface IAIService
 {
-    Task<(string task, string response, bool usedStrongerModel)> ProcessRequestAsync(string input);
+    Task<(string task, string response, bool usedAdvancedModel)> ProcessRequestAsync(string input);
 }
 
 public class OllamaAIService : IAIService
@@ -16,8 +16,8 @@ public class OllamaAIService : IAIService
     private readonly Kernel _kernel;
     private readonly HttpClient _httpClient;
     private readonly ILogger<OllamaAIService> _logger;
-    private readonly string _strongerModelEndpoint;
-    private readonly string _strongerModelName;
+    private readonly string _advancedModelEndpoint;
+    private readonly string _advancedModelName;
     private readonly List<string> _knownTasks;
     private readonly ITaskDispatcher _dispatcher;
 
@@ -26,13 +26,13 @@ public class OllamaAIService : IAIService
         _kernel = kernel;
         _httpClient = httpClient;
         _logger = logger;
-        _strongerModelEndpoint = configuration["AI:StrongerModelEndpoint"] ?? "http://localhost:5000/api/chat";
-        _strongerModelName = configuration["AI:StrongerModelName"] ?? "gpt-4";
+        _advancedModelEndpoint = configuration["AI:AdvancedModelEndpoint"] ?? "http://localhost:5000/api/chat";
+        _advancedModelName = configuration["AI:AdvancedModelName"] ?? "gpt-4";
         _dispatcher = dispatcher;
         _knownTasks = _dispatcher.KnownTasks.ToList();
     }
 
-    public async Task<(string task, string response, bool usedStrongerModel)> ProcessRequestAsync(string input)
+    public async Task<(string task, string response, bool usedAdvancedModel)> ProcessRequestAsync(string input)
     {
         try
         {
@@ -54,12 +54,12 @@ Task:";
 
             _logger.LogInformation("Detected task: {Task} for input: {Input}", detectedTask, input);
 
-            // If task is unknown, use stronger model
+            // If task is unknown, use advanced model
             if (detectedTask == "unknown" || !_knownTasks.Contains(detectedTask))
             {
-                _logger.LogInformation("Task is unknown, forwarding to stronger model");
-                var strongerResponse = await CallStrongerModelAsync(input);
-                return ("unknown", strongerResponse, true);
+                _logger.LogInformation("Task is unknown, forwarding to advanced model");
+                var advancedResponse = await CallAdvancedModelAsync(input);
+                return ("unknown", advancedResponse, true);
             }
             // If we have a concrete handler for the detected task, invoke it via dispatcher
             try
@@ -91,14 +91,14 @@ Please provide a helpful and concise response:";
         }
     }
 
-    private async Task<string> CallStrongerModelAsync(string input)
+    private async Task<string> CallAdvancedModelAsync(string input)
     {
         try
         {
             var requestBody = new
             {
                 message = input,
-                model = _strongerModelName
+                model = _advancedModelName
             };
 
             var content = new StringContent(
@@ -106,17 +106,17 @@ Please provide a helpful and concise response:";
                 System.Text.Encoding.UTF8,
                 "application/json");
 
-            var response = await _httpClient.PostAsync(_strongerModelEndpoint, content);
+            var response = await _httpClient.PostAsync(_advancedModelEndpoint, content);
             response.EnsureSuccessStatusCode();
 
             var responseContent = await response.Content.ReadAsStringAsync();
             var result = JsonSerializer.Deserialize<JsonElement>(responseContent);
             
-            return result.GetProperty("response").GetString() ?? "No response from stronger model.";
+            return result.GetProperty("response").GetString() ?? "No response from advanced model.";
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error calling stronger model");
+            _logger.LogError(ex, "Error calling advanced model");
             return "I'm having trouble connecting to the advanced model. Please try again later.";
         }
     }
