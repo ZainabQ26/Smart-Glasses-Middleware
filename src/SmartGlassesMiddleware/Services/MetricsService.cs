@@ -28,25 +28,35 @@ public class MetricsService : IMetricsService
     public void IncrementRequestCount(string endpoint)
     {
         var metrics = _metrics.GetOrAdd(endpoint, _ => new EndpointMetrics());
-        Interlocked.Increment(ref metrics.RequestCount);
-        metrics.LastRequestUtc = DateTime.UtcNow;
+        lock (metrics)
+        {
+            Interlocked.Increment(ref metrics.RequestCount);
+            metrics.LastRequestUtc = DateTime.UtcNow;
+        }
     }
 
     public void IncrementErrorCount(string endpoint)
     {
         var metrics = _metrics.GetOrAdd(endpoint, _ => new EndpointMetrics());
-        Interlocked.Increment(ref metrics.ErrorCount);
+        lock (metrics)
+        {
+            Interlocked.Increment(ref metrics.ErrorCount);
+        }
     }
 
     public void RecordRequestDuration(string endpoint, TimeSpan duration)
     {
         var metrics = _metrics.GetOrAdd(endpoint, _ => new EndpointMetrics());
         
-        // Simple moving average calculation
         lock (metrics)
         {
+            // Update average duration using cumulative moving average
             var totalDuration = metrics.AverageDurationMs * metrics.RequestCount + duration.TotalMilliseconds;
-            metrics.AverageDurationMs = totalDuration / (metrics.RequestCount + 1);
+            var newCount = metrics.RequestCount;
+            if (newCount > 0)
+            {
+                metrics.AverageDurationMs = totalDuration / newCount;
+            }
         }
     }
 

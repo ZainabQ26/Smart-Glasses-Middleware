@@ -100,14 +100,14 @@ public class MediaController : ControllerBase
 
                         var pd = new ValidationProblemDetails(errors)
                         {
-                            Type = "https://example.com/probs/validation",
+                            Type = "https://tools.ietf.org/html/rfc7231#section-6.5.1",
                             Title = "Validation Failed",
                             Status = StatusCodes.Status400BadRequest,
                             Detail = "Provide either 'prompt' (text) or 'promptAudio' (file), not both.",
                             Instance = HttpContext?.Request?.Path
                         };
 
-                        pd.Extensions["requestId"] = Guid.NewGuid().ToString();
+                        pd.Extensions["requestId"] = HttpContext?.TraceIdentifier ?? Guid.NewGuid().ToString();
                         pd.Extensions["timestamp"] = DateTime.UtcNow.ToString("o");
 
                         return BadRequest(pd);
