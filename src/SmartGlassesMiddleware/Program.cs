@@ -336,6 +336,11 @@ builder.Services.AddScoped<ITaskDispatcher, TaskDispatcher>();
 
 // Add SignalR for real-time notifications
 builder.Services.AddSignalR();
+// Add Redis pub/sub bridge to forward messages to SignalR clients
+builder.Services.AddSingleton<RedisPubSubBridge>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<RedisPubSubBridge>());
+// Register bridge status for health checks
+builder.Services.AddSingleton<RedisPubSubBridgeStatus>();
 
 // (AssemblyExtensions moved to a dedicated file)
 
@@ -521,6 +526,30 @@ app.MapGet("/health", async (IServiceProvider services) =>
     }
     checks["vosk-transcriber"] = new { healthy = voskOk, error = voskError };
     allHealthy &= voskOk;
+
+    // Check Redis Pub/Sub bridge
+    var bridgeOk = false;
+    string? bridgeError = null;
+    try
+    {
+        var bridgeStatus = scope.ServiceProvider.GetService<RedisPubSubBridgeStatus>();
+        if (bridgeStatus != null)
+        {
+            bridgeOk = bridgeStatus.IsSubscribed;
+            bridgeError = bridgeStatus.LastError;
+        }
+        else
+        {
+            bridgeOk = false;
+            bridgeError = "RedisPubSubBridgeStatus not registered";
+        }
+    }
+    catch (Exception ex)
+    {
+        bridgeError = ex.Message;
+    }
+    checks["redis-pubsub-bridge"] = new { healthy = bridgeOk, error = bridgeError };
+    allHealthy &= bridgeOk;
 
     var result = new
     {
