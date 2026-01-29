@@ -330,6 +330,12 @@ Assembly? CompileSourceFiles(string[] filePaths, ILogger logger)
 
 // Task dispatcher (configurable handler selection)
 builder.Services.AddScoped<ITaskDispatcher, TaskDispatcher>();
+    builder.Services.AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();
+    builder.Services.AddSingleton<IMediaProcessor, MediaProcessor>();
+    builder.Services.AddHostedService<BackgroundTaskHostedService>();
+
+// Add SignalR for real-time notifications
+builder.Services.AddSignalR();
 
 // (AssemblyExtensions moved to a dedicated file)
 
@@ -417,6 +423,9 @@ app.UseExceptionHandler(errorApp =>
 });
 
 app.MapControllers();
+
+// Map SignalR hubs
+app.MapHub<SmartGlassesMiddleware.Hubs.TaskHub>("/hubs/tasks");
 
 // Health endpoint to allow Docker healthchecks to verify service dependencies
 app.MapGet("/health", async (IServiceProvider services) =>
