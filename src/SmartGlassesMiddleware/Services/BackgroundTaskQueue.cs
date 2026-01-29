@@ -16,13 +16,15 @@ public class BackgroundTaskQueue : IBackgroundTaskQueue
     private const string QueueKey = "background:queue";
     private const string TaskKeyPrefix = "background:task:";
     private const string PubSubChannel = "background:task:completed";
+    private readonly int _retentionSeconds;
 
-    public BackgroundTaskQueue(IConnectionMultiplexer redis, ILogger<BackgroundTaskQueue> logger, IHubContext<TaskHub> hub)
+    public BackgroundTaskQueue(IConnectionMultiplexer redis, ILogger<BackgroundTaskQueue> logger, IHubContext<TaskHub> hub, IConfiguration config)
     {
         _redis = redis;
         _db = _redis.GetDatabase();
         _logger = logger;
         _hub = hub;
+        _retentionSeconds = config.GetValue<int?>("BackgroundTasks:RetentionSeconds") ?? 60;
     }
 
     public async Task EnqueueAsync(BackgroundTaskEntry entry)
@@ -130,7 +132,7 @@ public class BackgroundTaskQueue : IBackgroundTaskQueue
             // Set a short TTL for the stored task so clients can poll if they miss notification
             try
             {
-                await _db.KeyExpireAsync(key, TimeSpan.FromSeconds(60));
+                await _db.KeyExpireAsync(key, TimeSpan.FromSeconds(_retentionSeconds));
             }
             catch (Exception ex)
             {
