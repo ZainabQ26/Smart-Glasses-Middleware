@@ -13,18 +13,24 @@ public class MediaController : ControllerBase
     private readonly ILogger<MediaController> _logger;
     private readonly IAIService _aiService;
     private readonly IHistoryService _historyService;
+    private readonly IBackgroundTaskQueue _backgroundQueue;
+    private readonly IMediaProcessor _mediaProcessor;
 
     public MediaController(
         IMediaStorageService mediaStorageService,
         ITranscriptionService transcriptionService,
         IAIService aiService,
         IHistoryService historyService,
+        IBackgroundTaskQueue backgroundQueue,
+        IMediaProcessor mediaProcessor,
         ILogger<MediaController> logger)
     {
         _mediaStorageService = mediaStorageService;
         _transcriptionService = transcriptionService;
         _aiService = aiService;
         _historyService = historyService;
+        _backgroundQueue = backgroundQueue;
+        _mediaProcessor = mediaProcessor;
         _logger = logger;
     }
 
@@ -41,9 +47,13 @@ public class MediaController : ControllerBase
             {
                 files.AddRange(request.Files!);
             }
-            else if (Request.HasFormContentType && Request.Form.Files?.Count > 0)
+            else if (Request.HasFormContentType)
             {
-                files.AddRange(Request.Form.Files.ToList());
+                var formFiles = Request.Form?.Files;
+                if (formFiles != null && formFiles.Count > 0)
+                {
+                    files.AddRange(formFiles.ToList());
+                }
             }
 
             // If a prompt audio file was uploaded as `promptAudio`, enforce exclusivity with text prompt, transcribe it, and remove it from uploads
@@ -79,7 +89,8 @@ public class MediaController : ControllerBase
                     try
                     {
                         using var promptStream = promptAudioFile.OpenReadStream();
-                        var transcribedPrompt = await _transcriptionService.TranscribeAsync(promptStream, promptAudioFile.FileName, promptAudioFile.ContentType);
+                        var contentType = promptAudioFile.ContentType ?? string.Empty;
+                        var transcribedPrompt = await _transcriptionService.TranscribeAsync(promptStream, promptAudioFile.FileName, contentType);
                         if (!string.IsNullOrWhiteSpace(transcribedPrompt)) promptAudioTranscription = transcribedPrompt;
                     }
                     catch (Exception ex)
@@ -93,14 +104,22 @@ public class MediaController : ControllerBase
             }
 
             // Support a single combined `input` form field which may be either a file part or a plain transcription string.
-            var inputText = Request.HasFormContentType && Request.Form.TryGetValue("input", out var iv) ? iv.FirstOrDefault() : null;
+            string? inputText = null;
+            if (Request.HasFormContentType)
+            {
+                var form = Request.Form;
+                if (form != null && form.TryGetValue("input", out var iv))
+                {
+                    inputText = iv.FirstOrDefault();
+                }
+            }
             IFormFile? inputFile = null;
             if (Request.HasFormContentType)
             {
                 var formFiles = Request.Form?.Files;
                 if (formFiles != null && formFiles.Count > 0)
                 {
-                    inputFile = formFiles.FirstOrDefault(f => string.Equals(f.Name, "input", StringComparison.OrdinalIgnoreCase));
+                    inputFile = formFiles.FirstOrDefault(f => string.Equals(f?.Name ?? string.Empty, "input", StringComparison.OrdinalIgnoreCase));
                 }
             }
 
@@ -219,9 +238,8 @@ public class MediaController : ControllerBase
                 if (!perFileTrans.ContainsKey(firstName)) perFileTrans[firstName] = inputText!;
             }
 
-            // Process each file in order: upload, optionally transcribe, collect metadata
-            var mediaItems = new List<object>();
-            var partsForAi = new List<string>();
+            // Upload files now and enqueue a background task for processing
+            var bgItems = new List<BackgroundMediaItem>();
             foreach (var file in orderedFiles)
             {
                 var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
@@ -231,90 +249,39 @@ public class MediaController : ControllerBase
                 }
 
                 using var uploadStream = file.OpenReadStream();
-                var storageKey = await _mediaStorageService.UploadMediaAsync(uploadStream, file.FileName, file.ContentType);
+                var contentType = file.ContentType ?? "application/octet-stream";
+                var storageKey = await _mediaStorageService.UploadMediaAsync(uploadStream, file.FileName, contentType);
 
-                string? thisTranscription = null;
-                // If per-file transcription exists for this file, prefer it
+                var item = new BackgroundMediaItem { FileName = file.FileName, ContentType = contentType, StorageKey = storageKey };
+                // If per-file transcription provided, attach it
                 if (perFileTrans != null && perFileTrans.TryGetValue(file.FileName, out var mapped))
                 {
-                    thisTranscription = mapped;
+                    item.Transcription = mapped;
                 }
-                if (audioExtensions.Contains(extension))
-                {
-                    // If a per-file transcription exists we already set it above. Otherwise transcribe the audio.
-                    if (thisTranscription == null)
-                    {
-                        try
-                        {
-                            using var downloaded = await _mediaStorageService.DownloadMediaAsync(storageKey);
-                            thisTranscription = await _transcriptionService.TranscribeAsync(downloaded, file.FileName, file.ContentType);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex, "Transcription failed for {Key}", storageKey);
-                        }
-                    }
-                }
-
-                mediaItems.Add(new { fileName = file.FileName, contentType = file.ContentType, storageKey, transcription = thisTranscription });
-
-                var partText = $"MediaFileName: {file.FileName}\nMediaStorageKey: {storageKey}\nMediaContentType: {file.ContentType}";
-                if (!string.IsNullOrWhiteSpace(thisTranscription)) partText += $"\nTranscription: {thisTranscription}";
-                partsForAi.Add(partText);
+                bgItems.Add(item);
             }
 
-            // Build final prompt for AI
-            var promptText = request.Prompt ?? string.Empty;
-
-            // If a prompt audio file was uploaded as `promptAudio`, transcribe it and use that as the prompt (override text prompt)
-            if (Request.HasFormContentType)
+            // If an inputText transcription was provided and files exist, attach it to the first file if no per-file transcription present
+            if (!string.IsNullOrWhiteSpace(inputText) && bgItems.Count > 0)
             {
-                var formFiles = Request.Form?.Files;
-                var promptAudioFile = formFiles?.FirstOrDefault(f => string.Equals(f.Name, "promptAudio", StringComparison.OrdinalIgnoreCase));
-                if (promptAudioFile != null)
-                {
-                    try
-                    {
-                        using var promptStream = promptAudioFile.OpenReadStream();
-                        var transcribedPrompt = await _transcriptionService.TranscribeAsync(promptStream, promptAudioFile.FileName, promptAudioFile.ContentType);
-                        if (!string.IsNullOrWhiteSpace(transcribedPrompt))
-                        {
-                            promptText = transcribedPrompt;
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to transcribe prompt audio");
-                    }
-                }
+                var first = bgItems[0];
+                if (string.IsNullOrWhiteSpace(first.Transcription)) first.Transcription = inputText;
             }
 
-            var textToProcess = promptText + "\n\n" + string.Join("\n\n", partsForAi);
+            // Determine prompt text (if promptAudio was transcribed earlier, use it)
+            var promptTextFinal = !string.IsNullOrWhiteSpace(promptAudioTranscription) ? promptAudioTranscription : request.Prompt;
 
-            // Process with AI
-            var (task, response, usedAdvancedModel) = await _aiService.ProcessRequestAsync(textToProcess);
-
-            // Save to history
-            try
+            var entry = new BackgroundTaskEntry
             {
-                var history = new RequestHistory
-                {
-                    RequestType = "Media",
-                    InputText = textToProcess,
-                    DetectedTask = task,
-                    Response = response,
-                    UsedAdvancedModel = usedAdvancedModel,
-                    MediaStorageKey = string.Join(",", ((IEnumerable<dynamic>)mediaItems).Select(m => (string)m.storageKey))
-                };
-                history = await _historyService.SaveRequestAsync(history);
+                PromptText = promptTextFinal,
+                PerFileTranscriptions = perFileTrans,
+                MediaItems = bgItems
+            };
 
-                return Ok(new { task, response, usedAdvancedModel, requestId = history.Id, items = mediaItems });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to save history for media upload");
-                return Ok(new { task, response, usedAdvancedModel, items = mediaItems });
-            }
+            await _backgroundQueue.EnqueueAsync(entry);
+
+            var location = $"/api/tasks/{entry.Id}";
+            return Accepted(location, new { taskId = entry.Id, location });
         }
         catch (Exception ex)
         {
