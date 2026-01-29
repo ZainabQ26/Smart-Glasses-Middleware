@@ -196,6 +196,7 @@ builder.Services.AddHttpClient<IAIService, OllamaAIService>((sp, client) =>
 builder.Services.AddScoped<IHistoryService, HistoryService>();
 builder.Services.AddScoped<IMediaStorageService, MinioMediaStorageService>();
 builder.Services.AddScoped<ICacheService, RedisCacheService>();
+builder.Services.AddSingleton<IMetricsService, MetricsService>();
 // Transcription service (server-side) — registered as a typed HTTP client with timeout configuration
 builder.Services.AddHttpClient<ITranscriptionService, HttpTranscriptionService>((sp, client) =>
 {
@@ -496,6 +497,30 @@ app.UseHttpsRedirection();
 app.UseCors();
 app.UseRateLimiter();
 
+// Add metrics tracking middleware
+app.Use(async (context, next) =>
+{
+    var startTime = DateTime.UtcNow;
+    var endpoint = context.Request.Path.ToString();
+    var metricsService = context.RequestServices.GetService<IMetricsService>();
+    
+    try
+    {
+        metricsService?.IncrementRequestCount(endpoint);
+        await next();
+    }
+    catch
+    {
+        metricsService?.IncrementErrorCount(endpoint);
+        throw;
+    }
+    finally
+    {
+        var duration = DateTime.UtcNow - startTime;
+        metricsService?.RecordRequestDuration(endpoint, duration);
+    }
+});
+
 // Add a consistent request id header for all responses so clients can correlate errors with logs
 app.Use(async (context, next) =>
 {
@@ -689,6 +714,17 @@ app.MapGet("/health", async (IServiceProvider services) =>
     }
 
     return Results.Json(result, statusCode: 503);
+});
+
+// Metrics endpoint to view application statistics
+app.MapGet("/metrics", (IMetricsService metricsService) =>
+{
+    var summary = metricsService.GetSummary();
+    return Results.Ok(new
+    {
+        timestamp = DateTime.UtcNow,
+        endpoints = summary
+    });
 });
 
 app.Run();
