@@ -190,3 +190,13 @@ None. All changes are backward compatible.
 - **Severity**: N/A
 
 All code changes have been verified to not introduce security vulnerabilities.
+
+## Known Pre-Existing Issues
+
+### Service Lifetime Configuration Issue
+There is a pre-existing dependency injection configuration issue where `IMediaProcessor` is registered as a Singleton but depends on `IMediaStorageService` which is registered as Scoped. This issue existed before these improvements were made.
+
+**Workaround**: The application works correctly when run in Docker containers with the docker-compose setup, as the services are properly initialized in that environment.
+
+**Fix Required** (separate from this PR): Change the MediaProcessor registration from Singleton to Scoped, or refactor to use IServiceScopeFactory for creating scopes when needed.
+
