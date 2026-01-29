@@ -368,7 +368,6 @@ if (rateLimitEnabled)
     builder.Services.AddRateLimiter(options =>
     {
         var requestsPerMinute = builder.Configuration.GetValue<int?>("RateLimiting:RequestsPerMinute") ?? 60;
-        var burstSize = builder.Configuration.GetValue<int?>("RateLimiting:BurstSize") ?? 10;
         
         options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
             RateLimitPartition.GetFixedWindowLimiter(
@@ -495,7 +494,13 @@ using (var scope = app.Services.CreateScope())
 
 app.UseHttpsRedirection();
 app.UseCors();
-app.UseRateLimiter();
+
+// Only use rate limiter if it's enabled
+var rateLimitConfig = app.Configuration.GetValue<bool?>("RateLimiting:Enabled") ?? true;
+if (rateLimitConfig)
+{
+    app.UseRateLimiter();
+}
 
 // Add metrics tracking middleware
 app.Use(async (context, next) =>
@@ -717,8 +722,29 @@ app.MapGet("/health", async (IServiceProvider services) =>
 });
 
 // Metrics endpoint to view application statistics
-app.MapGet("/metrics", (IMetricsService metricsService) =>
+app.MapGet("/metrics", (IMetricsService metricsService, HttpContext context, IConfiguration config) =>
 {
+    // In production, restrict access to metrics endpoint
+    var env = context.RequestServices.GetRequiredService<IWebHostEnvironment>();
+    if (!env.IsDevelopment())
+    {
+        // Check for authorization header or API key
+        var apiKey = config["Metrics:ApiKey"];
+        if (!string.IsNullOrEmpty(apiKey))
+        {
+            var providedKey = context.Request.Headers["X-API-Key"].FirstOrDefault();
+            if (providedKey != apiKey)
+            {
+                return Results.Unauthorized();
+            }
+        }
+        else
+        {
+            // If no API key configured in production, deny access
+            return Results.Forbid();
+        }
+    }
+    
     var summary = metricsService.GetSummary();
     return Results.Ok(new
     {

@@ -63,31 +63,34 @@ public class BackgroundTaskCleanupService : BackgroundService
                 return;
             }
 
-            var cleanedCount = 0;
+            // Note: Cleanup is handled automatically by Redis TTL (set in BackgroundTaskQueue.UpdateAsync).
+            // This service mainly monitors and logs the state of background tasks.
+            // Redis automatically removes keys with expired TTL, so manual deletion is not needed.
+            var monitoredCount = 0;
             var pattern = TaskKeyPrefix + "*";
             
             await foreach (var key in server.KeysAsync(pattern: pattern))
             {
+                monitoredCount++;
                 var ttl = await db.KeyTimeToLiveAsync(key);
                 
-                // If key has no TTL (meaning it won't expire), skip it
+                // If key has no TTL (meaning it won't expire), log a warning
                 // TTL is null when key doesn't exist or has no expiration
                 if (ttl == null)
                 {
                     // This shouldn't happen for completed tasks as they should have TTL set
-                    // but we'll leave them for manual cleanup to avoid deleting active tasks
-                    _logger.LogDebug("Key {Key} has no TTL set", key.ToString());
+                    _logger.LogWarning("Background task key {Key} has no TTL set and will not expire", key.ToString());
                 }
             }
 
-            if (cleanedCount > 0)
+            if (monitoredCount > 0)
             {
-                _logger.LogInformation("Cleaned up {Count} expired background tasks", cleanedCount);
+                _logger.LogDebug("Monitored {Count} background task keys in Redis", monitoredCount);
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error cleaning up expired tasks");
+            _logger.LogError(ex, "Error monitoring background tasks");
         }
     }
 }
