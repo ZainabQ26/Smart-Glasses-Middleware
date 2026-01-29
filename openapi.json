@@ -32,6 +32,22 @@
                     },
                     "timestamp": { "type": "string", "format": "date-time" }
                   }
+                },
+                "examples": {
+                  "healthy": {
+                    "summary": "All services healthy",
+                    "value": {
+                      "status": "Healthy",
+                      "checks": {
+                        "postgres": { "healthy": true, "error": null },
+                        "redis": { "healthy": true, "error": null },
+                        "minio": { "healthy": true, "error": null },
+                        "ollama": { "healthy": true, "error": null },
+                        "vosk-transcriber": { "healthy": true, "error": null }
+                      },
+                      "timestamp": "2026-01-28T00:00:00Z"
+                    }
+                  }
                 }
               }
             }
@@ -100,7 +116,24 @@
           }
         },
         "responses": {
-          "200": { "description": "Audio upload result", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AudioUploadResponse" } } } },
+          "200": {
+            "description": "Audio upload result",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AudioUploadResponse" },
+                "examples": {
+                  "success": {
+                    "summary": "Successful transcription",
+                    "value": {
+                      "storageKey": "audio/2026-01-28/recording1.wav",
+                      "transcription": "Hello world",
+                      "requestId": "550e8400-e29b-41d4-a716-446655440200"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "400": {
             "description": "Bad Request",
             "content": {
@@ -171,12 +204,72 @@
               "encoding": {
                 "files": { "contentType": "application/octet-stream" },
                 "promptAudio": { "contentType": "audio/*" },
-                  "prompt": { "contentType": "text/plain" }
+                "prompt": { "contentType": "text/plain" }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Media upload result",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/MediaUploadResponse" },
+                "examples": {
+                  "success_simple": {
+                    "summary": "Successful media processing (single file)",
+                    "value": {
+                      "task": "general",
+                      "response": "Processed successfully",
+                      "usedAdvancedModel": false,
+                      "requestId": "550e8400-e29b-41d4-a716-446655440100",
+                      "items": [
+                        {
+                          "fileName": "image123.jpg",
+                          "contentType": "image/jpeg",
+                          "storageKey": "media/2026-01-28/image123.jpg",
+                          "transcription": null
+                        }
+                      ]
+                    }
+                  },
+                  "success_multiple": {
+                    "summary": "Successful processing (multiple files with transcription)",
+                    "value": {
+                      "task": "general",
+                      "response": "I see a beach scene with people and umbrellas.",
+                      "usedAdvancedModel": true,
+                      "requestId": "550e8400-e29b-41d4-a716-446655440101",
+                      "items": [
+                        {
+                          "fileName": "photo1.jpg",
+                          "contentType": "image/jpeg",
+                          "storageKey": "media/2026-01-28/photo1.jpg",
+                          "transcription": null
+                        },
+                        {
+                          "fileName": "note1.wav",
+                          "contentType": "audio/wav",
+                          "storageKey": "media/2026-01-28/note1.wav",
+                          "transcription": "Buy milk tomorrow"
+                        }
+                      ]
+                    }
+                  },
+                  "transcription_only": {
+                    "summary": "Transcription-only / prompt-only ask (no media)",
+                    "value": {
+                      "task": "reminder",
+                      "response": "Reminder set for tomorrow at 3 PM",
+                      "usedAdvancedModel": false,
+                      "requestId": "550e8400-e29b-41d4-a716-446655440102",
+                      "transcription": "Set a reminder for tomorrow at 3 PM"
+                    }
+                  }
                 }
               }
-            },
-        "responses": {
-          "200": { "description": "Media upload result", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MediaUploadResponse" } } } },
+            }
+          },
           "400": {
             "description": "Bad Request",
             "content": {
@@ -227,7 +320,6 @@
           }
         }
       }
-    }
     },
     
     "/api/history": {
