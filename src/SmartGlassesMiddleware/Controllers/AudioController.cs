@@ -66,6 +66,23 @@ public class AudioController : ControllerBase
             try
             {
                 audioBytes = Convert.FromBase64String(request.AudioBase64);
+                
+                if (audioBytes.Length == 0)
+                {
+                    var pd = new ValidationProblemDetails
+                    {
+                        Type = "https://tools.ietf.org/html/rfc7231#section-6.5.1",
+                        Title = "Validation Failed",
+                        Status = StatusCodes.Status400BadRequest,
+                        Detail = "Audio data cannot be empty.",
+                        Instance = HttpContext.Request.Path
+                    };
+                    pd.Errors.Add("audioBase64", new[] { "Audio data decoded to empty byte array" });
+                    pd.Extensions["requestId"] = HttpContext.TraceIdentifier;
+                    pd.Extensions["timestamp"] = DateTime.UtcNow.ToString("o");
+                    
+                    return BadRequest(pd);
+                }
             }
             catch (FormatException)
             {
