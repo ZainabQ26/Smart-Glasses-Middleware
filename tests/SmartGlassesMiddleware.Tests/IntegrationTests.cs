@@ -94,8 +94,7 @@ public class IntegrationTests : IClassFixture<WebApplicationFactory<Program>>
             // Simulate immediate processing and notify via SignalR
             entry.Status = BackgroundTaskStatus.Completed;
             var payload = new { id = entry.Id, status = entry.Status.ToString() };
-            _ = _hub.Clients.All.SendAsync("TaskCompleted", payload);
-            return Task.CompletedTask;
+            return _hub.Clients.All.SendAsync("TaskCompleted", payload);
         }
 
         public ValueTask<BackgroundTaskEntry?> DequeueAsync(System.Threading.CancellationToken cancellationToken) => new ValueTask<BackgroundTaskEntry?>((BackgroundTaskEntry?)null);

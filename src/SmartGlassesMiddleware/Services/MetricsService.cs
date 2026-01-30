@@ -52,7 +52,7 @@ public class MetricsService : IMetricsService
         {
             // Update average duration using cumulative moving average
             var totalDuration = metrics.AverageDurationMs * metrics.DurationCount + duration.TotalMilliseconds;
-            Interlocked.Increment(ref metrics.DurationCount);
+            metrics.DurationCount++;
             metrics.AverageDurationMs = totalDuration / metrics.DurationCount;
         }
     }
