@@ -4,6 +4,9 @@ using SmartGlassesMiddleware.Services;
 
 namespace SmartGlassesMiddleware.Controllers;
 
+/// <summary>
+/// Handles media processing requests including images, videos, and audio files
+/// </summary>
 [ApiController]
 [Route("api/ask")]
 public class MediaController : ControllerBase
@@ -34,7 +37,31 @@ public class MediaController : ControllerBase
         _logger = logger;
     }
 
+    /// <summary>
+    /// Process media files (images, videos, audio) with optional AI prompt
+    /// </summary>
+    /// <param name="request">Media request containing files and optional prompt</param>
+    /// <returns>Accepted response with task ID for tracking processing status</returns>
+    /// <response code="202">Request accepted for background processing</response>
+    /// <response code="400">Invalid request format or unsupported file types</response>
+    /// <response code="500">Internal server error during processing</response>
+    /// <remarks>
+    /// This endpoint accepts multipart/form-data with:
+    /// - files: One or more media files (images, videos, audio)
+    /// - prompt: Optional text prompt for AI processing
+    /// - promptAudio: Optional audio file containing the prompt (mutually exclusive with prompt)
+    /// - manifest: Optional JSON array specifying file processing order
+    /// - perFileTranscriptions: Optional JSON object mapping filenames to transcriptions
+    /// 
+    /// Supported file formats:
+    /// - Images: .jpg, .jpeg, .png, .gif
+    /// - Videos: .mp4, .avi, .mov
+    /// - Audio: .wav, .mp3, .m4a, .flac, .aac
+    /// </remarks>
     [HttpPost]
+    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult> ProcessMedia([FromForm] MediaRequest request)
     {
         try
@@ -73,14 +100,14 @@ public class MediaController : ControllerBase
 
                         var pd = new ValidationProblemDetails(errors)
                         {
-                            Type = "https://example.com/probs/validation",
+                            Type = "https://tools.ietf.org/html/rfc7231#section-6.5.1",
                             Title = "Validation Failed",
                             Status = StatusCodes.Status400BadRequest,
                             Detail = "Provide either 'prompt' (text) or 'promptAudio' (file), not both.",
                             Instance = HttpContext?.Request?.Path
                         };
 
-                        pd.Extensions["requestId"] = Guid.NewGuid().ToString();
+                        pd.Extensions["requestId"] = HttpContext?.TraceIdentifier ?? Guid.NewGuid().ToString();
                         pd.Extensions["timestamp"] = DateTime.UtcNow.ToString("o");
 
                         return BadRequest(pd);
@@ -245,7 +272,19 @@ public class MediaController : ControllerBase
                 var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
                 if (!allowedExtensions.Contains(extension))
                 {
-                    return BadRequest(new ProblemDetails { Title = "Bad Request", Detail = $"Invalid file type: {file.FileName}", Status = StatusCodes.Status400BadRequest });
+                    var pd = new ValidationProblemDetails
+                    {
+                        Type = "https://tools.ietf.org/html/rfc7231#section-6.5.1",
+                        Title = "Validation Failed",
+                        Status = StatusCodes.Status400BadRequest,
+                        Detail = $"File '{file.FileName}' has an unsupported file type. Allowed types: {string.Join(", ", allowedExtensions)}",
+                        Instance = HttpContext.Request.Path
+                    };
+                    pd.Errors.Add("files", new[] { $"Invalid file type: {file.FileName}" });
+                    pd.Extensions["requestId"] = HttpContext.TraceIdentifier;
+                    pd.Extensions["timestamp"] = DateTime.UtcNow.ToString("o");
+                    
+                    return BadRequest(pd);
                 }
 
                 using var uploadStream = file.OpenReadStream();
@@ -286,8 +325,18 @@ public class MediaController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing media request");
-            var pd = new ProblemDetails { Title = "Internal Server Error", Detail = "An error occurred processing your request", Status = StatusCodes.Status500InternalServerError };
+            
+            var pd = new ProblemDetails
+            {
+                Type = "https://tools.ietf.org/html/rfc7231#section-6.6.1",
+                Title = "Internal Server Error",
+                Detail = "An unexpected error occurred while processing your media. Please try again later.",
+                Status = StatusCodes.Status500InternalServerError,
+                Instance = HttpContext.Request.Path
+            };
             pd.Extensions["requestId"] = HttpContext.TraceIdentifier;
+            pd.Extensions["timestamp"] = DateTime.UtcNow.ToString("o");
+            
             return StatusCode(500, pd);
         }
     }
