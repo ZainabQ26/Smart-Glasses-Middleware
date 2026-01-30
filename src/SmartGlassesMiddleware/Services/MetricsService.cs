@@ -51,12 +51,9 @@ public class MetricsService : IMetricsService
         lock (metrics)
         {
             // Update average duration using cumulative moving average
-            var totalDuration = metrics.AverageDurationMs * metrics.RequestCount + duration.TotalMilliseconds;
-            var newCount = metrics.RequestCount;
-            if (newCount > 0)
-            {
-                metrics.AverageDurationMs = totalDuration / newCount;
-            }
+            var totalDuration = metrics.AverageDurationMs * metrics.DurationCount + duration.TotalMilliseconds;
+            Interlocked.Increment(ref metrics.DurationCount);
+            metrics.AverageDurationMs = totalDuration / metrics.DurationCount;
         }
     }
 
@@ -77,6 +74,7 @@ public class MetricsService : IMetricsService
     {
         public long RequestCount;
         public long ErrorCount;
+        public long DurationCount;
         public double AverageDurationMs;
         public DateTime LastRequestUtc = DateTime.UtcNow;
     }
