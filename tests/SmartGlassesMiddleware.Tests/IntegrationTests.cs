@@ -1,13 +1,17 @@
 using System;
 using System.Net.Http;
 using System.Threading.Tasks;
+using System.Linq;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
 using Xunit;
 using SmartGlassesMiddleware.Models;
 using SmartGlassesMiddleware.Services;
 using SmartGlassesMiddleware.Hubs;
+using SmartGlassesMiddleware.Data;
 
 namespace SmartGlassesMiddleware.Tests;
 
@@ -21,6 +25,23 @@ public class IntegrationTests : IClassFixture<WebApplicationFactory<Program>>
         {
             builder.ConfigureServices(services =>
             {
+                // Remove all database context related services
+                var dbContextDescriptor = services.SingleOrDefault(
+                    d => d.ServiceType == typeof(DbContextOptions<ApplicationDbContext>));
+                if (dbContextDescriptor != null)
+                    services.Remove(dbContextDescriptor);
+
+                var dbContextDescriptor2 = services.SingleOrDefault(
+                    d => d.ServiceType == typeof(ApplicationDbContext));
+                if (dbContextDescriptor2 != null)
+                    services.Remove(dbContextDescriptor2);
+                
+                // Add in-memory database
+                services.AddDbContext<ApplicationDbContext>(options =>
+                {
+                    options.UseInMemoryDatabase("TestDb");
+                });
+                
                 // Replace IBackgroundTaskQueue with a test implementation that completes immediately
                 services.AddSingleton<IBackgroundTaskQueue, TestBackgroundTaskQueue>();
             });
@@ -33,7 +54,7 @@ public class IntegrationTests : IClassFixture<WebApplicationFactory<Program>>
         using var client = _factory.CreateClient();
 
         // Connect SignalR to the test server
-        var hubUrl = new Uri(client.BaseAddress, "/hubs/tasks").ToString();
+        var hubUrl = new Uri(client.BaseAddress ?? new Uri("http://localhost"), "/hubs/tasks").ToString();
 
         var connection = new HubConnectionBuilder()
             .WithUrl(hubUrl, options => { options.HttpMessageHandlerFactory = _ => _factory.Server.CreateHandler(); })
