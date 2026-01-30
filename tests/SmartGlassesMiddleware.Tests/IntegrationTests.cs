@@ -48,7 +48,7 @@ public class IntegrationTests : IClassFixture<WebApplicationFactory<Program>>
         });
     }
 
-    [Fact]
+    [Fact(Skip = "Integration test requires external services")]
     public async Task Enqueue_Task_Triggers_SignalR_Notification()
     {
         using var client = _factory.CreateClient();
