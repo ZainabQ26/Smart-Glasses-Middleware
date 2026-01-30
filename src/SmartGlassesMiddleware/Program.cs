@@ -13,6 +13,9 @@ using System.Reflection;
 using System.Runtime.Loader;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.RateLimiting;
+using Polly;
+using Polly.Extensions.Http;
 
 #pragma warning disable SKEXP0010
 
@@ -179,15 +182,30 @@ builder.Services.AddSingleton<Kernel>(sp =>
     return kernelBuilder.Build();
 });
 
-// Add HttpClient for advanced model calls
-builder.Services.AddHttpClient<IAIService, OllamaAIService>();
+// Add HttpClient for advanced model calls with timeout configuration
+builder.Services.AddHttpClient<IAIService, OllamaAIService>((sp, client) =>
+{
+    var config = sp.GetRequiredService<IConfiguration>();
+    var timeoutSeconds = config.GetValue<int?>("ServiceTimeouts:AIServiceTimeoutSeconds") ?? 60;
+    client.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
+})
+.AddPolicyHandler(GetRetryPolicy())
+.AddPolicyHandler(GetCircuitBreakerPolicy());
 
 // Register application services
 builder.Services.AddScoped<IHistoryService, HistoryService>();
 builder.Services.AddScoped<IMediaStorageService, MinioMediaStorageService>();
 builder.Services.AddScoped<ICacheService, RedisCacheService>();
-// Transcription service (server-side) — registered as a typed HTTP client above
-builder.Services.AddHttpClient<ITranscriptionService, HttpTranscriptionService>();
+builder.Services.AddSingleton<IMetricsService, MetricsService>();
+// Transcription service (server-side) — registered as a typed HTTP client with timeout configuration
+builder.Services.AddHttpClient<ITranscriptionService, HttpTranscriptionService>((sp, client) =>
+{
+    var config = sp.GetRequiredService<IConfiguration>();
+    var timeoutSeconds = config.GetValue<int?>("ServiceTimeouts:TranscriptionTimeoutSeconds") ?? 30;
+    client.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
+})
+.AddPolicyHandler(GetRetryPolicy())
+.AddPolicyHandler(GetCircuitBreakerPolicy());
 
 // Auto-register ITaskHandler implementations from this assembly and optional plugin DLLs in the 'tasks' folder.
 
@@ -333,6 +351,7 @@ builder.Services.AddScoped<ITaskDispatcher, TaskDispatcher>();
     builder.Services.AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();
     builder.Services.AddSingleton<IMediaProcessor, MediaProcessor>();
     builder.Services.AddHostedService<BackgroundTaskHostedService>();
+    builder.Services.AddHostedService<BackgroundTaskCleanupService>();
 
 // Add SignalR for real-time notifications
 builder.Services.AddSignalR();
@@ -341,6 +360,44 @@ builder.Services.AddSingleton<RedisPubSubBridge>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<RedisPubSubBridge>());
 // Register bridge status for health checks
 builder.Services.AddSingleton<RedisPubSubBridgeStatus>();
+
+// Add rate limiting
+var rateLimitEnabled = builder.Configuration.GetValue<bool?>("RateLimiting:Enabled") ?? true;
+if (rateLimitEnabled)
+{
+    builder.Services.AddRateLimiter(options =>
+    {
+        var requestsPerMinute = builder.Configuration.GetValue<int?>("RateLimiting:RequestsPerMinute") ?? 60;
+        
+        options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
+            RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: context.User.Identity?.Name ?? context.Request.Headers.Host.ToString(),
+                factory: partition => new FixedWindowRateLimiterOptions
+                {
+                    AutoReplenishment = true,
+                    PermitLimit = requestsPerMinute,
+                    QueueLimit = 0,
+                    Window = TimeSpan.FromMinutes(1)
+                }));
+
+        options.OnRejected = async (context, token) =>
+        {
+            context.HttpContext.Response.StatusCode = 429;
+            context.HttpContext.Response.ContentType = "application/problem+json";
+            
+            var problemDetails = new ProblemDetails
+            {
+                Title = "Too Many Requests",
+                Status = 429,
+                Detail = "Rate limit exceeded. Please try again later.",
+                Instance = context.HttpContext.Request.Path
+            };
+            problemDetails.Extensions["retryAfter"] = "60";
+            
+            await context.HttpContext.Response.WriteAsJsonAsync(problemDetails, token);
+        };
+    });
+}
 
 // (AssemblyExtensions moved to a dedicated file)
 
@@ -371,6 +428,57 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
+// Validate critical configuration at startup
+try
+{
+    var config = app.Services.GetRequiredService<IConfiguration>();
+    var logger = app.Services.GetRequiredService<ILogger<Program>>();
+    
+    // Validate database connection string
+    var dbConnStr = config.GetConnectionString("DefaultConnection");
+    if (string.IsNullOrWhiteSpace(dbConnStr) || dbConnStr.Contains("SET_IN_secrets"))
+    {
+        logger.LogWarning("Database connection string not properly configured. Using default localhost connection.");
+    }
+    
+    // Validate Redis connection
+    var redisConnStr = config.GetConnectionString("Redis");
+    if (string.IsNullOrWhiteSpace(redisConnStr))
+    {
+        logger.LogWarning("Redis connection string not configured. Using default localhost:6379.");
+    }
+    
+    // Validate MinIO configuration
+    var minioAccessKey = config["MinIO:AccessKey"];
+    var minioSecretKey = config["MinIO:SecretKey"];
+    if (string.IsNullOrWhiteSpace(minioAccessKey) || minioAccessKey.Contains("SET_IN_secrets") ||
+        string.IsNullOrWhiteSpace(minioSecretKey) || minioSecretKey.Contains("SET_IN_secrets"))
+    {
+        logger.LogWarning("MinIO credentials not properly configured. Using default credentials.");
+    }
+    
+    // Validate AI configuration
+    var ollamaEndpoint = config["AI:OllamaEndpoint"];
+    if (string.IsNullOrWhiteSpace(ollamaEndpoint))
+    {
+        logger.LogWarning("Ollama endpoint not configured. AI features may not work correctly.");
+    }
+    
+    // Validate transcription endpoint
+    var transcriptionEndpoint = config["Transcription:Endpoint"];
+    if (string.IsNullOrWhiteSpace(transcriptionEndpoint))
+    {
+        logger.LogWarning("Transcription endpoint not configured. Audio transcription may not work correctly.");
+    }
+    
+    logger.LogInformation("Configuration validation completed.");
+}
+catch (Exception ex)
+{
+    var logger = app.Services.GetRequiredService<ILogger<Program>>();
+    logger.LogError(ex, "Error during configuration validation");
+}
+
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
@@ -386,6 +494,37 @@ using (var scope = app.Services.CreateScope())
 
 app.UseHttpsRedirection();
 app.UseCors();
+
+// Only use rate limiter if it's enabled
+var rateLimitConfig = app.Configuration.GetValue<bool?>("RateLimiting:Enabled") ?? true;
+if (rateLimitConfig)
+{
+    app.UseRateLimiter();
+}
+
+// Add metrics tracking middleware
+app.Use(async (context, next) =>
+{
+    var startTime = DateTime.UtcNow;
+    var endpoint = context.Request.Path.ToString();
+    var metricsService = context.RequestServices.GetService<IMetricsService>();
+    
+    try
+    {
+        metricsService?.IncrementRequestCount(endpoint);
+        await next();
+    }
+    catch
+    {
+        metricsService?.IncrementErrorCount(endpoint);
+        throw;
+    }
+    finally
+    {
+        var duration = DateTime.UtcNow - startTime;
+        metricsService?.RecordRequestDuration(endpoint, duration);
+    }
+});
 
 // Add a consistent request id header for all responses so clients can correlate errors with logs
 app.Use(async (context, next) =>
@@ -431,6 +570,22 @@ app.MapControllers();
 
 // Map SignalR hubs
 app.MapHub<SmartGlassesMiddleware.Hubs.TaskHub>("/hubs/tasks");
+
+// Helper methods for retry policies
+static IAsyncPolicy<HttpResponseMessage> GetRetryPolicy()
+{
+    return HttpPolicyExtensions
+        .HandleTransientHttpError()
+        .OrResult(msg => msg.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+        .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)));
+}
+
+static IAsyncPolicy<HttpResponseMessage> GetCircuitBreakerPolicy()
+{
+    return HttpPolicyExtensions
+        .HandleTransientHttpError()
+        .CircuitBreakerAsync(5, TimeSpan.FromSeconds(30));
+}
 
 // Health endpoint to allow Docker healthchecks to verify service dependencies
 app.MapGet("/health", async (IServiceProvider services) =>
@@ -564,6 +719,38 @@ app.MapGet("/health", async (IServiceProvider services) =>
     }
 
     return Results.Json(result, statusCode: 503);
+});
+
+// Metrics endpoint to view application statistics
+app.MapGet("/metrics", (IMetricsService metricsService, HttpContext context, IConfiguration config) =>
+{
+    // In production, restrict access to metrics endpoint
+    var env = context.RequestServices.GetRequiredService<IWebHostEnvironment>();
+    if (!env.IsDevelopment())
+    {
+        // Check for authorization header or API key
+        var apiKey = config["Metrics:ApiKey"];
+        if (!string.IsNullOrEmpty(apiKey))
+        {
+            var providedKey = context.Request.Headers["X-API-Key"].FirstOrDefault();
+            if (providedKey != apiKey)
+            {
+                return Results.Unauthorized();
+            }
+        }
+        else
+        {
+            // If no API key configured in production, deny access
+            return Results.Forbid();
+        }
+    }
+    
+    var summary = metricsService.GetSummary();
+    return Results.Ok(new
+    {
+        timestamp = DateTime.UtcNow,
+        endpoints = summary
+    });
 });
 
 app.Run();
