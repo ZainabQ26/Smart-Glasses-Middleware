@@ -349,7 +349,7 @@ Assembly? CompileSourceFiles(string[] filePaths, ILogger logger)
 // Task dispatcher (configurable handler selection)
 builder.Services.AddScoped<ITaskDispatcher, TaskDispatcher>();
     builder.Services.AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();
-    builder.Services.AddSingleton<IMediaProcessor, MediaProcessor>();
+    builder.Services.AddScoped<IMediaProcessor, MediaProcessor>();
     builder.Services.AddHostedService<BackgroundTaskHostedService>();
     builder.Services.AddHostedService<BackgroundTaskCleanupService>();
 
@@ -754,3 +754,6 @@ app.MapGet("/metrics", (IMetricsService metricsService, HttpContext context, ICo
 });
 
 app.Run();
+
+// Make Program accessible to tests
+public partial class Program { }
