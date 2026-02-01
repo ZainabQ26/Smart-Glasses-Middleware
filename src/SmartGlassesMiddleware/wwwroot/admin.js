@@ -48,10 +48,15 @@ async function loadFiles() {
                     </div>
                 ` : ''}
                 <div class="card-actions">
-                    <button class="delete" onclick="deleteFile('${file.id}')">Delete</button>
+                    <button class="delete" data-file-id="${file.id}" data-action="delete-file">Delete</button>
                 </div>
             </div>
         `).join('');
+        
+        // Attach event listeners
+        list.querySelectorAll('[data-action="delete-file"]').forEach(btn => {
+            btn.addEventListener('click', () => deleteFile(btn.dataset.fileId));
+        });
     } catch (error) {
         showMessage('Error loading files: ' + error.message, 'error');
     }
@@ -133,11 +138,19 @@ async function loadPrompts() {
                     </div>
                 ` : ''}
                 <div class="card-actions">
-                    <button onclick="editPrompt('${prompt.id}', \`${escapeHtml(prompt.name).replace(/`/g, '\\`')}\`, \`${escapeHtml(prompt.promptText).replace(/`/g, '\\`')}\`)">Edit</button>
-                    <button class="delete" onclick="deletePrompt('${prompt.id}')">Delete</button>
+                    <button data-action="edit-prompt" data-prompt-id="${prompt.id}" data-prompt-name="${escapeHtml(prompt.name)}" data-prompt-text="${escapeHtml(prompt.promptText)}">Edit</button>
+                    <button class="delete" data-action="delete-prompt" data-prompt-id="${prompt.id}">Delete</button>
                 </div>
             </div>
         `).join('');
+        
+        // Attach event listeners
+        list.querySelectorAll('[data-action="edit-prompt"]').forEach(btn => {
+            btn.addEventListener('click', () => editPrompt(btn.dataset.promptId, btn.dataset.promptName, btn.dataset.promptText));
+        });
+        list.querySelectorAll('[data-action="delete-prompt"]').forEach(btn => {
+            btn.addEventListener('click', () => deletePrompt(btn.dataset.promptId));
+        });
     } catch (error) {
         showMessage('Error loading prompts: ' + error.message, 'error');
     }
@@ -244,12 +257,23 @@ async function loadGroups() {
                     ${group.prompts.length > 0 ? group.prompts.map(p => `<span class="badge">${escapeHtml(p.name)}</span>`).join('') : '<span style="color: #95a5a6; font-size: 0.85rem;">No prompts</span>'}
                 </div>
                 <div class="card-actions">
-                    <button onclick="manageGroupResources('${group.id}', \`${escapeHtml(group.name).replace(/`/g, '\\`')}\`)">Manage Resources</button>
-                    <button onclick="editGroup('${group.id}', \`${escapeHtml(group.name).replace(/`/g, '\\`')}\`, \`${escapeHtml(group.description || '').replace(/`/g, '\\`')}\`)">Edit</button>
-                    <button class="delete" onclick="deleteGroup('${group.id}')">Delete</button>
+                    <button data-action="manage-group" data-group-id="${group.id}" data-group-name="${escapeHtml(group.name)}">Manage Resources</button>
+                    <button data-action="edit-group" data-group-id="${group.id}" data-group-name="${escapeHtml(group.name)}" data-group-description="${escapeHtml(group.description || '')}">Edit</button>
+                    <button class="delete" data-action="delete-group" data-group-id="${group.id}">Delete</button>
                 </div>
             </div>
         `).join('');
+        
+        // Attach event listeners
+        list.querySelectorAll('[data-action="manage-group"]').forEach(btn => {
+            btn.addEventListener('click', () => manageGroupResources(btn.dataset.groupId, btn.dataset.groupName));
+        });
+        list.querySelectorAll('[data-action="edit-group"]').forEach(btn => {
+            btn.addEventListener('click', () => editGroup(btn.dataset.groupId, btn.dataset.groupName, btn.dataset.groupDescription));
+        });
+        list.querySelectorAll('[data-action="delete-group"]').forEach(btn => {
+            btn.addEventListener('click', () => deleteGroup(btn.dataset.groupId));
+        });
     } catch (error) {
         showMessage('Error loading groups: ' + error.message, 'error');
     }
@@ -358,7 +382,9 @@ async function manageGroupResources(groupId, groupName) {
                                 <input type="checkbox" 
                                     value="${file.id}" 
                                     ${groupFileIds.has(file.id) ? 'checked' : ''}
-                                    onchange="toggleFileInGroup('${groupId}', '${file.id}', this.checked)">
+                                    data-action="toggle-file"
+                                    data-group-id="${groupId}"
+                                    data-file-id="${file.id}">
                                 ${escapeHtml(file.label)} (${escapeHtml(file.fileName)})
                             </label>
                         </div>
@@ -376,7 +402,9 @@ async function manageGroupResources(groupId, groupName) {
                                 <input type="checkbox" 
                                     value="${prompt.id}" 
                                     ${groupPromptIds.has(prompt.id) ? 'checked' : ''}
-                                    onchange="togglePromptInGroup('${groupId}', '${prompt.id}', this.checked)">
+                                    data-action="toggle-prompt"
+                                    data-group-id="${groupId}"
+                                    data-prompt-id="${prompt.id}">
                                 ${escapeHtml(prompt.name)}
                             </label>
                         </div>
@@ -385,6 +413,18 @@ async function manageGroupResources(groupId, groupName) {
                 </div>
             </div>
         `;
+        
+        // Attach event listeners for checkboxes
+        modalBody.querySelectorAll('[data-action="toggle-file"]').forEach(checkbox => {
+            checkbox.addEventListener('change', (e) => {
+                toggleFileInGroup(e.target.dataset.groupId, e.target.dataset.fileId, e.target.checked);
+            });
+        });
+        modalBody.querySelectorAll('[data-action="toggle-prompt"]').forEach(checkbox => {
+            checkbox.addEventListener('change', (e) => {
+                togglePromptInGroup(e.target.dataset.groupId, e.target.dataset.promptId, e.target.checked);
+            });
+        });
         
         document.getElementById('manage-group-modal').classList.add('active');
     } catch (error) {
@@ -448,6 +488,9 @@ function formatFileSize(bytes) {
     if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
     return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
 }
+
+// Close modal event listener
+document.getElementById('close-modal-btn').addEventListener('click', closeManageGroupModal);
 
 // Initial load
 loadFiles();

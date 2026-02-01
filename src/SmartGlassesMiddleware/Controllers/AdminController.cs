@@ -731,21 +731,3 @@ public class AdminController : ControllerBase
 
     #endregion
 }
-
-public class FileUploadRequest
-{
-    public IFormFile? File { get; set; }
-    public string Label { get; set; } = string.Empty;
-}
-
-public class PromptRequest
-{
-    public string Name { get; set; } = string.Empty;
-    public string PromptText { get; set; } = string.Empty;
-}
-
-public class GroupRequest
-{
-    public string Name { get; set; } = string.Empty;
-    public string? Description { get; set; }
-}
