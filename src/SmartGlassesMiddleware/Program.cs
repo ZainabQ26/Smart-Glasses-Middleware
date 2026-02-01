@@ -480,6 +480,8 @@ catch (Exception ex)
 }
 
 // Configure the HTTP request pipeline.
+app.UseStaticFiles();
+
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
