@@ -32,7 +32,13 @@ public class HttpTranscriptionService : ITranscriptionService
             content.Add(streamContent, "file", fileName);
 
             var response = await _httpClient.PostAsync(_endpoint, content, cancellationToken);
-            response.EnsureSuccessStatusCode();
+            
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Transcription service returned {StatusCode}: {ReasonPhrase}", 
+                    response.StatusCode, response.ReasonPhrase);
+                return null;
+            }
 
             var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
 
@@ -55,9 +61,19 @@ public class HttpTranscriptionService : ITranscriptionService
             // Fallback: return raw body
             return responseContent;
         }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, "Network error calling transcription endpoint: {Endpoint}. Service may be unavailable.", _endpoint);
+            return null;
+        }
+        catch (TaskCanceledException ex)
+        {
+            _logger.LogWarning(ex, "Transcription request timed out for endpoint: {Endpoint}", _endpoint);
+            return null;
+        }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error calling transcription endpoint: {Endpoint}", _endpoint);
+            _logger.LogError(ex, "Unexpected error calling transcription endpoint: {Endpoint}", _endpoint);
             return null;
         }
     }
