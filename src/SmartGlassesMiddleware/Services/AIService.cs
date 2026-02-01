@@ -48,46 +48,74 @@ Input: {input}
 
 Task:";
 
-            var chatService = _kernel.GetRequiredService<IChatCompletionService>();
-            var taskResult = await chatService.GetChatMessageContentAsync(taskDetectionPrompt);
-            var detectedTask = taskResult.Content?.Trim().ToLower() ?? "unknown";
-
-            _logger.LogInformation("Detected task: {Task} for input: {Input}", detectedTask, input);
+            string detectedTask;
+            try
+            {
+                var chatService = _kernel.GetRequiredService<IChatCompletionService>();
+                var taskResult = await chatService.GetChatMessageContentAsync(taskDetectionPrompt);
+                detectedTask = taskResult.Content?.Trim().ToLower() ?? "unknown";
+                _logger.LogInformation("Detected task: {Task} for input: {Input}", detectedTask, input);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to detect task using local model, defaulting to unknown");
+                detectedTask = "unknown";
+            }
 
             // If task is unknown, use advanced model
             if (detectedTask == "unknown" || !_knownTasks.Contains(detectedTask))
             {
                 _logger.LogInformation("Task is unknown, forwarding to advanced model");
-                var advancedResponse = await CallAdvancedModelAsync(input);
-                return ("unknown", advancedResponse, true);
+                try
+                {
+                    var advancedResponse = await CallAdvancedModelAsync(input);
+                    return ("unknown", advancedResponse, true);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Advanced model failed, falling back to local model");
+                    // Fall through to use local model as fallback
+                }
             }
+            
             // If we have a concrete handler for the detected task, invoke it via dispatcher
-            try
+            if (_knownTasks.Contains(detectedTask))
             {
-                var (handled, handlerResponse) = await _dispatcher.TryHandleAsync(detectedTask, input);
-                if (handled) return (detectedTask, handlerResponse ?? string.Empty, false);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Handler for task {Task} failed, falling back to model processing", detectedTask);
+                try
+                {
+                    var (handled, handlerResponse) = await _dispatcher.TryHandleAsync(detectedTask, input);
+                    if (handled) return (detectedTask, handlerResponse ?? string.Empty, false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Handler for task {Task} failed, falling back to model processing", detectedTask);
+                }
             }
 
             // Otherwise, process with local Ollama model
-            var processingPrompt = $@"
+            try
+            {
+                var chatService = _kernel.GetRequiredService<IChatCompletionService>();
+                var processingPrompt = $@"
 You are a helpful assistant processing a {detectedTask} task.
 
 User request: {input}
 
 Please provide a helpful and concise response:";
 
-            var response = await chatService.GetChatMessageContentAsync(processingPrompt);
-
-            return (detectedTask, response.Content ?? "I couldn't process that request.", false);
+                var response = await chatService.GetChatMessageContentAsync(processingPrompt);
+                return (detectedTask, response.Content ?? "I couldn't process that request.", false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Local model processing failed");
+                return (detectedTask, "I'm currently unable to process your request. Please try again later.", false);
+            }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing request with AI service");
-            throw;
+            return ("error", "An unexpected error occurred while processing your request. Please try again later.", false);
         }
     }
 

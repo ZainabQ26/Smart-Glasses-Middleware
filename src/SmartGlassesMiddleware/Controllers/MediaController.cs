@@ -4,6 +4,9 @@ using SmartGlassesMiddleware.Services;
 
 namespace SmartGlassesMiddleware.Controllers;
 
+/// <summary>
+/// Handles media processing requests including images, videos, and audio files
+/// </summary>
 [ApiController]
 [Route("api/ask")]
 public class MediaController : ControllerBase
@@ -13,22 +16,52 @@ public class MediaController : ControllerBase
     private readonly ILogger<MediaController> _logger;
     private readonly IAIService _aiService;
     private readonly IHistoryService _historyService;
+    private readonly IBackgroundTaskQueue _backgroundQueue;
+    private readonly IMediaProcessor _mediaProcessor;
 
     public MediaController(
         IMediaStorageService mediaStorageService,
         ITranscriptionService transcriptionService,
         IAIService aiService,
         IHistoryService historyService,
+        IBackgroundTaskQueue backgroundQueue,
+        IMediaProcessor mediaProcessor,
         ILogger<MediaController> logger)
     {
         _mediaStorageService = mediaStorageService;
         _transcriptionService = transcriptionService;
         _aiService = aiService;
         _historyService = historyService;
+        _backgroundQueue = backgroundQueue;
+        _mediaProcessor = mediaProcessor;
         _logger = logger;
     }
 
+    /// <summary>
+    /// Process media files (images, videos, audio) with optional AI prompt
+    /// </summary>
+    /// <param name="request">Media request containing files and optional prompt</param>
+    /// <returns>Accepted response with task ID for tracking processing status</returns>
+    /// <response code="202">Request accepted for background processing</response>
+    /// <response code="400">Invalid request format or unsupported file types</response>
+    /// <response code="500">Internal server error during processing</response>
+    /// <remarks>
+    /// This endpoint accepts multipart/form-data with:
+    /// - files: One or more media files (images, videos, audio)
+    /// - prompt: Optional text prompt for AI processing
+    /// - promptAudio: Optional audio file containing the prompt (mutually exclusive with prompt)
+    /// - manifest: Optional JSON array specifying file processing order
+    /// - perFileTranscriptions: Optional JSON object mapping filenames to transcriptions
+    /// 
+    /// Supported file formats:
+    /// - Images: .jpg, .jpeg, .png, .gif
+    /// - Videos: .mp4, .avi, .mov
+    /// - Audio: .wav, .mp3, .m4a, .flac, .aac
+    /// </remarks>
     [HttpPost]
+    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult> ProcessMedia([FromForm] MediaRequest request)
     {
         try
@@ -41,9 +74,13 @@ public class MediaController : ControllerBase
             {
                 files.AddRange(request.Files!);
             }
-            else if (Request.HasFormContentType && Request.Form.Files?.Count > 0)
+            else if (Request.HasFormContentType)
             {
-                files.AddRange(Request.Form.Files.ToList());
+                var formFiles = Request.Form?.Files;
+                if (formFiles != null && formFiles.Count > 0)
+                {
+                    files.AddRange(formFiles.ToList());
+                }
             }
 
             // If a prompt audio file was uploaded as `promptAudio`, enforce exclusivity with text prompt, transcribe it, and remove it from uploads
@@ -63,14 +100,14 @@ public class MediaController : ControllerBase
 
                         var pd = new ValidationProblemDetails(errors)
                         {
-                            Type = "https://example.com/probs/validation",
+                            Type = "https://tools.ietf.org/html/rfc7231#section-6.5.1",
                             Title = "Validation Failed",
                             Status = StatusCodes.Status400BadRequest,
                             Detail = "Provide either 'prompt' (text) or 'promptAudio' (file), not both.",
                             Instance = HttpContext?.Request?.Path
                         };
 
-                        pd.Extensions["requestId"] = Guid.NewGuid().ToString();
+                        pd.Extensions["requestId"] = HttpContext?.TraceIdentifier ?? Guid.NewGuid().ToString();
                         pd.Extensions["timestamp"] = DateTime.UtcNow.ToString("o");
 
                         return BadRequest(pd);
@@ -79,7 +116,8 @@ public class MediaController : ControllerBase
                     try
                     {
                         using var promptStream = promptAudioFile.OpenReadStream();
-                        var transcribedPrompt = await _transcriptionService.TranscribeAsync(promptStream, promptAudioFile.FileName, promptAudioFile.ContentType);
+                        var contentType = promptAudioFile.ContentType ?? string.Empty;
+                        var transcribedPrompt = await _transcriptionService.TranscribeAsync(promptStream, promptAudioFile.FileName, contentType);
                         if (!string.IsNullOrWhiteSpace(transcribedPrompt)) promptAudioTranscription = transcribedPrompt;
                     }
                     catch (Exception ex)
@@ -93,14 +131,22 @@ public class MediaController : ControllerBase
             }
 
             // Support a single combined `input` form field which may be either a file part or a plain transcription string.
-            var inputText = Request.HasFormContentType && Request.Form.TryGetValue("input", out var iv) ? iv.FirstOrDefault() : null;
+            string? inputText = null;
+            if (Request.HasFormContentType)
+            {
+                var form = Request.Form;
+                if (form != null && form.TryGetValue("input", out var iv))
+                {
+                    inputText = iv.FirstOrDefault();
+                }
+            }
             IFormFile? inputFile = null;
             if (Request.HasFormContentType)
             {
                 var formFiles = Request.Form?.Files;
                 if (formFiles != null && formFiles.Count > 0)
                 {
-                    inputFile = formFiles.FirstOrDefault(f => string.Equals(f.Name, "input", StringComparison.OrdinalIgnoreCase));
+                    inputFile = formFiles.FirstOrDefault(f => string.Equals(f?.Name ?? string.Empty, "input", StringComparison.OrdinalIgnoreCase));
                 }
             }
 
@@ -219,108 +265,78 @@ public class MediaController : ControllerBase
                 if (!perFileTrans.ContainsKey(firstName)) perFileTrans[firstName] = inputText!;
             }
 
-            // Process each file in order: upload, optionally transcribe, collect metadata
-            var mediaItems = new List<object>();
-            var partsForAi = new List<string>();
+            // Upload files now and enqueue a background task for processing
+            var bgItems = new List<BackgroundMediaItem>();
             foreach (var file in orderedFiles)
             {
                 var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
                 if (!allowedExtensions.Contains(extension))
                 {
-                    return BadRequest(new ProblemDetails { Title = "Bad Request", Detail = $"Invalid file type: {file.FileName}", Status = StatusCodes.Status400BadRequest });
+                    var pd = new ValidationProblemDetails
+                    {
+                        Type = "https://tools.ietf.org/html/rfc7231#section-6.5.1",
+                        Title = "Validation Failed",
+                        Status = StatusCodes.Status400BadRequest,
+                        Detail = $"File '{file.FileName}' has an unsupported file type. Allowed types: {string.Join(", ", allowedExtensions)}",
+                        Instance = HttpContext.Request.Path
+                    };
+                    pd.Errors.Add("files", new[] { $"Invalid file type: {file.FileName}" });
+                    pd.Extensions["requestId"] = HttpContext.TraceIdentifier;
+                    pd.Extensions["timestamp"] = DateTime.UtcNow.ToString("o");
+                    
+                    return BadRequest(pd);
                 }
 
                 using var uploadStream = file.OpenReadStream();
-                var storageKey = await _mediaStorageService.UploadMediaAsync(uploadStream, file.FileName, file.ContentType);
+                var contentType = file.ContentType ?? "application/octet-stream";
+                var storageKey = await _mediaStorageService.UploadMediaAsync(uploadStream, file.FileName, contentType);
 
-                string? thisTranscription = null;
-                // If per-file transcription exists for this file, prefer it
+                var item = new BackgroundMediaItem { FileName = file.FileName, ContentType = contentType, StorageKey = storageKey };
+                // If per-file transcription provided, attach it
                 if (perFileTrans != null && perFileTrans.TryGetValue(file.FileName, out var mapped))
                 {
-                    thisTranscription = mapped;
+                    item.Transcription = mapped;
                 }
-                if (audioExtensions.Contains(extension))
-                {
-                    // If a per-file transcription exists we already set it above. Otherwise transcribe the audio.
-                    if (thisTranscription == null)
-                    {
-                        try
-                        {
-                            using var downloaded = await _mediaStorageService.DownloadMediaAsync(storageKey);
-                            thisTranscription = await _transcriptionService.TranscribeAsync(downloaded, file.FileName, file.ContentType);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex, "Transcription failed for {Key}", storageKey);
-                        }
-                    }
-                }
-
-                mediaItems.Add(new { fileName = file.FileName, contentType = file.ContentType, storageKey, transcription = thisTranscription });
-
-                var partText = $"MediaFileName: {file.FileName}\nMediaStorageKey: {storageKey}\nMediaContentType: {file.ContentType}";
-                if (!string.IsNullOrWhiteSpace(thisTranscription)) partText += $"\nTranscription: {thisTranscription}";
-                partsForAi.Add(partText);
+                bgItems.Add(item);
             }
 
-            // Build final prompt for AI
-            var promptText = request.Prompt ?? string.Empty;
-
-            // If a prompt audio file was uploaded as `promptAudio`, transcribe it and use that as the prompt (override text prompt)
-            if (Request.HasFormContentType)
+            // If an inputText transcription was provided and files exist, attach it to the first file if no per-file transcription present
+            if (!string.IsNullOrWhiteSpace(inputText) && bgItems.Count > 0)
             {
-                var formFiles = Request.Form?.Files;
-                var promptAudioFile = formFiles?.FirstOrDefault(f => string.Equals(f.Name, "promptAudio", StringComparison.OrdinalIgnoreCase));
-                if (promptAudioFile != null)
-                {
-                    try
-                    {
-                        using var promptStream = promptAudioFile.OpenReadStream();
-                        var transcribedPrompt = await _transcriptionService.TranscribeAsync(promptStream, promptAudioFile.FileName, promptAudioFile.ContentType);
-                        if (!string.IsNullOrWhiteSpace(transcribedPrompt))
-                        {
-                            promptText = transcribedPrompt;
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to transcribe prompt audio");
-                    }
-                }
+                var first = bgItems[0];
+                if (string.IsNullOrWhiteSpace(first.Transcription)) first.Transcription = inputText;
             }
 
-            var textToProcess = promptText + "\n\n" + string.Join("\n\n", partsForAi);
+            // Determine prompt text (if promptAudio was transcribed earlier, use it)
+            var promptTextFinal = !string.IsNullOrWhiteSpace(promptAudioTranscription) ? promptAudioTranscription : request.Prompt;
 
-            // Process with AI
-            var (task, response, usedAdvancedModel) = await _aiService.ProcessRequestAsync(textToProcess);
-
-            // Save to history
-            try
+            var entry = new BackgroundTaskEntry
             {
-                var history = new RequestHistory
-                {
-                    RequestType = "Media",
-                    InputText = textToProcess,
-                    DetectedTask = task,
-                    Response = response,
-                    UsedAdvancedModel = usedAdvancedModel,
-                    MediaStorageKey = string.Join(",", ((IEnumerable<dynamic>)mediaItems).Select(m => (string)m.storageKey))
-                };
-                history = await _historyService.SaveRequestAsync(history);
+                PromptText = promptTextFinal,
+                PerFileTranscriptions = perFileTrans,
+                MediaItems = bgItems
+            };
 
-                return Ok(new { task, response, usedAdvancedModel, requestId = history.Id, items = mediaItems });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to save history for media upload");
-                return Ok(new { task, response, usedAdvancedModel, items = mediaItems });
-            }
+            await _backgroundQueue.EnqueueAsync(entry);
+
+            var location = $"/api/tasks/{entry.Id}";
+            return Accepted(location, new { taskId = entry.Id, location });
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing media request");
-            var pd = new ProblemDetails { Title = "Internal Server Error", Detail = "An error occurred processing your request", Status = StatusCodes.Status500InternalServerError };
+            
+            var pd = new ProblemDetails
+            {
+                Type = "https://tools.ietf.org/html/rfc7231#section-6.6.1",
+                Title = "Internal Server Error",
+                Detail = "An unexpected error occurred while processing your media. Please try again later.",
+                Status = StatusCodes.Status500InternalServerError,
+                Instance = HttpContext.Request.Path
+            };
             pd.Extensions["requestId"] = HttpContext.TraceIdentifier;
+            pd.Extensions["timestamp"] = DateTime.UtcNow.ToString("o");
+            
             return StatusCode(500, pd);
         }
     }

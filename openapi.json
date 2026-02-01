@@ -554,6 +554,54 @@
           }
         }
       }
+    },
+    "/metrics": {
+      "get": {
+        "summary": "Get application metrics",
+        "responses": {
+          "200": {
+            "description": "Application metrics and statistics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "timestamp": { "type": "string", "format": "date-time" },
+                    "endpoints": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "$ref": "#/components/schemas/MetricsSummary"
+                      }
+                    }
+                  }
+                },
+                "examples": {
+                  "metricsExample": {
+                    "summary": "Metrics example",
+                    "value": {
+                      "timestamp": "2026-01-28T12:00:00Z",
+                      "endpoints": {
+                        "/api/transcribe": {
+                          "totalRequests": 150,
+                          "totalErrors": 2,
+                          "averageDurationMs": 245.5,
+                          "lastRequestUtc": "2026-01-28T11:58:30Z"
+                        },
+                        "/api/ask": {
+                          "totalRequests": 89,
+                          "totalErrors": 1,
+                          "averageDurationMs": 1520.3,
+                          "lastRequestUtc": "2026-01-28T11:59:45Z"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -610,6 +658,15 @@
           "error": { "type": "string", "nullable": true, "description": "Error message if service is unhealthy" }
         },
         "required": ["healthy"]
+      },
+      "MetricsSummary": {
+        "type": "object",
+        "properties": {
+          "totalRequests": { "type": "integer", "format": "int64", "description": "Total number of requests to this endpoint" },
+          "totalErrors": { "type": "integer", "format": "int64", "description": "Total number of errors for this endpoint" },
+          "averageDurationMs": { "type": "number", "format": "double", "description": "Average request duration in milliseconds" },
+          "lastRequestUtc": { "type": "string", "format": "date-time", "description": "Timestamp of the last request" }
+        }
       }
     },
     "examples": {

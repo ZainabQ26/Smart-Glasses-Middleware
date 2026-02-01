@@ -4,6 +4,9 @@ using SmartGlassesMiddleware.Services;
 
 namespace SmartGlassesMiddleware.Controllers;
 
+/// <summary>
+/// Handles audio transcription requests
+/// </summary>
 [ApiController]
 [Route("api/transcribe")]
 public class AudioController : ControllerBase
@@ -25,18 +28,80 @@ public class AudioController : ControllerBase
         _logger = logger;
     }
 
+    /// <summary>
+    /// Transcribes audio from base64-encoded data
+    /// </summary>
+    /// <param name="request">Audio request containing base64-encoded audio data</param>
+    /// <returns>Transcription result with storage key and request ID</returns>
+    /// <response code="200">Audio successfully transcribed</response>
+    /// <response code="400">Invalid audio data or request format</response>
+    /// <response code="500">Internal server error during processing</response>
     [HttpPost]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult> ProcessAudio([FromBody] AudioRequest request)
     {
         try
         {
             if (string.IsNullOrWhiteSpace(request.AudioBase64))
             {
-                return BadRequest(new ProblemDetails { Title = "Bad Request", Detail = "Audio data cannot be empty", Status = StatusCodes.Status400BadRequest });
+                var pd = new ValidationProblemDetails
+                {
+                    Type = "https://tools.ietf.org/html/rfc7231#section-6.5.1",
+                    Title = "Validation Failed",
+                    Status = StatusCodes.Status400BadRequest,
+                    Detail = "Audio data is required and cannot be empty.",
+                    Instance = HttpContext.Request.Path
+                };
+                pd.Errors.Add("audioBase64", new[] { "Audio data cannot be empty" });
+                pd.Extensions["requestId"] = HttpContext.TraceIdentifier;
+                pd.Extensions["timestamp"] = DateTime.UtcNow.ToString("o");
+                
+                return BadRequest(pd);
+            }
+
+            // Validate base64 format
+            byte[] audioBytes;
+            try
+            {
+                audioBytes = Convert.FromBase64String(request.AudioBase64);
+                
+                if (audioBytes.Length == 0)
+                {
+                    var pd = new ValidationProblemDetails
+                    {
+                        Type = "https://tools.ietf.org/html/rfc7231#section-6.5.1",
+                        Title = "Validation Failed",
+                        Status = StatusCodes.Status400BadRequest,
+                        Detail = "Audio data cannot be empty.",
+                        Instance = HttpContext.Request.Path
+                    };
+                    pd.Errors.Add("audioBase64", new[] { "Audio data decoded to empty byte array" });
+                    pd.Extensions["requestId"] = HttpContext.TraceIdentifier;
+                    pd.Extensions["timestamp"] = DateTime.UtcNow.ToString("o");
+                    
+                    return BadRequest(pd);
+                }
+            }
+            catch (FormatException)
+            {
+                var pd = new ValidationProblemDetails
+                {
+                    Type = "https://tools.ietf.org/html/rfc7231#section-6.5.1",
+                    Title = "Validation Failed",
+                    Status = StatusCodes.Status400BadRequest,
+                    Detail = "Audio data must be valid base64-encoded string.",
+                    Instance = HttpContext.Request.Path
+                };
+                pd.Errors.Add("audioBase64", new[] { "Invalid base64 format" });
+                pd.Extensions["requestId"] = HttpContext.TraceIdentifier;
+                pd.Extensions["timestamp"] = DateTime.UtcNow.ToString("o");
+                
+                return BadRequest(pd);
             }
 
             // Store audio in MinIO
-            var audioBytes = Convert.FromBase64String(request.AudioBase64);
             using var audioStream = new MemoryStream(audioBytes);
             var fileName = $"audio_{DateTime.UtcNow:yyyyMMddHHmmss}.wav";
             var storageKey = await _mediaStorageService.UploadMediaAsync(
@@ -78,8 +143,18 @@ public class AudioController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing audio request");
-            var pd = new ProblemDetails { Title = "Internal Server Error", Detail = "An error occurred processing your request", Status = StatusCodes.Status500InternalServerError };
+            
+            var pd = new ProblemDetails
+            {
+                Type = "https://tools.ietf.org/html/rfc7231#section-6.6.1",
+                Title = "Internal Server Error",
+                Detail = "An unexpected error occurred while processing your audio. Please try again later.",
+                Status = StatusCodes.Status500InternalServerError,
+                Instance = HttpContext.Request.Path
+            };
             pd.Extensions["requestId"] = HttpContext.TraceIdentifier;
+            pd.Extensions["timestamp"] = DateTime.UtcNow.ToString("o");
+            
             return StatusCode(500, pd);
         }
     }
