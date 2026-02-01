@@ -632,10 +632,13 @@ async function showQuickAddToGroup(resourceId, resourceType, resourceName) {
     
     modalBody.querySelector('#quick-add-submit').addEventListener('click', () => {
         closeManageGroupModal();
-        // Refresh all data
-        loadFiles(true);
-        loadPrompts(true);
-        loadGroups(true);
+        // Refresh only the relevant data based on resource type
+        if (resourceType === 'file') {
+            loadFiles(true);
+        } else {
+            loadPrompts(true);
+        }
+        loadGroups(true); // Always refresh groups to show updated counts
     });
     
     document.getElementById('manage-group-modal').classList.add('active');
@@ -701,28 +704,31 @@ document.getElementById('close-modal-btn').addEventListener('click', closeManage
 
 // Infinite scroll implementation
 function setupInfiniteScroll() {
-    const filesContainer = document.getElementById('files-list');
-    const promptsContainer = document.getElementById('prompts-list');
-    const groupsContainer = document.getElementById('groups-list');
+    const containers = [
+        { id: 'files-list', loadFn: loadFiles },
+        { id: 'prompts-list', loadFn: loadPrompts },
+        { id: 'groups-list', loadFn: loadGroups }
+    ];
     
-    const observer = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-            if (entry.isIntersecting) {
-                const container = entry.target;
-                if (container.id === 'files-list') {
-                    loadFiles();
-                } else if (container.id === 'prompts-list') {
-                    loadPrompts();
-                } else if (container.id === 'groups-list') {
-                    loadGroups();
+    containers.forEach(({ id, loadFn }) => {
+        const container = document.getElementById(id);
+        
+        // Create sentinel element at the bottom of each list
+        const sentinel = document.createElement('div');
+        sentinel.className = 'scroll-sentinel';
+        sentinel.style.height = '10px';
+        container.appendChild(sentinel);
+        
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    loadFn();
                 }
-            }
-        });
-    }, { threshold: 0.5 });
-    
-    observer.observe(filesContainer);
-    observer.observe(promptsContainer);
-    observer.observe(groupsContainer);
+            });
+        }, { threshold: 0.1 });
+        
+        observer.observe(sentinel);
+    });
 }
 
 // Initial load
