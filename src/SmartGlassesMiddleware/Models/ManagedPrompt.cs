@@ -16,9 +16,21 @@ public class ManagedPrompt
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
     
-    // Optional file attachment metadata
+    
+    /// <summary>
+    /// Optional file attachment metadata.
+    /// These fields store information about a file that can be attached to the prompt for context.
+    /// </summary>
     public string? FileName { get; set; }
+    
+    /// <summary>
+    /// Storage key for retrieving the attached file from object storage (MinIO).
+    /// </summary>
     public string? StorageKey { get; set; }
+    
+    /// <summary>
+    /// MIME content type of the attached file (e.g., "image/png", "application/pdf").
+    /// </summary>
     public string? ContentType { get; set; }
     
     // Navigation property for groups

@@ -243,9 +243,10 @@ async function previewFile(fileId, fileName, fileLabel) {
         if (mimeType.startsWith('image/')) {
             const url = URL.createObjectURL(blob);
             previewObjectUrls.push(url);
+            const altText = fileLabel ? `${fileLabel} (${fileName})` : fileName;
             previewHTML = `
                 <div class="preview-container">
-                    <img src="${url}" alt="${escapeHtml(fileName)}" />
+                    <img src="${url}" alt="${escapeHtml(altText)}" />
                 </div>
                 <button id="preview-download-btn" data-file-id="${fileId}" data-file-name="${escapeHtml(fileName)}">Download File</button>
             `;
@@ -1018,6 +1019,13 @@ function setupInfiniteScroll() {
         observer.observe(sentinel);
     });
 }
+
+// Cleanup on page unload
+window.addEventListener('beforeunload', () => {
+    // Clean up any remaining object URLs to prevent memory leaks
+    previewObjectUrls.forEach(url => URL.revokeObjectURL(url));
+    previewObjectUrls = [];
+});
 
 // Initial load
 async function init() {

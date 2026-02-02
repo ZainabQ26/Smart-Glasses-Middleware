@@ -192,7 +192,8 @@ public class AdminController : ControllerBase
         try
         {
             var stream = await _mediaStorageService.DownloadMediaAsync(file.StorageKey);
-            return File(stream, file.ContentType, file.FileName);
+            var sanitizedFileName = SanitizeFileName(file.FileName);
+            return File(stream, file.ContentType, sanitizedFileName);
         }
         catch (Exception ex)
         {
@@ -1081,6 +1082,24 @@ public class AdminController : ControllerBase
             InvalidatePromptsCache(),
             InvalidateGroupsCache()
         );
+    }
+
+    /// <summary>
+    /// Validate and sanitize file name for security
+    /// </summary>
+    private static string SanitizeFileName(string fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            return "download";
+        }
+
+        // Remove path traversal characters and invalid file name characters
+        var invalidChars = Path.GetInvalidFileNameChars();
+        var sanitized = new string(fileName.Where(c => !invalidChars.Contains(c) && c != '/' && c != '\\').ToArray());
+        
+        // Ensure the file name is not empty after sanitization
+        return string.IsNullOrWhiteSpace(sanitized) ? "download" : sanitized;
     }
 
     #endregion
