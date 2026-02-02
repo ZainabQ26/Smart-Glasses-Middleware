@@ -1,5 +1,61 @@
 const API_BASE = '/api/admin';
 
+// Helper function to get property with case-insensitive fallback
+function getProp(obj, propName) {
+    if (!obj) return undefined;
+    // Try lowercase first
+    if (obj[propName] !== undefined) return obj[propName];
+    // Try uppercase first letter
+    const upperProp = propName.charAt(0).toUpperCase() + propName.slice(1);
+    if (obj[upperProp] !== undefined) return obj[upperProp];
+    // Try all uppercase
+    if (obj[propName.toUpperCase()] !== undefined) return obj[propName.toUpperCase()];
+    return undefined;
+}
+
+// Enhanced fetch with retry logic and cache busting
+async function fetchWithRetry(url, options = {}, retries = 3) {
+    // Add cache busting parameter and no-cache headers
+    const cacheBuster = `_=${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    const separator = url.includes('?') ? '&' : '?';
+    const bustUrl = `${url}${separator}${cacheBuster}`;
+    
+    // Force no-cache headers
+    const fetchOptions = {
+        ...options,
+        headers: {
+            ...options.headers,
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+        },
+        cache: 'no-store'
+    };
+    
+    for (let i = 0; i < retries; i++) {
+        try {
+            console.log(`[API] Request: ${fetchOptions.method || 'GET'} ${url}${i > 0 ? ` (retry ${i})` : ''}`);
+            const response = await fetch(bustUrl, fetchOptions);
+            console.log(`[API] Response: ${response.status} ${response.statusText} for ${url}`);
+            
+            if (!response.ok && response.status >= 500 && i < retries - 1) {
+                console.warn(`[API] Server error, retrying in ${(i + 1) * 500}ms...`);
+                await new Promise(resolve => setTimeout(resolve, (i + 1) * 500));
+                continue;
+            }
+            
+            return response;
+        } catch (error) {
+            console.error(`[API] Network error on attempt ${i + 1}:`, error);
+            if (i < retries - 1) {
+                await new Promise(resolve => setTimeout(resolve, (i + 1) * 500));
+                continue;
+            }
+            throw error;
+        }
+    }
+}
+
 // Pagination state
 const state = {
     files: { page: 1, pageSize: 20, hasMore: true, loading: false, data: [] },
@@ -8,13 +64,25 @@ const state = {
     allGroups: [] // Cache of all groups for quick-add
 };
 
-// Tab switching
+// Tab switching with forced refresh
 document.querySelectorAll('.tab').forEach(tab => {
     tab.addEventListener('click', () => {
         document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
         document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
         tab.classList.add('active');
         document.getElementById(tab.dataset.tab).classList.add('active');
+        
+        // Force reload data when switching tabs to ensure fresh data
+        const tabName = tab.dataset.tab;
+        console.log(`[TAB SWITCH] Switching to ${tabName}, forcing data refresh`);
+        if (tabName === 'files') {
+            loadFiles(true);
+        } else if (tabName === 'prompts') {
+            loadPrompts(true);
+        } else if (tabName === 'groups') {
+            loadGroups(true);
+            loadAllGroups();
+        }
     });
 });
 
@@ -59,23 +127,35 @@ async function loadFiles(reset = false) {
     showLoading('files-list');
     
     try {
-        const response = await fetch(`${API_BASE}/files?page=${state.files.page}&pageSize=${state.files.pageSize}`);
+        const response = await fetchWithRetry(`${API_BASE}/files?page=${state.files.page}&pageSize=${state.files.pageSize}`);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
         const result = await response.json();
+        console.log('Files API response:', result);
+        // Handle both lowercase and uppercase from API
+        const filesData = result.data || result.Data || [];
+        const pagination = result.pagination || result.Pagination || {};
+        console.log('Files data length:', filesData.length);
+        console.log('Files pagination:', pagination);
+        
         const list = document.getElementById('files-list');
         
         hideLoading('files-list');
         
-        if (result.data && result.data.length > 0) {
-            state.files.data.push(...result.data);
+        if (filesData && filesData.length > 0) {
+            state.files.data.push(...filesData);
             
             const fragment = document.createDocumentFragment();
-            result.data.forEach(file => {
+            filesData.forEach(file => {
                 const div = createFileCard(file);
                 fragment.appendChild(div);
             });
             list.appendChild(fragment);
             
-            state.files.hasMore = result.pagination.hasNext;
+            state.files.hasMore = pagination.hasNext || pagination.HasNext;
             state.files.page++;
         } else if (reset) {
             list.innerHTML = '<div class="empty-state"><p>No files uploaded yet</p></div>';
@@ -92,27 +172,39 @@ async function loadFiles(reset = false) {
 function createFileCard(file) {
     const div = document.createElement('div');
     div.className = 'card';
+    
+    const id = getProp(file, 'id');
+    const label = getProp(file, 'label') || 'Untitled';
+    const fileName = getProp(file, 'fileName') || 'unknown';
+    const fileSize = getProp(file, 'fileSize') || 0;
+    const uploadedAt = getProp(file, 'uploadedAt');
+    const groups = getProp(file, 'groups') || [];
+    
     div.innerHTML = `
         <div class="card-header">
-            <div class="card-title">${escapeHtml(file.label)}</div>
+            <div class="card-title">${escapeHtml(label)}</div>
         </div>
         <div class="card-meta">
-            File: ${escapeHtml(file.fileName)} | 
-            Size: ${formatFileSize(file.fileSize)} | 
-            Uploaded: ${new Date(file.uploadedAt).toLocaleString()}
+            File: ${escapeHtml(fileName)} | 
+            Size: ${formatFileSize(fileSize)} | 
+            Uploaded: ${uploadedAt ? new Date(uploadedAt).toLocaleString() : 'Unknown'}
         </div>
-        ${file.groups && file.groups.length > 0 ? `
+        ${groups && groups.length > 0 ? `
             <div style="margin-top: 8px;">
-                ${file.groups.map(g => `<span class="badge">${escapeHtml(g.name)}</span>`).join('')}
+                ${groups.map(g => `<span class="badge">${escapeHtml(getProp(g, 'name') || '')}</span>`).join('')}
             </div>
         ` : ''}
         <div class="card-actions">
-            <button data-action="add-to-group-file" data-file-id="${file.id}" data-file-label="${escapeHtml(file.label)}">Add to Group</button>
-            <button class="delete" data-file-id="${file.id}" data-action="delete-file">Delete</button>
+            <button data-action="preview-file" data-file-id="${id}" data-file-name="${escapeHtml(fileName)}" class="secondary">Preview</button>
+            <button data-action="add-to-group-file" data-file-id="${id}" data-file-label="${escapeHtml(label)}">Add to Group</button>
+            <button class="delete" data-file-id="${id}" data-action="delete-file">Delete</button>
         </div>
     `;
     
     // Attach event listeners
+    div.querySelector('[data-action="preview-file"]').addEventListener('click', (e) => {
+        previewFile(e.target.dataset.fileId, e.target.dataset.fileName);
+    });
     div.querySelector('[data-action="delete-file"]').addEventListener('click', (e) => {
         deleteFile(e.target.dataset.fileId);
     });
@@ -141,7 +233,9 @@ document.getElementById('upload-form').addEventListener('submit', async (e) => {
         if (response.ok) {
             showMessage('File uploaded successfully');
             e.target.reset();
-            loadFiles(true);
+            // Force refresh files and all groups
+            await loadFiles(true);
+            await loadAllGroups(true);
         } else {
             const error = await response.json();
             showMessage(error.detail || 'Error uploading file', 'error');
@@ -161,7 +255,8 @@ async function deleteFile(id) {
         
         if (response.ok || response.status === 204) {
             showMessage('File deleted successfully');
-            loadFiles(true);
+            await loadFiles(true);
+            await loadAllGroups(true);
         } else {
             const error = await response.json();
             showMessage(error.detail || 'Error deleting file', 'error');
@@ -170,6 +265,32 @@ async function deleteFile(id) {
         showMessage('Error deleting file: ' + error.message, 'error');
     }
 }
+
+async function previewFile(id, fileName) {
+    const previewContainer = document.getElementById('file-preview');
+    const previewContent = document.getElementById('preview-content');
+    
+    previewContent.innerHTML = '<p style="color: #95a5a6;">Loading preview...</p>';
+    previewContainer.style.display = 'block';
+    
+    // Scroll to preview
+    previewContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    
+    const fileUrl = `/api/media/file/${id}`;
+    const ext = fileName.split('.').pop().toLowerCase();
+    
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) {
+        previewContent.innerHTML = `<img src="${fileUrl}" alt="${escapeHtml(fileName)}" style="max-width: 100%; max-height: 500px; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">`;
+    } else if (ext === 'pdf') {
+        previewContent.innerHTML = `<embed src="${fileUrl}" type="application/pdf" width="100%" height="600px" style="border-radius: 4px;">`;
+    } else {
+        previewContent.innerHTML = `<p style="color: #e74c3c;">Preview not available for this file type.</p>`;
+    }
+}
+
+document.getElementById('close-preview').addEventListener('click', () => {
+    document.getElementById('file-preview').style.display = 'none';
+});
 
 // Prompts with lazy loading
 async function loadPrompts(reset = false) {
@@ -187,23 +308,34 @@ async function loadPrompts(reset = false) {
     showLoading('prompts-list');
     
     try {
-        const response = await fetch(`${API_BASE}/prompts?page=${state.prompts.page}&pageSize=${state.prompts.pageSize}`);
+        const response = await fetchWithRetry(`${API_BASE}/prompts?page=${state.prompts.page}&pageSize=${state.prompts.pageSize}`);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
         const result = await response.json();
+        console.log('Prompts API response:', result);
+        // Handle both lowercase and uppercase from API
+        const promptsData = result.data || result.Data || [];
+        const pagination = result.pagination || result.Pagination || {};
+        console.log('Prompts data length:', promptsData.length);
+        
         const list = document.getElementById('prompts-list');
         
         hideLoading('prompts-list');
         
-        if (result.data && result.data.length > 0) {
-            state.prompts.data.push(...result.data);
+        if (promptsData && promptsData.length > 0) {
+            state.prompts.data.push(...promptsData);
             
             const fragment = document.createDocumentFragment();
-            result.data.forEach(prompt => {
+            promptsData.forEach(prompt => {
                 const div = createPromptCard(prompt);
                 fragment.appendChild(div);
             });
             list.appendChild(fragment);
             
-            state.prompts.hasMore = result.pagination.hasNext;
+            state.prompts.hasMore = pagination.hasNext || pagination.HasNext;
             state.prompts.page++;
         } else if (reset) {
             list.innerHTML = '<div class="empty-state"><p>No prompts created yet</p></div>';
@@ -220,24 +352,32 @@ async function loadPrompts(reset = false) {
 function createPromptCard(prompt) {
     const div = document.createElement('div');
     div.className = 'card';
+    
+    const id = getProp(prompt, 'id');
+    const name = getProp(prompt, 'name') || 'Untitled';
+    const promptText = getProp(prompt, 'promptText') || '';
+    const createdAt = getProp(prompt, 'createdAt');
+    const updatedAt = getProp(prompt, 'updatedAt');
+    const groups = getProp(prompt, 'groups') || [];
+    
     div.innerHTML = `
         <div class="card-header">
-            <div class="card-title">${escapeHtml(prompt.name)}</div>
+            <div class="card-title">${escapeHtml(name)}</div>
         </div>
         <div class="card-meta">
-            Created: ${new Date(prompt.createdAt).toLocaleString()}
-            ${prompt.updatedAt ? ` | Updated: ${new Date(prompt.updatedAt).toLocaleString()}` : ''}
+            Created: ${createdAt ? new Date(createdAt).toLocaleString() : 'Unknown'}
+            ${updatedAt ? ` | Updated: ${new Date(updatedAt).toLocaleString()}` : ''}
         </div>
-        <div style="margin-top: 10px; padding: 10px; background-color: #f8f9fa; border-radius: 4px; white-space: pre-wrap;">${escapeHtml(prompt.promptText)}</div>
-        ${prompt.groups && prompt.groups.length > 0 ? `
+        <div style="margin-top: 10px; padding: 10px; background-color: #f8f9fa; border-radius: 4px; white-space: pre-wrap;">${escapeHtml(promptText)}</div>
+        ${groups && groups.length > 0 ? `
             <div style="margin-top: 8px;">
-                ${prompt.groups.map(g => `<span class="badge">${escapeHtml(g.name)}</span>`).join('')}
+                ${groups.map(g => `<span class="badge">${escapeHtml(getProp(g, 'name') || '')}</span>`).join('')}
             </div>
         ` : ''}
         <div class="card-actions">
-            <button data-action="add-to-group-prompt" data-prompt-id="${prompt.id}" data-prompt-name="${escapeHtml(prompt.name)}">Add to Group</button>
-            <button data-action="edit-prompt" data-prompt-id="${prompt.id}" data-prompt-name="${escapeHtml(prompt.name)}" data-prompt-text="${escapeHtml(prompt.promptText)}">Edit</button>
-            <button class="delete" data-action="delete-prompt" data-prompt-id="${prompt.id}">Delete</button>
+            <button data-action="add-to-group-prompt" data-prompt-id="${id}" data-prompt-name="${escapeHtml(name)}">Add to Group</button>
+            <button data-action="edit-prompt" data-prompt-id="${id}" data-prompt-name="${escapeHtml(name)}" data-prompt-text="${escapeHtml(promptText)}">Edit</button>
+            <button class="delete" data-action="delete-prompt" data-prompt-id="${id}">Delete</button>
         </div>
     `;
     
@@ -278,7 +418,8 @@ document.getElementById('prompt-form').addEventListener('submit', async (e) => {
         if (response.ok) {
             showMessage(isEditingPrompt ? 'Prompt updated successfully' : 'Prompt created successfully');
             cancelEditPrompt();
-            loadPrompts(true);
+            await loadPrompts(true);
+            await loadAllGroups(true);
         } else {
             const error = await response.json();
             showMessage(error.detail || 'Error saving prompt', 'error');
@@ -318,7 +459,8 @@ async function deletePrompt(id) {
         
         if (response.ok || response.status === 204) {
             showMessage('Prompt deleted successfully');
-            loadPrompts(true);
+            await loadPrompts(true);
+            await loadAllGroups(true);
         } else {
             const error = await response.json();
             showMessage(error.detail || 'Error deleting prompt', 'error');
@@ -344,23 +486,34 @@ async function loadGroups(reset = false) {
     showLoading('groups-list');
     
     try {
-        const response = await fetch(`${API_BASE}/groups?page=${state.groups.page}&pageSize=${state.groups.pageSize}`);
+        const response = await fetchWithRetry(`${API_BASE}/groups?page=${state.groups.page}&pageSize=${state.groups.pageSize}`);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
         const result = await response.json();
+        console.log('Groups API response:', result);
+        // Handle both lowercase and uppercase from API
+        const groupsData = result.data || result.Data || [];
+        const pagination = result.pagination || result.Pagination || {};
+        console.log('Groups data length:', groupsData.length);
+        
         const list = document.getElementById('groups-list');
         
         hideLoading('groups-list');
         
-        if (result.data && result.data.length > 0) {
-            state.groups.data.push(...result.data);
+        if (groupsData && groupsData.length > 0) {
+            state.groups.data.push(...groupsData);
             
             const fragment = document.createDocumentFragment();
-            result.data.forEach(group => {
+            groupsData.forEach(group => {
                 const div = createGroupCard(group);
                 fragment.appendChild(div);
             });
             list.appendChild(fragment);
             
-            state.groups.hasMore = result.pagination.hasNext;
+            state.groups.hasMore = pagination.hasNext || pagination.HasNext;
             state.groups.page++;
         } else if (reset) {
             list.innerHTML = '<div class="empty-state"><p>No groups created yet</p></div>';
@@ -377,24 +530,32 @@ async function loadGroups(reset = false) {
 function createGroupCard(group) {
     const div = document.createElement('div');
     div.className = 'card';
+    
+    const id = getProp(group, 'id');
+    const name = getProp(group, 'name') || 'Untitled';
+    const description = getProp(group, 'description') || '';
+    const createdAt = getProp(group, 'createdAt');
+    const files = getProp(group, 'files') || [];
+    const prompts = getProp(group, 'prompts') || [];
+    
     div.innerHTML = `
         <div class="card-header">
-            <div class="card-title">${escapeHtml(group.name)}</div>
+            <div class="card-title">${escapeHtml(name)}</div>
         </div>
-        ${group.description ? `<div style="margin-bottom: 10px; color: #555;">${escapeHtml(group.description)}</div>` : ''}
-        <div class="card-meta">Created: ${new Date(group.createdAt).toLocaleString()}</div>
+        ${description ? `<div style="margin-bottom: 10px; color: #555;">${escapeHtml(description)}</div>` : ''}
+        <div class="card-meta">Created: ${createdAt ? new Date(createdAt).toLocaleString() : 'Unknown'}</div>
         <div class="group-resources">
-            <div class="group-resources-title">Files (${group.files.length}):</div>
-            ${group.files && group.files.length > 0 ? group.files.map(f => `<span class="badge">${escapeHtml(f.label)}</span>`).join('') : '<span style="color: #95a5a6; font-size: 0.85rem;">No files</span>'}
+            <div class="group-resources-title">Files (${files.length}):</div>
+            ${files && files.length > 0 ? files.map(f => `<span class="badge">${escapeHtml(getProp(f, 'label') || '')}</span>`).join('') : '<span style="color: #95a5a6; font-size: 0.85rem;">No files</span>'}
         </div>
         <div class="group-resources">
-            <div class="group-resources-title">Prompts (${group.prompts.length}):</div>
-            ${group.prompts && group.prompts.length > 0 ? group.prompts.map(p => `<span class="badge">${escapeHtml(p.name)}</span>`).join('') : '<span style="color: #95a5a6; font-size: 0.85rem;">No prompts</span>'}
+            <div class="group-resources-title">Prompts (${prompts.length}):</div>
+            ${prompts && prompts.length > 0 ? prompts.map(p => `<span class="badge">${escapeHtml(getProp(p, 'name') || '')}</span>`).join('') : '<span style="color: #95a5a6; font-size: 0.85rem;">No prompts</span>'}
         </div>
         <div class="card-actions">
-            <button data-action="manage-group" data-group-id="${group.id}" data-group-name="${escapeHtml(group.name)}">Manage Resources</button>
-            <button data-action="edit-group" data-group-id="${group.id}" data-group-name="${escapeHtml(group.name)}" data-group-description="${escapeHtml(group.description || '')}">Edit</button>
-            <button class="delete" data-action="delete-group" data-group-id="${group.id}">Delete</button>
+            <button data-action="manage-group" data-group-id="${id}" data-group-name="${escapeHtml(name)}">Manage Resources</button>
+            <button data-action="edit-group" data-group-id="${id}" data-group-name="${escapeHtml(name)}" data-group-description="${escapeHtml(description)}">Edit</button>
+            <button class="delete" data-action="delete-group" data-group-id="${id}">Delete</button>
         </div>
     `;
     
@@ -435,8 +596,8 @@ document.getElementById('group-form').addEventListener('submit', async (e) => {
         if (response.ok) {
             showMessage(isEditingGroup ? 'Group updated successfully' : 'Group created successfully');
             cancelEditGroup();
-            loadGroups(true);
-            loadAllGroups(); // Refresh groups cache
+            await loadGroups(true);
+            await loadAllGroups(true); // Force refresh groups cache
         } else {
             const error = await response.json();
             showMessage(error.detail || 'Error saving group', 'error');
@@ -476,8 +637,8 @@ async function deleteGroup(id) {
         
         if (response.ok || response.status === 204) {
             showMessage('Group deleted successfully');
-            loadGroups(true);
-            loadAllGroups(); // Refresh groups cache
+            await loadGroups(true);
+            await loadAllGroups(true); // Force refresh groups cache
         } else {
             const error = await response.json();
             showMessage(error.detail || 'Error deleting group', 'error');
@@ -490,23 +651,90 @@ async function deleteGroup(id) {
 // Manage Group Resources (existing modal functionality)
 async function manageGroupResources(groupId, groupName) {
     try {
-        const [filesRes, promptsRes, groupRes] = await Promise.all([
-            fetch(`${API_BASE}/files?page=1&pageSize=100`),
-            fetch(`${API_BASE}/prompts?page=1&pageSize=100`),
-            fetch(`${API_BASE}/groups?page=1&pageSize=100`)
-        ]);
+        console.log('[MANAGE] Looking for group ID:', groupId);
         
-        const filesResult = await filesRes.json();
-        const promptsResult = await promptsRes.json();
+        // ALWAYS fetch fresh group data to avoid stale cache
+        console.log('[MANAGE] Fetching fresh group data...');
+        const groupRes = await fetchWithRetry(`${API_BASE}/groups?page=1&pageSize=1000`);
+        if (!groupRes.ok) {
+            throw new Error(`Failed to fetch groups: ${groupRes.status}`);
+        }
         const groupsResult = await groupRes.json();
+        // Handle both lowercase and uppercase from API
+        const groups = groupsResult.data || groupsResult.Data || [];
+        console.log('[MANAGE] Groups fetched:', groups.length);
         
-        const allFiles = filesResult.data || [];
-        const allPrompts = promptsResult.data || [];
-        const groups = groupsResult.data || [];
-        const currentGroup = groups.find(g => g.id === groupId);
+        // Find group using case-insensitive property access
+        const currentGroup = groups.find(g => getProp(g, 'id') === groupId);
         
-        const groupFileIds = new Set(currentGroup.files.map(f => f.id));
-        const groupPromptIds = new Set(currentGroup.prompts.map(p => p.id));
+        if (!currentGroup) {
+            console.error('[MANAGE] Group not found. Looking for:', groupId);
+            console.error('[MANAGE] Available groups:', groups.map(g => getProp(g, 'id')));
+            throw new Error('Group not found');
+        }
+        
+        console.log('[MANAGE] Using fresh group data:', currentGroup);
+        
+        // ALWAYS fetch files and prompts fresh - don't rely on state cache
+        let allFiles = [];
+        let allPrompts = [];
+        
+        try {
+            console.log('[MANAGE] Fetching all files and prompts for manage resources...');
+            console.log('[MANAGE] Fetching from:', `${API_BASE}/files?page=1&pageSize=1000`);
+            console.log('[MANAGE] Fetching from:', `${API_BASE}/prompts?page=1&pageSize=1000`);
+            
+            const [filesRes, promptsRes] = await Promise.all([
+                fetchWithRetry(`${API_BASE}/files?page=1&pageSize=1000`),
+                fetchWithRetry(`${API_BASE}/prompts?page=1&pageSize=1000`)
+            ]);
+            
+            console.log('[MANAGE] Files response status:', filesRes.status);
+            console.log('[MANAGE] Prompts response status:', promptsRes.status);
+            
+            if (filesRes.ok) {
+                const filesResult = await filesRes.json();
+                console.log('[MANAGE] Files response:', filesResult);
+                // Handle both lowercase 'data' and uppercase 'Data' from API
+                allFiles = filesResult.data || filesResult.Data || [];
+                console.log('[MANAGE] Fetched files count:', allFiles.length);
+                if (allFiles.length > 0) {
+                    console.log('[MANAGE] First file:', allFiles[0]);
+                }
+            } else {
+                const errorText = await filesRes.text();
+                console.error('[MANAGE] Failed to load files:', filesRes.status, errorText);
+            }
+            
+            if (promptsRes.ok) {
+                const promptsResult = await promptsRes.json();
+                console.log('[MANAGE] Prompts response:', promptsResult);
+                // Handle both lowercase 'data' and uppercase 'Data' from API
+                allPrompts = promptsResult.data || promptsResult.Data || [];
+                console.log('[MANAGE] Fetched prompts count:', allPrompts.length);
+                if (allPrompts.length > 0) {
+                    console.log('[MANAGE] First prompt:', allPrompts[0]);
+                }
+            } else {
+                const errorText = await promptsRes.text();
+                console.error('[MANAGE] Failed to load prompts:', promptsRes.status, errorText);
+            }
+        } catch (fetchError) {
+            console.error('[MANAGE] Error fetching resources:', fetchError);
+            showMessage('Error loading resources: ' + fetchError.message, 'error');
+        }
+        
+        console.log('[MANAGE] Final counts - Files:', allFiles.length, 'Prompts:', allPrompts.length);
+        
+        if (allFiles.length === 0 && allPrompts.length === 0) {
+            console.warn('[MANAGE] WARNING: No files or prompts returned from API');
+        }
+        
+        // Use getProp to access files and prompts arrays with case-insensitive fallback
+        const groupFiles = getProp(currentGroup, 'files') || [];
+        const groupPrompts = getProp(currentGroup, 'prompts') || [];
+        const groupFileIds = new Set(groupFiles.map(f => getProp(f, 'id')));
+        const groupPromptIds = new Set(groupPrompts.map(p => getProp(p, 'id')));
         
         const modalBody = document.getElementById('modal-content-body');
         modalBody.innerHTML = `
@@ -515,19 +743,23 @@ async function manageGroupResources(groupId, groupName) {
             <div class="section" style="margin-bottom: 20px;">
                 <h5 style="margin-bottom: 10px;">Files</h5>
                 <div class="checkbox-group">
-                    ${allFiles.map(file => `
+                    ${allFiles.map(file => {
+                        const fileId = getProp(file, 'id');
+                        const fileName = getProp(file, 'fileName') || 'unknown';
+                        const label = getProp(file, 'label') || fileName;
+                        return `
                         <div class="checkbox-item">
                             <label>
                                 <input type="checkbox" 
-                                    value="${file.id}" 
-                                    ${groupFileIds.has(file.id) ? 'checked' : ''}
+                                    value="${fileId}" 
+                                    ${groupFileIds.has(fileId) ? 'checked' : ''}
                                     data-action="toggle-file"
                                     data-group-id="${groupId}"
-                                    data-file-id="${file.id}">
-                                ${escapeHtml(file.label)} (${escapeHtml(file.fileName)})
+                                    data-file-id="${fileId}">
+                                ${escapeHtml(label)} (${escapeHtml(fileName)})
                             </label>
                         </div>
-                    `).join('')}
+                    `}).join('')}
                     ${allFiles.length === 0 ? '<p style="color: #95a5a6;">No files available</p>' : ''}
                 </div>
             </div>
@@ -535,19 +767,22 @@ async function manageGroupResources(groupId, groupName) {
             <div class="section">
                 <h5 style="margin-bottom: 10px;">Prompts</h5>
                 <div class="checkbox-group">
-                    ${allPrompts.map(prompt => `
+                    ${allPrompts.map(prompt => {
+                        const promptId = getProp(prompt, 'id');
+                        const promptName = getProp(prompt, 'name') || 'Untitled';
+                        return `
                         <div class="checkbox-item">
                             <label>
                                 <input type="checkbox" 
-                                    value="${prompt.id}" 
-                                    ${groupPromptIds.has(prompt.id) ? 'checked' : ''}
+                                    value="${promptId}" 
+                                    ${groupPromptIds.has(promptId) ? 'checked' : ''}
                                     data-action="toggle-prompt"
                                     data-group-id="${groupId}"
-                                    data-prompt-id="${prompt.id}">
-                                ${escapeHtml(prompt.name)}
+                                    data-prompt-id="${promptId}">
+                                ${escapeHtml(promptName)}
                             </label>
                         </div>
-                    `).join('')}
+                    `}).join('')}
                     ${allPrompts.length === 0 ? '<p style="color: #95a5a6;">No prompts available</p>' : ''}
                 </div>
             </div>
@@ -572,20 +807,28 @@ async function manageGroupResources(groupId, groupName) {
 }
 
 // Quick add to group functionality
-async function loadAllGroups() {
+async function loadAllGroups(force = false) {
     try {
-        const response = await fetch(`${API_BASE}/groups?page=1&pageSize=100`);
+        console.log('[LOAD ALL GROUPS] Force refresh:', force);
+        const response = await fetchWithRetry(`${API_BASE}/groups?page=1&pageSize=1000`);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
         const result = await response.json();
-        state.allGroups = result.data || [];
+        // Handle both lowercase and uppercase from API
+        state.allGroups = result.data || result.Data || [];
+        console.log('[LOAD ALL GROUPS] Loaded', state.allGroups.length, 'groups');
     } catch (error) {
         console.error('Error loading all groups:', error);
     }
 }
 
 async function showQuickAddToGroup(resourceId, resourceType, resourceName) {
-    if (state.allGroups.length === 0) {
-        await loadAllGroups();
-    }
+    // Always refresh groups to ensure we have the latest
+    console.log('[QUICK ADD] Refreshing groups list...');
+    await loadAllGroups(true);
     
     if (state.allGroups.length === 0) {
         showMessage('No groups available. Create a group first.', 'error');
@@ -653,12 +896,35 @@ async function toggleFileInGroup(groupId, fileId, add) {
         
         if (response.ok || response.status === 204) {
             showMessage(add ? 'File added to group' : 'File removed from group');
+            
+            // Update the group in state cache
+            const groupInState = state.groups.data.find(g => g.id === groupId);
+            if (groupInState) {
+                if (!groupInState.files) groupInState.files = [];
+                if (add) {
+                    // Add file to cache if not already there
+                    if (!groupInState.files.find(f => f.id === fileId)) {
+                        const allFiles = state.files.data;
+                        const fileToAdd = allFiles.find(f => f.id === fileId);
+                        if (fileToAdd) groupInState.files.push(fileToAdd);
+                    }
+                } else {
+                    // Remove file from cache
+                    groupInState.files = groupInState.files.filter(f => f.id !== fileId);
+                }
+            }
+            
+            // Refresh groups display to show updated counts
+            loadGroups(true);
+            await loadAllGroups();
         } else {
             const error = await response.json();
             showMessage(error.detail || 'Error updating group', 'error');
+            throw new Error(error.detail || 'Error updating group');
         }
     } catch (error) {
         showMessage('Error updating group: ' + error.message, 'error');
+        throw error;
     }
 }
 
@@ -671,12 +937,35 @@ async function togglePromptInGroup(groupId, promptId, add) {
         
         if (response.ok || response.status === 204) {
             showMessage(add ? 'Prompt added to group' : 'Prompt removed from group');
+            
+            // Update the group in state cache
+            const groupInState = state.groups.data.find(g => g.id === groupId);
+            if (groupInState) {
+                if (!groupInState.prompts) groupInState.prompts = [];
+                if (add) {
+                    // Add prompt to cache if not already there
+                    if (!groupInState.prompts.find(p => p.id === promptId)) {
+                        const allPrompts = state.prompts.data;
+                        const promptToAdd = allPrompts.find(p => p.id === promptId);
+                        if (promptToAdd) groupInState.prompts.push(promptToAdd);
+                    }
+                } else {
+                    // Remove prompt from cache
+                    groupInState.prompts = groupInState.prompts.filter(p => p.id !== promptId);
+                }
+            }
+            
+            // Refresh groups display to show updated counts
+            loadGroups(true);
+            await loadAllGroups();
         } else {
             const error = await response.json();
             showMessage(error.detail || 'Error updating group', 'error');
+            throw new Error(error.detail || 'Error updating group');
         }
     } catch (error) {
         showMessage('Error updating group: ' + error.message, 'error');
+        throw error;
     }
 }
 
@@ -731,15 +1020,79 @@ function setupInfiniteScroll() {
     });
 }
 
-// Initial load
-async function init() {
-    await Promise.all([
-        loadFiles(),
-        loadPrompts(),
-        loadGroups(),
-        loadAllGroups()
-    ]);
-    setupInfiniteScroll();
+// Wait for API to be ready
+async function waitForAPI(maxRetries = 10, delayMs = 500) {
+    for (let i = 0; i < maxRetries; i++) {
+        try {
+            console.log(`[API Health] Checking API health (attempt ${i + 1}/${maxRetries})...`);
+            const response = await fetch(`${API_BASE}/files?page=1&pageSize=1`);
+            if (response.ok) {
+                console.log('[API Health] API is ready!');
+                return true;
+            }
+            console.warn(`[API Health] API returned ${response.status}, retrying...`);
+        } catch (error) {
+            console.warn(`[API Health] API not ready yet:`, error.message);
+        }
+        
+        if (i < maxRetries - 1) {
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+        }
+    }
+    
+    console.error('[API Health] API failed to become ready after', maxRetries, 'attempts');
+    return false;
 }
 
-init();
+// Initial load
+async function init() {
+    console.log('[INIT] Starting admin panel initialization...');
+    console.log('[INIT] Current time:', new Date().toISOString());
+    console.log('[INIT] API Base:', API_BASE);
+    
+    // Wait for API to be ready
+    const apiReady = await waitForAPI();
+    if (!apiReady) {
+        showMessage('API is not responding. Please refresh the page.', 'error');
+        alert('ERROR: The backend API is not responding. Please wait a moment and refresh the page.');
+        return;
+    }
+    
+    try {
+        // Load initial data with reset=true to ensure fresh load
+        console.log('[INIT] Loading initial data...');
+        const results = await Promise.allSettled([
+            loadFiles(true),
+            loadPrompts(true),
+            loadGroups(true),
+            loadAllGroups()
+        ]);
+        
+        // Check for failures
+        const failures = results.filter(r => r.status === 'rejected');
+        if (failures.length > 0) {
+            console.error('[INIT] Some data failed to load:', failures);
+            showMessage('Warning: Some data failed to load. Check console.', 'error');
+        } else {
+            console.log('[INIT] Initial data loaded successfully');
+        }
+        
+        setupInfiniteScroll();
+        console.log('[INIT] Infinite scroll setup complete');
+        console.log('[INIT] State:', JSON.stringify({
+            filesCount: state.files.data.length,
+            promptsCount: state.prompts.data.length,
+            groupsCount: state.groups.data.length
+        }));
+    } catch (error) {
+        console.error('[INIT] Error during initialization:', error);
+        showMessage('Error loading initial data: ' + error.message, 'error');
+    }
+}
+
+// Wait for DOM to be ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+} else {
+    init();
+}
