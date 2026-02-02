@@ -15,29 +15,53 @@ public class AdminController : ControllerBase
 {
     private readonly ApplicationDbContext _context;
     private readonly IMediaStorageService _mediaStorageService;
+    private readonly ICacheService _cacheService;
     private readonly ILogger<AdminController> _logger;
+    private const int DefaultPageSize = 20;
+    private const int MaxPageSize = 100;
 
     public AdminController(
         ApplicationDbContext context,
         IMediaStorageService mediaStorageService,
+        ICacheService cacheService,
         ILogger<AdminController> logger)
     {
         _context = context;
         _mediaStorageService = mediaStorageService;
+        _cacheService = cacheService;
         _logger = logger;
     }
 
     #region Files
 
     /// <summary>
-    /// Get all managed files
+    /// Get managed files with pagination and caching
     /// </summary>
     [HttpGet("files")]
-    public async Task<ActionResult<IEnumerable<object>>> GetFiles()
+    public async Task<ActionResult<object>> GetFiles([FromQuery] int page = 1, [FromQuery] int pageSize = DefaultPageSize)
     {
+        // Validate pagination parameters
+        if (page < 1) page = 1;
+        if (pageSize < 1 || pageSize > MaxPageSize) pageSize = DefaultPageSize;
+
+        var cacheKey = $"admin:files:page:{page}:size:{pageSize}";
+        
+        // Try to get from cache first
+        var cachedResult = await _cacheService.GetAsync<object>(cacheKey);
+        if (cachedResult != null)
+        {
+            return Ok(cachedResult);
+        }
+
+        var totalCount = await _context.ManagedFiles.CountAsync();
+        var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
+
         var files = await _context.ManagedFiles
             .Include(f => f.FileGroups)
             .ThenInclude(fg => fg.ResourceGroup)
+            .OrderByDescending(f => f.UploadedAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
             .Select(f => new
             {
                 f.Id,
@@ -51,7 +75,24 @@ public class AdminController : ControllerBase
             })
             .ToListAsync();
 
-        return Ok(files);
+        var result = new
+        {
+            Data = files,
+            Pagination = new
+            {
+                CurrentPage = page,
+                PageSize = pageSize,
+                TotalCount = totalCount,
+                TotalPages = totalPages,
+                HasPrevious = page > 1,
+                HasNext = page < totalPages
+            }
+        };
+
+        // Cache for 30 seconds
+        await _cacheService.SetAsync(cacheKey, result, TimeSpan.FromSeconds(30));
+
+        return Ok(result);
     }
 
     /// <summary>
@@ -102,6 +143,9 @@ public class AdminController : ControllerBase
             _context.ManagedFiles.Add(managedFile);
             await _context.SaveChangesAsync();
 
+            // Invalidate cache
+            await InvalidateFilesCache();
+
             return CreatedAtAction(nameof(GetFiles), new { id = managedFile.Id }, new
             {
                 managedFile.Id,
@@ -151,6 +195,9 @@ public class AdminController : ControllerBase
             _context.ManagedFiles.Remove(file);
             await _context.SaveChangesAsync();
 
+            // Invalidate cache
+            await InvalidateFilesCache();
+
             return NoContent();
         }
         catch (Exception ex)
@@ -170,14 +217,33 @@ public class AdminController : ControllerBase
     #region Prompts
 
     /// <summary>
-    /// Get all managed prompts
+    /// Get managed prompts with pagination and caching
     /// </summary>
     [HttpGet("prompts")]
-    public async Task<ActionResult<IEnumerable<object>>> GetPrompts()
+    public async Task<ActionResult<object>> GetPrompts([FromQuery] int page = 1, [FromQuery] int pageSize = DefaultPageSize)
     {
+        // Validate pagination parameters
+        if (page < 1) page = 1;
+        if (pageSize < 1 || pageSize > MaxPageSize) pageSize = DefaultPageSize;
+
+        var cacheKey = $"admin:prompts:page:{page}:size:{pageSize}";
+        
+        // Try to get from cache first
+        var cachedResult = await _cacheService.GetAsync<object>(cacheKey);
+        if (cachedResult != null)
+        {
+            return Ok(cachedResult);
+        }
+
+        var totalCount = await _context.ManagedPrompts.CountAsync();
+        var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
+
         var prompts = await _context.ManagedPrompts
             .Include(p => p.PromptGroups)
             .ThenInclude(pg => pg.ResourceGroup)
+            .OrderByDescending(p => p.CreatedAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
             .Select(p => new
             {
                 p.Id,
@@ -189,7 +255,24 @@ public class AdminController : ControllerBase
             })
             .ToListAsync();
 
-        return Ok(prompts);
+        var result = new
+        {
+            Data = prompts,
+            Pagination = new
+            {
+                CurrentPage = page,
+                PageSize = pageSize,
+                TotalCount = totalCount,
+                TotalPages = totalPages,
+                HasPrevious = page > 1,
+                HasNext = page < totalPages
+            }
+        };
+
+        // Cache for 30 seconds
+        await _cacheService.SetAsync(cacheKey, result, TimeSpan.FromSeconds(30));
+
+        return Ok(result);
     }
 
     /// <summary>
@@ -230,6 +313,9 @@ public class AdminController : ControllerBase
 
             _context.ManagedPrompts.Add(prompt);
             await _context.SaveChangesAsync();
+
+            // Invalidate cache
+            await InvalidatePromptsCache();
 
             return CreatedAtAction(nameof(GetPrompts), new { id = prompt.Id }, new
             {
@@ -297,6 +383,9 @@ public class AdminController : ControllerBase
 
             await _context.SaveChangesAsync();
 
+            // Invalidate cache
+            await InvalidatePromptsCache();
+
             return Ok(new
             {
                 prompt.Id,
@@ -340,6 +429,9 @@ public class AdminController : ControllerBase
             _context.ManagedPrompts.Remove(prompt);
             await _context.SaveChangesAsync();
 
+            // Invalidate cache
+            await InvalidatePromptsCache();
+
             return NoContent();
         }
         catch (Exception ex)
@@ -359,16 +451,35 @@ public class AdminController : ControllerBase
     #region Resource Groups
 
     /// <summary>
-    /// Get all resource groups
+    /// Get resource groups with pagination and caching
     /// </summary>
     [HttpGet("groups")]
-    public async Task<ActionResult<IEnumerable<object>>> GetGroups()
+    public async Task<ActionResult<object>> GetGroups([FromQuery] int page = 1, [FromQuery] int pageSize = DefaultPageSize)
     {
+        // Validate pagination parameters
+        if (page < 1) page = 1;
+        if (pageSize < 1 || pageSize > MaxPageSize) pageSize = DefaultPageSize;
+
+        var cacheKey = $"admin:groups:page:{page}:size:{pageSize}";
+        
+        // Try to get from cache first
+        var cachedResult = await _cacheService.GetAsync<object>(cacheKey);
+        if (cachedResult != null)
+        {
+            return Ok(cachedResult);
+        }
+
+        var totalCount = await _context.ResourceGroups.CountAsync();
+        var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
+
         var groups = await _context.ResourceGroups
             .Include(g => g.FileGroups)
             .ThenInclude(fg => fg.ManagedFile)
             .Include(g => g.PromptGroups)
             .ThenInclude(pg => pg.ManagedPrompt)
+            .OrderByDescending(g => g.CreatedAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
             .Select(g => new
             {
                 g.Id,
@@ -389,7 +500,24 @@ public class AdminController : ControllerBase
             })
             .ToListAsync();
 
-        return Ok(groups);
+        var result = new
+        {
+            Data = groups,
+            Pagination = new
+            {
+                CurrentPage = page,
+                PageSize = pageSize,
+                TotalCount = totalCount,
+                TotalPages = totalPages,
+                HasPrevious = page > 1,
+                HasNext = page < totalPages
+            }
+        };
+
+        // Cache for 30 seconds
+        await _cacheService.SetAsync(cacheKey, result, TimeSpan.FromSeconds(30));
+
+        return Ok(result);
     }
 
     /// <summary>
@@ -420,6 +548,9 @@ public class AdminController : ControllerBase
 
             _context.ResourceGroups.Add(group);
             await _context.SaveChangesAsync();
+
+            // Invalidate cache
+            await InvalidateGroupsCache();
 
             return CreatedAtAction(nameof(GetGroups), new { id = group.Id }, new
             {
@@ -475,6 +606,9 @@ public class AdminController : ControllerBase
 
             await _context.SaveChangesAsync();
 
+            // Invalidate cache
+            await InvalidateGroupsCache();
+
             return Ok(new
             {
                 group.Id,
@@ -516,6 +650,9 @@ public class AdminController : ControllerBase
         {
             _context.ResourceGroups.Remove(group);
             await _context.SaveChangesAsync();
+
+            // Invalidate cache
+            await InvalidateGroupsCache();
 
             return NoContent();
         }
@@ -578,6 +715,9 @@ public class AdminController : ControllerBase
             _context.Set<ManagedFileGroup>().Add(fileGroup);
             await _context.SaveChangesAsync();
 
+            // Invalidate cache
+            await InvalidateAllCaches();
+
             return Ok(new { message = "File added to group successfully" });
         }
         catch (Exception ex)
@@ -615,6 +755,9 @@ public class AdminController : ControllerBase
         {
             _context.Set<ManagedFileGroup>().Remove(fileGroup);
             await _context.SaveChangesAsync();
+
+            // Invalidate cache
+            await InvalidateAllCaches();
 
             return NoContent();
         }
@@ -677,6 +820,9 @@ public class AdminController : ControllerBase
             _context.Set<ManagedPromptGroup>().Add(promptGroup);
             await _context.SaveChangesAsync();
 
+            // Invalidate cache
+            await InvalidateAllCaches();
+
             return Ok(new { message = "Prompt added to group successfully" });
         }
         catch (Exception ex)
@@ -715,6 +861,9 @@ public class AdminController : ControllerBase
             _context.Set<ManagedPromptGroup>().Remove(promptGroup);
             await _context.SaveChangesAsync();
 
+            // Invalidate cache
+            await InvalidateAllCaches();
+
             return NoContent();
         }
         catch (Exception ex)
@@ -727,6 +876,95 @@ public class AdminController : ControllerBase
                 Status = StatusCodes.Status500InternalServerError
             });
         }
+    }
+
+    #endregion
+
+    #region Helper Methods
+
+    /// <summary>
+    /// Invalidate files cache for all pages
+    /// </summary>
+    private async Task InvalidateFilesCache()
+    {
+        try
+        {
+            // Invalidate cache pattern - remove all files cache keys in parallel
+            var totalCount = await _context.ManagedFiles.CountAsync();
+            var totalPages = (int)Math.Ceiling(totalCount / (double)DefaultPageSize);
+            
+            var tasks = new List<Task>();
+            for (int page = 1; page <= totalPages + 1; page++)
+            {
+                tasks.Add(_cacheService.RemoveAsync($"admin:files:page:{page}:size:{DefaultPageSize}"));
+                tasks.Add(_cacheService.RemoveAsync($"admin:files:page:{page}:size:{MaxPageSize}"));
+            }
+            await Task.WhenAll(tasks);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error invalidating files cache");
+        }
+    }
+
+    /// <summary>
+    /// Invalidate prompts cache for all pages
+    /// </summary>
+    private async Task InvalidatePromptsCache()
+    {
+        try
+        {
+            var totalCount = await _context.ManagedPrompts.CountAsync();
+            var totalPages = (int)Math.Ceiling(totalCount / (double)DefaultPageSize);
+            
+            var tasks = new List<Task>();
+            for (int page = 1; page <= totalPages + 1; page++)
+            {
+                tasks.Add(_cacheService.RemoveAsync($"admin:prompts:page:{page}:size:{DefaultPageSize}"));
+                tasks.Add(_cacheService.RemoveAsync($"admin:prompts:page:{page}:size:{MaxPageSize}"));
+            }
+            await Task.WhenAll(tasks);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error invalidating prompts cache");
+        }
+    }
+
+    /// <summary>
+    /// Invalidate groups cache for all pages
+    /// </summary>
+    private async Task InvalidateGroupsCache()
+    {
+        try
+        {
+            var totalCount = await _context.ResourceGroups.CountAsync();
+            var totalPages = (int)Math.Ceiling(totalCount / (double)DefaultPageSize);
+            
+            var tasks = new List<Task>();
+            for (int page = 1; page <= totalPages + 1; page++)
+            {
+                tasks.Add(_cacheService.RemoveAsync($"admin:groups:page:{page}:size:{DefaultPageSize}"));
+                tasks.Add(_cacheService.RemoveAsync($"admin:groups:page:{page}:size:{MaxPageSize}"));
+            }
+            await Task.WhenAll(tasks);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error invalidating groups cache");
+        }
+    }
+
+    /// <summary>
+    /// Invalidate all caches (files, prompts, groups)
+    /// </summary>
+    private async Task InvalidateAllCaches()
+    {
+        await Task.WhenAll(
+            InvalidateFilesCache(),
+            InvalidatePromptsCache(),
+            InvalidateGroupsCache()
+        );
     }
 
     #endregion
