@@ -107,12 +107,16 @@ function createFileCard(file) {
             </div>
         ` : ''}
         <div class="card-actions">
+            <button data-action="preview-file" data-file-id="${file.id}" data-file-name="${escapeHtml(file.fileName)}" class="secondary">Preview</button>
             <button data-action="add-to-group-file" data-file-id="${file.id}" data-file-label="${escapeHtml(file.label)}">Add to Group</button>
             <button class="delete" data-file-id="${file.id}" data-action="delete-file">Delete</button>
         </div>
     `;
     
     // Attach event listeners
+    div.querySelector('[data-action="preview-file"]').addEventListener('click', (e) => {
+        previewFile(e.target.dataset.fileId, e.target.dataset.fileName);
+    });
     div.querySelector('[data-action="delete-file"]').addEventListener('click', (e) => {
         deleteFile(e.target.dataset.fileId);
     });
@@ -170,6 +174,32 @@ async function deleteFile(id) {
         showMessage('Error deleting file: ' + error.message, 'error');
     }
 }
+
+async function previewFile(id, fileName) {
+    const previewContainer = document.getElementById('file-preview');
+    const previewContent = document.getElementById('preview-content');
+    
+    previewContent.innerHTML = '<p style="color: #95a5a6;">Loading preview...</p>';
+    previewContainer.style.display = 'block';
+    
+    // Scroll to preview
+    previewContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    
+    const fileUrl = `/api/media/file/${id}`;
+    const ext = fileName.split('.').pop().toLowerCase();
+    
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) {
+        previewContent.innerHTML = `<img src="${fileUrl}" alt="${escapeHtml(fileName)}" style="max-width: 100%; max-height: 500px; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">`;
+    } else if (ext === 'pdf') {
+        previewContent.innerHTML = `<embed src="${fileUrl}" type="application/pdf" width="100%" height="600px" style="border-radius: 4px;">`;
+    } else {
+        previewContent.innerHTML = `<p style="color: #e74c3c;">Preview not available for this file type.</p>`;
+    }
+}
+
+document.getElementById('close-preview').addEventListener('click', () => {
+    document.getElementById('file-preview').style.display = 'none';
+});
 
 // Prompts with lazy loading
 async function loadPrompts(reset = false) {
