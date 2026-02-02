@@ -487,11 +487,19 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
-// Ensure database is created
+// Ensure database is created (tolerant to missing DB during local development)
 using (var scope = app.Services.CreateScope())
 {
-    var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-    db.Database.EnsureCreated();
+    try
+    {
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        db.Database.EnsureCreated();
+    }
+    catch (Exception ex)
+    {
+        var logger = scope.ServiceProvider.GetService<ILogger<Program>>();
+        logger?.LogWarning(ex, "Could not ensure database is created. Continuing startup without DB initialization.");
+    }
 }
 
 app.UseHttpsRedirection();

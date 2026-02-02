@@ -24,30 +24,41 @@ public class RedisPubSubBridge : IHostedService, IDisposable
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        _subscriber = _redis.GetSubscriber();
-        _subscriber.Subscribe(new RedisChannel(PubSubChannel, RedisChannel.PatternMode.Literal), async (ch, value) =>
+        try
         {
-            try
+            _subscriber = _redis.GetSubscriber();
+            _subscriber.Subscribe(new RedisChannel(PubSubChannel, RedisChannel.PatternMode.Literal), async (ch, value) =>
             {
-                var payload = JsonSerializer.Deserialize<object>(value.ToString());
-                await _hub.Clients.All.SendAsync("TaskCompleted", payload);
-                _status.IsSubscribed = true;
-                _status.LastError = null;
-                _status.LastUpdatedUtc = DateTime.UtcNow;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to forward pubsub message to SignalR");
-                _status.IsSubscribed = false;
-                _status.LastError = ex.Message;
-                _status.LastUpdatedUtc = DateTime.UtcNow;
-            }
-        });
+                try
+                {
+                    var payload = JsonSerializer.Deserialize<object>(value.ToString());
+                    await _hub.Clients.All.SendAsync("TaskCompleted", payload);
+                    _status.IsSubscribed = true;
+                    _status.LastError = null;
+                    _status.LastUpdatedUtc = DateTime.UtcNow;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to forward pubsub message to SignalR");
+                    _status.IsSubscribed = false;
+                    _status.LastError = ex.Message;
+                    _status.LastUpdatedUtc = DateTime.UtcNow;
+                }
+            });
 
-        _logger.LogInformation("RedisPubSubBridge subscribed to {Channel}", PubSubChannel);
-        _status.IsSubscribed = true;
-        _status.LastError = null;
-        _status.LastUpdatedUtc = DateTime.UtcNow;
+            _logger.LogInformation("RedisPubSubBridge subscribed to {Channel}", PubSubChannel);
+            _status.IsSubscribed = true;
+            _status.LastError = null;
+            _status.LastUpdatedUtc = DateTime.UtcNow;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "RedisPubSubBridge failed to start. Redis may be unavailable; continuing without pub/sub bridge.");
+            _status.IsSubscribed = false;
+            _status.LastError = ex.Message;
+            _status.LastUpdatedUtc = DateTime.UtcNow;
+        }
+
         return Task.CompletedTask;
     }
 
