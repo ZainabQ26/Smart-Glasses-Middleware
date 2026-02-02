@@ -8,6 +8,33 @@ const state = {
     allGroups: [] // Cache of all groups for quick-add
 };
 
+// Dark mode toggle
+function initTheme() {
+    const savedTheme = localStorage.getItem('theme') || 'light';
+    document.documentElement.setAttribute('data-theme', savedTheme);
+    updateThemeButton(savedTheme);
+}
+
+function updateThemeButton(theme) {
+    const button = document.getElementById('theme-toggle');
+    if (theme === 'dark') {
+        button.textContent = '☀️ Light Mode';
+    } else {
+        button.textContent = '🌙 Dark Mode';
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const themeToggle = document.getElementById('theme-toggle');
+    themeToggle.addEventListener('click', () => {
+        const currentTheme = document.documentElement.getAttribute('data-theme');
+        const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', newTheme);
+        localStorage.setItem('theme', newTheme);
+        updateThemeButton(newTheme);
+    });
+});
+
 // Tab switching
 document.querySelectorAll('.tab').forEach(tab => {
     tab.addEventListener('click', () => {
@@ -18,14 +45,58 @@ document.querySelectorAll('.tab').forEach(tab => {
     });
 });
 
-// Show message
+// Show message with better error handling
 function showMessage(message, type = 'success') {
     const container = document.getElementById('message-container');
     const div = document.createElement('div');
     div.className = `message ${type}`;
-    div.textContent = message;
+    
+    // Handle both string and object messages
+    if (typeof message === 'object') {
+        if (message.errors) {
+            // Validation errors from API
+            const errorMessages = Object.entries(message.errors)
+                .map(([field, msgs]) => `${field}: ${msgs.join(', ')}`)
+                .join('; ');
+            div.textContent = errorMessages;
+        } else if (message.detail) {
+            div.textContent = message.detail;
+        } else if (message.title) {
+            div.textContent = message.title;
+        } else {
+            div.textContent = JSON.stringify(message);
+        }
+    } else {
+        div.textContent = message;
+    }
+    
     container.appendChild(div);
     setTimeout(() => div.remove(), 5000);
+}
+
+// Client-side validation
+function validateField(input, errorElementId, validationFn, errorMessage) {
+    const errorElement = document.getElementById(errorElementId);
+    const isValid = validationFn(input.value);
+    
+    if (!isValid) {
+        input.classList.add('invalid');
+        errorElement.textContent = errorMessage;
+        errorElement.classList.add('visible');
+    } else {
+        input.classList.remove('invalid');
+        errorElement.classList.remove('visible');
+    }
+    
+    return isValid;
+}
+
+function clearFieldError(input, errorElementId) {
+    input.classList.remove('invalid');
+    const errorElement = document.getElementById(errorElementId);
+    if (errorElement) {
+        errorElement.classList.remove('visible');
+    }
 }
 
 // Loading indicator
@@ -91,7 +162,7 @@ async function loadFiles(reset = false) {
 
 function createFileCard(file) {
     const div = document.createElement('div');
-    div.className = 'card';
+    div.className = 'card clickable';
     div.innerHTML = `
         <div class="card-header">
             <div class="card-title">${escapeHtml(file.label)}</div>
@@ -107,26 +178,159 @@ function createFileCard(file) {
             </div>
         ` : ''}
         <div class="card-actions">
+            <button data-action="preview-file" data-file-id="${file.id}" data-file-name="${escapeHtml(file.fileName)}" data-file-label="${escapeHtml(file.label)}">Preview</button>
+            <button data-action="download-file" data-file-id="${file.id}" data-file-name="${escapeHtml(file.fileName)}">Download</button>
             <button data-action="add-to-group-file" data-file-id="${file.id}" data-file-label="${escapeHtml(file.label)}">Add to Group</button>
             <button class="delete" data-file-id="${file.id}" data-action="delete-file">Delete</button>
         </div>
     `;
     
     // Attach event listeners
+    div.querySelector('[data-action="preview-file"]').addEventListener('click', (e) => {
+        e.stopPropagation();
+        previewFile(e.target.dataset.fileId, e.target.dataset.fileName, e.target.dataset.fileLabel);
+    });
+    div.querySelector('[data-action="download-file"]').addEventListener('click', (e) => {
+        e.stopPropagation();
+        downloadFile(e.target.dataset.fileId, e.target.dataset.fileName);
+    });
     div.querySelector('[data-action="delete-file"]').addEventListener('click', (e) => {
+        e.stopPropagation();
         deleteFile(e.target.dataset.fileId);
     });
     div.querySelector('[data-action="add-to-group-file"]').addEventListener('click', (e) => {
+        e.stopPropagation();
         showQuickAddToGroup(e.target.dataset.fileId, 'file', e.target.dataset.fileLabel);
+    });
+    
+    // Click on card (not button) to preview
+    div.addEventListener('click', (e) => {
+        if (!e.target.closest('button')) {
+            const previewBtn = div.querySelector('[data-action="preview-file"]');
+            previewFile(previewBtn.dataset.fileId, previewBtn.dataset.fileName, previewBtn.dataset.fileLabel);
+        }
     });
     
     return div;
 }
 
+// File preview functionality
+async function previewFile(fileId, fileName, fileLabel) {
+    try {
+        const modal = document.getElementById('preview-modal');
+        const title = document.getElementById('preview-title');
+        const body = document.getElementById('preview-body');
+        
+        title.textContent = fileLabel || fileName;
+        body.innerHTML = '<div class="loading-indicator">Loading preview...</div>';
+        modal.classList.add('active');
+        
+        const response = await fetch(`${API_BASE}/files/${fileId}/download`);
+        if (!response.ok) throw new Error('Failed to load file');
+        
+        const blob = await response.blob();
+        const fileType = fileName.split('.').pop().toLowerCase();
+        const mimeType = blob.type;
+        
+        let previewHTML = '';
+        
+        // Image preview
+        if (mimeType.startsWith('image/')) {
+            const url = URL.createObjectURL(blob);
+            previewHTML = `
+                <div class="preview-container">
+                    <img src="${url}" alt="${escapeHtml(fileName)}" />
+                </div>
+                <button onclick="downloadFileById('${fileId}', '${escapeHtml(fileName)}')">Download File</button>
+            `;
+        }
+        // PDF preview
+        else if (mimeType === 'application/pdf' || fileType === 'pdf') {
+            const url = URL.createObjectURL(blob);
+            previewHTML = `
+                <div class="preview-container">
+                    <iframe src="${url}" type="application/pdf"></iframe>
+                </div>
+                <button onclick="downloadFileById('${fileId}', '${escapeHtml(fileName)}')">Download File</button>
+            `;
+        }
+        // Text files
+        else if (mimeType.startsWith('text/') || ['txt', 'json', 'xml', 'csv', 'log', 'md'].includes(fileType)) {
+            const text = await blob.text();
+            previewHTML = `
+                <div class="preview-container">
+                    <pre>${escapeHtml(text)}</pre>
+                </div>
+                <button onclick="downloadFileById('${fileId}', '${escapeHtml(fileName)}')">Download File</button>
+            `;
+        }
+        // No preview available
+        else {
+            previewHTML = `
+                <div class="preview-container">
+                    <p style="text-align: center; color: var(--text-tertiary);">Preview not available for this file type</p>
+                    <p style="text-align: center; margin-top: 10px;">File: ${escapeHtml(fileName)}</p>
+                </div>
+                <button onclick="downloadFileById('${fileId}', '${escapeHtml(fileName)}')">Download File</button>
+            `;
+        }
+        
+        body.innerHTML = previewHTML;
+    } catch (error) {
+        showMessage('Error loading preview: ' + error.message, 'error');
+        closePreviewModal();
+    }
+}
+
+// Download file
+async function downloadFile(fileId, fileName) {
+    try {
+        const response = await fetch(`${API_BASE}/files/${fileId}/download`);
+        if (!response.ok) throw new Error('Download failed');
+        
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showMessage('File downloaded successfully');
+    } catch (error) {
+        showMessage('Error downloading file: ' + error.message, 'error');
+    }
+}
+
+// Global function for download button in preview
+function downloadFileById(fileId, fileName) {
+    downloadFile(fileId, fileName);
+}
+
+function closePreviewModal() {
+    document.getElementById('preview-modal').classList.remove('active');
+}
+
 document.getElementById('upload-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const fileInput = document.getElementById('file-input');
-    const label = document.getElementById('file-label').value;
+    const labelInput = document.getElementById('file-label');
+    const label = labelInput.value.trim();
+    
+    // Client-side validation
+    if (!fileInput.files || fileInput.files.length === 0) {
+        showMessage('Please select a file', 'error');
+        return;
+    }
+    
+    if (!label) {
+        showMessage('Please enter a label', 'error');
+        labelInput.classList.add('invalid');
+        return;
+    }
+    
+    labelInput.classList.remove('invalid');
     
     const formData = new FormData();
     formData.append('file', fileInput.files[0]);
@@ -144,7 +348,7 @@ document.getElementById('upload-form').addEventListener('submit', async (e) => {
             loadFiles(true);
         } else {
             const error = await response.json();
-            showMessage(error.detail || 'Error uploading file', 'error');
+            showMessage(error, 'error');
         }
     } catch (error) {
         showMessage('Error uploading file: ' + error.message, 'error');
@@ -164,7 +368,7 @@ async function deleteFile(id) {
             loadFiles(true);
         } else {
             const error = await response.json();
-            showMessage(error.detail || 'Error deleting file', 'error');
+            showMessage(error, 'error');
         }
     } catch (error) {
         showMessage('Error deleting file: ' + error.message, 'error');
@@ -220,28 +424,34 @@ async function loadPrompts(reset = false) {
 function createPromptCard(prompt) {
     const div = document.createElement('div');
     div.className = 'card';
+    const displayName = prompt.name || 'Unnamed Prompt';
     div.innerHTML = `
         <div class="card-header">
-            <div class="card-title">${escapeHtml(prompt.name)}</div>
+            <div class="card-title">${escapeHtml(displayName)}</div>
         </div>
         <div class="card-meta">
             Created: ${new Date(prompt.createdAt).toLocaleString()}
             ${prompt.updatedAt ? ` | Updated: ${new Date(prompt.updatedAt).toLocaleString()}` : ''}
         </div>
-        <div style="margin-top: 10px; padding: 10px; background-color: #f8f9fa; border-radius: 4px; white-space: pre-wrap;">${escapeHtml(prompt.promptText)}</div>
+        <div style="margin-top: 10px; padding: 10px; background-color: var(--bg-tertiary); border-radius: 4px; white-space: pre-wrap;">${escapeHtml(prompt.promptText)}</div>
         ${prompt.groups && prompt.groups.length > 0 ? `
             <div style="margin-top: 8px;">
                 ${prompt.groups.map(g => `<span class="badge">${escapeHtml(g.name)}</span>`).join('')}
             </div>
         ` : ''}
         <div class="card-actions">
-            <button data-action="add-to-group-prompt" data-prompt-id="${prompt.id}" data-prompt-name="${escapeHtml(prompt.name)}">Add to Group</button>
-            <button data-action="edit-prompt" data-prompt-id="${prompt.id}" data-prompt-name="${escapeHtml(prompt.name)}" data-prompt-text="${escapeHtml(prompt.promptText)}">Edit</button>
+            <button class="execute" data-action="execute-prompt" data-prompt-id="${prompt.id}">Execute</button>
+            <button data-action="add-to-group-prompt" data-prompt-id="${prompt.id}" data-prompt-name="${escapeHtml(displayName)}">Add to Group</button>
+            <button data-action="edit-prompt" data-prompt-id="${prompt.id}" data-prompt-name="${escapeHtml(prompt.name || '')}" data-prompt-text="${escapeHtml(prompt.promptText)}">Edit</button>
             <button class="delete" data-action="delete-prompt" data-prompt-id="${prompt.id}">Delete</button>
         </div>
+        <div id="execution-result-${prompt.id}" class="execution-result" style="display: none;"></div>
     `;
     
     // Attach event listeners
+    div.querySelector('[data-action="execute-prompt"]').addEventListener('click', (e) => {
+        executePrompt(e.target.dataset.promptId);
+    });
     div.querySelector('[data-action="add-to-group-prompt"]').addEventListener('click', (e) => {
         showQuickAddToGroup(e.target.dataset.promptId, 'prompt', e.target.dataset.promptName);
     });
@@ -255,24 +465,85 @@ function createPromptCard(prompt) {
     return div;
 }
 
+// Execute prompt
+async function executePrompt(promptId) {
+    try {
+        const resultDiv = document.getElementById(`execution-result-${promptId}`);
+        resultDiv.style.display = 'block';
+        resultDiv.innerHTML = '<div class="loading-indicator">Executing prompt...</div>';
+        
+        const response = await fetch(`${API_BASE}/prompts/${promptId}/execute`, {
+            method: 'POST'
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            resultDiv.innerHTML = `
+                <strong>Execution Result:</strong>
+                <pre>${escapeHtml(JSON.stringify(result, null, 2))}</pre>
+            `;
+            showMessage('Prompt executed successfully');
+        } else {
+            const error = await response.json();
+            resultDiv.innerHTML = `
+                <strong style="color: var(--danger-color);">Execution Failed:</strong>
+                <pre>${escapeHtml(JSON.stringify(error, null, 2))}</pre>
+            `;
+            showMessage('Failed to execute prompt', 'error');
+        }
+    } catch (error) {
+        const resultDiv = document.getElementById(`execution-result-${promptId}`);
+        resultDiv.innerHTML = `
+            <strong style="color: var(--danger-color);">Error:</strong>
+            <pre>${escapeHtml(error.message)}</pre>
+        `;
+        showMessage('Error executing prompt: ' + error.message, 'error');
+    }
+}
+
 let isEditingPrompt = false;
 
 document.getElementById('prompt-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const id = document.getElementById('prompt-id').value;
-    const name = document.getElementById('prompt-name').value;
-    const text = document.getElementById('prompt-text').value;
+    const name = document.getElementById('prompt-name').value.trim();
+    const text = document.getElementById('prompt-text').value.trim();
+    const fileInput = document.getElementById('prompt-file');
     
-    const data = { name, promptText: text };
+    // Client-side validation
+    let isValid = true;
+    
+    if (!text) {
+        validateField(
+            document.getElementById('prompt-text'),
+            'prompt-text-error',
+            (val) => val.trim().length > 0,
+            'Prompt text is required'
+        );
+        isValid = false;
+    } else {
+        clearFieldError(document.getElementById('prompt-text'), 'prompt-text-error');
+    }
+    
+    if (!isValid) {
+        showMessage('Please fix validation errors', 'error');
+        return;
+    }
     
     try {
+        const formData = new FormData();
+        if (name) formData.append('name', name);
+        formData.append('promptText', text);
+        if (fileInput.files && fileInput.files.length > 0) {
+            formData.append('file', fileInput.files[0]);
+        }
+        
         const url = isEditingPrompt ? `${API_BASE}/prompts/${id}` : `${API_BASE}/prompts`;
         const method = isEditingPrompt ? 'PUT' : 'POST';
         
         const response = await fetch(url, {
             method,
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data)
+            body: formData
         });
         
         if (response.ok) {
@@ -281,7 +552,7 @@ document.getElementById('prompt-form').addEventListener('submit', async (e) => {
             loadPrompts(true);
         } else {
             const error = await response.json();
-            showMessage(error.detail || 'Error saving prompt', 'error');
+            showMessage(error, 'error');
         }
     } catch (error) {
         showMessage('Error saving prompt: ' + error.message, 'error');
@@ -304,6 +575,8 @@ function cancelEditPrompt() {
     document.getElementById('prompt-id').value = '';
     document.getElementById('prompt-submit-btn').textContent = 'Add Prompt';
     document.getElementById('prompt-cancel-btn').style.display = 'none';
+    clearFieldError(document.getElementById('prompt-text'), 'prompt-text-error');
+    clearFieldError(document.getElementById('prompt-name'), 'prompt-name-error');
 }
 
 document.getElementById('prompt-cancel-btn').addEventListener('click', cancelEditPrompt);
@@ -321,7 +594,7 @@ async function deletePrompt(id) {
             loadPrompts(true);
         } else {
             const error = await response.json();
-            showMessage(error.detail || 'Error deleting prompt', 'error');
+            showMessage(error, 'error');
         }
     } catch (error) {
         showMessage('Error deleting prompt: ' + error.message, 'error');
@@ -381,15 +654,15 @@ function createGroupCard(group) {
         <div class="card-header">
             <div class="card-title">${escapeHtml(group.name)}</div>
         </div>
-        ${group.description ? `<div style="margin-bottom: 10px; color: #555;">${escapeHtml(group.description)}</div>` : ''}
+        ${group.description ? `<div style="margin-bottom: 10px; color: var(--text-secondary);">${escapeHtml(group.description)}</div>` : ''}
         <div class="card-meta">Created: ${new Date(group.createdAt).toLocaleString()}</div>
         <div class="group-resources">
-            <div class="group-resources-title">Files (${group.files.length}):</div>
-            ${group.files && group.files.length > 0 ? group.files.map(f => `<span class="badge">${escapeHtml(f.label)}</span>`).join('') : '<span style="color: #95a5a6; font-size: 0.85rem;">No files</span>'}
+            <div class="group-resources-title">Files (${group.files?.length || 0}):</div>
+            ${group.files && group.files.length > 0 ? group.files.map(f => `<span class="badge">${escapeHtml(f.label)}</span>`).join('') : '<span style="color: var(--text-tertiary); font-size: 0.85rem;">No files</span>'}
         </div>
         <div class="group-resources">
-            <div class="group-resources-title">Prompts (${group.prompts.length}):</div>
-            ${group.prompts && group.prompts.length > 0 ? group.prompts.map(p => `<span class="badge">${escapeHtml(p.name)}</span>`).join('') : '<span style="color: #95a5a6; font-size: 0.85rem;">No prompts</span>'}
+            <div class="group-resources-title">Prompts (${group.prompts?.length || 0}):</div>
+            ${group.prompts && group.prompts.length > 0 ? group.prompts.map(p => `<span class="badge">${escapeHtml(p.name || 'Unnamed')}</span>`).join('') : '<span style="color: var(--text-tertiary); font-size: 0.85rem;">No prompts</span>'}
         </div>
         <div class="card-actions">
             <button data-action="manage-group" data-group-id="${group.id}" data-group-name="${escapeHtml(group.name)}">Manage Resources</button>
@@ -439,7 +712,7 @@ document.getElementById('group-form').addEventListener('submit', async (e) => {
             loadAllGroups(); // Refresh groups cache
         } else {
             const error = await response.json();
-            showMessage(error.detail || 'Error saving group', 'error');
+            showMessage(error, 'error');
         }
     } catch (error) {
         showMessage('Error saving group: ' + error.message, 'error');
@@ -480,7 +753,7 @@ async function deleteGroup(id) {
             loadAllGroups(); // Refresh groups cache
         } else {
             const error = await response.json();
-            showMessage(error.detail || 'Error deleting group', 'error');
+            showMessage(error, 'error');
         }
     } catch (error) {
         showMessage('Error deleting group: ' + error.message, 'error');
@@ -493,20 +766,22 @@ async function manageGroupResources(groupId, groupName) {
         const [filesRes, promptsRes, groupRes] = await Promise.all([
             fetch(`${API_BASE}/files?page=1&pageSize=100`),
             fetch(`${API_BASE}/prompts?page=1&pageSize=100`),
-            fetch(`${API_BASE}/groups?page=1&pageSize=100`)
+            fetch(`${API_BASE}/groups/${groupId}`)
         ]);
+        
+        if (!filesRes.ok || !promptsRes.ok || !groupRes.ok) {
+            throw new Error('Failed to load resources');
+        }
         
         const filesResult = await filesRes.json();
         const promptsResult = await promptsRes.json();
-        const groupsResult = await groupRes.json();
+        const currentGroup = await groupRes.json();
         
         const allFiles = filesResult.data || [];
         const allPrompts = promptsResult.data || [];
-        const groups = groupsResult.data || [];
-        const currentGroup = groups.find(g => g.id === groupId);
         
-        const groupFileIds = new Set(currentGroup.files.map(f => f.id));
-        const groupPromptIds = new Set(currentGroup.prompts.map(p => p.id));
+        const groupFileIds = new Set((currentGroup.files || []).map(f => f.id));
+        const groupPromptIds = new Set((currentGroup.prompts || []).map(p => p.id));
         
         const modalBody = document.getElementById('modal-content-body');
         modalBody.innerHTML = `
@@ -528,7 +803,7 @@ async function manageGroupResources(groupId, groupName) {
                             </label>
                         </div>
                     `).join('')}
-                    ${allFiles.length === 0 ? '<p style="color: #95a5a6;">No files available</p>' : ''}
+                    ${allFiles.length === 0 ? '<p style="color: var(--text-tertiary);">No files available</p>' : ''}
                 </div>
             </div>
             
@@ -544,11 +819,11 @@ async function manageGroupResources(groupId, groupName) {
                                     data-action="toggle-prompt"
                                     data-group-id="${groupId}"
                                     data-prompt-id="${prompt.id}">
-                                ${escapeHtml(prompt.name)}
+                                ${escapeHtml(prompt.name || 'Unnamed Prompt')}
                             </label>
                         </div>
                     `).join('')}
-                    ${allPrompts.length === 0 ? '<p style="color: #95a5a6;">No prompts available</p>' : ''}
+                    ${allPrompts.length === 0 ? '<p style="color: var(--text-tertiary);">No prompts available</p>' : ''}
                 </div>
             </div>
         `;
@@ -655,7 +930,7 @@ async function toggleFileInGroup(groupId, fileId, add) {
             showMessage(add ? 'File added to group' : 'File removed from group');
         } else {
             const error = await response.json();
-            showMessage(error.detail || 'Error updating group', 'error');
+            showMessage(error, 'error');
         }
     } catch (error) {
         showMessage('Error updating group: ' + error.message, 'error');
@@ -673,7 +948,7 @@ async function togglePromptInGroup(groupId, promptId, add) {
             showMessage(add ? 'Prompt added to group' : 'Prompt removed from group');
         } else {
             const error = await response.json();
-            showMessage(error.detail || 'Error updating group', 'error');
+            showMessage(error, 'error');
         }
     } catch (error) {
         showMessage('Error updating group: ' + error.message, 'error');
@@ -701,6 +976,13 @@ function formatFileSize(bytes) {
 
 // Close modal event listener
 document.getElementById('close-modal-btn').addEventListener('click', closeManageGroupModal);
+document.getElementById('close-preview-btn').addEventListener('click', closePreviewModal);
+
+// Close execution modal
+function closeExecutionModal() {
+    document.getElementById('execution-modal').classList.remove('active');
+}
+document.getElementById('close-execution-btn').addEventListener('click', closeExecutionModal);
 
 // Infinite scroll implementation
 function setupInfiniteScroll() {
@@ -733,6 +1015,7 @@ function setupInfiniteScroll() {
 
 // Initial load
 async function init() {
+    initTheme();
     await Promise.all([
         loadFiles(),
         loadPrompts(),

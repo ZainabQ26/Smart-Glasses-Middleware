@@ -16,6 +16,7 @@ public class AdminController : ControllerBase
     private readonly ApplicationDbContext _context;
     private readonly IMediaStorageService _mediaStorageService;
     private readonly ICacheService _cacheService;
+    private readonly IAIService _aiService;
     private readonly ILogger<AdminController> _logger;
     private const int DefaultPageSize = 20;
     private const int MaxPageSize = 100;
@@ -24,11 +25,13 @@ public class AdminController : ControllerBase
         ApplicationDbContext context,
         IMediaStorageService mediaStorageService,
         ICacheService cacheService,
+        IAIService aiService,
         ILogger<AdminController> logger)
     {
         _context = context;
         _mediaStorageService = mediaStorageService;
         _cacheService = cacheService;
+        _aiService = aiService;
         _logger = logger;
     }
 
@@ -170,6 +173,40 @@ public class AdminController : ControllerBase
     }
 
     /// <summary>
+    /// Download a managed file
+    /// </summary>
+    [HttpGet("files/{id}/download")]
+    public async Task<ActionResult> DownloadFile(Guid id)
+    {
+        var file = await _context.ManagedFiles.FindAsync(id);
+        if (file == null)
+        {
+            return NotFound(new ProblemDetails
+            {
+                Title = "Not Found",
+                Detail = $"File with ID {id} not found",
+                Status = StatusCodes.Status404NotFound
+            });
+        }
+
+        try
+        {
+            var stream = await _mediaStorageService.DownloadMediaAsync(file.StorageKey);
+            return File(stream, file.ContentType, file.FileName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error downloading file {FileId}", id);
+            return StatusCode(500, new ProblemDetails
+            {
+                Title = "Internal Server Error",
+                Detail = "An error occurred while downloading the file. The file may have been deleted from storage.",
+                Status = StatusCodes.Status500InternalServerError
+            });
+        }
+    }
+
+    /// <summary>
     /// Delete a managed file
     /// </summary>
     [HttpDelete("files/{id}")]
@@ -251,6 +288,9 @@ public class AdminController : ControllerBase
                 p.PromptText,
                 p.CreatedAt,
                 p.UpdatedAt,
+                p.FileId,
+                p.FileName,
+                p.ContentType,
                 Groups = p.PromptGroups.Select(pg => new { pg.ResourceGroup.Id, pg.ResourceGroup.Name })
             })
             .ToListAsync();
@@ -276,21 +316,11 @@ public class AdminController : ControllerBase
     }
 
     /// <summary>
-    /// Create a new prompt
+    /// Create a new prompt with optional file attachment
     /// </summary>
     [HttpPost("prompts")]
-    public async Task<ActionResult> CreatePrompt([FromBody] PromptRequest request)
+    public async Task<ActionResult> CreatePrompt([FromForm] PromptFileRequest request)
     {
-        if (string.IsNullOrWhiteSpace(request.Name))
-        {
-            return BadRequest(new ProblemDetails
-            {
-                Title = "Bad Request",
-                Detail = "Name is required",
-                Status = StatusCodes.Status400BadRequest
-            });
-        }
-
         if (string.IsNullOrWhiteSpace(request.PromptText))
         {
             return BadRequest(new ProblemDetails
@@ -311,6 +341,19 @@ public class AdminController : ControllerBase
                 CreatedAt = DateTime.UtcNow
             };
 
+            // Handle file upload if provided
+            if (request.File != null && request.File.Length > 0)
+            {
+                using var stream = request.File.OpenReadStream();
+                var contentType = request.File.ContentType ?? "application/octet-stream";
+                var storageKey = await _mediaStorageService.UploadMediaAsync(stream, request.File.FileName, contentType);
+
+                prompt.FileId = Guid.NewGuid();
+                prompt.FileName = request.File.FileName;
+                prompt.StorageKey = storageKey;
+                prompt.ContentType = contentType;
+            }
+
             _context.ManagedPrompts.Add(prompt);
             await _context.SaveChangesAsync();
 
@@ -323,7 +366,10 @@ public class AdminController : ControllerBase
                 prompt.Name,
                 prompt.PromptText,
                 prompt.CreatedAt,
-                prompt.UpdatedAt
+                prompt.UpdatedAt,
+                prompt.FileId,
+                prompt.FileName,
+                prompt.ContentType
             });
         }
         catch (Exception ex)
@@ -339,10 +385,10 @@ public class AdminController : ControllerBase
     }
 
     /// <summary>
-    /// Update an existing prompt
+    /// Update an existing prompt with optional file attachment
     /// </summary>
     [HttpPut("prompts/{id}")]
-    public async Task<ActionResult> UpdatePrompt(Guid id, [FromBody] PromptRequest request)
+    public async Task<ActionResult> UpdatePrompt(Guid id, [FromForm] PromptFileRequest request)
     {
         var prompt = await _context.ManagedPrompts.FindAsync(id);
         if (prompt == null)
@@ -352,16 +398,6 @@ public class AdminController : ControllerBase
                 Title = "Not Found",
                 Detail = $"Prompt with ID {id} not found",
                 Status = StatusCodes.Status404NotFound
-            });
-        }
-
-        if (string.IsNullOrWhiteSpace(request.Name))
-        {
-            return BadRequest(new ProblemDetails
-            {
-                Title = "Bad Request",
-                Detail = "Name is required",
-                Status = StatusCodes.Status400BadRequest
             });
         }
 
@@ -381,6 +417,32 @@ public class AdminController : ControllerBase
             prompt.PromptText = request.PromptText;
             prompt.UpdatedAt = DateTime.UtcNow;
 
+            // Handle file upload if provided
+            if (request.File != null && request.File.Length > 0)
+            {
+                // Delete old file if exists
+                if (!string.IsNullOrEmpty(prompt.StorageKey))
+                {
+                    try
+                    {
+                        await _mediaStorageService.DeleteMediaAsync(prompt.StorageKey);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to delete old prompt file");
+                    }
+                }
+
+                using var stream = request.File.OpenReadStream();
+                var contentType = request.File.ContentType ?? "application/octet-stream";
+                var storageKey = await _mediaStorageService.UploadMediaAsync(stream, request.File.FileName, contentType);
+
+                prompt.FileId = Guid.NewGuid();
+                prompt.FileName = request.File.FileName;
+                prompt.StorageKey = storageKey;
+                prompt.ContentType = contentType;
+            }
+
             await _context.SaveChangesAsync();
 
             // Invalidate cache
@@ -392,7 +454,10 @@ public class AdminController : ControllerBase
                 prompt.Name,
                 prompt.PromptText,
                 prompt.CreatedAt,
-                prompt.UpdatedAt
+                prompt.UpdatedAt,
+                prompt.FileId,
+                prompt.FileName,
+                prompt.ContentType
             });
         }
         catch (Exception ex)
@@ -426,6 +491,19 @@ public class AdminController : ControllerBase
 
         try
         {
+            // Delete associated file if exists
+            if (!string.IsNullOrEmpty(prompt.StorageKey))
+            {
+                try
+                {
+                    await _mediaStorageService.DeleteMediaAsync(prompt.StorageKey);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to delete prompt file");
+                }
+            }
+
             _context.ManagedPrompts.Remove(prompt);
             await _context.SaveChangesAsync();
 
@@ -441,6 +519,49 @@ public class AdminController : ControllerBase
             {
                 Title = "Internal Server Error",
                 Detail = "An error occurred while deleting the prompt",
+                Status = StatusCodes.Status500InternalServerError
+            });
+        }
+    }
+
+    /// <summary>
+    /// Execute a prompt and get AI response
+    /// </summary>
+    [HttpPost("prompts/{id}/execute")]
+    public async Task<ActionResult> ExecutePrompt(Guid id)
+    {
+        var prompt = await _context.ManagedPrompts.FindAsync(id);
+        if (prompt == null)
+        {
+            return NotFound(new ProblemDetails
+            {
+                Title = "Not Found",
+                Detail = $"Prompt with ID {id} not found",
+                Status = StatusCodes.Status404NotFound
+            });
+        }
+
+        try
+        {
+            var (task, response, usedAdvancedModel) = await _aiService.ProcessRequestAsync(prompt.PromptText);
+
+            return Ok(new
+            {
+                promptId = prompt.Id,
+                promptText = prompt.PromptText,
+                task,
+                response,
+                usedAdvancedModel,
+                executedAt = DateTime.UtcNow
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error executing prompt {PromptId}", id);
+            return StatusCode(500, new ProblemDetails
+            {
+                Title = "Internal Server Error",
+                Detail = "An error occurred while executing the prompt. The AI service may be unavailable.",
                 Status = StatusCodes.Status500InternalServerError
             });
         }

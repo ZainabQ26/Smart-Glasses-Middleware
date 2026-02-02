@@ -21,6 +21,16 @@ public class PromptRequest
 }
 
 /// <summary>
+/// Request model for creating or updating a prompt with optional file
+/// </summary>
+public class PromptFileRequest
+{
+    public string? Name { get; set; }
+    public string PromptText { get; set; } = string.Empty;
+    public IFormFile? File { get; set; }
+}
+
+/// <summary>
 /// Request model for creating or updating a resource group
 /// </summary>
 public class GroupRequest
