@@ -1,5 +1,48 @@
 const API_BASE = '/api/admin';
 
+// Enhanced fetch with retry logic and cache busting
+async function fetchWithRetry(url, options = {}, retries = 3) {
+    // Add cache busting parameter and no-cache headers
+    const cacheBuster = `_=${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    const separator = url.includes('?') ? '&' : '?';
+    const bustUrl = `${url}${separator}${cacheBuster}`;
+    
+    // Force no-cache headers
+    const fetchOptions = {
+        ...options,
+        headers: {
+            ...options.headers,
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+        },
+        cache: 'no-store'
+    };
+    
+    for (let i = 0; i < retries; i++) {
+        try {
+            console.log(`[API] Request: ${fetchOptions.method || 'GET'} ${url}${i > 0 ? ` (retry ${i})` : ''}`);
+            const response = await fetch(bustUrl, fetchOptions);
+            console.log(`[API] Response: ${response.status} ${response.statusText} for ${url}`);
+            
+            if (!response.ok && response.status >= 500 && i < retries - 1) {
+                console.warn(`[API] Server error, retrying in ${(i + 1) * 500}ms...`);
+                await new Promise(resolve => setTimeout(resolve, (i + 1) * 500));
+                continue;
+            }
+            
+            return response;
+        } catch (error) {
+            console.error(`[API] Network error on attempt ${i + 1}:`, error);
+            if (i < retries - 1) {
+                await new Promise(resolve => setTimeout(resolve, (i + 1) * 500));
+                continue;
+            }
+            throw error;
+        }
+    }
+}
+
 // Pagination state
 const state = {
     files: { page: 1, pageSize: 20, hasMore: true, loading: false, data: [] },
@@ -59,8 +102,17 @@ async function loadFiles(reset = false) {
     showLoading('files-list');
     
     try {
-        const response = await fetch(`${API_BASE}/files?page=${state.files.page}&pageSize=${state.files.pageSize}`);
+        const response = await fetchWithRetry(`${API_BASE}/files?page=${state.files.page}&pageSize=${state.files.pageSize}`);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
         const result = await response.json();
+        console.log('Files API response:', result);
+        console.log('Files data length:', result.data?.length || 0);
+        console.log('Files pagination:', result.pagination);
+        
         const list = document.getElementById('files-list');
         
         hideLoading('files-list');
@@ -217,8 +269,16 @@ async function loadPrompts(reset = false) {
     showLoading('prompts-list');
     
     try {
-        const response = await fetch(`${API_BASE}/prompts?page=${state.prompts.page}&pageSize=${state.prompts.pageSize}`);
+        const response = await fetchWithRetry(`${API_BASE}/prompts?page=${state.prompts.page}&pageSize=${state.prompts.pageSize}`);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
         const result = await response.json();
+        console.log('Prompts API response:', result);
+        console.log('Prompts data length:', result.data?.length || 0);
+        
         const list = document.getElementById('prompts-list');
         
         hideLoading('prompts-list');
@@ -374,8 +434,16 @@ async function loadGroups(reset = false) {
     showLoading('groups-list');
     
     try {
-        const response = await fetch(`${API_BASE}/groups?page=${state.groups.page}&pageSize=${state.groups.pageSize}`);
+        const response = await fetchWithRetry(`${API_BASE}/groups?page=${state.groups.page}&pageSize=${state.groups.pageSize}`);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
         const result = await response.json();
+        console.log('Groups API response:', result);
+        console.log('Groups data length:', result.data?.length || 0);
+        
         const list = document.getElementById('groups-list');
         
         hideLoading('groups-list');
@@ -520,23 +588,69 @@ async function deleteGroup(id) {
 // Manage Group Resources (existing modal functionality)
 async function manageGroupResources(groupId, groupName) {
     try {
-        const [filesRes, promptsRes, groupRes] = await Promise.all([
-            fetch(`${API_BASE}/files?page=1&pageSize=100`),
-            fetch(`${API_BASE}/prompts?page=1&pageSize=100`),
-            fetch(`${API_BASE}/groups?page=1&pageSize=100`)
-        ]);
+        console.log('Looking for group ID:', groupId);
+        console.log('State groups data:', state.groups.data);
+        console.log('State groups IDs:', state.groups.data.map(g => g.id));
         
-        const filesResult = await filesRes.json();
-        const promptsResult = await promptsRes.json();
-        const groupsResult = await groupRes.json();
+        // Use the already-loaded group from state, or fetch if not found
+        let currentGroup = state.groups.data.find(g => g.id === groupId);
         
-        const allFiles = filesResult.data || [];
-        const allPrompts = promptsResult.data || [];
-        const groups = groupsResult.data || [];
-        const currentGroup = groups.find(g => g.id === groupId);
+        console.log('Found group in state:', currentGroup);
         
-        const groupFileIds = new Set(currentGroup.files.map(f => f.id));
-        const groupPromptIds = new Set(currentGroup.prompts.map(p => p.id));
+        if (!currentGroup) {
+            // Fallback: try to fetch the specific group's data from the groups list
+            console.log('Group not in state, fetching fresh groups...');
+            const groupRes = await fetch(`${API_BASE}/groups?page=1&pageSize=1000`);
+            const groupsResult = await groupRes.json();
+            const groups = groupsResult.data || [];
+            currentGroup = groups.find(g => g.id === groupId);
+            
+            if (!currentGroup) {
+                throw new Error('Group not found even after refresh');
+            }
+            
+            console.log('Using fetched group:', currentGroup);
+        }
+        
+        // ALWAYS fetch files and prompts fresh - don't rely on state cache
+        let allFiles = [];
+        let allPrompts = [];
+        
+        try {
+            console.log('[MANAGE] Fetching all files and prompts for manage resources...');
+            const [filesRes, promptsRes] = await Promise.all([
+                fetchWithRetry(`${API_BASE}/files?page=1&pageSize=1000`),
+                fetchWithRetry(`${API_BASE}/prompts?page=1&pageSize=1000`)
+            ]);
+            
+            if (filesRes.ok) {
+                const filesResult = await filesRes.json();
+                console.log('[MANAGE] Files response:', filesResult);
+                allFiles = filesResult.data || [];
+                console.log('[MANAGE] Fetched files:', allFiles.length, allFiles);
+            } else {
+                console.error('[MANAGE] Failed to load files:', filesRes.status, await filesRes.text());
+            }
+            
+            if (promptsRes.ok) {
+                const promptsResult = await promptsRes.json();
+                console.log('[MANAGE] Prompts response:', promptsResult);
+                allPrompts = promptsResult.data || [];
+                console.log('[MANAGE] Fetched prompts:', allPrompts.length, allPrompts);
+            } else {
+                console.error('[MANAGE] Failed to load prompts:', promptsRes.status, await promptsRes.text());
+            }
+        } catch (fetchError) {
+            console.error('Error fetching resources:', fetchError);
+            showMessage('Error loading resources: ' + fetchError.message, 'error');
+        }
+        
+        if (allFiles.length === 0 && allPrompts.length === 0) {
+            console.warn('No files or prompts returned from API');
+        }
+        
+        const groupFileIds = new Set((currentGroup.files || []).map(f => f.id));
+        const groupPromptIds = new Set((currentGroup.prompts || []).map(p => p.id));
         
         const modalBody = document.getElementById('modal-content-body');
         modalBody.innerHTML = `
@@ -604,7 +718,12 @@ async function manageGroupResources(groupId, groupName) {
 // Quick add to group functionality
 async function loadAllGroups() {
     try {
-        const response = await fetch(`${API_BASE}/groups?page=1&pageSize=100`);
+        const response = await fetchWithRetry(`${API_BASE}/groups?page=1&pageSize=100`);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
         const result = await response.json();
         state.allGroups = result.data || [];
     } catch (error) {
@@ -683,12 +802,35 @@ async function toggleFileInGroup(groupId, fileId, add) {
         
         if (response.ok || response.status === 204) {
             showMessage(add ? 'File added to group' : 'File removed from group');
+            
+            // Update the group in state cache
+            const groupInState = state.groups.data.find(g => g.id === groupId);
+            if (groupInState) {
+                if (!groupInState.files) groupInState.files = [];
+                if (add) {
+                    // Add file to cache if not already there
+                    if (!groupInState.files.find(f => f.id === fileId)) {
+                        const allFiles = state.files.data;
+                        const fileToAdd = allFiles.find(f => f.id === fileId);
+                        if (fileToAdd) groupInState.files.push(fileToAdd);
+                    }
+                } else {
+                    // Remove file from cache
+                    groupInState.files = groupInState.files.filter(f => f.id !== fileId);
+                }
+            }
+            
+            // Refresh groups display to show updated counts
+            loadGroups(true);
+            await loadAllGroups();
         } else {
             const error = await response.json();
             showMessage(error.detail || 'Error updating group', 'error');
+            throw new Error(error.detail || 'Error updating group');
         }
     } catch (error) {
         showMessage('Error updating group: ' + error.message, 'error');
+        throw error;
     }
 }
 
@@ -701,12 +843,35 @@ async function togglePromptInGroup(groupId, promptId, add) {
         
         if (response.ok || response.status === 204) {
             showMessage(add ? 'Prompt added to group' : 'Prompt removed from group');
+            
+            // Update the group in state cache
+            const groupInState = state.groups.data.find(g => g.id === groupId);
+            if (groupInState) {
+                if (!groupInState.prompts) groupInState.prompts = [];
+                if (add) {
+                    // Add prompt to cache if not already there
+                    if (!groupInState.prompts.find(p => p.id === promptId)) {
+                        const allPrompts = state.prompts.data;
+                        const promptToAdd = allPrompts.find(p => p.id === promptId);
+                        if (promptToAdd) groupInState.prompts.push(promptToAdd);
+                    }
+                } else {
+                    // Remove prompt from cache
+                    groupInState.prompts = groupInState.prompts.filter(p => p.id !== promptId);
+                }
+            }
+            
+            // Refresh groups display to show updated counts
+            loadGroups(true);
+            await loadAllGroups();
         } else {
             const error = await response.json();
             showMessage(error.detail || 'Error updating group', 'error');
+            throw new Error(error.detail || 'Error updating group');
         }
     } catch (error) {
         showMessage('Error updating group: ' + error.message, 'error');
+        throw error;
     }
 }
 
@@ -761,15 +926,79 @@ function setupInfiniteScroll() {
     });
 }
 
-// Initial load
-async function init() {
-    await Promise.all([
-        loadFiles(),
-        loadPrompts(),
-        loadGroups(),
-        loadAllGroups()
-    ]);
-    setupInfiniteScroll();
+// Wait for API to be ready
+async function waitForAPI(maxRetries = 10, delayMs = 500) {
+    for (let i = 0; i < maxRetries; i++) {
+        try {
+            console.log(`[API Health] Checking API health (attempt ${i + 1}/${maxRetries})...`);
+            const response = await fetch(`${API_BASE}/files?page=1&pageSize=1`);
+            if (response.ok) {
+                console.log('[API Health] API is ready!');
+                return true;
+            }
+            console.warn(`[API Health] API returned ${response.status}, retrying...`);
+        } catch (error) {
+            console.warn(`[API Health] API not ready yet:`, error.message);
+        }
+        
+        if (i < maxRetries - 1) {
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+        }
+    }
+    
+    console.error('[API Health] API failed to become ready after', maxRetries, 'attempts');
+    return false;
 }
 
-init();
+// Initial load
+async function init() {
+    console.log('[INIT] Starting admin panel initialization...');
+    console.log('[INIT] Current time:', new Date().toISOString());
+    console.log('[INIT] API Base:', API_BASE);
+    
+    // Wait for API to be ready
+    const apiReady = await waitForAPI();
+    if (!apiReady) {
+        showMessage('API is not responding. Please refresh the page.', 'error');
+        alert('ERROR: The backend API is not responding. Please wait a moment and refresh the page.');
+        return;
+    }
+    
+    try {
+        // Load initial data with reset=true to ensure fresh load
+        console.log('[INIT] Loading initial data...');
+        const results = await Promise.allSettled([
+            loadFiles(true),
+            loadPrompts(true),
+            loadGroups(true),
+            loadAllGroups()
+        ]);
+        
+        // Check for failures
+        const failures = results.filter(r => r.status === 'rejected');
+        if (failures.length > 0) {
+            console.error('[INIT] Some data failed to load:', failures);
+            showMessage('Warning: Some data failed to load. Check console.', 'error');
+        } else {
+            console.log('[INIT] Initial data loaded successfully');
+        }
+        
+        setupInfiniteScroll();
+        console.log('[INIT] Infinite scroll setup complete');
+        console.log('[INIT] State:', JSON.stringify({
+            filesCount: state.files.data.length,
+            promptsCount: state.prompts.data.length,
+            groupsCount: state.groups.data.length
+        }));
+    } catch (error) {
+        console.error('[INIT] Error during initialization:', error);
+        showMessage('Error loading initial data: ' + error.message, 'error');
+    }
+}
+
+// Wait for DOM to be ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+} else {
+    init();
+}
