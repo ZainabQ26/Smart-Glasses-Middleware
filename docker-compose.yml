@@ -32,7 +32,7 @@ services:
     expose:
       - "5432"
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
@@ -55,23 +55,20 @@ services:
   minio:
     image: quay.io/minio/minio:latest
     container_name: smartglasses-minio
-    # Read MinIO credentials from secrets mounted at /run/secrets and then start
-    command: sh -c "export MINIO_ROOT_USER=$(cat /run/secrets/minio_access_key) && export MINIO_ROOT_PASSWORD=$(cat /run/secrets/minio_secret_key) && exec minio server /data --console-address ':9001'"
+    command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
     expose:
       - "9000"
       - "9001"
     volumes:
       - minio-data:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD-SHELL", "mc ready local || exit 1"]
       interval: 30s
       timeout: 20s
       retries: 3
-    secrets:
-      - minio_access_key
-      - minio_secret_key
 
   ollama:
     image: ollama/ollama:latest
@@ -114,7 +111,7 @@ services:
       minio:
         condition: service_healthy
       ollama:
-        condition: service_healthy
+        condition: service_started
       # no faster-whisper or model-downloader dependencies
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health || exit 1"]
