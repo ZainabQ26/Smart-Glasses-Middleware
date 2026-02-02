@@ -16,8 +16,7 @@ public class ManagedPrompt
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
     
-    // Optional file attachment
-    public Guid? FileId { get; set; }
+    // Optional file attachment metadata
     public string? FileName { get; set; }
     public string? StorageKey { get; set; }
     public string? ContentType { get; set; }

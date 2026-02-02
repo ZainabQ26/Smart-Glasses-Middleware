@@ -288,7 +288,6 @@ public class AdminController : ControllerBase
                 p.PromptText,
                 p.CreatedAt,
                 p.UpdatedAt,
-                p.FileId,
                 p.FileName,
                 p.ContentType,
                 Groups = p.PromptGroups.Select(pg => new { pg.ResourceGroup.Id, pg.ResourceGroup.Name })
@@ -348,7 +347,6 @@ public class AdminController : ControllerBase
                 var contentType = request.File.ContentType ?? "application/octet-stream";
                 var storageKey = await _mediaStorageService.UploadMediaAsync(stream, request.File.FileName, contentType);
 
-                prompt.FileId = Guid.NewGuid();
                 prompt.FileName = request.File.FileName;
                 prompt.StorageKey = storageKey;
                 prompt.ContentType = contentType;
@@ -367,7 +365,6 @@ public class AdminController : ControllerBase
                 prompt.PromptText,
                 prompt.CreatedAt,
                 prompt.UpdatedAt,
-                prompt.FileId,
                 prompt.FileName,
                 prompt.ContentType
             });
@@ -437,7 +434,6 @@ public class AdminController : ControllerBase
                 var contentType = request.File.ContentType ?? "application/octet-stream";
                 var storageKey = await _mediaStorageService.UploadMediaAsync(stream, request.File.FileName, contentType);
 
-                prompt.FileId = Guid.NewGuid();
                 prompt.FileName = request.File.FileName;
                 prompt.StorageKey = storageKey;
                 prompt.ContentType = contentType;
@@ -455,7 +451,6 @@ public class AdminController : ControllerBase
                 prompt.PromptText,
                 prompt.CreatedAt,
                 prompt.UpdatedAt,
-                prompt.FileId,
                 prompt.FileName,
                 prompt.ContentType
             });
