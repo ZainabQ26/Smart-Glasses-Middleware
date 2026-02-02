@@ -540,6 +540,12 @@
         </div>
     </div>
 
-    <script src="admin.js?v=2"></script>
+    <script>
+        // Force reload with timestamp
+        const timestamp = new Date().getTime();
+        const script = document.createElement('script');
+        script.src = `admin.js?v=${timestamp}`;
+        document.body.appendChild(script);
+    </script>
 </body>
 </html>
