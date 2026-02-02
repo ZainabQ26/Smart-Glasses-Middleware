@@ -109,6 +109,25 @@
             transition: border-color 0.3s ease;
         }
 
+        input[type="file"]::file-selector-button {
+            margin-right: 10px;
+            padding: 8px 16px;
+            background-color: #f0f0f0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        input[type="file"]::file-selector-button:hover {
+            background-color: #e0e0e0;
+        }
+
+        input[type="file"]::after {
+            content: ' (must be img or pdf)';
+            color: #7f8c8d;
+            font-size: 13px;
+        }
+
         input[type="text"]:focus,
         textarea:focus,
         select:focus {
@@ -432,7 +451,7 @@
                 <form id="upload-form">
                     <div class="form-group">
                         <label for="file-input">Select File</label>
-                        <input type="file" id="file-input" required>
+                        <input type="file" id="file-input" accept="image/*,.pdf" required>
                     </div>
                     <div class="form-group">
                         <label for="file-label">Label</label>
@@ -444,6 +463,13 @@
 
             <div class="section">
                 <h2>Uploaded Files</h2>
+                <div id="file-preview" style="display: none; margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 6px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <strong>Preview:</strong>
+                        <button type="button" id="close-preview" class="secondary" style="padding: 5px 10px; font-size: 12px;">Close</button>
+                    </div>
+                    <div id="preview-content" style="max-width: 100%; text-align: center;"></div>
+                </div>
                 <div id="files-list"></div>
             </div>
         </div>
