@@ -200,7 +200,7 @@ public class AdminController : ControllerBase
             return StatusCode(500, new ProblemDetails
             {
                 Title = "Internal Server Error",
-                Detail = "An error occurred while downloading the file. The file may have been deleted from storage.",
+                Detail = "An error occurred while downloading the file. Please try again or contact support if the issue persists.",
                 Status = StatusCodes.Status500InternalServerError
             });
         }
@@ -561,7 +561,7 @@ public class AdminController : ControllerBase
             return StatusCode(500, new ProblemDetails
             {
                 Title = "Internal Server Error",
-                Detail = "An error occurred while executing the prompt. The AI service may be unavailable.",
+                Detail = "An error occurred while executing the prompt. Please try again or contact support if the issue persists.",
                 Status = StatusCodes.Status500InternalServerError
             });
         }

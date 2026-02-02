@@ -241,7 +241,7 @@ async function previewFile(fileId, fileName, fileLabel) {
                 <div class="preview-container">
                     <img src="${url}" alt="${escapeHtml(fileName)}" />
                 </div>
-                <button onclick="downloadFileById('${fileId}', '${escapeHtml(fileName)}')">Download File</button>
+                <button id="preview-download-btn" data-file-id="${fileId}" data-file-name="${escapeHtml(fileName)}">Download File</button>
             `;
         }
         // PDF preview
@@ -251,7 +251,7 @@ async function previewFile(fileId, fileName, fileLabel) {
                 <div class="preview-container">
                     <iframe src="${url}" type="application/pdf"></iframe>
                 </div>
-                <button onclick="downloadFileById('${fileId}', '${escapeHtml(fileName)}')">Download File</button>
+                <button id="preview-download-btn" data-file-id="${fileId}" data-file-name="${escapeHtml(fileName)}">Download File</button>
             `;
         }
         // Text files
@@ -261,7 +261,7 @@ async function previewFile(fileId, fileName, fileLabel) {
                 <div class="preview-container">
                     <pre>${escapeHtml(text)}</pre>
                 </div>
-                <button onclick="downloadFileById('${fileId}', '${escapeHtml(fileName)}')">Download File</button>
+                <button id="preview-download-btn" data-file-id="${fileId}" data-file-name="${escapeHtml(fileName)}">Download File</button>
             `;
         }
         // No preview available
@@ -271,11 +271,19 @@ async function previewFile(fileId, fileName, fileLabel) {
                     <p style="text-align: center; color: var(--text-tertiary);">Preview not available for this file type</p>
                     <p style="text-align: center; margin-top: 10px;">File: ${escapeHtml(fileName)}</p>
                 </div>
-                <button onclick="downloadFileById('${fileId}', '${escapeHtml(fileName)}')">Download File</button>
+                <button id="preview-download-btn" data-file-id="${fileId}" data-file-name="${escapeHtml(fileName)}">Download File</button>
             `;
         }
         
         body.innerHTML = previewHTML;
+        
+        // Attach event listener to download button
+        const downloadBtn = body.querySelector('#preview-download-btn');
+        if (downloadBtn) {
+            downloadBtn.addEventListener('click', () => {
+                downloadFile(downloadBtn.dataset.fileId, downloadBtn.dataset.fileName);
+            });
+        }
     } catch (error) {
         showMessage('Error loading preview: ' + error.message, 'error');
         closePreviewModal();
@@ -301,11 +309,6 @@ async function downloadFile(fileId, fileName) {
     } catch (error) {
         showMessage('Error downloading file: ' + error.message, 'error');
     }
-}
-
-// Global function for download button in preview
-function downloadFileById(fileId, fileName) {
-    downloadFile(fileId, fileName);
 }
 
 function closePreviewModal() {
