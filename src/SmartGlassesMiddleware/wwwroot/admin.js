@@ -579,7 +579,6 @@ function cancelEditPrompt() {
     document.getElementById('prompt-submit-btn').textContent = 'Add Prompt';
     document.getElementById('prompt-cancel-btn').style.display = 'none';
     clearFieldError(document.getElementById('prompt-text'), 'prompt-text-error');
-    clearFieldError(document.getElementById('prompt-name'), 'prompt-name-error');
 }
 
 document.getElementById('prompt-cancel-btn').addEventListener('click', cancelEditPrompt);
@@ -665,7 +664,7 @@ function createGroupCard(group) {
         </div>
         <div class="group-resources">
             <div class="group-resources-title">Prompts (${group.prompts?.length || 0}):</div>
-            ${group.prompts && group.prompts.length > 0 ? group.prompts.map(p => `<span class="badge">${escapeHtml(p.name || 'Unnamed')}</span>`).join('') : '<span style="color: var(--text-tertiary); font-size: 0.85rem;">No prompts</span>'}
+            ${group.prompts && group.prompts.length > 0 ? group.prompts.map(p => `<span class="badge">${escapeHtml(p.name || 'Unnamed Prompt')}</span>`).join('') : '<span style="color: var(--text-tertiary); font-size: 0.85rem;">No prompts</span>'}
         </div>
         <div class="card-actions">
             <button data-action="manage-group" data-group-id="${group.id}" data-group-name="${escapeHtml(group.name)}">Manage Resources</button>
@@ -980,12 +979,6 @@ function formatFileSize(bytes) {
 // Close modal event listener
 document.getElementById('close-modal-btn').addEventListener('click', closeManageGroupModal);
 document.getElementById('close-preview-btn').addEventListener('click', closePreviewModal);
-
-// Close execution modal
-function closeExecutionModal() {
-    document.getElementById('execution-modal').classList.remove('active');
-}
-document.getElementById('close-execution-btn').addEventListener('click', closeExecutionModal);
 
 // Infinite scroll implementation
 function setupInfiniteScroll() {

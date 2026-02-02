@@ -630,7 +630,6 @@
                     <div class="form-group hidden">
                         <label for="prompt-name">Name (optional)</label>
                         <input type="text" id="prompt-name" placeholder="Enter prompt name">
-                        <div class="field-error" id="prompt-name-error"></div>
                     </div>
                     <div class="form-group">
                         <label for="prompt-text">Prompt Text *</label>
@@ -640,7 +639,6 @@
                     <div class="form-group">
                         <label for="prompt-file">Attachment (optional)</label>
                         <input type="file" id="prompt-file">
-                        <div class="field-error" id="prompt-file-error"></div>
                     </div>
                     <button type="submit" id="prompt-submit-btn">Add Prompt</button>
                     <button type="button" id="prompt-cancel-btn" class="secondary" style="display: none;">Cancel</button>
@@ -698,17 +696,6 @@
                 <button class="close-modal" id="close-preview-btn">&times;</button>
             </div>
             <div id="preview-body"></div>
-        </div>
-    </div>
-
-    <!-- Execution Result Modal -->
-    <div id="execution-modal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Execution Result</h3>
-                <button class="close-modal" id="close-execution-btn">&times;</button>
-            </div>
-            <div id="execution-body"></div>
         </div>
     </div>
 
