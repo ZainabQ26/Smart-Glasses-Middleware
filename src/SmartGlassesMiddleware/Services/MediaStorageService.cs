@@ -7,6 +7,7 @@ public interface IMediaStorageService
 {
     Task<string> UploadMediaAsync(Stream fileStream, string fileName, string contentType);
     Task<Stream> DownloadMediaAsync(string key);
+    Task DeleteMediaAsync(string key);
 }
 
 public class MinioMediaStorageService : IMediaStorageService
@@ -77,6 +78,25 @@ public class MinioMediaStorageService : IMediaStorageService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error downloading media from MinIO: {Key}", key);
+            throw;
+        }
+    }
+
+    public async Task DeleteMediaAsync(string key)
+    {
+        try
+        {
+            var removeObjectArgs = new RemoveObjectArgs()
+                .WithBucket(_bucketName)
+                .WithObject(key);
+
+            await _minioClient.RemoveObjectAsync(removeObjectArgs);
+            
+            _logger.LogInformation("Deleted media from MinIO: {Key}", key);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deleting media from MinIO: {Key}", key);
             throw;
         }
     }
