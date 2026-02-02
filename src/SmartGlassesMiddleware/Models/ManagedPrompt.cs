@@ -6,7 +6,12 @@ namespace SmartGlassesMiddleware.Models;
 public class ManagedPrompt
 {
     public Guid Id { get; set; }
+    
+    /// <summary>
+    /// Optional display name for the prompt. If not provided, defaults to "Unnamed Prompt" in the UI.
+    /// </summary>
     public string? Name { get; set; }
+    
     public string PromptText { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }

@@ -13,27 +13,30 @@ function initTheme() {
     const savedTheme = localStorage.getItem('theme') || 'light';
     document.documentElement.setAttribute('data-theme', savedTheme);
     updateThemeButton(savedTheme);
+    
+    // Set up theme toggle listener
+    const themeToggle = document.getElementById('theme-toggle');
+    if (themeToggle) {
+        themeToggle.addEventListener('click', () => {
+            const currentTheme = document.documentElement.getAttribute('data-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', newTheme);
+            localStorage.setItem('theme', newTheme);
+            updateThemeButton(newTheme);
+        });
+    }
 }
 
 function updateThemeButton(theme) {
     const button = document.getElementById('theme-toggle');
-    if (theme === 'dark') {
-        button.textContent = '☀️ Light Mode';
-    } else {
-        button.textContent = '🌙 Dark Mode';
+    if (button) {
+        if (theme === 'dark') {
+            button.textContent = '☀️ Light Mode';
+        } else {
+            button.textContent = '🌙 Dark Mode';
+        }
     }
 }
-
-document.addEventListener('DOMContentLoaded', () => {
-    const themeToggle = document.getElementById('theme-toggle');
-    themeToggle.addEventListener('click', () => {
-        const currentTheme = document.documentElement.getAttribute('data-theme');
-        const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-        document.documentElement.setAttribute('data-theme', newTheme);
-        localStorage.setItem('theme', newTheme);
-        updateThemeButton(newTheme);
-    });
-});
 
 // Tab switching
 document.querySelectorAll('.tab').forEach(tab => {
@@ -215,6 +218,8 @@ function createFileCard(file) {
 }
 
 // File preview functionality
+let previewObjectUrls = [];
+
 async function previewFile(fileId, fileName, fileLabel) {
     try {
         const modal = document.getElementById('preview-modal');
@@ -237,6 +242,7 @@ async function previewFile(fileId, fileName, fileLabel) {
         // Image preview
         if (mimeType.startsWith('image/')) {
             const url = URL.createObjectURL(blob);
+            previewObjectUrls.push(url);
             previewHTML = `
                 <div class="preview-container">
                     <img src="${url}" alt="${escapeHtml(fileName)}" />
@@ -247,6 +253,7 @@ async function previewFile(fileId, fileName, fileLabel) {
         // PDF preview
         else if (mimeType === 'application/pdf' || fileType === 'pdf') {
             const url = URL.createObjectURL(blob);
+            previewObjectUrls.push(url);
             previewHTML = `
                 <div class="preview-container">
                     <iframe src="${url}" type="application/pdf"></iframe>
@@ -312,6 +319,9 @@ async function downloadFile(fileId, fileName) {
 }
 
 function closePreviewModal() {
+    // Revoke all object URLs to prevent memory leaks
+    previewObjectUrls.forEach(url => URL.revokeObjectURL(url));
+    previewObjectUrls = [];
     document.getElementById('preview-modal').classList.remove('active');
 }
 
@@ -427,7 +437,7 @@ async function loadPrompts(reset = false) {
 function createPromptCard(prompt) {
     const div = document.createElement('div');
     div.className = 'card';
-    const displayName = prompt.name || 'Unnamed Prompt';
+    const displayName = prompt.name?.trim() || 'Unnamed Prompt';
     div.innerHTML = `
         <div class="card-header">
             <div class="card-title">${escapeHtml(displayName)}</div>
