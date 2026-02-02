@@ -662,9 +662,14 @@ async function manageGroupResources(groupId, groupName) {
         const groupsResult = await groupRes.json();
         // Handle both lowercase and uppercase from API
         const groups = groupsResult.data || groupsResult.Data || [];
-        const currentGroup = groups.find(g => g.id === groupId);
+        console.log('[MANAGE] Groups fetched:', groups.length);
+        
+        // Find group using case-insensitive property access
+        const currentGroup = groups.find(g => getProp(g, 'id') === groupId);
         
         if (!currentGroup) {
+            console.error('[MANAGE] Group not found. Looking for:', groupId);
+            console.error('[MANAGE] Available groups:', groups.map(g => getProp(g, 'id')));
             throw new Error('Group not found');
         }
         
@@ -725,8 +730,11 @@ async function manageGroupResources(groupId, groupName) {
             console.warn('[MANAGE] WARNING: No files or prompts returned from API');
         }
         
-        const groupFileIds = new Set((currentGroup.files || []).map(f => f.id));
-        const groupPromptIds = new Set((currentGroup.prompts || []).map(p => p.id));
+        // Use getProp to access files and prompts arrays with case-insensitive fallback
+        const groupFiles = getProp(currentGroup, 'files') || [];
+        const groupPrompts = getProp(currentGroup, 'prompts') || [];
+        const groupFileIds = new Set(groupFiles.map(f => getProp(f, 'id')));
+        const groupPromptIds = new Set(groupPrompts.map(p => getProp(p, 'id')));
         
         const modalBody = document.getElementById('modal-content-body');
         modalBody.innerHTML = `
@@ -735,19 +743,23 @@ async function manageGroupResources(groupId, groupName) {
             <div class="section" style="margin-bottom: 20px;">
                 <h5 style="margin-bottom: 10px;">Files</h5>
                 <div class="checkbox-group">
-                    ${allFiles.map(file => `
+                    ${allFiles.map(file => {
+                        const fileId = getProp(file, 'id');
+                        const fileName = getProp(file, 'fileName') || 'unknown';
+                        const label = getProp(file, 'label') || fileName;
+                        return `
                         <div class="checkbox-item">
                             <label>
                                 <input type="checkbox" 
-                                    value="${file.id}" 
-                                    ${groupFileIds.has(file.id) ? 'checked' : ''}
+                                    value="${fileId}" 
+                                    ${groupFileIds.has(fileId) ? 'checked' : ''}
                                     data-action="toggle-file"
                                     data-group-id="${groupId}"
-                                    data-file-id="${file.id}">
-                                ${escapeHtml(file.label)} (${escapeHtml(file.fileName)})
+                                    data-file-id="${fileId}">
+                                ${escapeHtml(label)} (${escapeHtml(fileName)})
                             </label>
                         </div>
-                    `).join('')}
+                    `}).join('')}
                     ${allFiles.length === 0 ? '<p style="color: #95a5a6;">No files available</p>' : ''}
                 </div>
             </div>
@@ -755,19 +767,22 @@ async function manageGroupResources(groupId, groupName) {
             <div class="section">
                 <h5 style="margin-bottom: 10px;">Prompts</h5>
                 <div class="checkbox-group">
-                    ${allPrompts.map(prompt => `
+                    ${allPrompts.map(prompt => {
+                        const promptId = getProp(prompt, 'id');
+                        const promptName = getProp(prompt, 'name') || 'Untitled';
+                        return `
                         <div class="checkbox-item">
                             <label>
                                 <input type="checkbox" 
-                                    value="${prompt.id}" 
-                                    ${groupPromptIds.has(prompt.id) ? 'checked' : ''}
+                                    value="${promptId}" 
+                                    ${groupPromptIds.has(promptId) ? 'checked' : ''}
                                     data-action="toggle-prompt"
                                     data-group-id="${groupId}"
-                                    data-prompt-id="${prompt.id}">
-                                ${escapeHtml(prompt.name)}
+                                    data-prompt-id="${promptId}">
+                                ${escapeHtml(promptName)}
                             </label>
                         </div>
-                    `).join('')}
+                    `}).join('')}
                     ${allPrompts.length === 0 ? '<p style="color: #95a5a6;">No prompts available</p>' : ''}
                 </div>
             </div>
