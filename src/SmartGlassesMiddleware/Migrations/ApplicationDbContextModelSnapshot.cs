@@ -28,6 +28,9 @@ namespace SmartGlassesMiddleware.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("ContentHash")
+                        .HasColumnType("text");
+
                     b.Property<string>("ContentType")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -54,6 +57,8 @@ namespace SmartGlassesMiddleware.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ContentHash");
 
                     b.ToTable("ManagedFiles");
                 });
@@ -125,6 +130,9 @@ namespace SmartGlassesMiddleware.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.PrimitiveCollection<float[]>("EmbeddingVector")
+                        .HasColumnType("real[]");
+
                     b.Property<Guid>("FileId")
                         .HasColumnType("uuid");
 
@@ -149,9 +157,13 @@ namespace SmartGlassesMiddleware.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("FileId");
+                    b.HasIndex("FileId")
+                        .IsUnique();
 
                     b.HasIndex("ProcessedAt");
+
+                    b.HasIndex("StorageKey")
+                        .IsUnique();
 
                     b.ToTable("RagEntries");
                 });
