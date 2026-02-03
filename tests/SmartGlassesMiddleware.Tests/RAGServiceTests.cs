@@ -17,8 +17,9 @@ public class RAGServiceTests
 {
     private readonly Mock<ILogger<RAGService>> _mockLogger;
     private readonly Mock<IAIService> _mockAIService;
-    private readonly Mock<Kernel> _mockKernel;
+    private readonly Kernel _kernel;
     private readonly Mock<IConfiguration> _mockConfiguration;
+    private readonly Mock<ITaskDispatcher> _mockTaskDispatcher;
     private readonly ApplicationDbContext _context;
     private readonly RAGService _service;
 
@@ -26,12 +27,20 @@ public class RAGServiceTests
     {
         _mockLogger = new Mock<ILogger<RAGService>>();
         _mockAIService = new Mock<IAIService>();
-        _mockKernel = new Mock<Kernel>();
+        _kernel = new Kernel();
         _mockConfiguration = new Mock<IConfiguration>();
+        _mockTaskDispatcher = new Mock<ITaskDispatcher>();
         
-        // Setup configuration defaults
-        _mockConfiguration.Setup(c => c["RAG:MaxRetries"]).Returns("3");
-        _mockConfiguration.Setup(c => c["RAG:RetryDelayMs"]).Returns("1000");
+        // Setup configuration defaults using GetValue<T> method
+        _mockConfiguration.Setup(c => c.GetSection("RAG:MaxRetries").Value).Returns("3");
+        _mockConfiguration.Setup(c => c.GetSection("RAG:RetryDelayMs").Value).Returns("1000");
+        _mockConfiguration.Setup(c => c.GetSection("RAG:MaxContextTokens").Value).Returns("4000");
+        _mockConfiguration.Setup(c => c.GetSection("RAG:MaxLocalModelTokens").Value).Returns("2000");
+        _mockConfiguration.Setup(c => c.GetSection("RAG:ApproximateTokensPerChar").Value).Returns("0.25");
+        _mockConfiguration.Setup(c => c.GetSection("RAG:EmbeddingBatchSize").Value).Returns("10");
+        _mockConfiguration.Setup(c => c.GetSection("RAG:EmbeddingMaxConcurrency").Value).Returns("5");
+        _mockConfiguration.Setup(c => c.GetSection("RAG:UseVectorDB").Value).Returns("true");
+        _mockConfiguration.Setup(c => c.GetSection("RAG:VectorSimilarityThreshold").Value).Returns("0.7");
         
         // Create in-memory database for testing
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -43,7 +52,8 @@ public class RAGServiceTests
             _context,
             _mockLogger.Object,
             _mockAIService.Object,
-            _mockKernel.Object,
+            _kernel,
+            _mockTaskDispatcher.Object,
             _mockConfiguration.Object
         );
     }
