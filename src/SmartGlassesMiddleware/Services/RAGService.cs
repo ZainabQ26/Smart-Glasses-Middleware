@@ -18,6 +18,7 @@ public interface IRAGService
     Task GenerateEmbeddingsAsync(Guid documentId);
     Task<int> ReprocessFailedDocumentsAsync();
     Task<List<DocumentMetadata>> GetUnprocessedDocumentsAsync();
+    Task<(string embeddingJson, int dimension)> GenerateTextEmbeddingJsonAsync(string text);
 }
 
 public class RAGService : IRAGService
@@ -30,6 +31,8 @@ public class RAGService : IRAGService
     private readonly int _retryDelayMs;
     private readonly int _maxContextTokens;
     private readonly double _tokensPerChar;
+    private readonly int _embeddingBatchSize;
+    private readonly int _embeddingMaxConcurrency;
 
     public RAGService(
         ApplicationDbContext context,
@@ -46,6 +49,8 @@ public class RAGService : IRAGService
         _retryDelayMs = configuration.GetValue<int?>("RAG:RetryDelayMs") ?? 1000;
         _maxContextTokens = configuration.GetValue<int?>("RAG:MaxContextTokens") ?? 4000;
         _tokensPerChar = configuration.GetValue<double?>("RAG:ApproximateTokensPerChar") ?? 0.25;
+        _embeddingBatchSize = configuration.GetValue<int?>("RAG:EmbeddingBatchSize") ?? 10;
+        _embeddingMaxConcurrency = configuration.GetValue<int?>("RAG:EmbeddingMaxConcurrency") ?? 5;
     }
 
     public async Task<QueryResult> QueryDocumentsAsync(string query, int topK = 5, List<Guid>? groupIds = null)
@@ -267,13 +272,38 @@ Answer:";
         var chunks = document.Chunks.ToList();
         var failedChunks = 0;
         
-        foreach (var chunk in chunks)
+        // Process chunks in batches with controlled concurrency
+        var batches = chunks.Chunk(_embeddingBatchSize).ToList();
+        _logger.LogInformation("Processing {ChunkCount} chunks in {BatchCount} batches (batch size: {BatchSize}, concurrency: {Concurrency})", 
+            chunks.Count, batches.Count, _embeddingBatchSize, _embeddingMaxConcurrency);
+        
+        var semaphore = new SemaphoreSlim(_embeddingMaxConcurrency);
+        
+        foreach (var batch in batches)
         {
-            var success = await GenerateEmbeddingWithRetryAsync(chunk);
-            if (!success)
+            var tasks = batch.Select(async chunk =>
             {
-                failedChunks++;
-            }
+                await semaphore.WaitAsync();
+                try
+                {
+                    var success = await GenerateEmbeddingWithRetryAsync(chunk);
+                    if (!success)
+                    {
+                        Interlocked.Increment(ref failedChunks);
+                    }
+                }
+                finally
+                {
+                    semaphore.Release();
+                }
+            }).ToList();
+            
+            await Task.WhenAll(tasks);
+            
+            // Save progress after each batch
+            await _context.SaveChangesAsync();
+            _logger.LogDebug("Completed batch with {Success} successes, {Failed} failures", 
+                batch.Count() - tasks.Count(t => t.IsFaulted), tasks.Count(t => t.IsFaulted));
         }
 
         // Update document processing state based on embedding success
@@ -589,6 +619,8 @@ Answer:";
                 .ThenInclude(pg => pg.ManagedPrompt)
                 .SelectMany(g => g.PromptGroups.Select(pg => pg.ManagedPrompt))
                 .Distinct()
+                .OrderByDescending(p => p.IsPinned) // Prioritize pinned prompts
+                .ThenBy(p => p.CreatedAt)
                 .ToListAsync();
 
             if (groupPrompts.Any())
@@ -601,9 +633,10 @@ Answer:";
                     context.AppendLine(groupContextHeader);
                     currentTokens += headerTokens;
                     
+                    // Add pinned prompts first (they get priority)
                     foreach (var prompt in groupPrompts)
                     {
-                        var promptHeader = $"[{prompt.Name}]:";
+                        var promptHeader = $"[{prompt.Name}]" + (prompt.IsPinned ? " [PINNED]:" : ":");
                         var promptTokens = EstimateTokens(promptHeader + prompt.PromptText);
                         
                         if (currentTokens + promptTokens > _maxContextTokens)
@@ -626,5 +659,20 @@ Answer:";
         // Rough approximation: ~4 characters per token for English text
         // This is configurable via ApproximateTokensPerChar
         return (int)(text.Length * _tokensPerChar);
+    }
+
+    public async Task<(string embeddingJson, int dimension)> GenerateTextEmbeddingJsonAsync(string text)
+    {
+        try
+        {
+            var embedding = await GenerateTextEmbeddingAsync(text);
+            var json = SerializeEmbedding(embedding);
+            return (json, embedding.Length);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to generate embedding for text");
+            throw;
+        }
     }
 }

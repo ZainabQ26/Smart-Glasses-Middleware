@@ -309,6 +309,61 @@ public class DocumentsController : ControllerBase
             return StatusCode(500, new { error = "Failed to get unprocessed documents", details = ex.Message });
         }
     }
+
+    /// <summary>
+    /// Move a document to different groups (reindexing)
+    /// </summary>
+    [HttpPost("{id}/move")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> MoveDocumentToGroups(Guid id, [FromBody] MoveDocumentRequest request)
+    {
+        try
+        {
+            var document = await _context.DocumentMetadatas
+                .Include(d => d.DocumentGroups)
+                .FirstOrDefaultAsync(d => d.Id == id);
+
+            if (document == null)
+                return NotFound();
+
+            // Remove existing group associations
+            _context.DocumentGroups.RemoveRange(document.DocumentGroups);
+
+            // Add new group associations
+            if (request.GroupIds != null && request.GroupIds.Any())
+            {
+                foreach (var groupId in request.GroupIds)
+                {
+                    document.DocumentGroups.Add(new DocumentGroup
+                    {
+                        DocumentMetadataId = id,
+                        ResourceGroupId = groupId
+                    });
+                }
+            }
+
+            await _context.SaveChangesAsync();
+
+            // Optionally regenerate embeddings if requested
+            if (request.RegenerateEmbeddings)
+            {
+                _logger.LogInformation("Regenerating embeddings for moved document {DocumentId}", id);
+                await _ragService.GenerateEmbeddingsAsync(id);
+            }
+
+            return Ok(new
+            {
+                message = $"Document moved to {request.GroupIds?.Count ?? 0} groups",
+                regeneratedEmbeddings = request.RegenerateEmbeddings
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error moving document {DocumentId}", id);
+            return StatusCode(500, new { error = "Failed to move document", details = ex.Message });
+        }
+    }
 }
 
 public class QueryRequest
@@ -316,6 +371,12 @@ public class QueryRequest
     public string Query { get; set; } = string.Empty;
     public int? TopK { get; set; }
     public List<Guid>? GroupIds { get; set; }
+}
+
+public class MoveDocumentRequest
+{
+    public List<Guid>? GroupIds { get; set; }
+    public bool RegenerateEmbeddings { get; set; } = false;
 }
 
 public class HighlightRequest
