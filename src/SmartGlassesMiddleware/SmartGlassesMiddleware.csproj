@@ -25,4 +25,9 @@
     <PackageReference Include="SixLabors.ImageSharp.Drawing" Version="2.1.7" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Include task handlers from tasks folder -->
+    <Compile Include="..\..\tasks\*.cs" Link="Services\TaskHandlers\%(Filename)%(Extension)" />
+  </ItemGroup>
+
 </Project>
