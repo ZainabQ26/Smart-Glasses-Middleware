@@ -684,7 +684,7 @@
       },
       "post": {
         "summary": "Upload a new file with label",
-        "description": "Uploads a file to MinIO storage, saves metadata to PostgreSQL, and automatically processes it through the RAG system for AI indexing. The file becomes immediately searchable and referenceable by AI.",
+        "description": "Uploads a file to MinIO storage, saves metadata to PostgreSQL, and automatically processes it through the RAG system for AI indexing. The file becomes immediately searchable and referenceable by AI. Files are deduplicated by content hash - if the same file is uploaded again, the existing file is returned instead of creating a duplicate.",
         "tags": ["Admin"],
         "operationId": "uploadAdminFile",
         "requestBody": {
@@ -709,7 +709,7 @@
               "application/json": {
                 "examples": {
                   "success": {
-                    "summary": "Successful upload",
+                    "summary": "Successful upload (new file)",
                     "value": {
                       "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
                       "fileName": "report.docx",
@@ -717,7 +717,32 @@
                       "contentType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                       "storageKey": "admin/2026-01-28/report.docx",
                       "uploadedAt": "2026-01-28T14:22:00Z",
-                      "fileSize": 1536000
+                      "fileSize": 1536000,
+                      "contentHash": "A1B2C3D4E5F67890ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890",
+                      "deduplicated": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "File already exists (deduplicated)",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "deduplicated": {
+                    "summary": "Duplicate file detected",
+                    "value": {
+                      "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+                      "fileName": "report.docx",
+                      "label": "Annual Report 2025",
+                      "contentType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                      "storageKey": "admin/2026-01-28/report.docx",
+                      "uploadedAt": "2026-01-28T14:22:00Z",
+                      "fileSize": 1536000,
+                      "contentHash": "A1B2C3D4E5F67890ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890",
+                      "deduplicated": true
                     }
                   }
                 }
