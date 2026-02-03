@@ -2,7 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Smart Glasses Middleware API",
-    "version": "1.0.0"
+    "version": "2.0.0",
+    "description": "API for Smart Glasses Middleware with RAG (Retrieval-Augmented Generation) capabilities, document processing, and conversational AI"
   },
   "servers": [
     { "url": "http://localhost:5000" }
@@ -602,6 +603,540 @@
           }
         }
       }
+    },
+
+    "/api/documents/upload": {
+      "post": {
+        "summary": "Upload and process a document for RAG",
+        "tags": ["Documents"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "Document file (PDF, DOCX, TXT, or image)"
+                  },
+                  "groupIds": {
+                    "type": "array",
+                    "items": { "type": "string", "format": "uuid" },
+                    "description": "Optional ResourceGroup IDs to associate document with"
+                  }
+                },
+                "required": ["file"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Document uploaded and processed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string", "format": "uuid" },
+                    "fileName": { "type": "string" },
+                    "documentType": { "type": "string" },
+                    "totalPages": { "type": "integer" },
+                    "chunkCount": { "type": "integer" },
+                    "groups": {
+                      "type": "array",
+                      "items": { "type": "string", "format": "uuid" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "Invalid file or file size exceeds limit" },
+          "500": { "description": "Processing error" }
+        }
+      }
+    },
+
+    "/api/documents/query": {
+      "post": {
+        "summary": "Query documents using RAG (Retrieval-Augmented Generation)",
+        "tags": ["Documents"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "query": { "type": "string", "description": "Query text" },
+                  "topK": { "type": "integer", "default": 5, "description": "Number of results to return" },
+                  "groupIds": {
+                    "type": "array",
+                    "items": { "type": "string", "format": "uuid" },
+                    "description": "Optional ResourceGroup IDs to filter documents"
+                  }
+                },
+                "required": ["query"]
+              },
+              "examples": {
+                "simpleQuery": {
+                  "summary": "Simple query",
+                  "value": {
+                    "query": "What are the main requirements?",
+                    "topK": 5
+                  }
+                },
+                "groupFilteredQuery": {
+                  "summary": "Query with group filter",
+                  "value": {
+                    "query": "What did we decide about the budget?",
+                    "topK": 5,
+                    "groupIds": ["550e8400-e29b-41d4-a716-446655440000"]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Query result with answer and sources",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueryResult"
+                },
+                "examples": {
+                  "withSources": {
+                    "summary": "Query result with sources",
+                    "value": {
+                      "answer": "The main requirements include: 1) User authentication, 2) Data encryption, 3) API rate limiting. These are detailed on page 3 of the requirements document.",
+                      "sources": [
+                        {
+                          "documentId": "550e8400-e29b-41d4-a716-446655440000",
+                          "fileName": "requirements.pdf",
+                          "pageNumber": 3,
+                          "chunkId": "650e8400-e29b-41d4-a716-446655440000",
+                          "chunkText": "1. User Authentication\n   - OAuth 2.0 integration\n   - Multi-factor authentication\n2. Data Encryption\n   - AES-256 for data at rest..."
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "Invalid query" },
+          "500": { "description": "Query processing error" }
+        }
+      }
+    },
+
+    "/api/documents": {
+      "get": {
+        "summary": "List all documents",
+        "tags": ["Documents"],
+        "responses": {
+          "200": {
+            "description": "List of documents",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": { "type": "string", "format": "uuid" },
+                      "fileName": { "type": "string" },
+                      "uploadedAt": { "type": "string", "format": "date-time" },
+                      "isProcessed": { "type": "boolean" },
+                      "chunkCount": { "type": "integer" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/api/documents/{id}": {
+      "get": {
+        "summary": "Get document details",
+        "tags": ["Documents"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Document details",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DocumentMetadata" }
+              }
+            }
+          },
+          "404": { "description": "Document not found" }
+        }
+      },
+      "delete": {
+        "summary": "Delete a document",
+        "tags": ["Documents"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "204": { "description": "Document deleted successfully" },
+          "404": { "description": "Document not found" }
+        }
+      }
+    },
+
+    "/api/documents/{id}/move": {
+      "post": {
+        "summary": "Move document to different groups (reindexing)",
+        "tags": ["Documents"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "groupIds": {
+                    "type": "array",
+                    "items": { "type": "string", "format": "uuid" },
+                    "description": "New group IDs"
+                  },
+                  "regenerateEmbeddings": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Whether to regenerate embeddings"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Document moved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": { "type": "string" },
+                    "regeneratedEmbeddings": { "type": "boolean" }
+                  }
+                }
+              }
+            }
+          },
+          "404": { "description": "Document not found" }
+        }
+      }
+    },
+
+    "/api/documents/reprocess": {
+      "post": {
+        "summary": "Reprocess failed or unprocessed documents",
+        "tags": ["Documents"],
+        "responses": {
+          "200": {
+            "description": "Reprocessing complete",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "reprocessedCount": { "type": "integer" },
+                    "message": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/api/documents/unprocessed": {
+      "get": {
+        "summary": "Get list of unprocessed documents",
+        "tags": ["Documents"],
+        "responses": {
+          "200": {
+            "description": "List of unprocessed documents",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": { "type": "string", "format": "uuid" },
+                      "fileName": { "type": "string" },
+                      "uploadedAt": { "type": "string", "format": "date-time" },
+                      "processingError": { "type": "string", "nullable": true },
+                      "isProcessed": { "type": "boolean" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/api/conversations": {
+      "post": {
+        "summary": "Create a new conversation",
+        "tags": ["Conversations"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": { "type": "string", "nullable": true },
+                  "resourceGroupId": { "type": "string", "format": "uuid", "nullable": true }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Conversation created",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Conversation" }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "Get all active conversations",
+        "tags": ["Conversations"],
+        "parameters": [
+          {
+            "name": "groupId",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "format": "uuid" },
+            "description": "Filter by ResourceGroup ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of conversations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/Conversation" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/api/conversations/{id}": {
+      "get": {
+        "summary": "Get conversation with messages",
+        "tags": ["Conversations"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Conversation details",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Conversation" }
+              }
+            }
+          },
+          "404": { "description": "Conversation not found" }
+        }
+      }
+    },
+
+    "/api/conversations/{id}/messages": {
+      "post": {
+        "summary": "Add a message to conversation",
+        "tags": ["Conversations"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "role": { "type": "string", "enum": ["user", "assistant", "system"] },
+                  "content": { "type": "string" },
+                  "model": { "type": "string", "nullable": true }
+                },
+                "required": ["role", "content"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Message added",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ChatMessage" }
+              }
+            }
+          },
+          "404": { "description": "Conversation not found" }
+        }
+      }
+    },
+
+    "/api/conversations/{id}/query": {
+      "post": {
+        "summary": "Query documents with conversation context",
+        "tags": ["Conversations"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "query": { "type": "string" },
+                  "topK": { "type": "integer", "default": 5 },
+                  "groupIds": {
+                    "type": "array",
+                    "items": { "type": "string", "format": "uuid" }
+                  },
+                  "model": { "type": "string", "nullable": true }
+                },
+                "required": ["query"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Query result with conversation history",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/QueryResult" }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/api/conversations/{id}/summarize": {
+      "post": {
+        "summary": "Summarize conversation",
+        "tags": ["Conversations"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          },
+          {
+            "name": "generateEmbedding",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "boolean", "default": false },
+            "description": "Generate embedding for the summary"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Conversation summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "summary": { "type": "string" },
+                    "embeddingGenerated": { "type": "boolean" }
+                  }
+                }
+              }
+            }
+          },
+          "404": { "description": "Conversation not found" }
+        }
+      }
+    },
+
+    "/api/conversations/{id}/archive": {
+      "post": {
+        "summary": "Archive a conversation",
+        "tags": ["Conversations"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "204": { "description": "Conversation archived successfully" }
+        }
+      }
     }
   },
   "components": {
@@ -666,6 +1201,71 @@
           "totalErrors": { "type": "integer", "format": "int64", "description": "Total number of errors for this endpoint" },
           "averageDurationMs": { "type": "number", "format": "double", "description": "Average request duration in milliseconds" },
           "lastRequestUtc": { "type": "string", "format": "date-time", "description": "Timestamp of the last request" }
+        }
+      },
+      "QueryResult": {
+        "type": "object",
+        "properties": {
+          "answer": { "type": "string", "description": "Generated answer from the AI" },
+          "sources": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/DocumentSource" },
+            "description": "Source documents used to generate the answer"
+          }
+        }
+      },
+      "DocumentSource": {
+        "type": "object",
+        "properties": {
+          "documentId": { "type": "string", "format": "uuid" },
+          "fileName": { "type": "string" },
+          "pageNumber": { "type": "integer" },
+          "chunkId": { "type": "string", "format": "uuid" },
+          "chunkText": { "type": "string", "description": "Preview of the relevant text (truncated to 200 chars)" }
+        }
+      },
+      "DocumentMetadata": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "fileName": { "type": "string" },
+          "originalFileName": { "type": "string" },
+          "contentType": { "type": "string" },
+          "uploadedAt": { "type": "string", "format": "date-time" },
+          "fileSize": { "type": "integer", "format": "int64" },
+          "totalPages": { "type": "integer" },
+          "documentType": { "type": "string", "enum": ["pdf", "docx", "txt", "image"] },
+          "isProcessed": { "type": "boolean" },
+          "processedAt": { "type": "string", "format": "date-time", "nullable": true },
+          "processingError": { "type": "string", "nullable": true }
+        }
+      },
+      "Conversation": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "title": { "type": "string" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" },
+          "isActive": { "type": "boolean" },
+          "resourceGroupId": { "type": "string", "format": "uuid", "nullable": true },
+          "summary": { "type": "string", "nullable": true },
+          "messages": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ChatMessage" }
+          }
+        }
+      },
+      "ChatMessage": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "conversationId": { "type": "string", "format": "uuid" },
+          "role": { "type": "string", "enum": ["user", "assistant", "system"] },
+          "content": { "type": "string" },
+          "model": { "type": "string", "nullable": true },
+          "timestamp": { "type": "string", "format": "date-time" },
+          "tokenCount": { "type": "integer", "nullable": true }
         }
       }
     },

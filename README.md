@@ -7,9 +7,15 @@ The middleware for the smart glasses that will run the small AI to complete simp
 - **Multi-format API**: Accepts text, audio, images, and video requests
 - **AI Task Detection**: Uses Ollama with Microsoft Semantic Kernel to classify and process tasks
 - **Intelligent Routing**: Automatically detects if a task requires an advanced model and routes accordingly
+- **RAG Pipeline**: Document processing and intelligent querying
+  - Extract text from PDFs (digital and scanned), DOCX, TXT, and images
+  - Track text positions on pages for precise location references
+  - Semantic search with embeddings
+  - Document highlighting capabilities
+  - Persistent storage through restarts
 - **Storage**: 
-  - PostgreSQL for request history
-  - MinIO for media storage (images, videos, audio)
+  - PostgreSQL for request history and document chunks
+  - MinIO for media storage (images, videos, audio, documents)
   - Redis for caching responses
 - **RESTful API**: Clean, well-documented endpoints
 
@@ -122,6 +128,18 @@ prompt: "What's in this image?"
 GET /api/history?count=10
 GET /api/history/{id}
 ```
+
+### Document Processing (RAG)
+```
+POST /api/documents/upload
+POST /api/documents/query
+POST /api/documents/{id}/highlight
+GET /api/documents
+GET /api/documents/{id}
+DELETE /api/documents/{id}
+```
+
+See [RAG Pipeline Documentation](docs/RAG_PIPELINE.md) for detailed information.
 
 ## How It Works
 
