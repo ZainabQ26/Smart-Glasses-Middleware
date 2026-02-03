@@ -197,6 +197,10 @@ builder.Services.AddScoped<IHistoryService, HistoryService>();
 builder.Services.AddScoped<IMediaStorageService, MinioMediaStorageService>();
 builder.Services.AddScoped<ICacheService, RedisCacheService>();
 builder.Services.AddSingleton<IMetricsService, MetricsService>();
+// Document processing and RAG services
+builder.Services.AddScoped<IDocumentProcessingService, DocumentProcessingService>();
+builder.Services.AddScoped<IRAGService, RAGService>();
+builder.Services.AddScoped<IDocumentHighlightService, DocumentHighlightService>();
 // Transcription service (server-side) — registered as a typed HTTP client with timeout configuration
 builder.Services.AddHttpClient<ITranscriptionService, HttpTranscriptionService>((sp, client) =>
 {
