@@ -16,6 +16,7 @@ public class AdminController : ControllerBase
     private readonly ApplicationDbContext _context;
     private readonly IMediaStorageService _mediaStorageService;
     private readonly ICacheService _cacheService;
+    private readonly IRagService _ragService;
     private readonly ILogger<AdminController> _logger;
     private const int DefaultPageSize = 20;
     private const int MaxPageSize = 100;
@@ -24,11 +25,13 @@ public class AdminController : ControllerBase
         ApplicationDbContext context,
         IMediaStorageService mediaStorageService,
         ICacheService cacheService,
+        IRagService ragService,
         ILogger<AdminController> logger)
     {
         _context = context;
         _mediaStorageService = mediaStorageService;
         _cacheService = cacheService;
+        _ragService = ragService;
         _logger = logger;
     }
 
@@ -123,6 +126,31 @@ public class AdminController : ControllerBase
 
         try
         {
+            // Compute content hash for deduplication
+            using var hashStream = request.File.OpenReadStream();
+            var contentHash = _mediaStorageService.ComputeContentHash(hashStream);
+            
+            // Check if file with same hash already exists
+            var existingFile = await _context.ManagedFiles
+                .FirstOrDefaultAsync(f => f.ContentHash == contentHash);
+            
+            if (existingFile != null)
+            {
+                _logger.LogInformation("File with hash {Hash} already exists as {FileId}, returning existing file", contentHash, existingFile.Id);
+                return Ok(new
+                {
+                    existingFile.Id,
+                    existingFile.FileName,
+                    existingFile.Label,
+                    existingFile.ContentType,
+                    existingFile.StorageKey,
+                    existingFile.UploadedAt,
+                    existingFile.FileSize,
+                    existingFile.ContentHash,
+                    deduplicated = true
+                });
+            }
+
             // Upload to MinIO
             using var stream = request.File.OpenReadStream();
             var contentType = request.File.ContentType ?? "application/octet-stream";
@@ -136,12 +164,28 @@ public class AdminController : ControllerBase
                 Label = request.Label,
                 ContentType = contentType,
                 StorageKey = storageKey,
+                ContentHash = contentHash,
                 UploadedAt = DateTime.UtcNow,
                 FileSize = request.File.Length
             };
 
             _context.ManagedFiles.Add(managedFile);
             await _context.SaveChangesAsync();
+
+            // Process file for RAG indexing
+            try
+            {
+                await _ragService.ProcessFileForRagAsync(
+                    managedFile.Id,
+                    managedFile.FileName,
+                    managedFile.ContentType,
+                    managedFile.StorageKey);
+                _logger.LogInformation("File {FileId} processed for RAG", managedFile.Id);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to process file {FileId} for RAG, but file was uploaded successfully", managedFile.Id);
+            }
 
             // Invalidate cache
             await InvalidateFilesCache();
@@ -154,7 +198,9 @@ public class AdminController : ControllerBase
                 managedFile.ContentType,
                 managedFile.StorageKey,
                 managedFile.UploadedAt,
-                managedFile.FileSize
+                managedFile.FileSize,
+                managedFile.ContentHash,
+                deduplicated = false
             });
         }
         catch (Exception ex)
