@@ -36,18 +36,53 @@ public class DocumentsController : ControllerBase
     [HttpPost("upload")]
     [ProducesResponseType(typeof(DocumentMetadata), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> UploadDocument(IFormFile file)
+    public async Task<IActionResult> UploadDocument(IFormFile file, [FromForm] List<Guid>? groupIds = null)
     {
         if (file == null || file.Length == 0)
             return BadRequest("No file uploaded");
+
+        // Validate file size (50MB limit)
+        const long maxFileSize = 50 * 1024 * 1024;
+        if (file.Length > maxFileSize)
+            return BadRequest($"File size exceeds maximum allowed size of {maxFileSize / 1024 / 1024}MB");
 
         try
         {
             using var stream = file.OpenReadStream();
             var document = await _processingService.ProcessDocumentAsync(stream, file.FileName, file.ContentType);
 
-            // Generate embeddings for the document chunks
-            await _ragService.GenerateEmbeddingsAsync(document.Id);
+            // Add to groups if specified
+            if (groupIds != null && groupIds.Any())
+            {
+                foreach (var groupId in groupIds)
+                {
+                    var group = await _context.ResourceGroups.FindAsync(groupId);
+                    if (group != null)
+                    {
+                        document.DocumentGroups.Add(new DocumentGroup
+                        {
+                            DocumentMetadataId = document.Id,
+                            ResourceGroupId = groupId
+                        });
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Group {GroupId} not found, skipping", groupId);
+                    }
+                }
+                await _context.SaveChangesAsync();
+            }
+
+            // Generate embeddings for the document chunks (with retry logic)
+            try
+            {
+                await _ragService.GenerateEmbeddingsAsync(document.Id);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error generating embeddings for document {DocumentId}, will retry later", document.Id);
+                // Don't fail the upload, background service will retry
+            }
 
             return Ok(new
             {
@@ -57,7 +92,8 @@ public class DocumentsController : ControllerBase
                 document.TotalPages,
                 document.IsProcessed,
                 document.ProcessedAt,
-                ChunkCount = document.Chunks.Count
+                ChunkCount = document.Chunks.Count,
+                Groups = document.DocumentGroups.Select(dg => dg.ResourceGroupId).ToList()
             });
         }
         catch (Exception ex)
@@ -79,8 +115,15 @@ public class DocumentsController : ControllerBase
 
         try
         {
-            var response = await _ragService.QueryDocumentsAsync(request.Query, request.TopK ?? 5);
-            var relevantChunks = await _ragService.SearchChunksAsync(request.Query, request.TopK ?? 5);
+            var response = await _ragService.QueryDocumentsAsync(
+                request.Query, 
+                request.TopK ?? 5, 
+                request.GroupIds);
+                
+            var relevantChunks = await _ragService.SearchChunksAsync(
+                request.Query, 
+                request.TopK ?? 5, 
+                request.GroupIds);
 
             return Ok(new QueryResponse
             {
@@ -92,7 +135,8 @@ public class DocumentsController : ControllerBase
                     PageNumber = c.PageNumber,
                     ChunkId = c.Id,
                     ChunkText = c.ChunkText.Length > 200 ? c.ChunkText.Substring(0, 200) + "..." : c.ChunkText
-                }).ToList()
+                }).ToList(),
+                UsedGroups = request.GroupIds?.Any() == true
             });
         }
         catch (Exception ex)
@@ -232,18 +276,65 @@ public class DocumentsController : ControllerBase
 
         return NoContent();
     }
+
+    /// <summary>
+    /// Reprocess failed or unprocessed documents
+    /// </summary>
+    [HttpPost("reprocess")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> ReprocessFailedDocuments()
+    {
+        try
+        {
+            var reprocessedCount = await _ragService.ReprocessFailedDocumentsAsync();
+            return Ok(new { reprocessedCount, message = $"Reprocessed {reprocessedCount} documents" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error reprocessing documents");
+            return StatusCode(500, new { error = "Failed to reprocess documents", details = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Get list of unprocessed documents
+    /// </summary>
+    [HttpGet("unprocessed")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetUnprocessedDocuments()
+    {
+        try
+        {
+            var docs = await _ragService.GetUnprocessedDocumentsAsync();
+            return Ok(docs.Select(d => new
+            {
+                d.Id,
+                d.FileName,
+                d.UploadedAt,
+                d.ProcessingError,
+                d.IsProcessed
+            }));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting unprocessed documents");
+            return StatusCode(500, new { error = "Failed to get unprocessed documents", details = ex.Message });
+        }
+    }
 }
 
 public class QueryRequest
 {
     public string Query { get; set; } = string.Empty;
     public int? TopK { get; set; }
+    public List<Guid>? GroupIds { get; set; }
 }
 
 public class QueryResponse
 {
     public string Answer { get; set; } = string.Empty;
     public List<DocumentSource> Sources { get; set; } = new();
+    public bool UsedGroups { get; set; }
 }
 
 public class DocumentSource

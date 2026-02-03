@@ -102,5 +102,16 @@ public class ApplicationDbContext : DbContext
                 .HasForeignKey(e => e.DocumentMetadataId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
+
+        modelBuilder.Entity<DocumentGroup>(entity =>
+        {
+            entity.HasKey(e => new { e.DocumentMetadataId, e.ResourceGroupId });
+            entity.HasOne(e => e.DocumentMetadata)
+                .WithMany(d => d.DocumentGroups)
+                .HasForeignKey(e => e.DocumentMetadataId);
+            entity.HasOne(e => e.ResourceGroup)
+                .WithMany(g => g.DocumentGroups)
+                .HasForeignKey(e => e.ResourceGroupId);
+        });
     }
 }

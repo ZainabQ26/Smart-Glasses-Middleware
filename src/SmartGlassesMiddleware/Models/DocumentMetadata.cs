@@ -18,8 +18,21 @@ public class DocumentMetadata
     public DateTime? ProcessedAt { get; set; }
     public string? ProcessingError { get; set; }
     
-    // Navigation property
+    // Navigation properties
     public List<DocumentChunk> Chunks { get; set; } = new();
+    public List<DocumentGroup> DocumentGroups { get; set; } = new();
+}
+
+/// <summary>
+/// Join table for many-to-many relationship between DocumentMetadata and ResourceGroup
+/// </summary>
+public class DocumentGroup
+{
+    public Guid DocumentMetadataId { get; set; }
+    public DocumentMetadata DocumentMetadata { get; set; } = null!;
+    
+    public Guid ResourceGroupId { get; set; }
+    public ResourceGroup ResourceGroup { get; set; } = null!;
 }
 
 /// <summary>
