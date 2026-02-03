@@ -2,7 +2,11 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Smart Glasses Middleware API",
-    "version": "1.0.0"
+    "description": "A comprehensive middleware API for smart glasses that processes audio, images, videos, and text with AI-powered task detection and intelligent routing. Features include RAG (Retrieval-Augmented Generation) indexing for all uploaded files, making them easily searchable and referenceable by AI.",
+    "version": "1.0.0",
+    "contact": {
+      "name": "Smart Glasses Middleware Support"
+    }
   },
   "servers": [
     { "url": "http://localhost:5000" }
@@ -10,7 +14,10 @@
   "paths": {
     "/health": {
       "get": {
-        "summary": "Health check",
+        "summary": "Health check endpoint",
+        "description": "Checks the health status of all dependent services including PostgreSQL, Redis, MinIO, Ollama AI, and the Vosk transcription service. Returns a comprehensive health report with individual service statuses.",
+        "tags": ["System"],
+        "operationId": "getHealth",
         "responses": {
           "200": {
             "description": "All services healthy",
@@ -98,7 +105,10 @@
     
     "/api/transcribe": {
       "post": {
-        "summary": "Transcribe audio",
+        "summary": "Transcribe audio from base64-encoded data",
+        "description": "Accepts base64-encoded audio data, stores it in MinIO, transcribes it using the Vosk transcription service, and indexes it in the RAG system for future AI reference. All uploaded audio files are automatically processed and made searchable.",
+        "tags": ["Audio"],
+        "operationId": "transcribeAudio",
         "requestBody": {
           "required": true,
           "content": {
@@ -184,7 +194,10 @@
     },
     "/api/ask": {
       "post": {
-        "summary": "Ask AI",
+        "summary": "Process media with AI (images, videos, audio)",
+        "description": "Accepts multipart form data with media files and optional prompts. All uploaded files are stored in MinIO, processed through RAG indexing, and analyzed by AI. Audio files are automatically transcribed. This endpoint supports multiple file uploads and processes them asynchronously for optimal performance. All files become searchable and referenceable by the AI system.",
+        "tags": ["Media"],
+        "operationId": "askWithMedia",
         "requestBody": {
           "required": true,
           "content": {
@@ -324,7 +337,10 @@
     
     "/api/history": {
       "get": {
-        "summary": "Get recent history",
+        "summary": "Retrieve request history",
+        "description": "Fetches recent request history entries from the database, including both audio and media processing requests. Supports pagination via the count parameter to retrieve a specific number of recent entries.",
+        "tags": ["History"],
+        "operationId": "getHistory",
         "parameters": [
           { "name": "count", "in": "query", "schema": { "type": "integer", "default": 10 }, "description": "Number of recent history entries to retrieve" }
         ],
@@ -438,7 +454,10 @@
     },
     "/api/history/{id}": {
       "get": {
-        "summary": "Get history by id",
+        "summary": "Retrieve a specific history entry by ID",
+        "description": "Fetches detailed information about a specific request history entry using its unique identifier (UUID). Returns complete information including the request type, input, detected task, AI response, and associated media storage keys.",
+        "tags": ["History"],
+        "operationId": "getHistoryById",
         "parameters": [
           {
             "name": "id",
@@ -557,7 +576,10 @@
     },
     "/metrics": {
       "get": {
-        "summary": "Get application metrics",
+        "summary": "Retrieve application metrics and performance statistics",
+        "description": "Returns real-time application metrics including request counts, error rates, average response times, and timestamps for each API endpoint. Useful for monitoring system performance and identifying bottlenecks.",
+        "tags": ["System"],
+        "operationId": "getMetrics",
         "responses": {
           "200": {
             "description": "Application metrics and statistics",
@@ -602,35 +624,240 @@
           }
         }
       }
+    },
+    "/api/admin/files": {
+      "get": {
+        "summary": "List managed files with pagination",
+        "description": "Retrieves a paginated list of all files uploaded through the admin panel. All files returned have been processed through the RAG system for AI searchability. Supports caching for improved performance.",
+        "tags": ["Admin"],
+        "operationId": "getAdminFiles",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "schema": { "type": "integer", "default": 1, "minimum": 1 },
+            "description": "Page number for pagination"
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": { "type": "integer", "default": 20, "minimum": 1, "maximum": 100 },
+            "description": "Number of items per page"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response with paginated files",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "success": {
+                    "summary": "Successful file listing",
+                    "value": {
+                      "data": [
+                        {
+                          "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                          "fileName": "presentation.pdf",
+                          "label": "Q4 Sales Presentation",
+                          "contentType": "application/pdf",
+                          "storageKey": "admin/2026-01-28/presentation.pdf",
+                          "uploadedAt": "2026-01-28T10:30:00Z",
+                          "fileSize": 2048576,
+                          "groups": []
+                        }
+                      ],
+                      "pagination": {
+                        "currentPage": 1,
+                        "pageSize": 20,
+                        "totalCount": 45,
+                        "totalPages": 3,
+                        "hasPrevious": false,
+                        "hasNext": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Upload a new file with label",
+        "description": "Uploads a file to MinIO storage, saves metadata to PostgreSQL, and automatically processes it through the RAG system for AI indexing. The file becomes immediately searchable and referenceable by AI.",
+        "tags": ["Admin"],
+        "operationId": "uploadAdminFile",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": { "type": "string", "format": "binary", "description": "File to upload" },
+                  "label": { "type": "string", "description": "Human-readable label for the file" }
+                },
+                "required": ["file", "label"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "File uploaded successfully and processed for RAG",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "success": {
+                    "summary": "Successful upload",
+                    "value": {
+                      "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+                      "fileName": "report.docx",
+                      "label": "Annual Report 2025",
+                      "contentType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                      "storageKey": "admin/2026-01-28/report.docx",
+                      "uploadedAt": "2026-01-28T14:22:00Z",
+                      "fileSize": 1536000
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request - Missing file or label",
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "missingFile": {
+                    "summary": "File is required",
+                    "value": {
+                      "title": "Bad Request",
+                      "detail": "File is required",
+                      "status": 400
+                    }
+                  },
+                  "missingLabel": {
+                    "summary": "Label is required",
+                    "value": {
+                      "title": "Bad Request",
+                      "detail": "Label is required",
+                      "status": 400
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server Error during upload",
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "serverError": {
+                    "summary": "Upload failed",
+                    "value": {
+                      "title": "Internal Server Error",
+                      "detail": "An error occurred while uploading the file",
+                      "status": 500
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
       "AudioRequest": {
         "type": "object",
-        "properties": { "audioBase64": { "type": "string" } },
+        "description": "Request payload for audio transcription containing base64-encoded audio data",
+        "properties": { 
+          "audioBase64": { 
+            "type": "string",
+            "description": "Base64-encoded audio data (WAV, MP3, M4A, FLAC, or AAC format)",
+            "example": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA="
+          } 
+        },
         "required": ["audioBase64"]
       },
       "AudioUploadResponse": {
         "type": "object",
-        "properties": { "storageKey": { "type": "string" }, "transcription": { "type": "string" }, "requestId": { "type": "string", "format": "uuid" } }
+        "description": "Response from audio transcription including storage location, transcription text, and request ID",
+        "properties": { 
+          "storageKey": { 
+            "type": "string",
+            "description": "MinIO storage key where the audio file is stored",
+            "example": "audio/2026-01-28/recording_20260128_103045.wav"
+          }, 
+          "transcription": { 
+            "type": "string",
+            "description": "Transcribed text from the audio file",
+            "example": "Hello world, this is a test recording"
+          }, 
+          "requestId": { 
+            "type": "string", 
+            "format": "uuid",
+            "description": "Unique identifier for tracking this request in history",
+            "example": "550e8400-e29b-41d4-a716-446655440200"
+          } 
+        }
       },
       "MediaUploadResponse": {
         "type": "object",
+        "description": "Response from media processing including AI analysis, detected task, and processed file information",
         "properties": {
-          "task": { "type": "string" },
-          "response": { "type": "string" },
-          "usedAdvancedModel": { "type": "boolean" },
-          "requestId": { "type": "string", "format": "uuid" },
+          "task": { 
+            "type": "string",
+            "description": "The AI-detected task type (e.g., 'general', 'reminder', 'time', etc.)",
+            "example": "general"
+          },
+          "response": { 
+            "type": "string",
+            "description": "AI-generated response based on the media and prompt",
+            "example": "The image shows a beautiful sunset over the ocean with sailboats in the distance"
+          },
+          "usedAdvancedModel": { 
+            "type": "boolean",
+            "description": "Whether the request was processed by the advanced AI model (true) or local model (false)",
+            "example": true
+          },
+          "requestId": { 
+            "type": "string", 
+            "format": "uuid",
+            "description": "Unique identifier for this request",
+            "example": "550e8400-e29b-41d4-a716-446655440100"
+          },
           "items": {
             "type": "array",
+            "description": "List of processed media files with their metadata",
             "items": {
               "type": "object",
               "properties": {
-                "fileName": { "type": "string" },
-                "contentType": { "type": "string" },
-                "storageKey": { "type": "string" },
-                "transcription": { "type": "string" }
+                "fileName": { 
+                  "type": "string",
+                  "description": "Original filename of the uploaded file",
+                  "example": "sunset_photo.jpg"
+                },
+                "contentType": { 
+                  "type": "string",
+                  "description": "MIME type of the file",
+                  "example": "image/jpeg"
+                },
+                "storageKey": { 
+                  "type": "string",
+                  "description": "MinIO storage location",
+                  "example": "media/2026-01-28/sunset_photo.jpg"
+                },
+                "transcription": { 
+                  "type": "string",
+                  "description": "Transcription text for audio/video files (null for images)",
+                  "nullable": true,
+                  "example": null
+                }
               }
             }
           }
@@ -638,7 +865,53 @@
       },
       "RequestHistory": {
         "type": "object",
-        "properties": { "id": { "type": "string", "format": "uuid" }, "requestType": { "type": "string" }, "inputText": { "type": "string" }, "detectedTask": { "type": "string" }, "response": { "type": "string" }, "usedAdvancedModel": { "type": "boolean" }, "mediaStorageKey": { "type": "string" }, "timestamp": { "type": "string", "format": "date-time" } }
+        "description": "Historical record of a request processed by the system",
+        "properties": { 
+          "id": { 
+            "type": "string", 
+            "format": "uuid",
+            "description": "Unique identifier for this history entry",
+            "example": "550e8400-e29b-41d4-a716-446655440001"
+          }, 
+          "requestType": { 
+            "type": "string",
+            "description": "Type of request (Audio, Media, or Text)",
+            "enum": ["Audio", "Media", "Text"],
+            "example": "Media"
+          }, 
+          "inputText": { 
+            "type": "string",
+            "description": "The original input text or transcription",
+            "example": "What is in this image?"
+          }, 
+          "detectedTask": { 
+            "type": "string",
+            "description": "The AI-detected task classification",
+            "example": "general"
+          }, 
+          "response": { 
+            "type": "string",
+            "description": "The AI-generated response",
+            "example": "The image shows a sunset over the ocean"
+          }, 
+          "usedAdvancedModel": { 
+            "type": "boolean",
+            "description": "Whether an advanced AI model was used",
+            "example": true
+          }, 
+          "mediaStorageKey": { 
+            "type": "string",
+            "nullable": true,
+            "description": "Storage key(s) for associated media files",
+            "example": "media/2026-01-28/image123.jpg"
+          }, 
+          "timestamp": { 
+            "type": "string", 
+            "format": "date-time",
+            "description": "When this request was processed",
+            "example": "2026-01-28T09:15:00Z"
+          } 
+        }
       },
       "ProblemDetails": {
         "type": "object",
