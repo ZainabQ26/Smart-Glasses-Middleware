@@ -94,12 +94,13 @@ public class DocumentHighlightTaskHandler : ITaskHandler
 
             // In a real scenario, we'd save this to storage and return a URL
             // For now, return information about the highlighted document
+            var distinctPages = matchingChunks.Select(c => c.PageNumber).Distinct().OrderBy(p => p).ToList();
             var response = $"✅ Document '{document.FileName}' highlighted successfully!\n\n";
             response += $"📄 Document: {document.FileName}\n";
             response += $"🔍 Highlighted text: '{highlightText}'\n";
             response += $"📍 Found on {matchingChunks.Count} chunk(s) across " + 
-                       $"{matchingChunks.Select(c => c.PageNumber).Distinct().Count()} page(s): " + 
-                       string.Join(", ", matchingChunks.Select(c => c.PageNumber).Distinct().OrderBy(p => p));
+                       $"{distinctPages.Count} page(s): " + 
+                       string.Join(", ", distinctPages);
             response += $"\n\n💡 Use API endpoint: GET /api/documents/{documentId}/highlight";
 
             return response;
