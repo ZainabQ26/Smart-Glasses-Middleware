@@ -126,6 +126,31 @@ public class AdminController : ControllerBase
 
         try
         {
+            // Compute content hash for deduplication
+            using var hashStream = request.File.OpenReadStream();
+            var contentHash = _mediaStorageService.ComputeContentHash(hashStream);
+            
+            // Check if file with same hash already exists
+            var existingFile = await _context.ManagedFiles
+                .FirstOrDefaultAsync(f => f.ContentHash == contentHash);
+            
+            if (existingFile != null)
+            {
+                _logger.LogInformation("File with hash {Hash} already exists as {FileId}, returning existing file", contentHash, existingFile.Id);
+                return Ok(new
+                {
+                    existingFile.Id,
+                    existingFile.FileName,
+                    existingFile.Label,
+                    existingFile.ContentType,
+                    existingFile.StorageKey,
+                    existingFile.UploadedAt,
+                    existingFile.FileSize,
+                    existingFile.ContentHash,
+                    deduplicated = true
+                });
+            }
+
             // Upload to MinIO
             using var stream = request.File.OpenReadStream();
             var contentType = request.File.ContentType ?? "application/octet-stream";
@@ -139,6 +164,7 @@ public class AdminController : ControllerBase
                 Label = request.Label,
                 ContentType = contentType,
                 StorageKey = storageKey,
+                ContentHash = contentHash,
                 UploadedAt = DateTime.UtcNow,
                 FileSize = request.File.Length
             };
@@ -172,7 +198,9 @@ public class AdminController : ControllerBase
                 managedFile.ContentType,
                 managedFile.StorageKey,
                 managedFile.UploadedAt,
-                managedFile.FileSize
+                managedFile.FileSize,
+                managedFile.ContentHash,
+                deduplicated = false
             });
         }
         catch (Exception ex)
