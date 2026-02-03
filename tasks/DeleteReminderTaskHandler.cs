@@ -61,7 +61,7 @@ public class DeleteReminderTaskHandler : ITaskHandler
             if (matchingReminders.Count > 1)
             {
                 var reminderList = string.Join("\n", matchingReminders.Take(5).Select((r, i) => 
-                    $"{i + 1}. {r.InputText} (created {r.Timestamp:yyyy-MM-dd HH:mm})"));
+                    $"{i + 1}. {r.InputText} (created {r.Timestamp:yyyy-MM-dd HH:mm} UTC)"));
                 return $"I found {matchingReminders.Count} reminders matching '{searchText}':\n\n{reminderList}\n\nPlease be more specific about which reminder you want to delete.";
             }
 
