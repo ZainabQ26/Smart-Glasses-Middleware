@@ -11,7 +11,6 @@ Push-Location (Join-Path $PSScriptRoot '..')
 Write-Host "Building 'app' image..."
 docker compose build app
 
-$
 Write-Host "Recreating 'app' container (no dependencies)..."
 docker compose up -d --force-recreate --no-deps app
 

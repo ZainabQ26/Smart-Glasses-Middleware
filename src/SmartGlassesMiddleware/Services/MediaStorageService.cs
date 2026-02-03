@@ -10,6 +10,8 @@ public interface IMediaStorageService
     Task<Stream> DownloadMediaAsync(string key);
     Task DeleteMediaAsync(string key);
     string ComputeContentHash(Stream fileStream);
+    Task<string> UploadFileAsync(string key, Stream fileStream, string contentType);
+    Task<Stream> DownloadFileAsync(string key);
 }
 
 public class MinioMediaStorageService : IMediaStorageService
@@ -113,5 +115,44 @@ public class MinioMediaStorageService : IMediaStorageService
         fileStream.Position = originalPosition;
         
         return Convert.ToHexString(hash);
+    }
+
+    public async Task<string> UploadFileAsync(string key, Stream fileStream, string contentType)
+    {
+        try
+        {
+            // Ensure bucket exists
+            var bucketExistsArgs = new BucketExistsArgs().WithBucket(_bucketName);
+            bool found = await _minioClient.BucketExistsAsync(bucketExistsArgs);
+            
+            if (!found)
+            {
+                var makeBucketArgs = new MakeBucketArgs().WithBucket(_bucketName);
+                await _minioClient.MakeBucketAsync(makeBucketArgs);
+            }
+
+            // Upload file with provided key
+            var putObjectArgs = new PutObjectArgs()
+                .WithBucket(_bucketName)
+                .WithObject(key)
+                .WithStreamData(fileStream)
+                .WithObjectSize(fileStream.Length)
+                .WithContentType(contentType);
+
+            await _minioClient.PutObjectAsync(putObjectArgs);
+
+            _logger.LogInformation("Uploaded file to MinIO: {Key}", key);
+            return key;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error uploading file to MinIO");
+            throw;
+        }
+    }
+
+    public async Task<Stream> DownloadFileAsync(string key)
+    {
+        return await DownloadMediaAsync(key);
     }
 }
