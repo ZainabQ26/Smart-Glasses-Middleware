@@ -45,9 +45,9 @@ public class ReminderTaskHandler : ITaskHandler
                 Response = "Reminder saved."
             };
 
-            await _historyService.SaveRequestAsync(history);
+            var savedHistory = await _historyService.SaveRequestAsync(history);
             
-            _logger.LogInformation("Reminder saved successfully: {ReminderId}", history.Id);
+            _logger.LogInformation("Reminder saved successfully with ID: {ReminderId}", savedHistory.Id);
 
             return $"Okay — I've saved that reminder: \"{reminderText}\"";
         }
