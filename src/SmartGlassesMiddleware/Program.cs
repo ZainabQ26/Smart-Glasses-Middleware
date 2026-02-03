@@ -137,7 +137,7 @@ builder.Services.AddOpenApi();
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") 
     ?? "Host=localhost;Database=smartglasses;Username=postgres;Password=postgres";
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseNpgsql(connectionString));
+    options.UseNpgsql(connectionString, o => o.UseVector()));
 
 // Configure Redis
 var redisConnection = builder.Configuration.GetConnectionString("Redis") 
@@ -198,6 +198,11 @@ builder.Services.AddScoped<IMediaStorageService, MinioMediaStorageService>();
 builder.Services.AddScoped<ICacheService, RedisCacheService>();
 builder.Services.AddSingleton<IMetricsService, MetricsService>();
 builder.Services.AddScoped<IRagService, RagService>();
+// Document processing and RAG services
+builder.Services.AddScoped<IDocumentProcessingService, DocumentProcessingService>();
+builder.Services.AddScoped<IRAGService, RAGService>();
+builder.Services.AddScoped<IDocumentHighlightService, DocumentHighlightService>();
+builder.Services.AddScoped<IConversationService, ConversationService>();
 // Transcription service (server-side) — registered as a typed HTTP client with timeout configuration
 builder.Services.AddHttpClient<ITranscriptionService, HttpTranscriptionService>((sp, client) =>
 {
@@ -353,6 +358,7 @@ builder.Services.AddScoped<ITaskDispatcher, TaskDispatcher>();
     builder.Services.AddScoped<IMediaProcessor, MediaProcessor>();
     builder.Services.AddHostedService<BackgroundTaskHostedService>();
     builder.Services.AddHostedService<BackgroundTaskCleanupService>();
+    builder.Services.AddHostedService<DocumentProcessingBackgroundService>();
 
 // Add SignalR for real-time notifications
 builder.Services.AddSignalR();

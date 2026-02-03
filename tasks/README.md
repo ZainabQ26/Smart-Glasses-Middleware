@@ -1,56 +1,189 @@
-Task handlers (plugins)
-=======================
+# Task Handlers - Local AI Tasks
+===============================
 
-Overview
---------
-This project discovers `ITaskHandler` implementations at startup and registers them with DI.
+## Overview
+This folder contains all task handlers that execute locally using Ollama. Any task handler placed in this folder will be compiled and loaded at runtime, making them easy to edit and customize without rebuilding the main application.
 
-- During development: add a new handler source file under `src/SmartGlassesMiddleware/Services/` and rebuild — the handler will be compiled into the app and discovered automatically.
-- At runtime: place a compiled plugin DLL that contains one or more `ITaskHandler` implementations into the `tasks/` folder (located at the app content root). The app will attempt to load `*.dll` files from this folder at startup and register any concrete types that implement `ITaskHandler`.
+**Architecture:**
+- ✅ Tasks in `tasks/` folder → Execute locally with Ollama
+- ❌ Tasks NOT in `tasks/` folder → Route to external REST API (advanced model)
 
-Template file
--------------
-`TemplateTaskHandler.cs` in the `tasks/` folder is a source template. It will not be loaded automatically unless you either:
+The application automatically:
+1. Compiles `.cs` files in this folder at startup
+2. Loads `.dll` plugin files from this folder
+3. Registers all `ITaskHandler` implementations with dependency injection
+4. Uses Ollama to classify requests and route to appropriate handlers
 
-1. Copy the file into the project (for example into `src/SmartGlassesMiddleware/Services/`) and rebuild, or
-2. Compile it into a class library DLL and drop that DLL into the `tasks/` folder.
+## Available Task Handlers
 
-Will the template cause issues?
-------------------------------
-- Leaving the `.cs` template file in the `tasks/` folder will not be loaded at runtime and is harmless.
-- If you compile a plugin DLL, make sure:
-  - The plugin targets the same framework (net10.0) or a compatible target.
-  - The plugin references any necessary assemblies (the app's public interfaces are in the same project/assembly).
-  - Each handler's `Name` property is unique (case-insensitive). Duplicate names will cause a startup error because handlers are keyed by `Name`.
-  - Avoid ambiguous handler types; handlers should be concrete, public classes implementing `ITaskHandler` with a parameterless or DI-compatible constructor.
+### Core Local Tasks (Ollama-based)
 
-Plugin example
---------------
-Create a small class library project (example):
+**TimeTaskHandler.cs** - `task: time`
+- Returns current date and time
+- Simple local task with no external dependencies
 
-_dotnet new classlib -n MyTaskPlugin_
+**ReminderTaskHandler.cs** - `task: reminder`
+- Saves reminders to database
+- Local task with database persistence
 
-Add a reference to the app project (or duplicate the `ITaskHandler` interface in a shared library) and implement `ITaskHandler`.
+**TemplateTaskHandler.cs** - `task: template`
+- Template/example for creating new handlers
+- Copy and modify to create custom tasks
 
-Example `csproj` snippet that outputs the DLL into the app `tasks` folder on build (adjust path as needed):
+### Document Processing Tasks (Local)
 
-    <PropertyGroup>
-      <TargetFramework>net10.0</TargetFramework>
-      <OutputPath>..\..\tasks\</OutputPath>
-    </PropertyGroup>
+**DocumentSearchTaskHandler.cs** - `task: document-search`
+- Finds text in documents and returns exact locations
+- Returns page numbers, positions, and context
+- Usage: "find [text] in document [filename]"
 
-Build and drop
---------------
-- Build the plugin: `dotnet build` (the DLL will be written to `tasks/` if you set `OutputPath`).
-- Restart the app; the startup will attempt to load the DLLs in `tasks/` and register `ITaskHandler` types.
+**DocumentHighlightTaskHandler.cs** - `task: document-highlight`
+- Highlights specific text in documents
+- Returns highlighted copy without modifying original
+- Usage: "highlight [text] in document [id]"
 
-Logging and errors
-------------------
-- If a plugin assembly fails to load, the startup logs a warning and continues.
-- If two handlers use the same `Name`, `TaskDispatcher` construction will throw; keep names unique.
+**OCRTaskHandler.cs** - `task: ocr`
+- OCR (Optical Character Recognition) for images
+- Placeholder implementation (requires Tesseract setup)
+- Usage: "ocr [document-id]"
 
-Support
--------
-If you'd like, I can:
-- Add a buildable sample plugin project that produces a DLL into `tasks/`.
-- Add a short script to compile and copy plugin DLLs into the `tasks/` folder.
+**DocumentQueryTaskHandler.cs** - `task: document-query`
+- RAG-based intelligent document queries
+- Searches documents semantically and provides answers
+- Usage: "What does the document say about [topic]?"
+
+### Advanced Model (External REST API)
+
+**AdvancedTaskHandler.cs** - `task: advanced`
+- Routes complex requests to external REST API
+- Configured via `AI:AdvancedModelEndpoint` in appsettings.json
+- Automatically used for unknown tasks or complex queries
+
+## How It Works
+
+1. **User sends request** → "What time is it?"
+2. **Ollama detects task** → Classifies as "time" task
+3. **System checks handlers** → Finds TimeTaskHandler in tasks/
+4. **Executes locally** → Uses Ollama to process
+5. **Returns response** → "The current time is 2:30 PM..."
+
+If no handler matches:
+1. **Unknown task detected**
+2. **Routes to AdvancedTaskHandler**
+3. **Calls external REST API** (e.g., GPT-4, Claude)
+4. **Returns advanced model response**
+
+## Creating Custom Tasks
+
+### Option 1: Edit .cs files directly (Recommended)
+
+1. **Copy TemplateTaskHandler.cs** to a new file
+2. **Change the class name** and `Name` property
+3. **Implement your logic** in `HandleAsync`
+4. **Restart the application** - it will auto-compile and load
+
+Example:
+```csharp
+public class WeatherTaskHandler : ITaskHandler
+{
+    public string Name => "weather";
+    
+    public async Task<string> HandleAsync(string input)
+    {
+        // Your logic here
+        return "Weather information...";
+    }
+}
+```
+
+### Option 2: Build as plugin DLL
+
+1. **Create a class library**: `dotnet new classlib -n MyTaskPlugin`
+2. **Add ITaskHandler interface** (copy from main project)
+3. **Implement handler** with unique `Name`
+4. **Build and copy DLL** to `tasks/` folder
+5. **Restart application**
+
+## Configuration
+
+**Advanced Model Endpoint:**
+```json
+{
+  "AI": {
+    "AdvancedModelEndpoint": "https://api.openai.com/v1/chat/completions",
+    "AdvancedModelName": "gpt-4"
+  }
+}
+```
+
+## Dependencies for Handlers
+
+Handlers can inject any registered service:
+- `ILogger<T>` - Logging
+- `ApplicationDbContext` - Database access
+- `IConfiguration` - Configuration
+- `IHttpClientFactory` - HTTP calls
+- `IRAGService` - Document queries
+- `IDocumentProcessingService` - Document processing
+- `IDocumentHighlightService` - Document highlighting
+
+Example with dependencies:
+```csharp
+public class MyTaskHandler : ITaskHandler
+{
+    private readonly ILogger<MyTaskHandler> _logger;
+    private readonly ApplicationDbContext _context;
+    
+    public MyTaskHandler(ILogger<MyTaskHandler> logger, ApplicationDbContext context)
+    {
+        _logger = logger;
+        _context = context;
+    }
+    
+    public string Name => "my-task";
+    
+    public async Task<string> HandleAsync(string input)
+    {
+        _logger.LogInformation("Processing: {Input}", input);
+        // Your logic here
+        return "Response";
+    }
+}
+```
+
+## Troubleshooting
+
+**Handler not loading:**
+- Check logs for compilation errors
+- Ensure `Name` property is unique
+- Verify namespace is `SmartGlassesMiddleware.Services`
+- Restart application after changes
+
+**Duplicate handler names:**
+- Each handler must have a unique `Name` (case-insensitive)
+- Check both `.cs` files and `.dll` plugins
+
+**Dependencies not injecting:**
+- Ensure service is registered in `Program.cs`
+- Use correct constructor injection pattern
+
+## Best Practices
+
+1. **Keep tasks simple** - Each handler should do one thing well
+2. **Use descriptive names** - Make task names intuitive ("document-search" not "ds")
+3. **Log extensively** - Help debugging with good logging
+4. **Handle errors gracefully** - Always catch exceptions and return user-friendly messages
+5. **Document usage** - Add comments explaining input format
+6. **Test locally** - Use Ollama for fast iteration
+
+## Examples of Good vs Bad Task Names
+
+✅ Good:
+- "document-search" - Clear what it does
+- "weather-forecast" - Descriptive
+- "translate-text" - Action-based
+
+❌ Bad:
+- "ds" - Too abbreviated
+- "handler1" - Not descriptive
+- "do-stuff" - Too vague
