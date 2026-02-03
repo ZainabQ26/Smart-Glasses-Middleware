@@ -1,174 +1,107 @@
 # Smart-Glasses-Middleware
 
-The middleware for the smart glasses that will run the small AI to complete simple tasks, and for other tasks it will send it to the advanced AI model.
+This repository contains the backend middleware for a smart glasses application. It provides a powerful, multi-modal API for interacting with AI models, processing documents, and managing tasks. The system is designed to be extensible, allowing developers to add new capabilities with ease.
 
 ## Features
 
-- **Multi-format API**: Accepts text, audio, images, and video requests
-- **AI Task Detection**: Uses Ollama with Microsoft Semantic Kernel to classify and process tasks
-- **Intelligent Routing**: Automatically detects if a task requires an advanced model and routes accordingly
-- **RAG Pipeline**: Document processing and intelligent querying
-  - Extract text from PDFs (digital and scanned), DOCX, TXT, and images
-  - Track text positions on pages for precise location references
-  - Semantic search with embeddings
-  - Document highlighting capabilities
-  - Persistent storage through restarts
-- **Storage**: 
-  - PostgreSQL for request history and document chunks
-  - MinIO for media storage (images, videos, audio, documents)
-  - Redis for caching responses
-- **RESTful API**: Clean, well-documented endpoints
+- **Multi-modal API**: Accepts requests via text, audio, images, and video.
+- **AI Task Detection & Routing**: Uses a local AI model (Ollama) with Microsoft Semantic Kernel to classify incoming tasks. Simple tasks are handled locally, while complex queries are intelligently routed to a more advanced AI model.
+- **Extensible Task System**: Dynamically load custom task handlers by dropping C# source files or compiled DLLs into the `tasks` directory. This allows for easy extension of the middleware's capabilities without needing to recompile the main application. See the [Task Handlers](#task-handlers) section for more details.
+- **Advanced RAG Pipeline**: A sophisticated Retrieval-Augmented Generation pipeline for document interaction.
+  - **Multi-format Document Processing**: Extracts text and layout information from PDFs (digital and scanned), DOCX, TXT, and various image formats.
+  - **Vector Embeddings**: Generates embeddings for document chunks using configurable models and stores them in PostgreSQL with `pgvector` for efficient similarity searches.
+  - **Semantic Querying**: Understands the meaning behind your questions to find the most relevant information.
+  - **Document Highlighting**: Pinpoints and highlights the exact location of information within your documents.
+  - **Resource Groups**: Organize documents and prompts into groups for targeted querying.
+  - For more details, see the [RAG Process Documentation](docs/RAG_PROCESS.md).
+- **Comprehensive Admin API**: A rich set of endpoints for managing the system's resources, including documents, prompts, and resource groups.
+- **Real-time Notifications**: Uses SignalR and Redis Pub/Sub to provide real-time notifications about background task completion.
+- **Robust Storage**:
+  - **PostgreSQL**: For storing request history, document metadata, and vector embeddings.
+  - **MinIO**: For scalable storage of media files (images, videos, audio) and documents.
+  - **Redis**: For response caching and pub/sub messaging.
+- **Monitoring & Health Checks**: Includes `/health` and `/metrics` endpoints for monitoring the application's status and performance.
 
 ## Architecture
 
-The application is built with:
-- **ASP.NET Core Web API** (.NET 10.0)
-- **Microsoft Semantic Kernel** for AI orchestration
-- **Ollama** as the local lightweight AI model
-- **PostgreSQL** for relational data storage
-- **MinIO** for object storage
-- **Redis** for caching
+The application is built on a modern .NET 8 stack, with a focus on modularity and scalability.
 
-## Prerequisites
-
-- .NET 10.0 SDK
-- Docker (recommended for running dependencies)
-- PostgreSQL database
-- Redis server
-- MinIO server
-- Ollama server (local model runtime)
-
-Note: a lightweight server-side transcription service (`vosk-transcriber`) is included in the provided `docker-compose.yml` and will auto-download a small Vosk model at startup. No external transcription keys are required for that service.
+- **ASP.NET Core Web API**: Provides the core framework for the RESTful API.
+- **Microsoft Semantic Kernel**: For AI orchestration, prompt engineering, and service connections.
+- **Ollama**: Serves as the local, lightweight AI model for initial task processing and simple queries.
+- **PostgreSQL + pgvector**: For relational data storage and efficient vector similarity search.
+- **MinIO**: S3-compatible object storage for all media and document files.
+- **Redis**: For caching, background task management, and real-time messaging.
+- **SignalR**: For pushing real-time notifications to connected clients.
 
 ## Quick Start with Docker
 
-The repository includes a `docker-compose.yml` that starts the full stack (Postgres, Redis, MinIO, Ollama, Vosk transcriber, and the app). To start everything locally run:
+The easiest way to get started is by using the provided Docker Compose file, which sets up the entire stack.
 
 ```bash
-# from the repository root
-docker compose pull
-docker compose up --build
+# From the repository root
+docker-compose pull
+docker-compose up --build
 ```
 
-The `vosk-transcriber` service auto-downloads a small Vosk model into the shared `models` Docker volume on first start; no extra steps or API keys are required for basic transcription.
-
-Build/run the application locally (dev):
-
-```bash
-cd src/SmartGlassesMiddleware
-dotnet restore
-dotnet build
-dotnet run
-```
-
-The API will be available at `https://localhost:5001` or `http://localhost:5000` (or `http://localhost:5000` when run via Docker compose).
+The API will then be available at `http://localhost:5000`.
 
 ## Configuration
 
-Edit `appsettings.json` to configure the services. In addition to the existing settings, the app reads a `Transcription:Endpoint` configuration key (or the environment variable `Transcription__Endpoint`) to know where to send audio for server-side transcription. By default the docker-compose sets this to the Vosk transcriber:
+The application is configured via `src/SmartGlassesMiddleware/appsettings.json` and environment variables. Key settings include:
 
-```json
-{
-  "ConnectionStrings": {
-    "DefaultConnection": "Host=localhost;Database=smartglasses;Username=postgres;Password=postgres",
-    "Redis": "localhost:6379"
-  },
-  "MinIO": {
-    "Endpoint": "localhost:9000",
-    "AccessKey": "minioadmin",
-    "SecretKey": "minioadmin",
-    "BucketName": "smart-glasses-media"
-  },
-    "AI": {
-    "OllamaEndpoint": "http://localhost:11434",
-    "OllamaModel": "llama2",
-    "AdvancedModelEndpoint": "http://localhost:5000/api/chat"
-  },
-  "Transcription": {
-    "Endpoint": "http://vosk-transcriber:8080/transcribe"
-  }
-}
-```
+- `ConnectionStrings`: For PostgreSQL and Redis.
+- `MinIO`: For MinIO server connection details.
+- `AI`: For configuring Ollama and the advanced AI model endpoints.
+- `RAG`: For tuning the RAG pipeline's behavior (e.g., token limits, embedding settings).
+- `Transcription`: For the server-side transcription service endpoint.
 
-If you prefer to point to another transcription service, override `Transcription__Endpoint` or set the `Transcription:Endpoint` key.
+Secrets should be managed using Docker secrets or another secure method. The application can read secrets from files in `/run/secrets` and map them to configuration keys. See `Program.cs` for details on the secret mapping logic.
 
 ## API Endpoints
 
-### Text Processing
-```
-POST /api/text
-Content-Type: application/json
+The application exposes a comprehensive set of RESTful API endpoints. For a complete and interactive API specification, run the application and navigate to `/swagger`. The OpenAPI specification can be found at `openapi.json`.
 
-{
-  "text": "What's the weather like today?"
-}
-```
+### Main Endpoints
+- `POST /api/text`: Submit a text-based query.
+- `POST /api/transcribe`: Submit an audio file for transcription and processing.
+- `POST /api/ask`: Submit a media file (image/video) with a prompt.
+- `GET /api/history`: Retrieve request history.
 
-### Audio Processing
-```
-POST /api/transcribe
-Content-Type: application/json
+### Document (RAG) Endpoints
+- `POST /api/documents/upload`: Upload a document for processing.
+- `POST /api/documents/query`: Query your documents.
+- `GET /api/documents`: List uploaded documents.
+- `GET /api/documents/{id}`: Get details for a specific document.
+- See the [RAG Process Documentation](docs/RAG_PROCESS.md) for more.
 
-{
-  "audioBase64": "<base64-encoded-audio>"
-}
-```
+### Admin Endpoints
+- `GET, POST, PUT, DELETE /api/admin/files`: Manage uploaded files.
+- `GET, POST, PUT, DELETE /api/admin/prompts`: Manage saved prompts.
+- `GET, POST, PUT, DELETE /api/admin/groups`: Manage resource groups.
+- See the `AdminController.cs` for a full list of admin endpoints.
 
-### Media Processing (Images/Videos)
-```
-POST /api/ask
-Content-Type: multipart/form-data
+### Task Management
+- `GET /api/tasks/{id}`: Get the status of a background task.
 
-file: <file-upload>
-prompt: "What's in this image?"
-```
+## Task Handlers
 
-### History
-```
-GET /api/history?count=10
-GET /api/history/{id}
-```
+The middleware can be extended with custom task handlers. These are C# classes that implement the `ITaskHandler` interface. The system automatically discovers and registers any `ITaskHandler` implementations found in `.cs` or `.dll` files in the `tasks` directory at startup.
 
-### Document Processing (RAG)
-```
-POST /api/documents/upload
-POST /api/documents/query
-POST /api/documents/{id}/highlight
-GET /api/documents
-GET /api/documents/{id}
-DELETE /api/documents/{id}
-```
+### Creating a Task Handler
 
-See [RAG Pipeline Documentation](docs/RAG_PIPELINE.md) for detailed information.
+1.  Create a new C# class that implements `SmartGlassesMiddleware.Services.ITaskHandler`.
+2.  Implement the `CanHandle` method to specify which tasks your handler can process (based on a task name string).
+3.  Implement the `HandleAsync` method to perform the task's logic.
+4.  Place the `.cs` file (or the compiled `.dll`) in the `tasks` directory.
 
-## How It Works
-
-1. **Request Reception**: The API receives a request (text, audio, or media)
-2. **Task Detection**: Ollama analyzes the request to determine the task type
-3. **Task Classification**: 
-  - Known tasks (weather, time, reminder, etc.) are processed by Ollama locally
-  - Unknown or complex tasks are forwarded to an advanced model via REST API
-4. **Response Generation**: The appropriate AI model generates a response
-5. **Storage**: 
-   - Request history is saved to PostgreSQL
-   - Media files are stored in MinIO
-   - Responses are cached in Redis for faster subsequent requests
-
-## Supported Tasks
-
-The local Ollama model can handle these tasks:
-- Weather queries
-- Time queries
-- Reminders
-- Alarms
-- Timers
-- Notes
-- Translation
-- Calculations
-
-Other tasks are automatically routed to the advanced model.
+The application will automatically pick up your new handler on the next restart. See the existing handlers in the `tasks` directory for examples.
 
 ## Development
+
+### Prerequisites
+- .NET 8.0 SDK
+- Docker (for dependencies)
 
 ### Build
 ```bash
@@ -184,22 +117,3 @@ dotnet test
 ```bash
 dotnet run --project src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj
 ```
-
-## Project Structure
-
-```
-Smart-Glasses-Middleware/
-├── src/
-│   └── SmartGlassesMiddleware/
-│       ├── Controllers/         # API endpoints
-│       ├── Services/            # Business logic
-│       ├── Models/              # Data models
-│       ├── Data/                # Database context
-│       └── Program.cs           # Application entry point
-├── SmartGlassesMiddleware.sln   # Solution file
-└── README.md
-```
-
-## License
-
-MIT

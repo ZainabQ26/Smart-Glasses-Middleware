@@ -1,94 +1,603 @@
 {
-  "openapi": "3.0.3",
+  "openapi": "3.1.1",
   "info": {
-    "title": "Smart Glasses Middleware API",
-    "version": "2.0.0",
-    "description": "API for Smart Glasses Middleware with RAG (Retrieval-Augmented Generation) capabilities, document processing, and conversational AI"
+    "title": "SmartGlassesMiddleware | v1",
+    "version": "1.0.0"
   },
   "servers": [
-    { "url": "http://localhost:5000" }
+    {
+      "url": "http://localhost:5000/"
+    }
   ],
   "paths": {
     "/health": {
       "get": {
-        "summary": "Health check",
+        "tags": [
+          "SmartGlassesMiddleware"
+        ],
         "responses": {
           "200": {
-            "description": "All services healthy",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "status": { "type": "string", "example": "Healthy" },
-                    "checks": {
-                      "type": "object",
-                      "properties": {
-                        "postgres": { "$ref": "#/components/schemas/ServiceHealthCheck" },
-                        "redis": { "$ref": "#/components/schemas/ServiceHealthCheck" },
-                        "minio": { "$ref": "#/components/schemas/ServiceHealthCheck" },
-                        "ollama": { "$ref": "#/components/schemas/ServiceHealthCheck" },
-                        "vosk-transcriber": { "$ref": "#/components/schemas/ServiceHealthCheck" }
-                      }
-                    },
-                    "timestamp": { "type": "string", "format": "date-time" }
-                  }
-                },
-                "examples": {
-                  "healthy": {
-                    "summary": "All services healthy",
-                    "value": {
-                      "status": "Healthy",
-                      "checks": {
-                        "postgres": { "healthy": true, "error": null },
-                        "redis": { "healthy": true, "error": null },
-                        "minio": { "healthy": true, "error": null },
-                        "ollama": { "healthy": true, "error": null },
-                        "vosk-transcriber": { "healthy": true, "error": null }
-                      },
-                      "timestamp": "2026-01-28T00:00:00Z"
-                    }
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "tags": [
+          "SmartGlassesMiddleware"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/admin/files": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Get managed files with pagination and caching",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32",
+              "default": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32",
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Upload a new file with label",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "File": {
+                    "$ref": "#/components/schemas/IFormFile"
+                  },
+                  "Label": {
+                    "type": "string"
                   }
                 }
               }
             }
           },
-          "503": {
-            "description": "One or more services unhealthy",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/admin/files/{id}": {
+      "delete": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Delete a managed file",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/admin/prompts": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Get managed prompts with pagination and caching",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32",
+              "default": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32",
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Create a new prompt",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromptRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromptRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromptRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/admin/prompts/{id}": {
+      "put": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Update an existing prompt",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromptRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromptRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromptRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Delete a prompt",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/admin/groups": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Get resource groups with pagination and caching",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32",
+              "default": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32",
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Create a new resource group",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/admin/groups/{id}": {
+      "put": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Update a resource group",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Delete a resource group",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/admin/groups/{groupId}/files/{fileId}": {
+      "post": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Add a file to a group",
+        "parameters": [
+          {
+            "name": "groupId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "fileId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Remove a file from a group",
+        "parameters": [
+          {
+            "name": "groupId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "fileId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/admin/groups/{groupId}/prompts/{promptId}": {
+      "post": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Add a prompt to a group",
+        "parameters": [
+          {
+            "name": "groupId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "promptId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Remove a prompt from a group",
+        "parameters": [
+          {
+            "name": "groupId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "promptId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/ai-interactions": {
+      "get": {
+        "tags": [
+          "AIInteraction"
+        ],
+        "summary": "Get AI interaction logs with optional filtering",
+        "parameters": [
+          {
+            "name": "groupId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "model",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32",
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32",
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
             "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "array"
+                }
+              },
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "status": { "type": "string", "example": "Unhealthy" },
-                    "checks": {
-                      "type": "object",
-                      "properties": {
-                        "postgres": { "$ref": "#/components/schemas/ServiceHealthCheck" },
-                        "redis": { "$ref": "#/components/schemas/ServiceHealthCheck" },
-                        "minio": { "$ref": "#/components/schemas/ServiceHealthCheck" },
-                        "ollama": { "$ref": "#/components/schemas/ServiceHealthCheck" },
-                        "vosk-transcriber": { "$ref": "#/components/schemas/ServiceHealthCheck" }
-                      }
-                    },
-                    "timestamp": { "type": "string", "format": "date-time" }
-                  }
-                },
-                "examples": {
-                  "partialFailure": {
-                    "summary": "Some services down",
-                    "value": {
-                      "status": "Unhealthy",
-                      "checks": {
-                        "postgres": { "healthy": true, "error": null },
-                        "redis": { "healthy": true, "error": null },
-                        "minio": { "healthy": true, "error": null },
-                        "ollama": { "healthy": false, "error": "Connection refused" },
-                        "vosk-transcriber": { "healthy": true, "error": null }
-                      },
-                      "timestamp": "2026-01-28T00:00:00Z"
-                    }
-                  }
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "type": "array"
                 }
               }
             }
@@ -96,32 +605,121 @@
         }
       }
     },
-    
-    "/api/transcribe": {
-      "post": {
-        "summary": "Transcribe audio",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "file": { "type": "string", "format": "binary", "description": "Binary audio file" }
+    "/api/ai-interactions/{id}": {
+      "get": {
+        "tags": [
+          "AIInteraction"
+        ],
+        "summary": "Get detailed information about a specific AI interaction",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIInteractionLog"
                 }
               },
-              "encoding": {
-                "file": { "contentType": "audio/*" }
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIInteractionLog"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIInteractionLog"
+                }
               }
             }
           }
+        }
+      }
+    },
+    "/api/ai-interactions/stats": {
+      "get": {
+        "tags": [
+          "AIInteraction"
+        ],
+        "summary": "Get statistics about AI model usage",
+        "parameters": [
+          {
+            "name": "startDate",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "endDate",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "groupId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/transcribe": {
+      "post": {
+        "tags": [
+          "Audio"
+        ],
+        "summary": "Transcribes audio from base64-encoded data",
+        "requestBody": {
+          "description": "Audio request containing base64-encoded audio data",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AudioRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AudioRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/AudioRequest"
+              }
+            }
+          },
+          "required": true
         },
         "responses": {
           "200": {
-            "description": "Audio upload result",
+            "description": "Audio successfully transcribed",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/AudioUploadResponse" },
+                "schema": {
+                  "$ref": "#/components/schemas/AudioUploadResponse"
+                },
                 "examples": {
                   "success": {
                     "summary": "Successful transcription",
@@ -136,46 +734,1317 @@
             }
           },
           "400": {
-            "description": "Bad Request",
+            "description": "Invalid audio data or request format",
             "content": {
-              "application/problem+json": {
-                "schema": { "$ref": "#/components/schemas/ProblemDetails" },
-                "examples": {
-                  "validationError": {
-                    "summary": "Validation error",
-                    "value": {
-                      "type": "https://example.com/probs/validation",
-                      "title": "Validation Failed",
-                      "status": 400,
-                      "detail": "One or more fields are invalid.",
-                      "instance": "/api/transcribe",
-                      "errors": { "audioBase64": [ "Audio data cannot be empty" ] },
-                      "requestId": "00000000-0000-0000-0000-000000000000",
-                      "timestamp": "2026-01-28T00:00:00Z"
-                    }
-                  }
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
             }
           },
           "500": {
-            "description": "Server Error",
+            "description": "Internal server error during processing",
             "content": {
-              "application/problem+json": {
-                "schema": { "$ref": "#/components/schemas/ProblemDetails" },
-                "examples": {
-                  "serverError": {
-                    "summary": "Internal error",
-                    "value": {
-                      "type": "about:blank",
-                      "title": "Internal Server Error",
-                      "status": 500,
-                      "detail": "An unexpected error occurred.",
-                      "instance": "/api/transcribe",
-                      "requestId": "00000000-0000-0000-0000-000000000001",
-                      "timestamp": "2026-01-28T00:00:00Z"
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/Conversations": {
+      "post": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Create a new conversation",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateConversationRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateConversationRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateConversationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/Conversation"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Conversation"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Conversation"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Get all active conversations",
+        "parameters": [
+          {
+            "name": "groupId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Conversation"
+                  }
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Conversation"
+                  }
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Conversation"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/Conversations/{id}": {
+      "get": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Get a specific conversation with its messages",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/Conversation"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Conversation"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Conversation"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/Conversations/{id}/messages": {
+      "post": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Add a message to a conversation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddMessageRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddMessageRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatMessage"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatMessage"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatMessage"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/Conversations/{id}/query": {
+      "post": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Query documents with conversation context",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConversationQueryRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConversationQueryRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConversationQueryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueryResult"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueryResult"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueryResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/Conversations/{id}/summarize": {
+      "post": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Summarize a conversation and optionally generate embedding",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "generateEmbedding",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/Conversations/{id}/archive": {
+      "post": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Archive a conversation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          }
+        }
+      }
+    },
+    "/api/Documents/upload": {
+      "post": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Upload and process a document (PDF, DOCX, TXT, or image)",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "allOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "file": {
+                        "$ref": "#/components/schemas/IFormFile"
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "groupIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "format": "uuid"
+                        }
+                      }
                     }
                   }
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentMetadata"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentMetadata"
+                },
+                "examples": {
+                  "success": {
+                    "summary": "Successful upload",
+                    "value": {
+                      "id": "550e8400-e29b-41d4-a716-446655440000",
+                      "fileName": "requirements.pdf",
+                      "documentType": "pdf",
+                      "totalPages": 10,
+                      "chunkCount": 50,
+                      "groups": []
+                    }
+                  }
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentMetadata"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/Documents/query": {
+      "post": {
+        "tags": [
+          "Documents"
+        ],
+"requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueryRequest"
+              },
+              "examples": {
+                "simpleQuery": {
+                  "summary": "Simple query",
+                  "value": {
+                    "query": "What are the main requirements?",
+                    "topK": 5
+                  }
+                },
+                "groupFilteredQuery": {
+                  "summary": "Query with group filter",
+                  "value": {
+                    "query": "What did we decide about the budget?",
+                    "topK": 5,
+                    "groupIds": ["550e8400-e29b-41d4-a716-446655440000"]
+                  }
+                }
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueryRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueryResult"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueryResult"
+                },
+                "examples": {
+                  "withSources": {
+                    "summary": "Query result with sources",
+                    "value": {
+                      "answer": "The main requirements include: 1) User authentication, 2) Data encryption, 3) API rate limiting. These are detailed on page 3 of the requirements document.",
+                      "sources": [
+                        {
+                          "documentId": "550e8400-e29b-41d4-a716-446655440000",
+                          "fileName": "requirements.pdf",
+                          "pageNumber": 3,
+                          "chunkId": "650e8400-e29b-41d4-a716-446655440000",
+                          "chunkText": "1. User Authentication\n   - OAuth 2.0 integration\n   - Multi-factor authentication\n2. Data Encryption\n   - AES-256 for data at rest..."
+                        }
+                      ]
+                    }
+                  }
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueryResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/Documents/{documentId}/highlight": {
+      "post": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Get a highlighted copy of a document showing where specific information is located",
+        "parameters": [
+          {
+            "name": "documentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HighlightRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HighlightRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/HighlightRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileStreamResult"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileStreamResult"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileStreamResult"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/Documents": {
+      "get": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "List all uploaded documents",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32",
+              "default": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32",
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DocumentMetadata"
+                  }
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DocumentMetadata"
+                  }
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DocumentMetadata"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/Documents/{documentId}": {
+      "get": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Get details of a specific document",
+        "parameters": [
+          {
+            "name": "documentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentMetadata"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentMetadata"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentMetadata"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Delete a document and all its chunks",
+        "parameters": [
+          {
+            "name": "documentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/Documents/reprocess": {
+      "post": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Reprocess failed or unprocessed documents",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/Documents/unprocessed": {
+      "get": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Get list of unprocessed documents",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/Documents/{id}/move": {
+      "post": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Move a document to different groups (reindexing)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MoveDocumentRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MoveDocumentRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/MoveDocumentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/History": {
+      "get": {
+        "tags": [
+          "History"
+        ],
+        "parameters": [
+          {
+            "name": "count",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32",
+              "default": 10
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RequestHistory"
+                  }
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RequestHistory"
+                  }
+                },
+                "examples": {
+                  "recentHistory": {
+                    "summary": "Recent history entries",
+                    "value": [
+                      {
+                        "id": "550e8400-e29b-41d4-a716-446655440001",
+                        "requestType": "Audio",
+                        "inputText": "Set a reminder for tomorrow at 3 PM",
+                        "detectedTask": "reminder",
+                        "response": "Reminder set for tomorrow at 3 PM",
+                        "usedAdvancedModel": false,
+                        "mediaStorageKey": null,
+                        "timestamp": "2026-01-28T10:30:00Z"
+                      },
+                      {
+                        "id": "550e8400-e29b-41d4-a716-446655440002",
+                        "requestType": "Media",
+                        "inputText": "What is in this image?",
+                        "detectedTask": "general",
+                        "response": "The image shows a sunset over the ocean with birds flying in the distance.",
+                        "usedAdvancedModel": true,
+                        "mediaStorageKey": "media/2026-01-28/image123.jpg",
+                        "timestamp": "2026-01-28T09:15:00Z"
+                      }
+                    ]
+                  }
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RequestHistory"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/History/{id}": {
+      "get": {
+        "tags": [
+          "History"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestHistory"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestHistory"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestHistory"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/History/reminders": {
+      "get": {
+        "tags": [
+          "History"
+        ],
+        "parameters": [
+          {
+            "name": "count",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32",
+              "default": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RequestHistory"
+                  }
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RequestHistory"
+                  }
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RequestHistory"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/History/type/{requestType}": {
+      "get": {
+        "tags": [
+          "History"
+        ],
+        "parameters": [
+          {
+            "name": "requestType",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "count",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32",
+              "default": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RequestHistory"
+                  }
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RequestHistory"
+                  }
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RequestHistory"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/History/reminders/{id}": {
+      "put": {
+        "tags": [
+          "History"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateReminderRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateReminderRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateReminderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestHistory"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestHistory"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestHistory"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "History"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/History/reminders/query": {
+      "post": {
+        "tags": [
+          "History"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueryRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueryRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueryResult"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueryResult"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueryResult"
                 }
               }
             }
@@ -185,37 +2054,54 @@
     },
     "/api/ask": {
       "post": {
-        "summary": "Ask AI",
+        "tags": [
+          "Media"
+        ],
+        "summary": "Process media files (images, videos, audio) with optional AI prompt",
+        "description": "This endpoint accepts multipart/form-data with:\n- files: One or more media files (images, videos, audio)\n- prompt: Optional text prompt for AI processing\n- promptAudio: Optional audio file containing the prompt (mutually exclusive with prompt)\n- manifest: Optional JSON array specifying file processing order\n- perFileTranscriptions: Optional JSON object mapping filenames to transcriptions\n\nSupported file formats:\n- Images: .jpg, .jpeg, .png, .gif\n- Videos: .mp4, .avi, .mov\n- Audio: .wav, .mp3, .m4a, .flac, .aac",
         "requestBody": {
-          "required": true,
+          "description": "Media request containing files and optional prompt",
           "content": {
-            "multipart/form-data": {
+            "application/x-www-form-urlencoded": {
               "schema": {
                 "type": "object",
                 "properties": {
-                  "files": {
-                    "type": "string",
-                    "format": "binary",
-                    "description": "Upload one or more files (client may allow selecting multiple files in the file picker). Allowed extensions: .jpg, .jpeg, .png, .gif, .mp4, .avi, .mov, .wav, .mp3, .m4a, .flac, .aac"
+                  "Files": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/IFormFile"
+                    }
                   },
-                  "prompt": { "type": "string", "description": "Prompt text (optional). Mutually exclusive with `promptAudio`: provide either a text prompt or an audio prompt file, not both." },
-                  "promptAudio": { "type": "string", "format": "binary", "description": "Prompt audio file (optional)" }
+                  "Prompt": {
+                    "maxLength": 5000,
+                    "minLength": 0,
+                    "type": "string"
+                  },
+                  "Transcription": {
+                    "maxLength": 10000,
+                    "minLength": 0,
+                    "type": "string"
+                  },
+                  "Manifest": {
+                    "type": "string"
+                  },
+                  "PerFileTranscriptions": {
+                    "type": "string"
+                  }
                 }
-              },
-              "encoding": {
-                "files": { "contentType": "application/octet-stream" },
-                "promptAudio": { "contentType": "audio/*" },
-                "prompt": { "contentType": "text/plain" }
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
-          "200": {
-            "description": "Media upload result",
+          "202": {
+            "description": "Request accepted for background processing",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/MediaUploadResponse" },
+                "schema": {
+                  "$ref": "#/components/schemas/MediaUploadResponse"
+                },
                 "examples": {
                   "success_simple": {
                     "summary": "Successful media processing (single file)",
@@ -272,1017 +2158,1129 @@
             }
           },
           "400": {
-            "description": "Bad Request",
+            "description": "Invalid request format or unsupported file types",
             "content": {
-              "application/problem+json": {
-                "schema": { "$ref": "#/components/schemas/ProblemDetails" },
-                "examples": {
-                  "validationError": {
-                    "summary": "Manifest/validation error",
-                    "value": {
-                      "type": "https://example.com/probs/validation",
-                      "title": "Validation Failed",
-                      "status": 400,
-                      "detail": "PerFileTranscriptions contains unknown keys.",
-                      "instance": "/api/ask",
-                      "errors": { "perFileTranscriptions": [ "Contains keys not present in uploaded files" ] },
-                      "requestId": "00000000-0000-0000-0000-000000000002",
-                      "timestamp": "2026-01-28T00:00:00Z"
-                    }
-                  },
-                  "promptConflict": {
-                    "$ref": "#/components/examples/promptConflict"
-                  }
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Server Error",
-            "content": {
-              "application/problem+json": {
-                "schema": { "$ref": "#/components/schemas/ProblemDetails" },
-                "examples": {
-                  "serverError": {
-                    "summary": "Internal error",
-                    "value": {
-                      "type": "about:blank",
-                      "title": "Internal Server Error",
-                      "status": 500,
-                      "detail": "An unexpected error occurred.",
-                      "instance": "/api/ask",
-                      "requestId": "00000000-0000-0000-0000-000000000003",
-                      "timestamp": "2026-01-28T00:00:00Z"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    
-    "/api/history": {
-      "get": {
-        "summary": "Get recent history",
-        "parameters": [
-          { "name": "count", "in": "query", "schema": { "type": "integer", "default": 10 }, "description": "Number of recent history entries to retrieve" }
-        ],
-        "responses": {
-          "200": {
-            "description": "List of recent history entries",
-            "content": {
-              "application/json": {
+              "text/plain": {
                 "schema": {
-                  "type": "array",
-                  "items": { "$ref": "#/components/schemas/RequestHistory" }
-                },
-                "examples": {
-                  "recentHistory": {
-                    "summary": "Recent history entries",
-                    "value": [
-                      {
-                        "id": "550e8400-e29b-41d4-a716-446655440001",
-                        "requestType": "Audio",
-                        "inputText": "Set a reminder for tomorrow at 3 PM",
-                        "detectedTask": "reminder",
-                        "response": "Reminder set for tomorrow at 3 PM",
-                        "usedAdvancedModel": false,
-                        "mediaStorageKey": null,
-                        "timestamp": "2026-01-28T10:30:00Z"
-                      },
-                      {
-                        "id": "550e8400-e29b-41d4-a716-446655440002",
-                        "requestType": "Media",
-                        "inputText": "What is in this image?",
-                        "detectedTask": "general",
-                        "response": "The image shows a sunset over the ocean with birds flying in the distance.",
-                        "usedAdvancedModel": true,
-                        "mediaStorageKey": "media/2026-01-28/image123.jpg",
-                        "timestamp": "2026-01-28T09:15:00Z"
-                      }
-                    ]
-                  }
+                  "$ref": "#/components/schemas/ProblemDetails"
                 }
-              }
-            }
-          },
-          "404": {
-            "description": "No history entries found",
-            "content": {
-              "application/problem+json": {
-                "schema": { "$ref": "#/components/schemas/ProblemDetails" },
-                "examples": {
-                  "noHistory": {
-                    "summary": "No history available",
-                    "value": {
-                      "type": "https://example.com/probs/not-found",
-                      "title": "Not Found",
-                      "status": 404,
-                      "detail": "No history entries found.",
-                      "instance": "/api/history",
-                      "requestId": "550e8400-e29b-41d4-a716-446655440020",
-                      "timestamp": "2026-01-28T00:00:00Z"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad Request",
-            "content": {
-              "application/problem+json": {
-                "schema": { "$ref": "#/components/schemas/ProblemDetails" },
-                "examples": {
-                  "invalidCount": {
-                    "summary": "Invalid count parameter",
-                    "value": {
-                      "type": "https://example.com/probs/validation",
-                      "title": "Validation Failed",
-                      "status": 400,
-                      "detail": "Count parameter must be a positive integer",
-                      "instance": "/api/history",
-                      "requestId": "550e8400-e29b-41d4-a716-446655440010",
-                      "timestamp": "2026-01-28T00:00:00Z"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Server Error",
-            "content": {
-              "application/problem+json": {
-                "schema": { "$ref": "#/components/schemas/ProblemDetails" },
-                "examples": {
-                  "serverError": {
-                    "summary": "Internal error",
-                    "value": {
-                      "type": "about:blank",
-                      "title": "Internal Server Error",
-                      "status": 500,
-                      "detail": "An unexpected error occurred while retrieving history.",
-                      "instance": "/api/history",
-                      "requestId": "550e8400-e29b-41d4-a716-446655440011",
-                      "timestamp": "2026-01-28T00:00:00Z"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/history/{id}": {
-      "get": {
-        "summary": "Get history by id",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": { "type": "string", "format": "uuid" },
-            "description": "Unique identifier of the history entry",
-            "example": "550e8400-e29b-41d4-a716-446655440001"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "History entry found",
-            "content": {
-              "application/json": {
-                "schema": { "$ref": "#/components/schemas/RequestHistory" },
-                "examples": {
-                  "audioHistory": {
-                    "summary": "Audio transcription history",
-                    "value": {
-                      "id": "550e8400-e29b-41d4-a716-446655440001",
-                      "requestType": "Audio",
-                      "inputText": "What time is it in Tokyo?",
-                      "detectedTask": "time",
-                      "response": "The current time in Tokyo is 7:30 PM JST.",
-                      "usedAdvancedModel": false,
-                      "mediaStorageKey": null,
-                      "timestamp": "2026-01-28T10:30:00Z"
-                    }
-                  },
-                  "mediaHistory": {
-                    "summary": "Media processing history",
-                    "value": {
-                      "id": "550e8400-e29b-41d4-a716-446655440002",
-                      "requestType": "Media",
-                      "inputText": "Describe this photo",
-                      "detectedTask": "general",
-                      "response": "The photo shows a scenic mountain landscape with snow-capped peaks and a lake in the foreground.",
-                      "usedAdvancedModel": true,
-                      "mediaStorageKey": "media/2026-01-28/photo456.jpg",
-                      "timestamp": "2026-01-28T09:15:00Z"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad Request",
-            "content": {
-              "application/problem+json": {
-                "schema": { "$ref": "#/components/schemas/ProblemDetails" },
-                "examples": {
-                  "invalidId": {
-                    "summary": "Invalid UUID format",
-                    "value": {
-                      "type": "https://example.com/probs/validation",
-                      "title": "Validation Failed",
-                      "status": 400,
-                      "detail": "The id parameter must be a valid UUID.",
-                      "instance": "/api/history/invalid-id",
-                      "requestId": "550e8400-e29b-41d4-a716-446655440012",
-                      "timestamp": "2026-01-28T00:00:00Z"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Not Found",
-            "content": {
-              "application/problem+json": {
-                "schema": { "$ref": "#/components/schemas/ProblemDetails" },
-                "examples": {
-                  "notFound": {
-                    "summary": "History entry not found",
-                    "value": {
-                      "type": "https://example.com/probs/not-found",
-                      "title": "Not Found",
-                      "status": 404,
-                      "detail": "History entry not found",
-                      "instance": "/api/history/550e8400-e29b-41d4-a716-446655440099",
-                      "requestId": "550e8400-e29b-41d4-a716-446655440013",
-                      "timestamp": "2026-01-28T00:00:00Z"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Server Error",
-            "content": {
-              "application/problem+json": {
-                "schema": { "$ref": "#/components/schemas/ProblemDetails" },
-                "examples": {
-                  "serverError": {
-                    "summary": "Internal error",
-                    "value": {
-                      "type": "about:blank",
-                      "title": "Internal Server Error",
-                      "status": 500,
-                      "detail": "An unexpected error occurred while retrieving the history entry.",
-                      "instance": "/api/history/550e8400-e29b-41d4-a716-446655440001",
-                      "requestId": "550e8400-e29b-41d4-a716-446655440014",
-                      "timestamp": "2026-01-28T00:00:00Z"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/metrics": {
-      "get": {
-        "summary": "Get application metrics",
-        "responses": {
-          "200": {
-            "description": "Application metrics and statistics",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "timestamp": { "type": "string", "format": "date-time" },
-                    "endpoints": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "$ref": "#/components/schemas/MetricsSummary"
-                      }
-                    }
-                  }
-                },
-                "examples": {
-                  "metricsExample": {
-                    "summary": "Metrics example",
-                    "value": {
-                      "timestamp": "2026-01-28T12:00:00Z",
-                      "endpoints": {
-                        "/api/transcribe": {
-                          "totalRequests": 150,
-                          "totalErrors": 2,
-                          "averageDurationMs": 245.5,
-                          "lastRequestUtc": "2026-01-28T11:58:30Z"
-                        },
-                        "/api/ask": {
-                          "totalRequests": 89,
-                          "totalErrors": 1,
-                          "averageDurationMs": 1520.3,
-                          "lastRequestUtc": "2026-01-28T11:59:45Z"
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-
-    "/api/documents/upload": {
-      "post": {
-        "summary": "Upload and process a document for RAG",
-        "tags": ["Documents"],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "file": {
-                    "type": "string",
-                    "format": "binary",
-                    "description": "Document file (PDF, DOCX, TXT, or image)"
-                  },
-                  "groupIds": {
-                    "type": "array",
-                    "items": { "type": "string", "format": "uuid" },
-                    "description": "Optional ResourceGroup IDs to associate document with"
-                  }
-                },
-                "required": ["file"]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Document uploaded and processed successfully",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": { "type": "string", "format": "uuid" },
-                    "fileName": { "type": "string" },
-                    "documentType": { "type": "string" },
-                    "totalPages": { "type": "integer" },
-                    "chunkCount": { "type": "integer" },
-                    "groups": {
-                      "type": "array",
-                      "items": { "type": "string", "format": "uuid" }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": { "description": "Invalid file or file size exceeds limit" },
-          "500": { "description": "Processing error" }
-        }
-      }
-    },
-
-    "/api/documents/query": {
-      "post": {
-        "summary": "Query documents using RAG (Retrieval-Augmented Generation)",
-        "tags": ["Documents"],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "query": { "type": "string", "description": "Query text" },
-                  "topK": { "type": "integer", "default": 5, "description": "Number of results to return" },
-                  "groupIds": {
-                    "type": "array",
-                    "items": { "type": "string", "format": "uuid" },
-                    "description": "Optional ResourceGroup IDs to filter documents"
-                  }
-                },
-                "required": ["query"]
               },
-              "examples": {
-                "simpleQuery": {
-                  "summary": "Simple query",
-                  "value": {
-                    "query": "What are the main requirements?",
-                    "topK": 5
-                  }
-                },
-                "groupFilteredQuery": {
-                  "summary": "Query with group filter",
-                  "value": {
-                    "query": "What did we decide about the budget?",
-                    "topK": 5,
-                    "groupIds": ["550e8400-e29b-41d4-a716-446655440000"]
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Query result with answer and sources",
-            "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/QueryResult"
-                },
-                "examples": {
-                  "withSources": {
-                    "summary": "Query result with sources",
-                    "value": {
-                      "answer": "The main requirements include: 1) User authentication, 2) Data encryption, 3) API rate limiting. These are detailed on page 3 of the requirements document.",
-                      "sources": [
-                        {
-                          "documentId": "550e8400-e29b-41d4-a716-446655440000",
-                          "fileName": "requirements.pdf",
-                          "pageNumber": 3,
-                          "chunkId": "650e8400-e29b-41d4-a716-446655440000",
-                          "chunkText": "1. User Authentication\n   - OAuth 2.0 integration\n   - Multi-factor authentication\n2. Data Encryption\n   - AES-256 for data at rest..."
-                        }
-                      ]
-                    }
-                  }
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
             }
           },
-          "400": { "description": "Invalid query" },
-          "500": { "description": "Query processing error" }
+          "500": {
+            "description": "Internal server error during processing",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
         }
       }
     },
-
-    "/api/documents": {
+    "/api/tasks/{id}": {
       "get": {
-        "summary": "List all documents",
-        "tags": ["Documents"],
-        "responses": {
-          "200": {
-            "description": "List of documents",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "id": { "type": "string", "format": "uuid" },
-                      "fileName": { "type": "string" },
-                      "uploadedAt": { "type": "string", "format": "date-time" },
-                      "isProcessed": { "type": "boolean" },
-                      "chunkCount": { "type": "integer" }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-
-    "/api/documents/{id}": {
-      "get": {
-        "summary": "Get document details",
-        "tags": ["Documents"],
+        "tags": [
+          "Tasks"
+        ],
         "parameters": [
           {
             "name": "id",
             "in": "path",
             "required": true,
-            "schema": { "type": "string", "format": "uuid" }
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
           "200": {
-            "description": "Document details",
-            "content": {
-              "application/json": {
-                "schema": { "$ref": "#/components/schemas/DocumentMetadata" }
-              }
-            }
-          },
-          "404": { "description": "Document not found" }
-        }
-      },
-      "delete": {
-        "summary": "Delete a document",
-        "tags": ["Documents"],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": { "type": "string", "format": "uuid" }
+            "description": "OK"
           }
-        ],
-        "responses": {
-          "204": { "description": "Document deleted successfully" },
-          "404": { "description": "Document not found" }
-        }
-      }
-    },
-
-    "/api/documents/{id}/move": {
-      "post": {
-        "summary": "Move document to different groups (reindexing)",
-        "tags": ["Documents"],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": { "type": "string", "format": "uuid" }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "groupIds": {
-                    "type": "array",
-                    "items": { "type": "string", "format": "uuid" },
-                    "description": "New group IDs"
-                  },
-                  "regenerateEmbeddings": {
-                    "type": "boolean",
-                    "default": false,
-                    "description": "Whether to regenerate embeddings"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Document moved successfully",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "message": { "type": "string" },
-                    "regeneratedEmbeddings": { "type": "boolean" }
-                  }
-                }
-              }
-            }
-          },
-          "404": { "description": "Document not found" }
-        }
-      }
-    },
-
-    "/api/documents/reprocess": {
-      "post": {
-        "summary": "Reprocess failed or unprocessed documents",
-        "tags": ["Documents"],
-        "responses": {
-          "200": {
-            "description": "Reprocessing complete",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "reprocessedCount": { "type": "integer" },
-                    "message": { "type": "string" }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-
-    "/api/documents/unprocessed": {
-      "get": {
-        "summary": "Get list of unprocessed documents",
-        "tags": ["Documents"],
-        "responses": {
-          "200": {
-            "description": "List of unprocessed documents",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "id": { "type": "string", "format": "uuid" },
-                      "fileName": { "type": "string" },
-                      "uploadedAt": { "type": "string", "format": "date-time" },
-                      "processingError": { "type": "string", "nullable": true },
-                      "isProcessed": { "type": "boolean" }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-
-    "/api/conversations": {
-      "post": {
-        "summary": "Create a new conversation",
-        "tags": ["Conversations"],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "title": { "type": "string", "nullable": true },
-                  "resourceGroupId": { "type": "string", "format": "uuid", "nullable": true }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Conversation created",
-            "content": {
-              "application/json": {
-                "schema": { "$ref": "#/components/schemas/Conversation" }
-              }
-            }
-          }
-        }
-      },
-      "get": {
-        "summary": "Get all active conversations",
-        "tags": ["Conversations"],
-        "parameters": [
-          {
-            "name": "groupId",
-            "in": "query",
-            "required": false,
-            "schema": { "type": "string", "format": "uuid" },
-            "description": "Filter by ResourceGroup ID"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "List of conversations",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": { "$ref": "#/components/schemas/Conversation" }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-
-    "/api/conversations/{id}": {
-      "get": {
-        "summary": "Get conversation with messages",
-        "tags": ["Conversations"],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": { "type": "string", "format": "uuid" }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Conversation details",
-            "content": {
-              "application/json": {
-                "schema": { "$ref": "#/components/schemas/Conversation" }
-              }
-            }
-          },
-          "404": { "description": "Conversation not found" }
-        }
-      }
-    },
-
-    "/api/conversations/{id}/messages": {
-      "post": {
-        "summary": "Add a message to conversation",
-        "tags": ["Conversations"],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": { "type": "string", "format": "uuid" }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "role": { "type": "string", "enum": ["user", "assistant", "system"] },
-                  "content": { "type": "string" },
-                  "model": { "type": "string", "nullable": true }
-                },
-                "required": ["role", "content"]
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Message added",
-            "content": {
-              "application/json": {
-                "schema": { "$ref": "#/components/schemas/ChatMessage" }
-              }
-            }
-          },
-          "404": { "description": "Conversation not found" }
-        }
-      }
-    },
-
-    "/api/conversations/{id}/query": {
-      "post": {
-        "summary": "Query documents with conversation context",
-        "tags": ["Conversations"],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": { "type": "string", "format": "uuid" }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "query": { "type": "string" },
-                  "topK": { "type": "integer", "default": 5 },
-                  "groupIds": {
-                    "type": "array",
-                    "items": { "type": "string", "format": "uuid" }
-                  },
-                  "model": { "type": "string", "nullable": true }
-                },
-                "required": ["query"]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Query result with conversation history",
-            "content": {
-              "application/json": {
-                "schema": { "$ref": "#/components/schemas/QueryResult" }
-              }
-            }
-          }
-        }
-      }
-    },
-
-    "/api/conversations/{id}/summarize": {
-      "post": {
-        "summary": "Summarize conversation",
-        "tags": ["Conversations"],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": { "type": "string", "format": "uuid" }
-          },
-          {
-            "name": "generateEmbedding",
-            "in": "query",
-            "required": false,
-            "schema": { "type": "boolean", "default": false },
-            "description": "Generate embedding for the summary"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Conversation summary",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "summary": { "type": "string" },
-                    "embeddingGenerated": { "type": "boolean" }
-                  }
-                }
-              }
-            }
-          },
-          "404": { "description": "Conversation not found" }
-        }
-      }
-    },
-
-    "/api/conversations/{id}/archive": {
-      "post": {
-        "summary": "Archive a conversation",
-        "tags": ["Conversations"],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": { "type": "string", "format": "uuid" }
-          }
-        ],
-        "responses": {
-          "204": { "description": "Conversation archived successfully" }
         }
       }
     }
   },
   "components": {
     "schemas": {
-      "AudioRequest": {
-        "type": "object",
-        "properties": { "audioBase64": { "type": "string" } },
-        "required": ["audioBase64"]
-      },
-      "AudioUploadResponse": {
-        "type": "object",
-        "properties": { "storageKey": { "type": "string" }, "transcription": { "type": "string" }, "requestId": { "type": "string", "format": "uuid" } }
-      },
-      "MediaUploadResponse": {
+      "AddMessageRequest": {
         "type": "object",
         "properties": {
-          "task": { "type": "string" },
-          "response": { "type": "string" },
-          "usedAdvancedModel": { "type": "boolean" },
-          "requestId": { "type": "string", "format": "uuid" },
-          "items": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "fileName": { "type": "string" },
-                "contentType": { "type": "string" },
-                "storageKey": { "type": "string" },
-                "transcription": { "type": "string" }
+          "role": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "model": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "AIInteractionLog": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "input": {
+            "type": "string"
+          },
+          "output": {
+            "type": "string"
+          },
+          "modelUsed": {
+            "type": "string"
+          },
+          "delegationReason": {
+            "type": "string"
+          },
+          "inputTokens": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "outputTokens": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "totalTokens": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "estimatedCost": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "responseTimeMs": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "resourceGroupId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "resourceGroup": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ResourceGroup"
               }
-            }
+            ]
+          },
+          "conversationId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "conversation": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Conversation"
+              }
+            ]
+          },
+          "success": {
+            "type": "boolean"
+          },
+          "errorMessage": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
-        }
-      },
-      "RequestHistory": {
-        "type": "object",
-        "properties": { "id": { "type": "string", "format": "uuid" }, "requestType": { "type": "string" }, "inputText": { "type": "string" }, "detectedTask": { "type": "string" }, "response": { "type": "string" }, "usedAdvancedModel": { "type": "boolean" }, "mediaStorageKey": { "type": "string" }, "timestamp": { "type": "string", "format": "date-time" } }
-      },
-      "ProblemDetails": {
-        "type": "object",
-        "properties": {
-          "type": { "type": "string", "description": "A URI reference that identifies the problem type" },
-          "title": { "type": "string", "description": "Short, human-readable summary of the problem type" },
-          "status": { "type": "integer", "format": "int32", "description": "HTTP status code" },
-          "detail": { "type": "string", "description": "Human-readable explanation specific to this occurrence of the problem" },
-          "instance": { "type": "string", "description": "A URI reference that identifies the specific occurrence of the problem" }
         },
-        "additionalProperties": true
+        "description": "Logs interactions with advanced AI models for auditing and analysis"
       },
-      "ServiceHealthCheck": {
+      "AudioRequest": {
+        "required": [
+          "audioBase64"
+        ],
         "type": "object",
         "properties": {
-          "healthy": { "type": "boolean", "description": "Whether the service is healthy" },
-          "error": { "type": "string", "nullable": true, "description": "Error message if service is unhealthy" }
-        },
-        "required": ["healthy"]
-      },
-      "MetricsSummary": {
-        "type": "object",
-        "properties": {
-          "totalRequests": { "type": "integer", "format": "int64", "description": "Total number of requests to this endpoint" },
-          "totalErrors": { "type": "integer", "format": "int64", "description": "Total number of errors for this endpoint" },
-          "averageDurationMs": { "type": "number", "format": "double", "description": "Average request duration in milliseconds" },
-          "lastRequestUtc": { "type": "string", "format": "date-time", "description": "Timestamp of the last request" }
-        }
-      },
-      "QueryResult": {
-        "type": "object",
-        "properties": {
-          "answer": { "type": "string", "description": "Generated answer from the AI" },
-          "sources": {
-            "type": "array",
-            "items": { "$ref": "#/components/schemas/DocumentSource" },
-            "description": "Source documents used to generate the answer"
-          }
-        }
-      },
-      "DocumentSource": {
-        "type": "object",
-        "properties": {
-          "documentId": { "type": "string", "format": "uuid" },
-          "fileName": { "type": "string" },
-          "pageNumber": { "type": "integer" },
-          "chunkId": { "type": "string", "format": "uuid" },
-          "chunkText": { "type": "string", "description": "Preview of the relevant text (truncated to 200 chars)" }
-        }
-      },
-      "DocumentMetadata": {
-        "type": "object",
-        "properties": {
-          "id": { "type": "string", "format": "uuid" },
-          "fileName": { "type": "string" },
-          "originalFileName": { "type": "string" },
-          "contentType": { "type": "string" },
-          "uploadedAt": { "type": "string", "format": "date-time" },
-          "fileSize": { "type": "integer", "format": "int64" },
-          "totalPages": { "type": "integer" },
-          "documentType": { "type": "string", "enum": ["pdf", "docx", "txt", "image"] },
-          "isProcessed": { "type": "boolean" },
-          "processedAt": { "type": "string", "format": "date-time", "nullable": true },
-          "processingError": { "type": "string", "nullable": true }
-        }
-      },
-      "Conversation": {
-        "type": "object",
-        "properties": {
-          "id": { "type": "string", "format": "uuid" },
-          "title": { "type": "string" },
-          "createdAt": { "type": "string", "format": "date-time" },
-          "updatedAt": { "type": "string", "format": "date-time" },
-          "isActive": { "type": "boolean" },
-          "resourceGroupId": { "type": "string", "format": "uuid", "nullable": true },
-          "summary": { "type": "string", "nullable": true },
-          "messages": {
-            "type": "array",
-            "items": { "$ref": "#/components/schemas/ChatMessage" }
+          "audioBase64": {
+            "maxLength": 2147483647,
+            "minLength": 1,
+            "type": "string"
+          },
+          "transcription": {
+            "maxLength": 10000,
+            "minLength": 0,
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
       "ChatMessage": {
         "type": "object",
         "properties": {
-          "id": { "type": "string", "format": "uuid" },
-          "conversationId": { "type": "string", "format": "uuid" },
-          "role": { "type": "string", "enum": ["user", "assistant", "system"] },
-          "content": { "type": "string" },
-          "model": { "type": "string", "nullable": true },
-          "timestamp": { "type": "string", "format": "date-time" },
-          "tokenCount": { "type": "integer", "nullable": true }
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversation": {
+            "$ref": "#/components/schemas/Conversation"
+          },
+          "role": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "model": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "tokenCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          }
+        },
+        "description": "Represents a chat message in a conversation"
+      },
+      "Conversation": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "resourceGroupId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "resourceGroup": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ResourceGroup"
+              }
+            ]
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChatMessage"
+            }
+          },
+          "summary": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "summaryEmbedding": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "summaryEmbeddingDimension": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          }
+        },
+        "description": "Represents a conversation thread"
+      },
+      "ConversationQueryRequest": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "topK": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "groupIds": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "model": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
         }
-      }
-    },
-    "examples": {
-      "promptConflict": {
-        "summary": "Prompt conflict error",
-        "value": {
-          "type": "https://example.com/probs/validation",
-          "title": "Validation Failed",
-          "status": 400,
-          "detail": "Provide either 'prompt' (text) or 'promptAudio' (file), not both.",
-          "instance": "/api/ask",
-          "errors": { "prompt": [ "Mutually exclusive with promptAudio" ] },
-          "requestId": "00000000-0000-0000-0000-000000000009",
-          "timestamp": "2026-01-28T00:00:00Z"
+      },
+      "CreateConversationRequest": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "resourceGroupId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          }
+        }
+      },
+      "DocumentChunk": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "documentMetadataId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "documentMetadata": {
+            "$ref": "#/components/schemas/DocumentMetadata"
+          },
+          "chunkText": {
+            "type": "string"
+          },
+          "pageNumber": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "chunkIndex": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "x": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "y": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "width": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "height": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "embedding": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "embeddingDimension": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "embeddingVector": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Vector"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "description": "Represents a chunk of text extracted from a document with positional information"
+      },
+      "DocumentGroup": {
+        "type": "object",
+        "properties": {
+          "documentMetadataId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "documentMetadata": {
+            "$ref": "#/components/schemas/DocumentMetadata"
+          },
+          "resourceGroupId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "resourceGroup": {
+            "$ref": "#/components/schemas/ResourceGroup"
+          }
+        },
+        "description": "Join table for many-to-many relationship between DocumentMetadata and ResourceGroup"
+      },
+      "DocumentMetadata": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "fileName": {
+            "type": "string"
+          },
+          "originalFileName": {
+            "type": "string"
+          },
+          "contentType": {
+            "type": "string"
+          },
+          "storageKey": {
+            "type": "string"
+          },
+          "uploadedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "fileSize": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "totalPages": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "documentType": {
+            "type": "string"
+          },
+          "isProcessed": {
+            "type": "boolean"
+          },
+          "processedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "processingError": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "chunks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DocumentChunk"
+            }
+          },
+          "documentGroups": { }
+        },
+        "description": "Represents metadata for a document uploaded to the RAG system"
+      },
+      "DocumentSource": {
+        "type": "object",
+        "properties": {
+          "documentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "fileName": {
+            "type": "string"
+          },
+          "pageNumber": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "chunkId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "chunkText": {
+            "type": "string"
+          }
+        },
+        "description": "Source document information for a query result"
+      },
+      "EntityTagHeaderValue": {
+        "type": "object",
+        "properties": {
+          "tag": {
+            "$ref": "#/components/schemas/StringSegment"
+          },
+          "isWeak": {
+            "type": "boolean"
+          }
+        }
+      },
+      "FileStreamResult": {
+        "type": "object",
+        "properties": {
+          "fileStream": {
+            "$ref": "#/components/schemas/Stream"
+          },
+          "contentType": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "fileDownloadName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "lastModified": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "entityTag": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/EntityTagHeaderValue"
+              }
+            ]
+          },
+          "enableRangeProcessing": {
+            "type": "boolean"
+          }
+        }
+      },
+      "GroupRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "description": "Request model for creating or updating a resource group"
+      },
+      "HighlightRequest": {
+        "type": "object",
+        "properties": {
+          "chunkIds": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "searchText": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "IFormFile": {
+        "type": "string",
+        "format": "binary"
+      },
+      "ManagedFile": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "fileName": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "contentType": {
+            "type": "string"
+          },
+          "storageKey": {
+            "type": "string"
+          },
+          "uploadedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "fileSize": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "fileGroups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ManagedFileGroup"
+            }
+          }
+        },
+        "description": "Represents a file uploaded and managed in the database"
+      },
+      "ManagedFileGroup": {
+        "type": "object",
+        "properties": {
+          "managedFileId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "managedFile": {
+            "$ref": "#/components/schemas/ManagedFile"
+          },
+          "resourceGroupId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "resourceGroup": {
+            "$ref": "#/components/schemas/ResourceGroup"
+          }
+        },
+        "description": "Join table for many-to-many relationship between ManagedFile and ResourceGroup"
+      },
+      "ManagedPrompt": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "promptText": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "isPinned": {
+            "type": "boolean"
+          },
+          "promptGroups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ManagedPromptGroup"
+            }
+          }
+        },
+        "description": "Represents a prompt that can be used with the middleware"
+      },
+      "ManagedPromptGroup": {
+        "type": "object",
+        "properties": {
+          "managedPromptId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "managedPrompt": {
+            "$ref": "#/components/schemas/ManagedPrompt"
+          },
+          "resourceGroupId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "resourceGroup": {
+            "$ref": "#/components/schemas/ResourceGroup"
+          }
+        },
+        "description": "Join table for many-to-many relationship between ManagedPrompt and ResourceGroup"
+      },
+      "MoveDocumentRequest": {
+        "type": "object",
+        "properties": {
+          "groupIds": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "regenerateEmbeddings": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ProblemDetails": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "title": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "status": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "detail": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "instance": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "PromptRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "promptText": {
+            "type": "string"
+          }
+        },
+        "description": "Request model for creating or updating a prompt"
+      },
+      "QueryRequest": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "topK": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "groupIds": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        }
+      },
+      "QueryResult": {
+        "type": "object",
+        "properties": {
+          "answer": {
+            "type": "string"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DocumentSource"
+            },
+            "description": "All sources that were provided to the AI as context"
+          },
+          "referencedSources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DocumentSource"
+            },
+            "description": "Sources that the AI explicitly referenced in its answer"
+          },
+          "usedAdvancedModel": {
+            "type": "boolean",
+            "description": "Whether the advanced model was used for this query"
+          },
+          "modelUsed": {
+            "type": "string",
+            "description": "Which model processed the query"
+          },
+          "tokenCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "description": "Estimated tokens in the query context",
+            "format": "int32"
+          },
+          "delegationReason": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "Reason for delegation to advanced model (if applicable)"
+          }
+        },
+        "description": "Result of a RAG query including the answer and source documents"
+      },
+      "RequestHistory": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "requestType": {
+            "type": "string"
+          },
+          "inputText": {
+            "type": "string"
+          },
+          "detectedTask": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "response": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "usedAdvancedModel": {
+            "type": "boolean"
+          },
+          "mediaStorageKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "ResourceGroup": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "fileGroups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ManagedFileGroup"
+            }
+          },
+          "promptGroups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ManagedPromptGroup"
+            }
+          },
+          "documentGroups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DocumentGroup"
+            }
+          },
+          "conversations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Conversation"
+            }
+          }
+        },
+        "description": "Represents a group that can contain files and prompts"
+      },
+      "Stream": {
+        "type": "string",
+        "format": "binary"
+      },
+      "StringSegment": {
+        "type": "object",
+        "properties": {
+          "buffer": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "offset": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "length": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "value": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "hasValue": {
+            "type": "boolean"
+          }
+        }
+      },
+      "UpdateReminderRequest": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        }
+      },
+      "Vector": {
+        "type": "object",
+        "properties": {
+          "memory": {
+            "type": "array",
+            "items": {
+              "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+              "type": [
+                "number",
+                "string"
+              ],
+              "format": "float"
+            }
+          }
         }
       }
     }
-  }
+  },
+  "tags": [
+    {
+      "name": "SmartGlassesMiddleware"
+    },
+    {
+      "name": "Admin"
+    },
+    {
+      "name": "AIInteraction"
+    },
+    {
+      "name": "Audio"
+    },
+    {
+      "name": "Conversations"
+    },
+    {
+      "name": "Documents"
+    },
+    {
+      "name": "History"
+    },
+    {
+      "name": "Media"
+    },
+    {
+      "name": "Tasks"
+    }
+  ]
 }

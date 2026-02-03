@@ -1,9 +1,8 @@
-Task Handlers - Local AI Tasks
+# Task Handlers - Local AI Tasks
 ===============================
 
-Overview
---------
-This folder contains ALL task handlers that execute locally using Ollama. Any task handler placed in this folder will be compiled and loaded at runtime, making them easy to edit and customize without rebuilding the main application.
+## Overview
+This folder contains all task handlers that execute locally using Ollama. Any task handler placed in this folder will be compiled and loaded at runtime, making them easy to edit and customize without rebuilding the main application.
 
 **Architecture:**
 - ✅ Tasks in `tasks/` folder → Execute locally with Ollama
@@ -15,8 +14,7 @@ The application automatically:
 3. Registers all `ITaskHandler` implementations with dependency injection
 4. Uses Ollama to classify requests and route to appropriate handlers
 
-Available Task Handlers
-------------------------
+## Available Task Handlers
 
 ### Core Local Tasks (Ollama-based)
 
@@ -61,8 +59,7 @@ Available Task Handlers
 - Configured via `AI:AdvancedModelEndpoint` in appsettings.json
 - Automatically used for unknown tasks or complex queries
 
-How It Works
-------------
+## How It Works
 
 1. **User sends request** → "What time is it?"
 2. **Ollama detects task** → Classifies as "time" task
@@ -76,8 +73,7 @@ If no handler matches:
 3. **Calls external REST API** (e.g., GPT-4, Claude)
 4. **Returns advanced model response**
 
-Creating Custom Tasks
----------------------
+## Creating Custom Tasks
 
 ### Option 1: Edit .cs files directly (Recommended)
 
@@ -108,18 +104,7 @@ public class WeatherTaskHandler : ITaskHandler
 4. **Build and copy DLL** to `tasks/` folder
 5. **Restart application**
 
-Configuration
--------------
-
-**Enable/Disable Handlers:**
-Edit `appsettings.json`:
-```json
-{
-  "AI": {
-    "KnownTasks": ["time", "reminder", "document-search", "document-highlight", "ocr", "document-query", "advanced"]
-  }
-}
-```
+## Configuration
 
 **Advanced Model Endpoint:**
 ```json
@@ -131,8 +116,7 @@ Edit `appsettings.json`:
 }
 ```
 
-Dependencies for Handlers
---------------------------
+## Dependencies for Handlers
 
 Handlers can inject any registered service:
 - `ILogger<T>` - Logging
@@ -167,8 +151,7 @@ public class MyTaskHandler : ITaskHandler
 }
 ```
 
-Troubleshooting
----------------
+## Troubleshooting
 
 **Handler not loading:**
 - Check logs for compilation errors
@@ -184,8 +167,7 @@ Troubleshooting
 - Ensure service is registered in `Program.cs`
 - Use correct constructor injection pattern
 
-Best Practices
---------------
+## Best Practices
 
 1. **Keep tasks simple** - Each handler should do one thing well
 2. **Use descriptive names** - Make task names intuitive ("document-search" not "ds")
@@ -194,8 +176,7 @@ Best Practices
 5. **Document usage** - Add comments explaining input format
 6. **Test locally** - Use Ollama for fast iteration
 
-Examples of Good vs Bad Task Names
------------------------------------
+## Examples of Good vs Bad Task Names
 
 ✅ Good:
 - "document-search" - Clear what it does
@@ -206,19 +187,3 @@ Examples of Good vs Bad Task Names
 - "ds" - Too abbreviated
 - "handler1" - Not descriptive
 - "do-stuff" - Too vague
-
-Migration from Services Folder
--------------------------------
-
-**OLD Architecture** (deprecated):
-- Handlers in `src/SmartGlassesMiddleware/Services/`
-- Required rebuild to add new handlers
-- Harder to customize
-
-**NEW Architecture** (current):
-- ALL handlers in `tasks/` folder
-- Auto-compiled at runtime
-- Easy to edit and customize
-- Local tasks vs external API routing
-
-If you have old handlers in Services/, they should be moved to tasks/ folder.

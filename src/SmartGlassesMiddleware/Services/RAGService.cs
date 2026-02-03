@@ -32,7 +32,7 @@ public class RAGService : IRAGService
     private readonly ILogger<RAGService> _logger;
     private readonly IAIService _aiService;
     private readonly Kernel _kernel;
-    private readonly ITaskDispatcher _taskDispatcher;
+    private readonly IServiceProvider _serviceProvider;
     private readonly int _maxRetries;
     private readonly int _retryDelayMs;
     private readonly int _maxContextTokens;
@@ -48,14 +48,14 @@ public class RAGService : IRAGService
         ILogger<RAGService> logger,
         IAIService aiService,
         Kernel kernel,
-        ITaskDispatcher taskDispatcher,
+        IServiceProvider serviceProvider,
         IConfiguration configuration)
     {
         _context = context;
         _logger = logger;
         _aiService = aiService;
         _kernel = kernel;
-        _taskDispatcher = taskDispatcher;
+        _serviceProvider = serviceProvider;
         _maxRetries = configuration.GetValue<int?>("RAG:MaxRetries") ?? 3;
         _retryDelayMs = configuration.GetValue<int?>("RAG:RetryDelayMs") ?? 1000;
         _maxContextTokens = configuration.GetValue<int?>("RAG:MaxContextTokens") ?? 4000;
@@ -122,7 +122,8 @@ Answer:";
                 // Force use of advanced model via task dispatcher
                 _logger.LogInformation("Auto-delegating to advanced AI due to token count: {Tokens}", estimatedTokens);
                 
-                var (handled, handlerResponse) = await _taskDispatcher.TryHandleAsync("advanced", promptTemplate);
+                var taskDispatcher = _serviceProvider.GetRequiredService<ITaskDispatcher>();
+                var (handled, handlerResponse) = await taskDispatcher.TryHandleAsync("advanced", promptTemplate);
                 if (handled && !string.IsNullOrEmpty(handlerResponse))
                 {
                     response = handlerResponse;
