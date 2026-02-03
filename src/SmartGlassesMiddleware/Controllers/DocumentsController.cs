@@ -112,7 +112,7 @@ public class DocumentsController : ControllerBase
     /// Query documents using RAG (Retrieval-Augmented Generation)
     /// </summary>
     [HttpPost("query")]
-    [ProducesResponseType(typeof(QueryResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(QueryResult), StatusCodes.Status200OK)]
     public async Task<IActionResult> QueryDocuments([FromBody] QueryRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.Query))
@@ -120,29 +120,12 @@ public class DocumentsController : ControllerBase
 
         try
         {
-            var response = await _ragService.QueryDocumentsAsync(
-                request.Query, 
-                request.TopK ?? 5, 
-                request.GroupIds);
-                
-            var relevantChunks = await _ragService.SearchChunksAsync(
+            var result = await _ragService.QueryDocumentsAsync(
                 request.Query, 
                 request.TopK ?? 5, 
                 request.GroupIds);
 
-            return Ok(new QueryResponse
-            {
-                Answer = response,
-                Sources = relevantChunks.Select(c => new DocumentSource
-                {
-                    DocumentId = c.DocumentMetadataId,
-                    FileName = c.DocumentMetadata.FileName,
-                    PageNumber = c.PageNumber,
-                    ChunkId = c.Id,
-                    ChunkText = c.ChunkText.Length > 200 ? c.ChunkText.Substring(0, 200) + "..." : c.ChunkText
-                }).ToList(),
-                UsedGroups = request.GroupIds?.Any() == true
-            });
+            return Ok(result);
         }
         catch (Exception ex)
         {
@@ -333,22 +316,6 @@ public class QueryRequest
     public string Query { get; set; } = string.Empty;
     public int? TopK { get; set; }
     public List<Guid>? GroupIds { get; set; }
-}
-
-public class QueryResponse
-{
-    public string Answer { get; set; } = string.Empty;
-    public List<DocumentSource> Sources { get; set; } = new();
-    public bool UsedGroups { get; set; }
-}
-
-public class DocumentSource
-{
-    public Guid DocumentId { get; set; }
-    public string FileName { get; set; } = string.Empty;
-    public int PageNumber { get; set; }
-    public Guid ChunkId { get; set; }
-    public string ChunkText { get; set; } = string.Empty;
 }
 
 public class HighlightRequest

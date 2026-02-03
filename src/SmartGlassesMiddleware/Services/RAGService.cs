@@ -12,7 +12,7 @@ namespace SmartGlassesMiddleware.Services;
 
 public interface IRAGService
 {
-    Task<string> QueryDocumentsAsync(string query, int topK = 5, List<Guid>? groupIds = null);
+    Task<QueryResult> QueryDocumentsAsync(string query, int topK = 5, List<Guid>? groupIds = null);
     Task<List<DocumentChunk>> SearchChunksAsync(string query, int topK = 5, List<Guid>? groupIds = null);
     Task GenerateEmbeddingsAsync(Guid documentId);
     Task<int> ReprocessFailedDocumentsAsync();
@@ -43,7 +43,7 @@ public class RAGService : IRAGService
         _retryDelayMs = configuration.GetValue<int?>("RAG:RetryDelayMs") ?? 1000;
     }
 
-    public async Task<string> QueryDocumentsAsync(string query, int topK = 5, List<Guid>? groupIds = null)
+    public async Task<QueryResult> QueryDocumentsAsync(string query, int topK = 5, List<Guid>? groupIds = null)
     {
         try
         {
@@ -52,7 +52,11 @@ public class RAGService : IRAGService
 
             if (!relevantChunks.Any())
             {
-                return "No relevant information found in the uploaded documents.";
+                return new QueryResult
+                {
+                    Answer = "No relevant information found in the uploaded documents.",
+                    Sources = new List<DocumentSource>()
+                };
             }
 
             // Build context from chunks
@@ -71,7 +75,21 @@ Answer:";
 
             var (_, response, _) = await _aiService.ProcessRequestAsync(prompt);
             
-            return response;
+            // Build sources list
+            var sources = relevantChunks.Select(c => new DocumentSource
+            {
+                DocumentId = c.DocumentMetadataId,
+                FileName = c.DocumentMetadata.FileName,
+                PageNumber = c.PageNumber,
+                ChunkId = c.Id,
+                ChunkText = c.ChunkText.Length > 200 ? c.ChunkText.Substring(0, 200) + "..." : c.ChunkText
+            }).ToList();
+            
+            return new QueryResult
+            {
+                Answer = response,
+                Sources = sources
+            };
         }
         catch (Exception ex)
         {
@@ -200,6 +218,7 @@ Answer:";
             {
                 var embedding = await GenerateTextEmbeddingAsync(chunk.ChunkText);
                 chunk.Embedding = SerializeEmbedding(embedding);
+                chunk.EmbeddingDimension = embedding.Length;
                 return true;
             }
             catch (Exception ex)
@@ -247,22 +266,39 @@ Answer:";
 
     private float[] GenerateSimpleEmbedding(string text)
     {
-        // Simple hash-based embedding for fallback
+        // SHA256-based deterministic embedding for fallback
+        // This provides consistent embeddings for the same text
         // In production, use proper embedding models like text-embedding-ada-002
-        var hash = text.GetHashCode();
-        var random = new Random(hash);
-        var embedding = new float[384]; // Common embedding dimension
+        using var sha256 = System.Security.Cryptography.SHA256.Create();
+        var textBytes = System.Text.Encoding.UTF8.GetBytes(text);
+        var hashBytes = sha256.ComputeHash(textBytes);
         
-        for (int i = 0; i < embedding.Length; i++)
+        const int embeddingDim = 384; // Common embedding dimension
+        var embedding = new float[embeddingDim];
+        
+        // Use hash bytes to seed multiple rounds of hashing for full dimension
+        var currentSeed = hashBytes;
+        for (int i = 0; i < embeddingDim; i += 32)
         {
-            embedding[i] = (float)(random.NextDouble() * 2 - 1); // Range: -1 to 1
+            // Generate more bytes by hashing the previous hash
+            currentSeed = sha256.ComputeHash(currentSeed);
+            
+            // Convert bytes to floats
+            for (int j = 0; j < 32 && (i + j) < embeddingDim; j++)
+            {
+                // Map byte (0-255) to float (-1 to 1)
+                embedding[i + j] = (currentSeed[j] / 127.5f) - 1.0f;
+            }
         }
         
-        // Normalize
+        // Normalize the vector
         var magnitude = (float)Math.Sqrt(embedding.Sum(x => x * x));
-        for (int i = 0; i < embedding.Length; i++)
+        if (magnitude > 0)
         {
-            embedding[i] /= magnitude;
+            for (int i = 0; i < embedding.Length; i++)
+            {
+                embedding[i] /= magnitude;
+            }
         }
         
         return embedding;
@@ -280,8 +316,18 @@ Answer:";
 
     private float CalculateCosineSimilarity(float[] a, float[] b)
     {
-        if (a.Length != b.Length)
+        // Validate dimensions match
+        if (a.Length == 0 || b.Length == 0)
+        {
+            _logger.LogWarning("Empty embedding vector encountered");
             return 0;
+        }
+        
+        if (a.Length != b.Length)
+        {
+            _logger.LogWarning("Embedding dimension mismatch: {DimA} vs {DimB}", a.Length, b.Length);
+            return 0;
+        }
 
         float dotProduct = 0;
         float magnitudeA = 0;
@@ -298,19 +344,43 @@ Answer:";
         magnitudeB = (float)Math.Sqrt(magnitudeB);
 
         if (magnitudeA == 0 || magnitudeB == 0)
+        {
+            _logger.LogWarning("Zero magnitude embedding encountered");
             return 0;
+        }
 
         return dotProduct / (magnitudeA * magnitudeB);
     }
 
     private async Task<List<DocumentChunk>> KeywordSearchAsync(string query, int topK, List<Guid>? groupIds = null)
     {
-        var keywords = query.ToLower().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var keywords = query.ToLower().Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
         
+        // Build the query incrementally to ensure EF Core can translate it
         var chunksQuery = _context.DocumentChunks
             .Include(c => c.DocumentMetadata)
             .ThenInclude(d => d.DocumentGroups)
-            .Where(c => keywords.Any(k => c.ChunkText.ToLower().Contains(k)));
+            .AsQueryable();
+
+        // Apply keyword filtering using OR conditions (EF-translatable)
+        if (keywords.Any())
+        {
+            IQueryable<DocumentChunk>? keywordQuery = null;
+            
+            foreach (var keyword in keywords)
+            {
+                var localKeyword = keyword; // Capture for closure
+                var currentQuery = _context.DocumentChunks
+                    .Where(c => EF.Functions.Like(c.ChunkText.ToLower(), $"%{localKeyword}%"));
+                
+                keywordQuery = keywordQuery == null ? currentQuery : keywordQuery.Union(currentQuery);
+            }
+            
+            if (keywordQuery != null)
+            {
+                chunksQuery = chunksQuery.Where(c => keywordQuery.Any(kq => kq.Id == c.Id));
+            }
+        }
 
         // Filter by groups if specified
         if (groupIds != null && groupIds.Any())
@@ -320,11 +390,22 @@ Answer:";
         }
 
         var chunks = await chunksQuery
-            .OrderByDescending(c => keywords.Count(k => c.ChunkText.ToLower().Contains(k)))
-            .Take(topK)
+            .Take(topK * 3) // Get more candidates for scoring
             .ToListAsync();
 
-        return chunks;
+        // Score and rank in memory
+        var scoredChunks = chunks
+            .Select(c => new
+            {
+                Chunk = c,
+                Score = keywords.Count(k => c.ChunkText.ToLower().Contains(k))
+            })
+            .OrderByDescending(x => x.Score)
+            .Take(topK)
+            .Select(x => x.Chunk)
+            .ToList();
+
+        return scoredChunks;
     }
 
     private async Task<string> BuildContextFromChunksAsync(List<DocumentChunk> chunks, List<Guid>? groupIds = null)

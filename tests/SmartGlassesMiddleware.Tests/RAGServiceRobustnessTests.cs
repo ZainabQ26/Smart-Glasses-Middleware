@@ -143,6 +143,7 @@ public class RAGServiceRobustnessTests
 
         // Assert
         Assert.NotNull(result);
+        Assert.NotEmpty(result.Answer);
         _mockAIService.Verify(
             s => s.ProcessRequestAsync(It.Is<string>(p => p.Contains("Context Prompt"))),
             Times.Once);
