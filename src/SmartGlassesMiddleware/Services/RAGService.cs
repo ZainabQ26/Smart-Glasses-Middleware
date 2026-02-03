@@ -12,9 +12,11 @@ namespace SmartGlassesMiddleware.Services;
 
 public interface IRAGService
 {
-    Task<string> QueryDocumentsAsync(string query, int topK = 5);
-    Task<List<DocumentChunk>> SearchChunksAsync(string query, int topK = 5);
+    Task<string> QueryDocumentsAsync(string query, int topK = 5, List<Guid>? groupIds = null);
+    Task<List<DocumentChunk>> SearchChunksAsync(string query, int topK = 5, List<Guid>? groupIds = null);
     Task GenerateEmbeddingsAsync(Guid documentId);
+    Task<int> ReprocessFailedDocumentsAsync();
+    Task<List<DocumentMetadata>> GetUnprocessedDocumentsAsync();
 }
 
 public class RAGService : IRAGService
@@ -23,6 +25,8 @@ public class RAGService : IRAGService
     private readonly ILogger<RAGService> _logger;
     private readonly IAIService _aiService;
     private readonly Kernel _kernel;
+    private const int MaxRetries = 3;
+    private const int RetryDelayMs = 1000;
 
     public RAGService(
         ApplicationDbContext context,
@@ -36,12 +40,12 @@ public class RAGService : IRAGService
         _kernel = kernel;
     }
 
-    public async Task<string> QueryDocumentsAsync(string query, int topK = 5)
+    public async Task<string> QueryDocumentsAsync(string query, int topK = 5, List<Guid>? groupIds = null)
     {
         try
         {
             // Search for relevant chunks
-            var relevantChunks = await SearchChunksAsync(query, topK);
+            var relevantChunks = await SearchChunksAsync(query, topK, groupIds);
 
             if (!relevantChunks.Any())
             {
@@ -49,7 +53,7 @@ public class RAGService : IRAGService
             }
 
             // Build context from chunks
-            var context = BuildContextFromChunks(relevantChunks);
+            var context = await BuildContextFromChunksAsync(relevantChunks, groupIds);
 
             // Generate response using AI with context
             var prompt = $@"Based on the following context from documents, answer the question. 
@@ -73,22 +77,31 @@ Answer:";
         }
     }
 
-    public async Task<List<DocumentChunk>> SearchChunksAsync(string query, int topK = 5)
+    public async Task<List<DocumentChunk>> SearchChunksAsync(string query, int topK = 5, List<Guid>? groupIds = null)
     {
         try
         {
             // Get query embedding
             var queryEmbedding = await GenerateQueryEmbeddingAsync(query);
 
-            // Get all chunks with embeddings
-            var allChunks = await _context.DocumentChunks
+            // Build query for chunks, optionally filtered by groups
+            var chunksQuery = _context.DocumentChunks
                 .Include(c => c.DocumentMetadata)
-                .Where(c => c.Embedding != null)
-                .ToListAsync();
+                .ThenInclude(d => d.DocumentGroups)
+                .Where(c => c.Embedding != null);
+
+            // Filter by groups if specified
+            if (groupIds != null && groupIds.Any())
+            {
+                chunksQuery = chunksQuery.Where(c => 
+                    c.DocumentMetadata.DocumentGroups.Any(dg => groupIds.Contains(dg.ResourceGroupId)));
+            }
+
+            var allChunks = await chunksQuery.ToListAsync();
 
             if (!allChunks.Any())
             {
-                _logger.LogWarning("No chunks with embeddings found");
+                _logger.LogWarning("No chunks with embeddings found for query: {Query}", query);
                 return new List<DocumentChunk>();
             }
 
@@ -110,7 +123,7 @@ Answer:";
             _logger.LogError(ex, "Error searching chunks");
             
             // Fallback to keyword search
-            return await KeywordSearchAsync(query, topK);
+            return await KeywordSearchAsync(query, topK, groupIds);
         }
     }
 
@@ -120,21 +133,85 @@ Answer:";
             .Where(c => c.DocumentMetadataId == documentId)
             .ToListAsync();
 
+        var failedChunks = 0;
         foreach (var chunk in chunks)
+        {
+            var success = await GenerateEmbeddingWithRetryAsync(chunk);
+            if (!success)
+            {
+                failedChunks++;
+            }
+        }
+
+        await _context.SaveChangesAsync();
+
+        if (failedChunks > 0)
+        {
+            _logger.LogWarning("Failed to generate embeddings for {FailedCount} out of {TotalCount} chunks in document {DocumentId}", 
+                failedChunks, chunks.Count, documentId);
+        }
+    }
+
+    public async Task<int> ReprocessFailedDocumentsAsync()
+    {
+        var unprocessedDocs = await GetUnprocessedDocumentsAsync();
+        var reprocessedCount = 0;
+
+        foreach (var doc in unprocessedDocs)
+        {
+            try
+            {
+                _logger.LogInformation("Reprocessing document {DocumentId}: {FileName}", doc.Id, doc.FileName);
+                await GenerateEmbeddingsAsync(doc.Id);
+                
+                doc.IsProcessed = true;
+                doc.ProcessedAt = DateTime.UtcNow;
+                doc.ProcessingError = null;
+                
+                reprocessedCount++;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to reprocess document {DocumentId}", doc.Id);
+                doc.ProcessingError = ex.Message;
+            }
+        }
+
+        await _context.SaveChangesAsync();
+        return reprocessedCount;
+    }
+
+    public async Task<List<DocumentMetadata>> GetUnprocessedDocumentsAsync()
+    {
+        return await _context.DocumentMetadatas
+            .Where(d => !d.IsProcessed || d.ProcessingError != null)
+            .OrderBy(d => d.UploadedAt)
+            .ToListAsync();
+    }
+
+    private async Task<bool> GenerateEmbeddingWithRetryAsync(DocumentChunk chunk)
+    {
+        for (int attempt = 0; attempt < MaxRetries; attempt++)
         {
             try
             {
                 var embedding = await GenerateTextEmbeddingAsync(chunk.ChunkText);
                 chunk.Embedding = SerializeEmbedding(embedding);
+                return true;
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to generate embedding for chunk {ChunkId}", chunk.Id);
-                // Continue with other chunks
+                _logger.LogWarning(ex, "Attempt {Attempt} failed to generate embedding for chunk {ChunkId}", 
+                    attempt + 1, chunk.Id);
+                
+                if (attempt < MaxRetries - 1)
+                {
+                    await Task.Delay(RetryDelayMs * (attempt + 1)); // Exponential backoff
+                }
             }
         }
-
-        await _context.SaveChangesAsync();
+        
+        return false;
     }
 
     private async Task<float[]> GenerateTextEmbeddingAsync(string text)
@@ -223,13 +300,23 @@ Answer:";
         return dotProduct / (magnitudeA * magnitudeB);
     }
 
-    private async Task<List<DocumentChunk>> KeywordSearchAsync(string query, int topK)
+    private async Task<List<DocumentChunk>> KeywordSearchAsync(string query, int topK, List<Guid>? groupIds = null)
     {
         var keywords = query.ToLower().Split(' ', StringSplitOptions.RemoveEmptyEntries);
         
-        var chunks = await _context.DocumentChunks
+        var chunksQuery = _context.DocumentChunks
             .Include(c => c.DocumentMetadata)
-            .Where(c => keywords.Any(k => c.ChunkText.ToLower().Contains(k)))
+            .ThenInclude(d => d.DocumentGroups)
+            .Where(c => keywords.Any(k => c.ChunkText.ToLower().Contains(k)));
+
+        // Filter by groups if specified
+        if (groupIds != null && groupIds.Any())
+        {
+            chunksQuery = chunksQuery.Where(c => 
+                c.DocumentMetadata.DocumentGroups.Any(dg => groupIds.Contains(dg.ResourceGroupId)));
+        }
+
+        var chunks = await chunksQuery
             .OrderByDescending(c => keywords.Count(k => c.ChunkText.ToLower().Contains(k)))
             .Take(topK)
             .ToListAsync();
@@ -237,15 +324,39 @@ Answer:";
         return chunks;
     }
 
-    private string BuildContextFromChunks(List<DocumentChunk> chunks)
+    private async Task<string> BuildContextFromChunksAsync(List<DocumentChunk> chunks, List<Guid>? groupIds = null)
     {
         var context = new StringBuilder();
         
+        // Add context from document chunks
         foreach (var chunk in chunks)
         {
             context.AppendLine($"[From {chunk.DocumentMetadata.FileName}, Page {chunk.PageNumber}]:");
             context.AppendLine(chunk.ChunkText);
             context.AppendLine();
+        }
+
+        // If group IDs are provided, add additional context from group prompts
+        if (groupIds != null && groupIds.Any())
+        {
+            var groupPrompts = await _context.ResourceGroups
+                .Where(g => groupIds.Contains(g.Id))
+                .Include(g => g.PromptGroups)
+                .ThenInclude(pg => pg.ManagedPrompt)
+                .SelectMany(g => g.PromptGroups.Select(pg => pg.ManagedPrompt))
+                .Distinct()
+                .ToListAsync();
+
+            if (groupPrompts.Any())
+            {
+                context.AppendLine("--- Additional Context from Groups ---");
+                foreach (var prompt in groupPrompts)
+                {
+                    context.AppendLine($"[{prompt.Name}]:");
+                    context.AppendLine(prompt.PromptText);
+                    context.AppendLine();
+                }
+            }
         }
 
         return context.ToString();
