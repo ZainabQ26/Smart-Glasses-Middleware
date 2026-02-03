@@ -87,6 +87,12 @@ public class ApplicationDbContext : DbContext
             entity.Property(e => e.IndexedContent).IsRequired();
             entity.HasIndex(e => e.FileId);
             entity.HasIndex(e => e.ProcessedAt);
+            
+            // Add foreign key relationship to ManagedFile with cascade delete
+            entity.HasOne<ManagedFile>()
+                .WithMany()
+                .HasForeignKey(e => e.FileId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }
