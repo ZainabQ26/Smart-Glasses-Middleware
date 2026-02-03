@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using SmartGlassesMiddleware.Models;
 using SmartGlassesMiddleware.Services;
+using SmartGlassesMiddleware.Data;
 
 namespace SmartGlassesMiddleware.Controllers;
 
@@ -19,6 +20,7 @@ public class MediaController : ControllerBase
     private readonly IBackgroundTaskQueue _backgroundQueue;
     private readonly IMediaProcessor _mediaProcessor;
     private readonly IRagService _ragService;
+    private readonly ApplicationDbContext _context;
 
     public MediaController(
         IMediaStorageService mediaStorageService,
@@ -28,6 +30,7 @@ public class MediaController : ControllerBase
         IBackgroundTaskQueue backgroundQueue,
         IMediaProcessor mediaProcessor,
         IRagService ragService,
+        ApplicationDbContext context,
         ILogger<MediaController> logger)
     {
         _mediaStorageService = mediaStorageService;
@@ -37,6 +40,7 @@ public class MediaController : ControllerBase
         _backgroundQueue = backgroundQueue;
         _mediaProcessor = mediaProcessor;
         _ragService = ragService;
+        _context = context;
         _logger = logger;
     }
 
@@ -302,16 +306,29 @@ public class MediaController : ControllerBase
                 }
                 bgItems.Add(item);
 
-                // Process file for RAG indexing (using a temporary file ID)
+                // Create ManagedFile record and process for RAG indexing
                 try
                 {
+                    var managedFile = new ManagedFile
+                    {
+                        Id = Guid.NewGuid(),
+                        FileName = file.FileName,
+                        Label = $"Media upload: {file.FileName}",
+                        ContentType = contentType,
+                        StorageKey = storageKey,
+                        UploadedAt = DateTime.UtcNow,
+                        FileSize = file.Length
+                    };
+                    _context.ManagedFiles.Add(managedFile);
+                    await _context.SaveChangesAsync();
+
                     await _ragService.ProcessFileForRagAsync(
-                        Guid.NewGuid(), // Temporary ID for media files
+                        managedFile.Id,
                         file.FileName,
                         contentType,
                         storageKey,
                         item.Transcription);
-                    _logger.LogInformation("File {FileName} processed for RAG", file.FileName);
+                    _logger.LogInformation("File {FileName} processed for RAG with ID {FileId}", file.FileName, managedFile.Id);
                 }
                 catch (Exception ex)
                 {
