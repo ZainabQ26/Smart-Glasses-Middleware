@@ -26,8 +26,11 @@ public class ApplicationDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
         
-        // Enable pgvector extension
-        modelBuilder.HasPostgresExtension("vector");
+        // Enable pgvector extension only for PostgreSQL
+        if (Database.ProviderName != "Microsoft.EntityFrameworkCore.InMemory")
+        {
+            modelBuilder.HasPostgresExtension("vector");
+        }
 
         modelBuilder.Entity<RequestHistory>(entity =>
         {
@@ -105,19 +108,28 @@ public class ApplicationDbContext : DbContext
             entity.Property(e => e.ChunkIndex).IsRequired();
             entity.Property(e => e.CreatedAt).IsRequired();
             
-            // Configure vector column for pgvector similarity search
-            entity.Property(e => e.EmbeddingVector)
-                .HasColumnType("vector(384)"); // 384-dimensional embeddings
+            // Only configure vector column for PostgreSQL (not for in-memory testing)
+            if (Database.ProviderName != "Microsoft.EntityFrameworkCore.InMemory")
+            {
+                // Configure vector column for pgvector similarity search
+                entity.Property(e => e.EmbeddingVector)
+                    .HasColumnType("vector(384)"); // 384-dimensional embeddings
+                    
+                // Create index on vector column for efficient similarity search
+                entity.HasIndex(e => e.EmbeddingVector)
+                    .HasMethod("ivfflat")
+                    .HasOperators("vector_cosine_ops");
+            }
+            else
+            {
+                // For in-memory database, ignore the EmbeddingVector property
+                entity.Ignore(e => e.EmbeddingVector);
+            }
             
             entity.HasOne(e => e.DocumentMetadata)
                 .WithMany(d => d.Chunks)
                 .HasForeignKey(e => e.DocumentMetadataId)
                 .OnDelete(DeleteBehavior.Cascade);
-                
-            // Create index on vector column for efficient similarity search
-            entity.HasIndex(e => e.EmbeddingVector)
-                .HasMethod("ivfflat")
-                .HasOperators("vector_cosine_ops");
         });
 
         modelBuilder.Entity<DocumentGroup>(entity =>

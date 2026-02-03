@@ -22,6 +22,8 @@ public interface IRAGService
     Task<int> ReprocessFailedDocumentsAsync();
     Task<List<DocumentMetadata>> GetUnprocessedDocumentsAsync();
     Task<(string embeddingJson, int dimension)> GenerateTextEmbeddingJsonAsync(string text);
+    Task<QueryResult> QueryRemindersAsync(string query, int topK = 10);
+    Task<QueryResult> QueryDocumentsAndRemindersAsync(string query, int topK = 5, List<Guid>? groupIds = null);
 }
 
 public class RAGService : IRAGService
@@ -929,6 +931,206 @@ Answer:";
         {
             _logger.LogError(ex, "Failed to generate embedding for text");
             throw;
+        }
+    }
+
+    public async Task<QueryResult> QueryRemindersAsync(string query, int topK = 10)
+    {
+        try
+        {
+            _logger.LogInformation("Querying reminders with query: {Query}", query);
+            
+            // Get all reminders
+            var reminders = await _context.RequestHistories
+                .Where(h => h.RequestType == "reminder")
+                .OrderByDescending(h => h.Timestamp)
+                .Take(topK * 2) // Get more to allow for filtering
+                .ToListAsync();
+
+            if (!reminders.Any())
+            {
+                return new QueryResult
+                {
+                    Answer = "You don't have any reminders saved.",
+                    Sources = new List<DocumentSource>(),
+                    UsedAdvancedModel = false,
+                    ModelUsed = "none",
+                    TokenCount = 0
+                };
+            }
+
+            // Simple keyword matching for reminders
+            var relevantReminders = reminders
+                .Where(r => 
+                    r.InputText.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                    query.Split(' ').Any(word => 
+                        word.Length > 3 && r.InputText.Contains(word, StringComparison.OrdinalIgnoreCase)))
+                .Take(topK)
+                .ToList();
+
+            // If no keyword matches, return most recent reminders
+            if (!relevantReminders.Any())
+            {
+                relevantReminders = reminders.Take(topK).ToList();
+            }
+
+            // Build context from reminders
+            var contextBuilder = new StringBuilder();
+            contextBuilder.AppendLine("Your Reminders:");
+            contextBuilder.AppendLine();
+            
+            var sources = new List<DocumentSource>();
+            foreach (var reminder in relevantReminders)
+            {
+                contextBuilder.AppendLine($"- {reminder.InputText}");
+                contextBuilder.AppendLine($"  (Created: {reminder.Timestamp:yyyy-MM-dd HH:mm})");
+                contextBuilder.AppendLine();
+                
+                sources.Add(new DocumentSource
+                {
+                    DocumentId = reminder.Id,
+                    FileName = reminder.InputText.Length > 30 
+                        ? $"Reminder: {reminder.InputText.Substring(0, 30)}..."
+                        : $"Reminder: {reminder.InputText}",
+                    PageNumber = 0,
+                    ChunkId = Guid.Empty,
+                    ChunkText = reminder.InputText
+                });
+            }
+
+            var context = contextBuilder.ToString();
+            
+            // Generate AI response about the reminders
+            var prompt = $@"Based on the user's reminders listed below, answer their question.
+Be helpful and conversational. If they ask about a specific reminder, provide details.
+If they ask for all reminders, list them clearly.
+
+{context}
+
+User Question: {query}
+
+Answer:";
+
+            var answer = await GenerateResponseWithLocalModel(prompt);
+
+            return new QueryResult
+            {
+                Answer = answer,
+                Sources = sources,
+                UsedAdvancedModel = false,
+                ModelUsed = "local-ollama",
+                TokenCount = EstimateTokens(prompt + answer)
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error querying reminders");
+            return new QueryResult
+            {
+                Answer = $"Error searching reminders: {ex.Message}",
+                Sources = new List<DocumentSource>(),
+                UsedAdvancedModel = false,
+                ModelUsed = "none",
+                TokenCount = 0
+            };
+        }
+    }
+
+    public async Task<QueryResult> QueryDocumentsAndRemindersAsync(string query, int topK = 5, List<Guid>? groupIds = null)
+    {
+        try
+        {
+            _logger.LogInformation("Querying documents and reminders with query: {Query}", query);
+            
+            // Check if query is reminder-specific
+            var isReminderQuery = query.Contains("reminder", StringComparison.OrdinalIgnoreCase) ||
+                                 query.Contains("remind me", StringComparison.OrdinalIgnoreCase) ||
+                                 query.Contains("what did i", StringComparison.OrdinalIgnoreCase);
+
+            // Query both documents and reminders
+            var documentTask = QueryDocumentsAsync(query, topK, groupIds);
+            var reminderTask = QueryRemindersAsync(query, topK);
+
+            await Task.WhenAll(documentTask, reminderTask);
+
+            var documentResult = await documentTask;
+            var reminderResult = await reminderTask;
+
+            // If it's a reminder-specific query, prioritize reminders
+            if (isReminderQuery && reminderResult.Sources.Any())
+            {
+                return reminderResult;
+            }
+
+            // Combine results if both have content
+            if (documentResult.Sources.Any() && reminderResult.Sources.Any())
+            {
+                var combinedSources = new List<DocumentSource>();
+                combinedSources.AddRange(reminderResult.Sources);
+                combinedSources.AddRange(documentResult.Sources.Take(Math.Max(0, topK - reminderResult.Sources.Count)));
+
+                var contextBuilder = new StringBuilder();
+                
+                if (reminderResult.Sources.Any())
+                {
+                    contextBuilder.AppendLine("YOUR REMINDERS:");
+                    foreach (var source in reminderResult.Sources)
+                    {
+                        contextBuilder.AppendLine($"- {source.ChunkText}");
+                    }
+                    contextBuilder.AppendLine();
+                }
+
+                if (documentResult.Sources.Any())
+                {
+                    contextBuilder.AppendLine("DOCUMENT INFORMATION:");
+                    foreach (var source in documentResult.Sources.Take(topK - reminderResult.Sources.Count))
+                    {
+                        contextBuilder.AppendLine($"From {source.FileName} (Page {source.PageNumber}):");
+                        contextBuilder.AppendLine(source.ChunkText);
+                        contextBuilder.AppendLine();
+                    }
+                }
+
+                var combinedPrompt = $@"Based on the following information from both reminders and documents, answer the question.
+
+{contextBuilder}
+
+Question: {query}
+
+Answer:";
+
+                var answer = await GenerateResponseWithLocalModel(combinedPrompt);
+
+                return new QueryResult
+                {
+                    Answer = answer,
+                    Sources = combinedSources,
+                    UsedAdvancedModel = false,
+                    ModelUsed = "local-ollama",
+                    TokenCount = EstimateTokens(combinedPrompt + answer)
+                };
+            }
+
+            // Return whichever has content, preferring documents
+            if (documentResult.Sources.Any())
+            {
+                return documentResult;
+            }
+
+            return reminderResult;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error querying documents and reminders");
+            return new QueryResult
+            {
+                Answer = $"Error searching: {ex.Message}",
+                Sources = new List<DocumentSource>(),
+                UsedAdvancedModel = false,
+                ModelUsed = "none",
+                TokenCount = 0
+            };
         }
     }
 }

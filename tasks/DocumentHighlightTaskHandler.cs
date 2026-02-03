@@ -83,30 +83,25 @@ public class DocumentHighlightTaskHandler : ITaskHandler
                 return $"Text '{highlightText}' not found in document '{document.FileName}'.";
             }
 
-            // Create locations for highlighting
-            var locations = matchingChunks.Select(c => new HighlightLocation
-            {
-                PageNumber = c.PageNumber,
-                StartPosition = c.StartPosition,
-                EndPosition = c.EndPosition,
-                Text = highlightText
-            }).ToList();
+            // Get chunk IDs for highlighting
+            var chunkIds = matchingChunks.Select(c => c.Id).ToList();
 
             // Generate highlighted document
             var highlightedStream = await _highlightService.HighlightDocumentAsync(
                 documentId, 
-                locations
+                chunkIds
             );
 
             // In a real scenario, we'd save this to storage and return a URL
             // For now, return information about the highlighted document
+            var distinctPages = matchingChunks.Select(c => c.PageNumber).Distinct().OrderBy(p => p).ToList();
             var response = $"✅ Document '{document.FileName}' highlighted successfully!\n\n";
             response += $"📄 Document: {document.FileName}\n";
             response += $"🔍 Highlighted text: '{highlightText}'\n";
-            response += $"📍 Found on {matchingChunks.Count} page(s): " + 
-                       string.Join(", ", matchingChunks.Select(c => c.PageNumber).Distinct().OrderBy(p => p));
+            response += $"📍 Found on {matchingChunks.Count} chunk(s) across " + 
+                       $"{distinctPages.Count} page(s): " + 
+                       string.Join(", ", distinctPages);
             response += $"\n\n💡 Use API endpoint: GET /api/documents/{documentId}/highlight";
-            response += $"\n   with locations: {string.Join("; ", locations.Select(l => $"Page {l.PageNumber}"))}";
 
             return response;
         }
@@ -116,13 +111,4 @@ public class DocumentHighlightTaskHandler : ITaskHandler
             return $"Error highlighting document: {ex.Message}";
         }
     }
-}
-
-// Helper class for highlight locations (should match DocumentHighlightService)
-public class HighlightLocation
-{
-    public int PageNumber { get; set; }
-    public int? StartPosition { get; set; }
-    public int? EndPosition { get; set; }
-    public string Text { get; set; } = string.Empty;
 }
