@@ -16,6 +16,7 @@ public class ApplicationDbContext : DbContext
     public DbSet<ResourceGroup> ResourceGroups { get; set; }
     public DbSet<DocumentMetadata> DocumentMetadatas { get; set; }
     public DbSet<DocumentChunk> DocumentChunks { get; set; }
+    public DbSet<DocumentGroup> DocumentGroups { get; set; }
     public DbSet<Conversation> Conversations { get; set; }
     public DbSet<ChatMessage> ChatMessages { get; set; }
 

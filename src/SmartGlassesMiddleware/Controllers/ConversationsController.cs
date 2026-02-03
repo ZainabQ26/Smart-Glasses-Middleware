@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using SmartGlassesMiddleware.Services;
 using SmartGlassesMiddleware.Models;
+using SmartGlassesMiddleware.Data;
 using Microsoft.EntityFrameworkCore;
 
 namespace SmartGlassesMiddleware.Controllers;
@@ -12,15 +13,18 @@ public class ConversationsController : ControllerBase
     private readonly ILogger<ConversationsController> _logger;
     private readonly IConversationService _conversationService;
     private readonly IRAGService _ragService;
+    private readonly ApplicationDbContext _context;
 
     public ConversationsController(
         ILogger<ConversationsController> logger,
         IConversationService conversationService,
-        IRAGService ragService)
+        IRAGService ragService,
+        ApplicationDbContext context)
     {
         _logger = logger;
         _conversationService = conversationService;
         _ragService = ragService;
+        _context = context;
     }
 
     /// <summary>
@@ -140,17 +144,32 @@ public class ConversationsController : ControllerBase
     }
 
     /// <summary>
-    /// Summarize a conversation
+    /// Summarize a conversation and optionally generate embedding
     /// </summary>
     [HttpPost("{id}/summarize")]
     [ProducesResponseType(typeof(string), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> SummarizeConversation(Guid id)
+    public async Task<IActionResult> SummarizeConversation(Guid id, [FromQuery] bool generateEmbedding = false)
     {
         try
         {
             var summary = await _conversationService.SummarizeConversationAsync(id);
-            return Ok(new { summary });
+            
+            // Optionally generate embedding for the summary
+            if (generateEmbedding && !string.IsNullOrEmpty(summary))
+            {
+                var conversation = await _context.Conversations.FindAsync(id);
+                if (conversation != null)
+                {
+                    var (embeddingJson, dimension) = await _ragService.GenerateTextEmbeddingJsonAsync(summary);
+                    conversation.SummaryEmbedding = embeddingJson;
+                    conversation.SummaryEmbeddingDimension = dimension;
+                    await _context.SaveChangesAsync();
+                    _logger.LogInformation("Generated embedding for conversation {ConversationId} summary", id);
+                }
+            }
+            
+            return Ok(new { summary, embeddingGenerated = generateEmbedding });
         }
         catch (ArgumentException ex)
         {
