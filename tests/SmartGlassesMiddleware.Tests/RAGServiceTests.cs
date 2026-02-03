@@ -19,6 +19,7 @@ public class RAGServiceTests
     private readonly Mock<IAIService> _mockAIService;
     private readonly Mock<Kernel> _mockKernel;
     private readonly Mock<IConfiguration> _mockConfiguration;
+    private readonly Mock<ITaskDispatcher> _mockTaskDispatcher;
     private readonly ApplicationDbContext _context;
     private readonly RAGService _service;
 
@@ -28,6 +29,7 @@ public class RAGServiceTests
         _mockAIService = new Mock<IAIService>();
         _mockKernel = new Mock<Kernel>();
         _mockConfiguration = new Mock<IConfiguration>();
+        _mockTaskDispatcher = new Mock<ITaskDispatcher>();
         
         // Setup configuration defaults
         _mockConfiguration.Setup(c => c["RAG:MaxRetries"]).Returns("3");
@@ -44,6 +46,7 @@ public class RAGServiceTests
             _mockLogger.Object,
             _mockAIService.Object,
             _mockKernel.Object,
+            _mockTaskDispatcher.Object,
             _mockConfiguration.Object
         );
     }
