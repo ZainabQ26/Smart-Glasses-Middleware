@@ -122,7 +122,8 @@ public class RAGServiceTests
         var result = await _service.QueryDocumentsAsync(query);
 
         // Assert
-        Assert.Contains("No relevant information found", result);
+        Assert.Contains("No relevant information found", result.Answer);
+        Assert.Empty(result.Sources);
     }
 
     [Fact]

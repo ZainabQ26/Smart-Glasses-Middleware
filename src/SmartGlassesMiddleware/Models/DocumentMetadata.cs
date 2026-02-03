@@ -56,6 +56,7 @@ public class DocumentChunk
     
     // Embedding for semantic search
     public string? Embedding { get; set; } // Stored as JSON array
+    public int? EmbeddingDimension { get; set; } // Dimension of the embedding vector
     
     public DateTime CreatedAt { get; set; }
 }
