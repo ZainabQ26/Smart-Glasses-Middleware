@@ -13,4 +13,5 @@ public class RagEntry
     public string? Transcription { get; set; }
     public DateTime ProcessedAt { get; set; }
     public string IndexedContent { get; set; } = string.Empty;
+    public float[]? EmbeddingVector { get; set; }
 }

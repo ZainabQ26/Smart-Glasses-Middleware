@@ -96,7 +96,8 @@ public class RagService : IRagService
         {
             _logger.LogInformation("Retrieving RAG context for query: {Query}", query);
 
-            // Simple keyword-based search (in a production system, use vector embeddings)
+            // TODO: Generate embedding vector for query using an embedding model
+            // For now, use keyword-based search as fallback
             var keywords = ExtractKeywords(query);
             
             var entries = await _context.RagEntries
@@ -106,6 +107,12 @@ public class RagService : IRagService
                 .OrderByDescending(e => e.ProcessedAt)
                 .Take(maxResults)
                 .ToListAsync();
+
+            // Future: If EmbeddingVector is populated, use cosine similarity:
+            // SELECT *, 1 - (EmbeddingVector <=> query_vector) as similarity
+            // FROM RagEntries
+            // ORDER BY similarity DESC
+            // LIMIT maxResults
 
             if (!entries.Any())
             {

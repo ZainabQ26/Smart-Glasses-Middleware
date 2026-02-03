@@ -37,6 +37,9 @@ public class ApplicationDbContext : DbContext
             entity.Property(e => e.StorageKey).IsRequired();
             entity.Property(e => e.UploadedAt).IsRequired();
             entity.Property(e => e.FileSize).IsRequired();
+            
+            // Add index for ContentHash for deduplication lookups
+            entity.HasIndex(e => e.ContentHash);
         });
 
         modelBuilder.Entity<ManagedPrompt>(entity =>
@@ -85,7 +88,11 @@ public class ApplicationDbContext : DbContext
             entity.Property(e => e.StorageKey).IsRequired();
             entity.Property(e => e.ProcessedAt).IsRequired();
             entity.Property(e => e.IndexedContent).IsRequired();
-            entity.HasIndex(e => e.FileId);
+            
+            // Add unique index on FileId to prevent duplicate RAG entries
+            entity.HasIndex(e => e.FileId).IsUnique();
+            // Add unique index on StorageKey to prevent duplicate RAG entries
+            entity.HasIndex(e => e.StorageKey).IsUnique();
             entity.HasIndex(e => e.ProcessedAt);
             
             // Add foreign key relationship to ManagedFile with cascade delete
