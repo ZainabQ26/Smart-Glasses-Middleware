@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using SmartGlassesMiddleware.Models;
 using SmartGlassesMiddleware.Services;
+using SmartGlassesMiddleware.Data;
 
 namespace SmartGlassesMiddleware.Controllers;
 
@@ -18,6 +20,8 @@ public class MediaController : ControllerBase
     private readonly IHistoryService _historyService;
     private readonly IBackgroundTaskQueue _backgroundQueue;
     private readonly IMediaProcessor _mediaProcessor;
+    private readonly IRagService _ragService;
+    private readonly ApplicationDbContext _context;
 
     public MediaController(
         IMediaStorageService mediaStorageService,
@@ -26,6 +30,8 @@ public class MediaController : ControllerBase
         IHistoryService historyService,
         IBackgroundTaskQueue backgroundQueue,
         IMediaProcessor mediaProcessor,
+        IRagService ragService,
+        ApplicationDbContext context,
         ILogger<MediaController> logger)
     {
         _mediaStorageService = mediaStorageService;
@@ -34,6 +40,8 @@ public class MediaController : ControllerBase
         _historyService = historyService;
         _backgroundQueue = backgroundQueue;
         _mediaProcessor = mediaProcessor;
+        _ragService = ragService;
+        _context = context;
         _logger = logger;
     }
 
@@ -289,7 +297,45 @@ public class MediaController : ControllerBase
 
                 using var uploadStream = file.OpenReadStream();
                 var contentType = file.ContentType ?? "application/octet-stream";
-                var storageKey = await _mediaStorageService.UploadMediaAsync(uploadStream, file.FileName, contentType);
+                
+                // Compute content hash for deduplication
+                var contentHash = _mediaStorageService.ComputeContentHash(uploadStream);
+                
+                // Check if file with same hash already exists
+                var existingFile = await _context.ManagedFiles
+                    .FirstOrDefaultAsync(f => f.ContentHash == contentHash);
+                
+                string storageKey;
+                Guid fileId;
+                
+                if (existingFile != null)
+                {
+                    // File already exists, reuse it
+                    _logger.LogInformation("File {FileName} with hash {Hash} already exists as {FileId}, reusing", file.FileName, contentHash, existingFile.Id);
+                    storageKey = existingFile.StorageKey;
+                    fileId = existingFile.Id;
+                }
+                else
+                {
+                    // Upload new file
+                    storageKey = await _mediaStorageService.UploadMediaAsync(uploadStream, file.FileName, contentType);
+                    
+                    // Create ManagedFile record
+                    var managedFile = new ManagedFile
+                    {
+                        Id = Guid.NewGuid(),
+                        FileName = file.FileName,
+                        Label = $"Media upload: {file.FileName}",
+                        ContentType = contentType,
+                        StorageKey = storageKey,
+                        ContentHash = contentHash,
+                        UploadedAt = DateTime.UtcNow,
+                        FileSize = file.Length
+                    };
+                    _context.ManagedFiles.Add(managedFile);
+                    await _context.SaveChangesAsync();
+                    fileId = managedFile.Id;
+                }
 
                 var item = new BackgroundMediaItem { FileName = file.FileName, ContentType = contentType, StorageKey = storageKey };
                 // If per-file transcription provided, attach it
@@ -298,6 +344,22 @@ public class MediaController : ControllerBase
                     item.Transcription = mapped;
                 }
                 bgItems.Add(item);
+
+                // Process file for RAG indexing
+                try
+                {
+                    await _ragService.ProcessFileForRagAsync(
+                        fileId,
+                        file.FileName,
+                        contentType,
+                        storageKey,
+                        item.Transcription);
+                    _logger.LogInformation("File {FileName} processed for RAG with ID {FileId}", file.FileName, fileId);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to process file {FileName} for RAG, but upload succeeded", file.FileName);
+                }
             }
 
             // If an inputText transcription was provided and files exist, attach it to the first file if no per-file transcription present
