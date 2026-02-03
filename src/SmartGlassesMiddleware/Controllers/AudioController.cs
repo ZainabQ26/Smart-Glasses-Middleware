@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using SmartGlassesMiddleware.Models;
 using SmartGlassesMiddleware.Services;
+using SmartGlassesMiddleware.Data;
 
 namespace SmartGlassesMiddleware.Controllers;
 
@@ -15,6 +16,7 @@ public class AudioController : ControllerBase
     private readonly ITranscriptionService _transcriptionService;
     private readonly IHistoryService _historyService;
     private readonly IRagService _ragService;
+    private readonly ApplicationDbContext _context;
     private readonly ILogger<AudioController> _logger;
 
     public AudioController(
@@ -22,12 +24,14 @@ public class AudioController : ControllerBase
         ITranscriptionService transcriptionService,
         IHistoryService historyService,
         IRagService ragService,
+        ApplicationDbContext context,
         ILogger<AudioController> logger)
     {
         _mediaStorageService = mediaStorageService;
         _transcriptionService = transcriptionService;
         _historyService = historyService;
         _ragService = ragService;
+        _context = context;
         _logger = logger;
     }
 
@@ -124,16 +128,29 @@ public class AudioController : ControllerBase
                 _logger.LogWarning(ex, "Transcription failed for {Key}", storageKey);
             }
 
-            // Process file for RAG indexing
+            // Create ManagedFile record and process for RAG indexing
             try
             {
+                var managedFile = new ManagedFile
+                {
+                    Id = Guid.NewGuid(),
+                    FileName = fileName,
+                    Label = $"Audio transcription: {fileName}",
+                    ContentType = "audio/wav",
+                    StorageKey = storageKey,
+                    UploadedAt = DateTime.UtcNow,
+                    FileSize = audioBytes.Length
+                };
+                _context.ManagedFiles.Add(managedFile);
+                await _context.SaveChangesAsync();
+
                 await _ragService.ProcessFileForRagAsync(
-                    Guid.NewGuid(), // Temporary ID for audio files
+                    managedFile.Id,
                     fileName,
                     "audio/wav",
                     storageKey,
                     transcription);
-                _logger.LogInformation("Audio file {FileName} processed for RAG", fileName);
+                _logger.LogInformation("Audio file {FileName} processed for RAG with ID {FileId}", fileName, managedFile.Id);
             }
             catch (Exception ex)
             {
