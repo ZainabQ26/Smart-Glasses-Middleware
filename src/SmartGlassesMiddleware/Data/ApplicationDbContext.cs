@@ -14,6 +14,8 @@ public class ApplicationDbContext : DbContext
     public DbSet<ManagedFile> ManagedFiles { get; set; }
     public DbSet<ManagedPrompt> ManagedPrompts { get; set; }
     public DbSet<ResourceGroup> ResourceGroups { get; set; }
+    public DbSet<DocumentMetadata> DocumentMetadatas { get; set; }
+    public DbSet<DocumentChunk> DocumentChunks { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -73,6 +75,32 @@ public class ApplicationDbContext : DbContext
             entity.HasOne(e => e.ResourceGroup)
                 .WithMany(g => g.PromptGroups)
                 .HasForeignKey(e => e.ResourceGroupId);
+        });
+
+        modelBuilder.Entity<DocumentMetadata>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.FileName).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.OriginalFileName).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.ContentType).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.StorageKey).IsRequired();
+            entity.Property(e => e.UploadedAt).IsRequired();
+            entity.Property(e => e.FileSize).IsRequired();
+            entity.Property(e => e.DocumentType).IsRequired().HasMaxLength(50);
+        });
+
+        modelBuilder.Entity<DocumentChunk>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.ChunkText).IsRequired();
+            entity.Property(e => e.PageNumber).IsRequired();
+            entity.Property(e => e.ChunkIndex).IsRequired();
+            entity.Property(e => e.CreatedAt).IsRequired();
+            
+            entity.HasOne(e => e.DocumentMetadata)
+                .WithMany(d => d.Chunks)
+                .HasForeignKey(e => e.DocumentMetadataId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }
