@@ -15,19 +15,25 @@ public class DocumentsController : ControllerBase
     private readonly IRAGService _ragService;
     private readonly IDocumentHighlightService _highlightService;
     private readonly ApplicationDbContext _context;
+    private readonly IConfiguration _configuration;
+    private readonly long _maxFileSize;
 
     public DocumentsController(
         ILogger<DocumentsController> logger,
         IDocumentProcessingService processingService,
         IRAGService ragService,
         IDocumentHighlightService highlightService,
-        ApplicationDbContext context)
+        ApplicationDbContext context,
+        IConfiguration configuration)
     {
         _logger = logger;
         _processingService = processingService;
         _ragService = ragService;
         _highlightService = highlightService;
         _context = context;
+        _configuration = configuration;
+        var maxFileSizeMB = configuration.GetValue<int?>("RAG:MaxFileSizeMB") ?? 50;
+        _maxFileSize = maxFileSizeMB * 1024 * 1024;
     }
 
     /// <summary>
@@ -41,10 +47,9 @@ public class DocumentsController : ControllerBase
         if (file == null || file.Length == 0)
             return BadRequest("No file uploaded");
 
-        // Validate file size (50MB limit)
-        const long maxFileSize = 50 * 1024 * 1024;
-        if (file.Length > maxFileSize)
-            return BadRequest($"File size exceeds maximum allowed size of {maxFileSize / 1024 / 1024}MB");
+        // Validate file size
+        if (file.Length > _maxFileSize)
+            return BadRequest($"File size exceeds maximum allowed size of {_maxFileSize / 1024 / 1024}MB");
 
         try
         {

@@ -25,19 +25,22 @@ public class RAGService : IRAGService
     private readonly ILogger<RAGService> _logger;
     private readonly IAIService _aiService;
     private readonly Kernel _kernel;
-    private const int MaxRetries = 3;
-    private const int RetryDelayMs = 1000;
+    private readonly int _maxRetries;
+    private readonly int _retryDelayMs;
 
     public RAGService(
         ApplicationDbContext context,
         ILogger<RAGService> logger,
         IAIService aiService,
-        Kernel kernel)
+        Kernel kernel,
+        IConfiguration configuration)
     {
         _context = context;
         _logger = logger;
         _aiService = aiService;
         _kernel = kernel;
+        _maxRetries = configuration.GetValue<int?>("RAG:MaxRetries") ?? 3;
+        _retryDelayMs = configuration.GetValue<int?>("RAG:RetryDelayMs") ?? 1000;
     }
 
     public async Task<string> QueryDocumentsAsync(string query, int topK = 5, List<Guid>? groupIds = null)
@@ -191,7 +194,7 @@ Answer:";
 
     private async Task<bool> GenerateEmbeddingWithRetryAsync(DocumentChunk chunk)
     {
-        for (int attempt = 0; attempt < MaxRetries; attempt++)
+        for (int attempt = 0; attempt < _maxRetries; attempt++)
         {
             try
             {
@@ -204,9 +207,9 @@ Answer:";
                 _logger.LogWarning(ex, "Attempt {Attempt} failed to generate embedding for chunk {ChunkId}", 
                     attempt + 1, chunk.Id);
                 
-                if (attempt < MaxRetries - 1)
+                if (attempt < _maxRetries - 1)
                 {
-                    await Task.Delay(RetryDelayMs * (attempt + 1)); // Exponential backoff
+                    await Task.Delay(_retryDelayMs * (attempt + 1)); // Exponential backoff
                 }
             }
         }

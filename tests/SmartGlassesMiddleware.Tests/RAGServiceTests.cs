@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Xunit;
 using Moq;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Configuration;
 using Microsoft.SemanticKernel;
 using SmartGlassesMiddleware.Services;
 using SmartGlassesMiddleware.Data;
@@ -17,6 +18,7 @@ public class RAGServiceTests
     private readonly Mock<ILogger<RAGService>> _mockLogger;
     private readonly Mock<IAIService> _mockAIService;
     private readonly Mock<Kernel> _mockKernel;
+    private readonly Mock<IConfiguration> _mockConfiguration;
     private readonly ApplicationDbContext _context;
     private readonly RAGService _service;
 
@@ -25,6 +27,11 @@ public class RAGServiceTests
         _mockLogger = new Mock<ILogger<RAGService>>();
         _mockAIService = new Mock<IAIService>();
         _mockKernel = new Mock<Kernel>();
+        _mockConfiguration = new Mock<IConfiguration>();
+        
+        // Setup configuration defaults
+        _mockConfiguration.Setup(c => c["RAG:MaxRetries"]).Returns("3");
+        _mockConfiguration.Setup(c => c["RAG:RetryDelayMs"]).Returns("1000");
         
         // Create in-memory database for testing
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -36,7 +43,8 @@ public class RAGServiceTests
             _context,
             _mockLogger.Object,
             _mockAIService.Object,
-            _mockKernel.Object
+            _mockKernel.Object,
+            _mockConfiguration.Object
         );
     }
 
