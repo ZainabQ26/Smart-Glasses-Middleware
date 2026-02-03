@@ -14,6 +14,7 @@ public class ApplicationDbContext : DbContext
     public DbSet<ManagedFile> ManagedFiles { get; set; }
     public DbSet<ManagedPrompt> ManagedPrompts { get; set; }
     public DbSet<ResourceGroup> ResourceGroups { get; set; }
+    public DbSet<RagEntry> RagEntries { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -73,6 +74,19 @@ public class ApplicationDbContext : DbContext
             entity.HasOne(e => e.ResourceGroup)
                 .WithMany(g => g.PromptGroups)
                 .HasForeignKey(e => e.ResourceGroupId);
+        });
+
+        modelBuilder.Entity<RagEntry>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.FileId).IsRequired();
+            entity.Property(e => e.FileName).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.ContentType).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.StorageKey).IsRequired();
+            entity.Property(e => e.ProcessedAt).IsRequired();
+            entity.Property(e => e.IndexedContent).IsRequired();
+            entity.HasIndex(e => e.FileId);
+            entity.HasIndex(e => e.ProcessedAt);
         });
     }
 }
