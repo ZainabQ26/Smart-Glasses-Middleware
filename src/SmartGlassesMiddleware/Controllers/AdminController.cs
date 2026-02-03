@@ -16,6 +16,7 @@ public class AdminController : ControllerBase
     private readonly ApplicationDbContext _context;
     private readonly IMediaStorageService _mediaStorageService;
     private readonly ICacheService _cacheService;
+    private readonly IRagService _ragService;
     private readonly ILogger<AdminController> _logger;
     private const int DefaultPageSize = 20;
     private const int MaxPageSize = 100;
@@ -24,11 +25,13 @@ public class AdminController : ControllerBase
         ApplicationDbContext context,
         IMediaStorageService mediaStorageService,
         ICacheService cacheService,
+        IRagService ragService,
         ILogger<AdminController> logger)
     {
         _context = context;
         _mediaStorageService = mediaStorageService;
         _cacheService = cacheService;
+        _ragService = ragService;
         _logger = logger;
     }
 
@@ -142,6 +145,21 @@ public class AdminController : ControllerBase
 
             _context.ManagedFiles.Add(managedFile);
             await _context.SaveChangesAsync();
+
+            // Process file for RAG indexing
+            try
+            {
+                await _ragService.ProcessFileForRagAsync(
+                    managedFile.Id,
+                    managedFile.FileName,
+                    managedFile.ContentType,
+                    managedFile.StorageKey);
+                _logger.LogInformation("File {FileId} processed for RAG", managedFile.Id);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to process file {FileId} for RAG, but file was uploaded successfully", managedFile.Id);
+            }
 
             // Invalidate cache
             await InvalidateFilesCache();

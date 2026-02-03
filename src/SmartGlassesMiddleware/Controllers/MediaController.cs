@@ -18,6 +18,7 @@ public class MediaController : ControllerBase
     private readonly IHistoryService _historyService;
     private readonly IBackgroundTaskQueue _backgroundQueue;
     private readonly IMediaProcessor _mediaProcessor;
+    private readonly IRagService _ragService;
 
     public MediaController(
         IMediaStorageService mediaStorageService,
@@ -26,6 +27,7 @@ public class MediaController : ControllerBase
         IHistoryService historyService,
         IBackgroundTaskQueue backgroundQueue,
         IMediaProcessor mediaProcessor,
+        IRagService ragService,
         ILogger<MediaController> logger)
     {
         _mediaStorageService = mediaStorageService;
@@ -34,6 +36,7 @@ public class MediaController : ControllerBase
         _historyService = historyService;
         _backgroundQueue = backgroundQueue;
         _mediaProcessor = mediaProcessor;
+        _ragService = ragService;
         _logger = logger;
     }
 
@@ -298,6 +301,22 @@ public class MediaController : ControllerBase
                     item.Transcription = mapped;
                 }
                 bgItems.Add(item);
+
+                // Process file for RAG indexing (using a temporary file ID)
+                try
+                {
+                    await _ragService.ProcessFileForRagAsync(
+                        Guid.NewGuid(), // Temporary ID for media files
+                        file.FileName,
+                        contentType,
+                        storageKey,
+                        item.Transcription);
+                    _logger.LogInformation("File {FileName} processed for RAG", file.FileName);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to process file {FileName} for RAG, but upload succeeded", file.FileName);
+                }
             }
 
             // If an inputText transcription was provided and files exist, attach it to the first file if no per-file transcription present
