@@ -72,8 +72,8 @@ public class DocumentSearchTaskHandler : ITaskHandler
                     PageNumber = c.PageNumber,
                     ChunkIndex = c.ChunkIndex,
                     Context = c.ChunkText.Length > 200 ? c.ChunkText.Substring(0, 200) + "..." : c.ChunkText,
-                    StartPosition = c.StartPosition,
-                    EndPosition = c.EndPosition
+                    X = c.X,
+                    Y = c.Y
                 })
                 .ToListAsync();
 
@@ -89,9 +89,9 @@ public class DocumentSearchTaskHandler : ITaskHandler
             {
                 response += $"📄 **{match.FileName}** (Page {match.PageNumber})\n";
                 response += $"   Location: Chunk {match.ChunkIndex}";
-                if (match.StartPosition.HasValue)
+                if (match.X.HasValue && match.Y.HasValue)
                 {
-                    response += $" (Pos: {match.StartPosition}-{match.EndPosition})";
+                    response += $" (Pos: X={match.X:F2}, Y={match.Y:F2})";
                 }
                 response += $"\n   Context: {match.Context}\n\n";
             }
