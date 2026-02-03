@@ -68,4 +68,61 @@ public class HistoryController : ControllerBase
             return StatusCode(500, pd);
         }
     }
+
+    [HttpGet("reminders")]
+    public async Task<ActionResult<List<RequestHistory>>> GetReminders([FromQuery] int count = 100)
+    {
+        try
+        {
+            var reminders = await _historyService.GetHistoryByTypeAsync("reminder", count);
+            // Return empty array instead of 404 for better API design
+            return Ok(reminders);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting reminders");
+            var pd = new ProblemDetails 
+            { 
+                Title = "Internal Server Error", 
+                Detail = "An error occurred retrieving reminders", 
+                Status = StatusCodes.Status500InternalServerError 
+            };
+            pd.Extensions["requestId"] = HttpContext.TraceIdentifier;
+            pd.Extensions["timestamp"] = DateTime.UtcNow.ToString("o");
+            return StatusCode(500, pd);
+        }
+    }
+
+    [HttpGet("type/{requestType}")]
+    public async Task<ActionResult<List<RequestHistory>>> GetHistoryByType(string requestType, [FromQuery] int count = 100)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(requestType))
+            {
+                return BadRequest(new ProblemDetails 
+                { 
+                    Title = "Bad Request", 
+                    Detail = "Request type cannot be empty", 
+                    Status = StatusCodes.Status400BadRequest 
+                });
+            }
+
+            var history = await _historyService.GetHistoryByTypeAsync(requestType, count);
+            return Ok(history);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting history by type: {Type}", requestType);
+            var pd = new ProblemDetails 
+            { 
+                Title = "Internal Server Error", 
+                Detail = "An error occurred retrieving history", 
+                Status = StatusCodes.Status500InternalServerError 
+            };
+            pd.Extensions["requestId"] = HttpContext.TraceIdentifier;
+            pd.Extensions["timestamp"] = DateTime.UtcNow.ToString("o");
+            return StatusCode(500, pd);
+        }
+    }
 }

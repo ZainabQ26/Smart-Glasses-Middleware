@@ -9,6 +9,7 @@ public interface IHistoryService
     Task<RequestHistory> SaveRequestAsync(RequestHistory history);
     Task<List<RequestHistory>> GetRecentHistoryAsync(int count = 10);
     Task<RequestHistory?> GetHistoryByIdAsync(Guid id);
+    Task<List<RequestHistory>> GetHistoryByTypeAsync(string requestType, int count = 100);
 }
 
 public class HistoryService : IHistoryService
@@ -67,6 +68,29 @@ public class HistoryService : IHistoryService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error getting history by ID: {Id}", id);
+            throw;
+        }
+    }
+
+    public async Task<List<RequestHistory>> GetHistoryByTypeAsync(string requestType, int count = 100)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(requestType))
+            {
+                _logger.LogWarning("GetHistoryByTypeAsync called with empty request type");
+                return new List<RequestHistory>();
+            }
+
+            return await _context.RequestHistories
+                .Where(h => h.RequestType == requestType)
+                .OrderByDescending(h => h.Timestamp)
+                .Take(count)
+                .ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting history by type: {Type}", requestType);
             throw;
         }
     }
