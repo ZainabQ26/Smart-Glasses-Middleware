@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Configuration;
 using SmartGlassesMiddleware.Services;
 
 namespace SmartGlassesMiddleware.Services;
@@ -12,19 +13,21 @@ public class DocumentProcessingBackgroundService : BackgroundService
 {
     private readonly ILogger<DocumentProcessingBackgroundService> _logger;
     private readonly IServiceProvider _serviceProvider;
-    private const int CheckIntervalMinutes = 15;
+    private readonly int _checkIntervalMinutes;
 
     public DocumentProcessingBackgroundService(
         ILogger<DocumentProcessingBackgroundService> logger,
-        IServiceProvider serviceProvider)
+        IServiceProvider serviceProvider,
+        IConfiguration configuration)
     {
         _logger = logger;
         _serviceProvider = serviceProvider;
+        _checkIntervalMinutes = configuration.GetValue<int?>("RAG:BackgroundProcessingIntervalMinutes") ?? 15;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("Document Processing Background Service starting");
+        _logger.LogInformation("Document Processing Background Service starting (check interval: {Minutes} minutes)", _checkIntervalMinutes);
 
         // Wait a bit for the application to fully start
         await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
@@ -33,7 +36,7 @@ public class DocumentProcessingBackgroundService : BackgroundService
         await ProcessUnprocessedDocumentsAsync();
 
         // Then check periodically
-        using var timer = new PeriodicTimer(TimeSpan.FromMinutes(CheckIntervalMinutes));
+        using var timer = new PeriodicTimer(TimeSpan.FromMinutes(_checkIntervalMinutes));
         
         try
         {
