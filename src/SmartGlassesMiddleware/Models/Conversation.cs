@@ -38,4 +38,6 @@ public class Conversation
     
     // Summary for long conversations
     public string? Summary { get; set; }
+    public string? SummaryEmbedding { get; set; } // JSON serialized embedding vector
+    public int? SummaryEmbeddingDimension { get; set; }
 }
