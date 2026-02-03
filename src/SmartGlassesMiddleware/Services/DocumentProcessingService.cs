@@ -294,8 +294,9 @@ public class DocumentProcessingService : IDocumentProcessingService
                 chunks.Add(chunk);
             }
 
-            startIndex = endIndex - ChunkOverlap;
-            if (startIndex < 0) startIndex = 0;
+            // Ensure we always advance to prevent infinite loops
+            var nextStart = endIndex - ChunkOverlap;
+            startIndex = Math.Max(nextStart, startIndex + 1);
         }
 
         return chunks;
