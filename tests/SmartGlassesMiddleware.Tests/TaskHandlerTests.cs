@@ -5,6 +5,8 @@ using Moq;
 using Microsoft.Extensions.Logging;
 using SmartGlassesMiddleware.Services;
 using SmartGlassesMiddleware.Models;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace SmartGlassesMiddleware.Tests;
 
@@ -180,5 +182,245 @@ public class TaskHandlerTests
         // Assert
         Assert.NotNull(result);
         Assert.Contains("couldn't save", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // Edit Reminder Handler Tests
+    
+    [Fact]
+    public async Task EditReminderTaskHandler_Edits_Reminder_Successfully()
+    {
+        // Arrange
+        var existingReminder = new RequestHistory
+        {
+            Id = Guid.NewGuid(),
+            RequestType = "reminder",
+            InputText = "Buy milk",
+            Timestamp = DateTime.UtcNow.AddHours(-1)
+        };
+
+        var mockHistoryService = new Mock<IHistoryService>();
+        mockHistoryService
+            .Setup(s => s.GetHistoryByTypeAsync("reminder", 100))
+            .ReturnsAsync(new List<RequestHistory> { existingReminder });
+        
+        mockHistoryService
+            .Setup(s => s.UpdateReminderAsync(existingReminder.Id, "Buy eggs"))
+            .ReturnsAsync(new RequestHistory
+            {
+                Id = existingReminder.Id,
+                RequestType = "reminder",
+                InputText = "Buy eggs",
+                Timestamp = existingReminder.Timestamp
+            });
+
+        var mockLogger = new Mock<ILogger<EditReminderTaskHandler>>();
+        var handler = new EditReminderTaskHandler(mockHistoryService.Object, mockLogger.Object);
+
+        // Act
+        var result = await handler.HandleAsync("change milk to Buy eggs");
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Contains("updated", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Buy eggs", result);
+        mockHistoryService.Verify(s => s.UpdateReminderAsync(existingReminder.Id, "Buy eggs"), Times.Once);
+    }
+
+    [Fact]
+    public async Task EditReminderTaskHandler_Handles_No_Match()
+    {
+        // Arrange
+        var mockHistoryService = new Mock<IHistoryService>();
+        mockHistoryService
+            .Setup(s => s.GetHistoryByTypeAsync("reminder", 100))
+            .ReturnsAsync(new List<RequestHistory>());
+
+        var mockLogger = new Mock<ILogger<EditReminderTaskHandler>>();
+        var handler = new EditReminderTaskHandler(mockHistoryService.Object, mockLogger.Object);
+
+        // Act
+        var result = await handler.HandleAsync("change xyz to abc");
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Contains("couldn't find", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task EditReminderTaskHandler_Handles_Multiple_Matches()
+    {
+        // Arrange
+        var reminders = new List<RequestHistory>
+        {
+            new RequestHistory { Id = Guid.NewGuid(), RequestType = "reminder", InputText = "Buy milk", Timestamp = DateTime.UtcNow.AddHours(-1) },
+            new RequestHistory { Id = Guid.NewGuid(), RequestType = "reminder", InputText = "Buy milk and eggs", Timestamp = DateTime.UtcNow.AddHours(-2) }
+        };
+
+        var mockHistoryService = new Mock<IHistoryService>();
+        mockHistoryService
+            .Setup(s => s.GetHistoryByTypeAsync("reminder", 100))
+            .ReturnsAsync(reminders);
+
+        var mockLogger = new Mock<ILogger<EditReminderTaskHandler>>();
+        var handler = new EditReminderTaskHandler(mockHistoryService.Object, mockLogger.Object);
+
+        // Act
+        var result = await handler.HandleAsync("change milk to bread");
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Contains("found", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("2", result);
+    }
+
+    [Fact]
+    public async Task EditReminderTaskHandler_Handles_Empty_Input()
+    {
+        // Arrange
+        var mockHistoryService = new Mock<IHistoryService>();
+        var mockLogger = new Mock<ILogger<EditReminderTaskHandler>>();
+        var handler = new EditReminderTaskHandler(mockHistoryService.Object, mockLogger.Object);
+
+        // Act
+        var result = await handler.HandleAsync("");
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Contains("didn't catch", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task EditReminderTaskHandler_Handles_Invalid_Format()
+    {
+        // Arrange
+        var mockHistoryService = new Mock<IHistoryService>();
+        var mockLogger = new Mock<ILogger<EditReminderTaskHandler>>();
+        var handler = new EditReminderTaskHandler(mockHistoryService.Object, mockLogger.Object);
+
+        // Act
+        var result = await handler.HandleAsync("just some random text");
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Contains("couldn't understand", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // Delete Reminder Handler Tests
+    
+    [Fact]
+    public async Task DeleteReminderTaskHandler_Deletes_Reminder_Successfully()
+    {
+        // Arrange
+        var existingReminder = new RequestHistory
+        {
+            Id = Guid.NewGuid(),
+            RequestType = "reminder",
+            InputText = "Buy milk",
+            Timestamp = DateTime.UtcNow.AddHours(-1)
+        };
+
+        var mockHistoryService = new Mock<IHistoryService>();
+        mockHistoryService
+            .Setup(s => s.GetHistoryByTypeAsync("reminder", 100))
+            .ReturnsAsync(new List<RequestHistory> { existingReminder });
+        
+        mockHistoryService
+            .Setup(s => s.DeleteReminderAsync(existingReminder.Id))
+            .ReturnsAsync(true);
+
+        var mockLogger = new Mock<ILogger<DeleteReminderTaskHandler>>();
+        var handler = new DeleteReminderTaskHandler(mockHistoryService.Object, mockLogger.Object);
+
+        // Act
+        var result = await handler.HandleAsync("delete milk");
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Contains("deleted", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Buy milk", result);
+        mockHistoryService.Verify(s => s.DeleteReminderAsync(existingReminder.Id), Times.Once);
+    }
+
+    [Fact]
+    public async Task DeleteReminderTaskHandler_Handles_No_Match()
+    {
+        // Arrange
+        var mockHistoryService = new Mock<IHistoryService>();
+        mockHistoryService
+            .Setup(s => s.GetHistoryByTypeAsync("reminder", 100))
+            .ReturnsAsync(new List<RequestHistory>());
+
+        var mockLogger = new Mock<ILogger<DeleteReminderTaskHandler>>();
+        var handler = new DeleteReminderTaskHandler(mockHistoryService.Object, mockLogger.Object);
+
+        // Act
+        var result = await handler.HandleAsync("delete xyz");
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Contains("couldn't find", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task DeleteReminderTaskHandler_Handles_Multiple_Matches()
+    {
+        // Arrange
+        var reminders = new List<RequestHistory>
+        {
+            new RequestHistory { Id = Guid.NewGuid(), RequestType = "reminder", InputText = "Buy milk", Timestamp = DateTime.UtcNow.AddHours(-1) },
+            new RequestHistory { Id = Guid.NewGuid(), RequestType = "reminder", InputText = "Buy milk and eggs", Timestamp = DateTime.UtcNow.AddHours(-2) }
+        };
+
+        var mockHistoryService = new Mock<IHistoryService>();
+        mockHistoryService
+            .Setup(s => s.GetHistoryByTypeAsync("reminder", 100))
+            .ReturnsAsync(reminders);
+
+        var mockLogger = new Mock<ILogger<DeleteReminderTaskHandler>>();
+        var handler = new DeleteReminderTaskHandler(mockHistoryService.Object, mockLogger.Object);
+
+        // Act
+        var result = await handler.HandleAsync("delete milk");
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Contains("found", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("2", result);
+    }
+
+    [Fact]
+    public async Task DeleteReminderTaskHandler_Handles_Empty_Input()
+    {
+        // Arrange
+        var mockHistoryService = new Mock<IHistoryService>();
+        var mockLogger = new Mock<ILogger<DeleteReminderTaskHandler>>();
+        var handler = new DeleteReminderTaskHandler(mockHistoryService.Object, mockLogger.Object);
+
+        // Act
+        var result = await handler.HandleAsync("");
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Contains("didn't catch", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task DeleteReminderTaskHandler_Prevents_Delete_All()
+    {
+        // Arrange
+        var mockHistoryService = new Mock<IHistoryService>();
+        mockHistoryService
+            .Setup(s => s.GetHistoryByTypeAsync("reminder", 100))
+            .ReturnsAsync(new List<RequestHistory>());
+        
+        var mockLogger = new Mock<ILogger<DeleteReminderTaskHandler>>();
+        var handler = new DeleteReminderTaskHandler(mockHistoryService.Object, mockLogger.Object);
+
+        // Act
+        var result = await handler.HandleAsync("delete all reminders");
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Contains("can't delete all", result, StringComparison.OrdinalIgnoreCase);
     }
 }
