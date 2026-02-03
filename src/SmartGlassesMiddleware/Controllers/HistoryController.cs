@@ -98,16 +98,7 @@ public class HistoryController : ControllerBase
     {
         try
         {
-            if (string.IsNullOrWhiteSpace(requestType))
-            {
-                return BadRequest(new ProblemDetails 
-                { 
-                    Title = "Bad Request", 
-                    Detail = "Request type cannot be empty", 
-                    Status = StatusCodes.Status400BadRequest 
-                });
-            }
-
+            // Service handles null/whitespace validation internally
             var history = await _historyService.GetHistoryByTypeAsync(requestType, count);
             return Ok(history);
         }
