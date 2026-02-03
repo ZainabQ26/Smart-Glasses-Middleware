@@ -1,5 +1,6 @@
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.Embeddings;
+using Microsoft.SemanticKernel.ChatCompletion;
 using SmartGlassesMiddleware.Models;
 using SmartGlassesMiddleware.Data;
 using Microsoft.EntityFrameworkCore;
@@ -29,6 +30,7 @@ public class RAGService : IRAGService
     private readonly ILogger<RAGService> _logger;
     private readonly IAIService _aiService;
     private readonly Kernel _kernel;
+    private readonly ITaskDispatcher _taskDispatcher;
     private readonly int _maxRetries;
     private readonly int _retryDelayMs;
     private readonly int _maxContextTokens;
@@ -44,12 +46,14 @@ public class RAGService : IRAGService
         ILogger<RAGService> logger,
         IAIService aiService,
         Kernel kernel,
+        ITaskDispatcher taskDispatcher,
         IConfiguration configuration)
     {
         _context = context;
         _logger = logger;
         _aiService = aiService;
         _kernel = kernel;
+        _taskDispatcher = taskDispatcher;
         _maxRetries = configuration.GetValue<int?>("RAG:MaxRetries") ?? 3;
         _retryDelayMs = configuration.GetValue<int?>("RAG:RetryDelayMs") ?? 1000;
         _maxContextTokens = configuration.GetValue<int?>("RAG:MaxContextTokens") ?? 4000;
@@ -113,13 +117,20 @@ Answer:";
             
             if (shouldDelegateToAdvancedAI)
             {
-                // Force use of advanced model by calling it directly
+                // Force use of advanced model via task dispatcher
                 _logger.LogInformation("Auto-delegating to advanced AI due to token count: {Tokens}", estimatedTokens);
-                var advancedHandler = new AdvancedTaskHandler(
-                    new HttpClientFactory(), 
-                    new ConfigurationWrapper(_maxRetries, _retryDelayMs), 
-                    _logger as ILogger<AdvancedTaskHandler> ?? new LoggerFactory().CreateLogger<AdvancedTaskHandler>());
-                response = await advancedHandler.HandleAsync(promptTemplate);
+                
+                var (handled, handlerResponse) = await _taskDispatcher.TryHandleAsync("advanced", promptTemplate);
+                if (handled && !string.IsNullOrEmpty(handlerResponse))
+                {
+                    response = handlerResponse;
+                }
+                else
+                {
+                    _logger.LogWarning("Advanced task handler not available, falling back to local model");
+                    response = await GenerateResponseWithLocalModel(promptTemplate);
+                }
+                
                 usedAdvancedModel = true;
                 modelUsed = "advanced";
                 
@@ -889,6 +900,21 @@ Answer:";
         // Rough approximation: ~4 characters per token for English text
         // This is configurable via ApproximateTokensPerChar
         return (int)(text.Length * _tokensPerChar);
+    }
+    
+    private async Task<string> GenerateResponseWithLocalModel(string prompt)
+    {
+        try
+        {
+            var chatService = _kernel.GetRequiredService<IChatCompletionService>();
+            var result = await chatService.GetChatMessageContentAsync(prompt);
+            return result.Content ?? "No response from local model.";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error generating response with local model");
+            return $"Error: {ex.Message}";
+        }
     }
 
     public async Task<(string embeddingJson, int dimension)> GenerateTextEmbeddingJsonAsync(string text)
