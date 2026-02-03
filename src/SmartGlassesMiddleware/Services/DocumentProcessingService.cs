@@ -15,6 +15,7 @@ public interface IDocumentProcessingService
 {
     Task<DocumentMetadata> ProcessDocumentAsync(Stream fileStream, string fileName, string contentType);
     Task<List<DocumentChunk>> ExtractChunksAsync(Guid documentId);
+    Task<DocumentMetadata> ReprocessDocumentAsync(Guid documentId);
 }
 
 public class DocumentProcessingService : IDocumentProcessingService
@@ -94,6 +95,52 @@ public class DocumentProcessingService : IDocumentProcessingService
             .Where(c => c.DocumentMetadataId == documentId)
             .OrderBy(c => c.ChunkIndex)
             .ToListAsync();
+    }
+
+    public async Task<DocumentMetadata> ReprocessDocumentAsync(Guid documentId)
+    {
+        var metadata = await _context.DocumentMetadatas
+            .Include(d => d.Chunks)
+            .FirstOrDefaultAsync(d => d.Id == documentId);
+
+        if (metadata == null)
+            throw new InvalidOperationException($"Document {documentId} not found");
+
+        metadata.IsProcessed = false;
+        metadata.ProcessingError = null;
+        metadata.ProcessedAt = null;
+
+        if (metadata.Chunks.Any())
+        {
+            _context.DocumentChunks.RemoveRange(metadata.Chunks);
+            metadata.Chunks.Clear();
+            await _context.SaveChangesAsync();
+        }
+
+        using var stream = await _storageService.DownloadFileAsync(metadata.StorageKey);
+        stream.Position = 0;
+
+        var documentType = string.IsNullOrWhiteSpace(metadata.DocumentType) || metadata.DocumentType == "unknown"
+            ? DetermineDocumentType(metadata.FileName, metadata.ContentType)
+            : metadata.DocumentType;
+
+        var chunks = documentType switch
+        {
+            "pdf" => await ExtractFromPdfAsync(stream, metadata.Id),
+            "docx" => await ExtractFromDocxAsync(stream, metadata.Id),
+            "txt" => await ExtractFromTextAsync(stream, metadata.Id),
+            "image" => await ExtractFromImageAsync(stream, metadata.Id),
+            _ => throw new NotSupportedException($"Document type {documentType} is not supported")
+        };
+
+        metadata.DocumentType = documentType;
+        metadata.TotalPages = chunks.Any() ? chunks.Max(c => c.PageNumber) : 0;
+        metadata.IsProcessed = true;
+        metadata.ProcessedAt = DateTime.UtcNow;
+        metadata.Chunks = chunks;
+
+        await _context.SaveChangesAsync();
+        return metadata;
     }
 
     private string DetermineDocumentType(string fileName, string contentType)

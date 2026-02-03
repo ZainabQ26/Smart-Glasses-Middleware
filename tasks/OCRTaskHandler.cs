@@ -11,13 +11,15 @@ public class OCRTaskHandler : ITaskHandler
 {
     private readonly ILogger<OCRTaskHandler> _logger;
     private readonly IDocumentProcessingService _processingService;
+    private readonly IRAGService _ragService;
 
     public string Name => "ocr";
 
-    public OCRTaskHandler(ILogger<OCRTaskHandler> logger, IDocumentProcessingService processingService)
+    public OCRTaskHandler(ILogger<OCRTaskHandler> logger, IDocumentProcessingService processingService, IRAGService ragService)
     {
         _logger = logger;
         _processingService = processingService;
+        _ragService = ragService;
     }
 
     public async Task<string> HandleAsync(string input)
@@ -35,12 +37,14 @@ public class OCRTaskHandler : ITaskHandler
             // Check if input is a file path or document ID
             if (Guid.TryParse(input.Trim(), out var documentId))
             {
-                return $"OCR processing for document {documentId} is configured but requires Tesseract data files. " +
-                       "To enable OCR:\n" +
-                       "1. Install Tesseract OCR\n" +
-                       "2. Download tessdata files\n" +
-                       "3. Configure path in appsettings.json\n" +
-                       "4. The document processing service will automatically use OCR for scanned PDFs and images.";
+                  var metadata = await _processingService.ReprocessDocumentAsync(documentId);
+                  await _ragService.GenerateEmbeddingsAsync(documentId);
+
+                  return $"Manual OCR retry complete for document {documentId}. " +
+                      $"Chunks: {metadata.Chunks.Count}. " +
+                      $"ProcessedAt: {metadata.ProcessedAt:O}. " +
+                      "If OCR is not configured, pages without text may still be empty. " +
+                      "Configure Tesseract and retry to enable full OCR.";
             }
 
             return "OCR task handler is ready but requires Tesseract configuration.\n\n" +
