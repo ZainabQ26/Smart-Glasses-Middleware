@@ -356,6 +356,7 @@ builder.Services.AddScoped<ITaskDispatcher, TaskDispatcher>();
     builder.Services.AddScoped<IMediaProcessor, MediaProcessor>();
     builder.Services.AddHostedService<BackgroundTaskHostedService>();
     builder.Services.AddHostedService<BackgroundTaskCleanupService>();
+    builder.Services.AddHostedService<DocumentProcessingBackgroundService>();
 
 // Add SignalR for real-time notifications
 builder.Services.AddSignalR();
