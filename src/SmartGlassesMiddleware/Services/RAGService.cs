@@ -27,6 +27,8 @@ public class RAGService : IRAGService
     private readonly Kernel _kernel;
     private readonly int _maxRetries;
     private readonly int _retryDelayMs;
+    private readonly int _maxContextTokens;
+    private readonly double _tokensPerChar;
 
     public RAGService(
         ApplicationDbContext context,
@@ -41,6 +43,8 @@ public class RAGService : IRAGService
         _kernel = kernel;
         _maxRetries = configuration.GetValue<int?>("RAG:MaxRetries") ?? 3;
         _retryDelayMs = configuration.GetValue<int?>("RAG:RetryDelayMs") ?? 1000;
+        _maxContextTokens = configuration.GetValue<int?>("RAG:MaxContextTokens") ?? 4000;
+        _tokensPerChar = configuration.GetValue<double?>("RAG:ApproximateTokensPerChar") ?? 0.25;
     }
 
     public async Task<QueryResult> QueryDocumentsAsync(string query, int topK = 5, List<Guid>? groupIds = null)
@@ -150,11 +154,19 @@ Answer:";
 
     public async Task GenerateEmbeddingsAsync(Guid documentId)
     {
-        var chunks = await _context.DocumentChunks
-            .Where(c => c.DocumentMetadataId == documentId)
-            .ToListAsync();
+        var document = await _context.DocumentMetadatas
+            .Include(d => d.Chunks)
+            .FirstOrDefaultAsync(d => d.Id == documentId);
+            
+        if (document == null)
+        {
+            _logger.LogWarning("Document {DocumentId} not found for embedding generation", documentId);
+            return;
+        }
 
+        var chunks = document.Chunks.ToList();
         var failedChunks = 0;
+        
         foreach (var chunk in chunks)
         {
             var success = await GenerateEmbeddingWithRetryAsync(chunk);
@@ -164,13 +176,30 @@ Answer:";
             }
         }
 
-        await _context.SaveChangesAsync();
-
-        if (failedChunks > 0)
+        // Update document processing state based on embedding success
+        if (failedChunks == 0)
         {
-            _logger.LogWarning("Failed to generate embeddings for {FailedCount} out of {TotalCount} chunks in document {DocumentId}", 
-                failedChunks, chunks.Count, documentId);
+            document.IsProcessed = true;
+            document.ProcessedAt = DateTime.UtcNow;
+            document.ProcessingError = null;
         }
+        else if (failedChunks < chunks.Count)
+        {
+            // Partial success
+            document.IsProcessed = true;
+            document.ProcessedAt = DateTime.UtcNow;
+            document.ProcessingError = $"Failed to generate embeddings for {failedChunks} out of {chunks.Count} chunks";
+            _logger.LogWarning("Partial embedding failure for document {DocumentId}: {Error}", documentId, document.ProcessingError);
+        }
+        else
+        {
+            // Complete failure
+            document.IsProcessed = false;
+            document.ProcessingError = $"Failed to generate embeddings for all {chunks.Count} chunks";
+            _logger.LogError("Complete embedding failure for document {DocumentId}: {Error}", documentId, document.ProcessingError);
+        }
+
+        await _context.SaveChangesAsync();
     }
 
     public async Task<int> ReprocessFailedDocumentsAsync()
@@ -411,17 +440,48 @@ Answer:";
     private async Task<string> BuildContextFromChunksAsync(List<DocumentChunk> chunks, List<Guid>? groupIds = null)
     {
         var context = new StringBuilder();
+        int currentTokens = 0;
+        int chunksIncluded = 0;
         
-        // Add context from document chunks
+        // Add context from document chunks with token budgeting
         foreach (var chunk in chunks)
         {
-            context.AppendLine($"[From {chunk.DocumentMetadata.FileName}, Page {chunk.PageNumber}]:");
-            context.AppendLine(chunk.ChunkText);
+            var chunkHeader = $"[From {chunk.DocumentMetadata.FileName}, Page {chunk.PageNumber}]:";
+            var chunkText = chunk.ChunkText;
+            var chunkTokens = EstimateTokens(chunkHeader + chunkText);
+            
+            // Check if adding this chunk would exceed budget
+            if (currentTokens + chunkTokens > _maxContextTokens)
+            {
+                // Try to truncate the chunk to fit
+                var remainingTokens = _maxContextTokens - currentTokens - EstimateTokens(chunkHeader);
+                if (remainingTokens > 100) // Only include if we can fit at least 100 tokens
+                {
+                    var maxChars = (int)(remainingTokens / _tokensPerChar);
+                    chunkText = chunkText.Substring(0, Math.Min(maxChars, chunkText.Length)) + "... [truncated]";
+                    context.AppendLine(chunkHeader);
+                    context.AppendLine(chunkText);
+                    context.AppendLine();
+                    chunksIncluded++;
+                }
+                break; // Stop adding more chunks
+            }
+            
+            context.AppendLine(chunkHeader);
+            context.AppendLine(chunkText);
             context.AppendLine();
+            currentTokens += chunkTokens;
+            chunksIncluded++;
+        }
+        
+        if (chunksIncluded < chunks.Count)
+        {
+            _logger.LogInformation("Token budget: included {Included} of {Total} chunks ({Tokens} tokens used of {Max})", 
+                chunksIncluded, chunks.Count, currentTokens, _maxContextTokens);
         }
 
-        // If group IDs are provided, add additional context from group prompts
-        if (groupIds != null && groupIds.Any())
+        // If group IDs are provided, add additional context from group prompts (if budget allows)
+        if (groupIds != null && groupIds.Any() && currentTokens < _maxContextTokens)
         {
             var groupPrompts = await _context.ResourceGroups
                 .Where(g => groupIds.Contains(g.Id))
@@ -433,16 +493,38 @@ Answer:";
 
             if (groupPrompts.Any())
             {
-                context.AppendLine("--- Additional Context from Groups ---");
-                foreach (var prompt in groupPrompts)
+                var groupContextHeader = "--- Additional Context from Groups ---";
+                var headerTokens = EstimateTokens(groupContextHeader);
+                
+                if (currentTokens + headerTokens < _maxContextTokens)
                 {
-                    context.AppendLine($"[{prompt.Name}]:");
-                    context.AppendLine(prompt.PromptText);
-                    context.AppendLine();
+                    context.AppendLine(groupContextHeader);
+                    currentTokens += headerTokens;
+                    
+                    foreach (var prompt in groupPrompts)
+                    {
+                        var promptHeader = $"[{prompt.Name}]:";
+                        var promptTokens = EstimateTokens(promptHeader + prompt.PromptText);
+                        
+                        if (currentTokens + promptTokens > _maxContextTokens)
+                            break;
+                            
+                        context.AppendLine(promptHeader);
+                        context.AppendLine(prompt.PromptText);
+                        context.AppendLine();
+                        currentTokens += promptTokens;
+                    }
                 }
             }
         }
 
         return context.ToString();
+    }
+    
+    private int EstimateTokens(string text)
+    {
+        // Rough approximation: ~4 characters per token for English text
+        // This is configurable via ApproximateTokensPerChar
+        return (int)(text.Length * _tokensPerChar);
     }
 }
