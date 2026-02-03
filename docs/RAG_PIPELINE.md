@@ -2,6 +2,8 @@
 
 This document describes the RAG pipeline implementation for document processing, text extraction, and intelligent querying.
 
+> **Note**: For information about robustness enhancements, restart tolerance, and ResourceGroup integration, see [RAG_ROBUSTNESS.md](RAG_ROBUSTNESS.md).
+
 ## Overview
 
 The RAG pipeline enables the Smart Glasses Middleware to:
@@ -11,6 +13,9 @@ The RAG pipeline enables the Smart Glasses Middleware to:
 - Query documents using natural language
 - Highlight specific sections in documents
 - Maintain persistence across restarts
+- Organize documents using ResourceGroups
+- Automatically retry failed processing
+- Include group-specific context in queries
 
 ## Features
 
