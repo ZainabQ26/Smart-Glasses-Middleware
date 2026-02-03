@@ -14,17 +14,20 @@ public class AudioController : ControllerBase
     private readonly IMediaStorageService _mediaStorageService;
     private readonly ITranscriptionService _transcriptionService;
     private readonly IHistoryService _historyService;
+    private readonly IRagService _ragService;
     private readonly ILogger<AudioController> _logger;
 
     public AudioController(
         IMediaStorageService mediaStorageService,
         ITranscriptionService transcriptionService,
         IHistoryService historyService,
+        IRagService ragService,
         ILogger<AudioController> logger)
     {
         _mediaStorageService = mediaStorageService;
         _transcriptionService = transcriptionService;
         _historyService = historyService;
+        _ragService = ragService;
         _logger = logger;
     }
 
@@ -119,6 +122,22 @@ public class AudioController : ControllerBase
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Transcription failed for {Key}", storageKey);
+            }
+
+            // Process file for RAG indexing
+            try
+            {
+                await _ragService.ProcessFileForRagAsync(
+                    Guid.NewGuid(), // Temporary ID for audio files
+                    fileName,
+                    "audio/wav",
+                    storageKey,
+                    transcription);
+                _logger.LogInformation("Audio file {FileName} processed for RAG", fileName);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to process audio file for RAG, but upload succeeded");
             }
 
             // Save transcription to history
