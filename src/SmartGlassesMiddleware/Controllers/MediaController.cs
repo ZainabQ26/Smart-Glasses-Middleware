@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using SmartGlassesMiddleware.Models;
 using SmartGlassesMiddleware.Services;
 using SmartGlassesMiddleware.Data;
@@ -296,7 +297,45 @@ public class MediaController : ControllerBase
 
                 using var uploadStream = file.OpenReadStream();
                 var contentType = file.ContentType ?? "application/octet-stream";
-                var storageKey = await _mediaStorageService.UploadMediaAsync(uploadStream, file.FileName, contentType);
+                
+                // Compute content hash for deduplication
+                var contentHash = _mediaStorageService.ComputeContentHash(uploadStream);
+                
+                // Check if file with same hash already exists
+                var existingFile = await _context.ManagedFiles
+                    .FirstOrDefaultAsync(f => f.ContentHash == contentHash);
+                
+                string storageKey;
+                Guid fileId;
+                
+                if (existingFile != null)
+                {
+                    // File already exists, reuse it
+                    _logger.LogInformation("File {FileName} with hash {Hash} already exists as {FileId}, reusing", file.FileName, contentHash, existingFile.Id);
+                    storageKey = existingFile.StorageKey;
+                    fileId = existingFile.Id;
+                }
+                else
+                {
+                    // Upload new file
+                    storageKey = await _mediaStorageService.UploadMediaAsync(uploadStream, file.FileName, contentType);
+                    
+                    // Create ManagedFile record
+                    var managedFile = new ManagedFile
+                    {
+                        Id = Guid.NewGuid(),
+                        FileName = file.FileName,
+                        Label = $"Media upload: {file.FileName}",
+                        ContentType = contentType,
+                        StorageKey = storageKey,
+                        ContentHash = contentHash,
+                        UploadedAt = DateTime.UtcNow,
+                        FileSize = file.Length
+                    };
+                    _context.ManagedFiles.Add(managedFile);
+                    await _context.SaveChangesAsync();
+                    fileId = managedFile.Id;
+                }
 
                 var item = new BackgroundMediaItem { FileName = file.FileName, ContentType = contentType, StorageKey = storageKey };
                 // If per-file transcription provided, attach it
@@ -306,29 +345,16 @@ public class MediaController : ControllerBase
                 }
                 bgItems.Add(item);
 
-                // Create ManagedFile record and process for RAG indexing
+                // Process file for RAG indexing
                 try
                 {
-                    var managedFile = new ManagedFile
-                    {
-                        Id = Guid.NewGuid(),
-                        FileName = file.FileName,
-                        Label = $"Media upload: {file.FileName}",
-                        ContentType = contentType,
-                        StorageKey = storageKey,
-                        UploadedAt = DateTime.UtcNow,
-                        FileSize = file.Length
-                    };
-                    _context.ManagedFiles.Add(managedFile);
-                    await _context.SaveChangesAsync();
-
                     await _ragService.ProcessFileForRagAsync(
-                        managedFile.Id,
+                        fileId,
                         file.FileName,
                         contentType,
                         storageKey,
                         item.Transcription);
-                    _logger.LogInformation("File {FileName} processed for RAG with ID {FileId}", file.FileName, managedFile.Id);
+                    _logger.LogInformation("File {FileName} processed for RAG with ID {FileId}", file.FileName, fileId);
                 }
                 catch (Exception ex)
                 {

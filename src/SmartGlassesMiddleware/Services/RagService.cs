@@ -47,20 +47,38 @@ public class RagService : IRagService
         {
             _logger.LogInformation("Processing file {FileId} ({FileName}) for RAG indexing", fileId, fileName);
 
-            // Create a RAG entry in the database
-            var ragEntry = new RagEntry
-            {
-                Id = Guid.NewGuid(),
-                FileId = fileId,
-                FileName = fileName,
-                ContentType = contentType,
-                StorageKey = storageKey,
-                Transcription = transcription,
-                ProcessedAt = DateTime.UtcNow,
-                IndexedContent = BuildIndexedContent(fileName, contentType, transcription)
-            };
+            // Avoid duplicate RAG entries: prefer updating an existing entry by FileId or StorageKey
+            var existing = await _context.RagEntries
+                .FirstOrDefaultAsync(e => e.FileId == fileId || e.StorageKey == storageKey);
 
-            _context.RagEntries.Add(ragEntry);
+            if (existing != null)
+            {
+                existing.FileName = fileName;
+                existing.ContentType = contentType;
+                existing.Transcription = transcription;
+                existing.ProcessedAt = DateTime.UtcNow;
+                existing.IndexedContent = BuildIndexedContent(fileName, contentType, transcription);
+
+                _context.RagEntries.Update(existing);
+            }
+            else
+            {
+                // Create a new RAG entry in the database
+                var ragEntry = new RagEntry
+                {
+                    Id = Guid.NewGuid(),
+                    FileId = fileId,
+                    FileName = fileName,
+                    ContentType = contentType,
+                    StorageKey = storageKey,
+                    Transcription = transcription,
+                    ProcessedAt = DateTime.UtcNow,
+                    IndexedContent = BuildIndexedContent(fileName, contentType, transcription)
+                };
+
+                _context.RagEntries.Add(ragEntry);
+            }
+
             await _context.SaveChangesAsync();
 
             _logger.LogInformation("Successfully indexed file {FileId} for RAG", fileId);
@@ -78,7 +96,8 @@ public class RagService : IRagService
         {
             _logger.LogInformation("Retrieving RAG context for query: {Query}", query);
 
-            // Simple keyword-based search (in a production system, use vector embeddings)
+            // TODO: Generate embedding vector for query using an embedding model
+            // For now, use keyword-based search as fallback
             var keywords = ExtractKeywords(query);
             
             var entries = await _context.RagEntries
@@ -88,6 +107,12 @@ public class RagService : IRagService
                 .OrderByDescending(e => e.ProcessedAt)
                 .Take(maxResults)
                 .ToListAsync();
+
+            // Future: If EmbeddingVector is populated, use cosine similarity:
+            // SELECT *, 1 - (EmbeddingVector <=> query_vector) as similarity
+            // FROM RagEntries
+            // ORDER BY similarity DESC
+            // LIMIT maxResults
 
             if (!entries.Any())
             {

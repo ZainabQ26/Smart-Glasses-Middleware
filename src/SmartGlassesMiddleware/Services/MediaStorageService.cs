@@ -1,5 +1,6 @@
 using Minio;
 using Minio.DataModel.Args;
+using System.Security.Cryptography;
 
 namespace SmartGlassesMiddleware.Services;
 
@@ -8,6 +9,7 @@ public interface IMediaStorageService
     Task<string> UploadMediaAsync(Stream fileStream, string fileName, string contentType);
     Task<Stream> DownloadMediaAsync(string key);
     Task DeleteMediaAsync(string key);
+    string ComputeContentHash(Stream fileStream);
 }
 
 public class MinioMediaStorageService : IMediaStorageService
@@ -99,5 +101,17 @@ public class MinioMediaStorageService : IMediaStorageService
             _logger.LogError(ex, "Error deleting media from MinIO: {Key}", key);
             throw;
         }
+    }
+
+    public string ComputeContentHash(Stream fileStream)
+    {
+        using var sha256 = SHA256.Create();
+        var originalPosition = fileStream.Position;
+        fileStream.Position = 0;
+        
+        var hash = sha256.ComputeHash(fileStream);
+        fileStream.Position = originalPosition;
+        
+        return Convert.ToHexString(hash);
     }
 }
