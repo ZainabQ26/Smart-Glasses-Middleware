@@ -47,20 +47,38 @@ public class RagService : IRagService
         {
             _logger.LogInformation("Processing file {FileId} ({FileName}) for RAG indexing", fileId, fileName);
 
-            // Create a RAG entry in the database
-            var ragEntry = new RagEntry
-            {
-                Id = Guid.NewGuid(),
-                FileId = fileId,
-                FileName = fileName,
-                ContentType = contentType,
-                StorageKey = storageKey,
-                Transcription = transcription,
-                ProcessedAt = DateTime.UtcNow,
-                IndexedContent = BuildIndexedContent(fileName, contentType, transcription)
-            };
+            // Avoid duplicate RAG entries: prefer updating an existing entry by FileId or StorageKey
+            var existing = await _context.RagEntries
+                .FirstOrDefaultAsync(e => e.FileId == fileId || e.StorageKey == storageKey);
 
-            _context.RagEntries.Add(ragEntry);
+            if (existing != null)
+            {
+                existing.FileName = fileName;
+                existing.ContentType = contentType;
+                existing.Transcription = transcription;
+                existing.ProcessedAt = DateTime.UtcNow;
+                existing.IndexedContent = BuildIndexedContent(fileName, contentType, transcription);
+
+                _context.RagEntries.Update(existing);
+            }
+            else
+            {
+                // Create a new RAG entry in the database
+                var ragEntry = new RagEntry
+                {
+                    Id = Guid.NewGuid(),
+                    FileId = fileId,
+                    FileName = fileName,
+                    ContentType = contentType,
+                    StorageKey = storageKey,
+                    Transcription = transcription,
+                    ProcessedAt = DateTime.UtcNow,
+                    IndexedContent = BuildIndexedContent(fileName, contentType, transcription)
+                };
+
+                _context.RagEntries.Add(ragEntry);
+            }
+
             await _context.SaveChangesAsync();
 
             _logger.LogInformation("Successfully indexed file {FileId} for RAG", fileId);
