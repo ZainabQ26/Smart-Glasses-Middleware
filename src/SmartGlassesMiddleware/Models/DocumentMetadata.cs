@@ -55,8 +55,11 @@ public class DocumentChunk
     public double? Height { get; set; }
     
     // Embedding for semantic search
-    public string? Embedding { get; set; } // Stored as JSON array
+    public string? Embedding { get; set; } // Stored as JSON array (fallback)
     public int? EmbeddingDimension { get; set; } // Dimension of the embedding vector
+    
+    // Vector embedding for pgvector (PostgreSQL native vector type)
+    public Pgvector.Vector? EmbeddingVector { get; set; }
     
     public DateTime CreatedAt { get; set; }
 }

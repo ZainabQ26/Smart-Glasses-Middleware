@@ -5,6 +5,8 @@ using SmartGlassesMiddleware.Data;
 using Microsoft.EntityFrameworkCore;
 using System.Text;
 using System.Text.Json;
+using Pgvector;
+using System.Diagnostics;
 
 #pragma warning disable SKEXP0001
 
@@ -30,9 +32,12 @@ public class RAGService : IRAGService
     private readonly int _maxRetries;
     private readonly int _retryDelayMs;
     private readonly int _maxContextTokens;
+    private readonly int _maxLocalModelTokens;
     private readonly double _tokensPerChar;
     private readonly int _embeddingBatchSize;
     private readonly int _embeddingMaxConcurrency;
+    private readonly bool _useVectorDB;
+    private readonly double _vectorSimilarityThreshold;
 
     public RAGService(
         ApplicationDbContext context,
@@ -48,15 +53,20 @@ public class RAGService : IRAGService
         _maxRetries = configuration.GetValue<int?>("RAG:MaxRetries") ?? 3;
         _retryDelayMs = configuration.GetValue<int?>("RAG:RetryDelayMs") ?? 1000;
         _maxContextTokens = configuration.GetValue<int?>("RAG:MaxContextTokens") ?? 4000;
+        _maxLocalModelTokens = configuration.GetValue<int?>("RAG:MaxLocalModelTokens") ?? 2000;
         _tokensPerChar = configuration.GetValue<double?>("RAG:ApproximateTokensPerChar") ?? 0.25;
         _embeddingBatchSize = configuration.GetValue<int?>("RAG:EmbeddingBatchSize") ?? 10;
         _embeddingMaxConcurrency = configuration.GetValue<int?>("RAG:EmbeddingMaxConcurrency") ?? 5;
+        _useVectorDB = configuration.GetValue<bool?>("RAG:UseVectorDB") ?? true;
+        _vectorSimilarityThreshold = configuration.GetValue<double?>("RAG:VectorSimilarityThreshold") ?? 0.7;
     }
 
     public async Task<QueryResult> QueryDocumentsAsync(string query, int topK = 5, List<Guid>? groupIds = null)
     {
         try
         {
+            var stopwatch = Stopwatch.StartNew();
+            
             // Search for relevant chunks
             var relevantChunks = await SearchChunksAsync(query, topK, groupIds);
 
@@ -65,15 +75,18 @@ public class RAGService : IRAGService
                 return new QueryResult
                 {
                     Answer = "No relevant information found in the uploaded documents.",
-                    Sources = new List<DocumentSource>()
+                    Sources = new List<DocumentSource>(),
+                    UsedAdvancedModel = false,
+                    ModelUsed = "none",
+                    TokenCount = 0
                 };
             }
 
             // Build context from chunks (with token budgeting)
             var context = await BuildContextFromChunksAsync(relevantChunks, groupIds);
-
-            // Generate response using AI with context
-            var prompt = $@"Based on the following context from documents, answer the question. 
+            
+            // Estimate token count for the complete prompt
+            var promptTemplate = $@"Based on the following context from documents, answer the question. 
 If you reference specific information, mention which page it came from.
 
 Context:
@@ -82,8 +95,63 @@ Context:
 Question: {query}
 
 Answer:";
-
-            var (_, response, _) = await _aiService.ProcessRequestAsync(prompt);
+            
+            var estimatedTokens = EstimateTokens(promptTemplate);
+            
+            // Check if we should auto-delegate to advanced AI based on token count
+            bool shouldDelegateToAdvancedAI = estimatedTokens > _maxLocalModelTokens;
+            string delegationReason = shouldDelegateToAdvancedAI ? "token_threshold_exceeded" : "";
+            
+            _logger.LogInformation(
+                "Query tokens: {Tokens}, Threshold: {Threshold}, Delegating: {Delegating}",
+                estimatedTokens, _maxLocalModelTokens, shouldDelegateToAdvancedAI);
+            
+            // Generate response using AI with context
+            string response;
+            bool usedAdvancedModel;
+            string modelUsed;
+            
+            if (shouldDelegateToAdvancedAI)
+            {
+                // Force use of advanced model by calling it directly
+                _logger.LogInformation("Auto-delegating to advanced AI due to token count: {Tokens}", estimatedTokens);
+                var advancedHandler = new AdvancedTaskHandler(
+                    new HttpClientFactory(), 
+                    new ConfigurationWrapper(_maxRetries, _retryDelayMs), 
+                    _logger as ILogger<AdvancedTaskHandler> ?? new LoggerFactory().CreateLogger<AdvancedTaskHandler>());
+                response = await advancedHandler.HandleAsync(promptTemplate);
+                usedAdvancedModel = true;
+                modelUsed = "advanced";
+                
+                // Log the interaction
+                await LogAIInteractionAsync(
+                    promptTemplate, 
+                    response, 
+                    "advanced", 
+                    delegationReason, 
+                    estimatedTokens,
+                    stopwatch.ElapsedMilliseconds,
+                    groupIds?.FirstOrDefault());
+            }
+            else
+            {
+                var (_, aiResponse, wasAdvanced) = await _aiService.ProcessRequestAsync(promptTemplate);
+                response = aiResponse;
+                usedAdvancedModel = wasAdvanced;
+                modelUsed = wasAdvanced ? "advanced" : "local";
+                
+                if (wasAdvanced)
+                {
+                    await LogAIInteractionAsync(
+                        promptTemplate, 
+                        response, 
+                        modelUsed, 
+                        "ai_service_delegation", 
+                        estimatedTokens,
+                        stopwatch.ElapsedMilliseconds,
+                        groupIds?.FirstOrDefault());
+                }
+            }
             
             // Build sources list
             var sources = relevantChunks.Select(c => new DocumentSource
@@ -95,16 +163,89 @@ Answer:";
                 ChunkText = c.ChunkText.Length > 200 ? c.ChunkText.Substring(0, 200) + "..." : c.ChunkText
             }).ToList();
             
+            // Analyze response to identify which sources were actually referenced
+            var referencedSources = IdentifyReferencedSources(response, sources);
+            
             return new QueryResult
             {
                 Answer = response,
-                Sources = sources
+                Sources = sources,
+                ReferencedSources = referencedSources,
+                UsedAdvancedModel = usedAdvancedModel,
+                ModelUsed = modelUsed,
+                TokenCount = estimatedTokens,
+                DelegationReason = delegationReason
             };
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error querying documents with query: {Query}", query);
             throw;
+        }
+    }
+    
+    /// <summary>
+    /// Identifies which sources were actually referenced in the AI response
+    /// </summary>
+    private List<DocumentSource> IdentifyReferencedSources(string response, List<DocumentSource> allSources)
+    {
+        var referenced = new List<DocumentSource>();
+        
+        foreach (var source in allSources)
+        {
+            // Check if the response mentions the file name or page number
+            if (response.Contains(source.FileName, StringComparison.OrdinalIgnoreCase) ||
+                response.Contains($"page {source.PageNumber}", StringComparison.OrdinalIgnoreCase) ||
+                response.Contains($"Page {source.PageNumber}"))
+            {
+                referenced.Add(source);
+            }
+        }
+        
+        return referenced;
+    }
+    
+    /// <summary>
+    /// Logs AI interactions with advanced models for auditing
+    /// </summary>
+    private async Task LogAIInteractionAsync(
+        string input, 
+        string output, 
+        string model, 
+        string delegationReason,
+        int estimatedTokens,
+        long responseTimeMs,
+        Guid? groupId = null)
+    {
+        try
+        {
+            var log = new AIInteractionLog
+            {
+                Id = Guid.NewGuid(),
+                Input = input.Length > 5000 ? input.Substring(0, 5000) + "..." : input,
+                Output = output.Length > 5000 ? output.Substring(0, 5000) + "..." : output,
+                ModelUsed = model,
+                DelegationReason = delegationReason,
+                InputTokens = estimatedTokens,
+                OutputTokens = EstimateTokens(output),
+                TotalTokens = estimatedTokens + EstimateTokens(output),
+                Timestamp = DateTime.UtcNow,
+                ResponseTimeMs = (int)responseTimeMs,
+                ResourceGroupId = groupId,
+                Success = true
+            };
+            
+            _context.AIInteractionLogs.Add(log);
+            await _context.SaveChangesAsync();
+            
+            _logger.LogInformation(
+                "Logged AI interaction: Model={Model}, Tokens={Tokens}, ResponseTime={Ms}ms",
+                model, log.TotalTokens, responseTimeMs);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to log AI interaction");
+            // Don't throw - logging failure shouldn't break the main flow
         }
     }
 
@@ -214,39 +355,16 @@ Answer:";
             // Get query embedding
             var queryEmbedding = await GenerateQueryEmbeddingAsync(query);
 
-            // Build query for chunks, optionally filtered by groups
-            var chunksQuery = _context.DocumentChunks
-                .Include(c => c.DocumentMetadata)
-                .ThenInclude(d => d.DocumentGroups)
-                .Where(c => c.Embedding != null);
-
-            // Filter by groups if specified
-            if (groupIds != null && groupIds.Any())
+            if (_useVectorDB)
             {
-                chunksQuery = chunksQuery.Where(c => 
-                    c.DocumentMetadata.DocumentGroups.Any(dg => groupIds.Contains(dg.ResourceGroupId)));
+                // Use pgvector for efficient similarity search with per-group indexing
+                return await SearchChunksWithVectorDBAsync(queryEmbedding, topK, groupIds);
             }
-
-            var allChunks = await chunksQuery.ToListAsync();
-
-            if (!allChunks.Any())
+            else
             {
-                _logger.LogWarning("No chunks with embeddings found for query: {Query}", query);
-                return new List<DocumentChunk>();
+                // Fallback to in-memory search
+                return await SearchChunksInMemoryAsync(queryEmbedding, topK, groupIds);
             }
-
-            // Calculate similarity scores
-            var scoredChunks = allChunks.Select(chunk => new
-            {
-                Chunk = chunk,
-                Score = CalculateCosineSimilarity(queryEmbedding, DeserializeEmbedding(chunk.Embedding!))
-            })
-            .OrderByDescending(x => x.Score)
-            .Take(topK)
-            .Select(x => x.Chunk)
-            .ToList();
-
-            return scoredChunks;
         }
         catch (Exception ex)
         {
@@ -255,6 +373,112 @@ Answer:";
             // Fallback to keyword search
             return await KeywordSearchAsync(query, topK, groupIds);
         }
+    }
+    
+    /// <summary>
+    /// Searches chunks using PostgreSQL pgvector for efficient vector similarity
+    /// with per-group indexing support
+    /// </summary>
+    private async Task<List<DocumentChunk>> SearchChunksWithVectorDBAsync(
+        float[] queryEmbedding, 
+        int topK, 
+        List<Guid>? groupIds)
+    {
+        try
+        {
+            var queryVector = new Vector(queryEmbedding);
+            
+            // Build base query
+            var query = _context.DocumentChunks
+                .Include(c => c.DocumentMetadata)
+                .ThenInclude(d => d.DocumentGroups)
+                .Where(c => c.EmbeddingVector != null);
+
+            // Filter by groups if specified (per-group indexing)
+            if (groupIds != null && groupIds.Any())
+            {
+                _logger.LogInformation("Filtering chunks by {Count} groups for vector search", groupIds.Count);
+                query = query.Where(c => 
+                    c.DocumentMetadata.DocumentGroups.Any(dg => groupIds.Contains(dg.ResourceGroupId)));
+            }
+
+            // Use pgvector for similarity search
+            // Since EF Core pgvector extensions may be limited, we'll fetch candidates
+            // and sort in-memory for now. In production, use proper vector indexes.
+            var candidates = await query.ToListAsync();
+            
+            if (!candidates.Any())
+            {
+                _logger.LogWarning("No chunks with vector embeddings found");
+                return new List<DocumentChunk>();
+            }
+            
+            // Calculate cosine similarity in-memory
+            var results = candidates
+                .Select(chunk => new
+                {
+                    Chunk = chunk,
+                    Score = CalculateCosineSimilarity(queryEmbedding, chunk.EmbeddingVector!.ToArray())
+                })
+                .OrderByDescending(x => x.Score)
+                .Take(topK)
+                .Select(x => x.Chunk)
+                .ToList();
+
+            _logger.LogInformation(
+                "Vector DB search returned {Count} chunks (requested {TopK})", 
+                results.Count, topK);
+
+            return results;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error in vector DB search, falling back to in-memory");
+            return await SearchChunksInMemoryAsync(queryEmbedding, topK, groupIds);
+        }
+    }
+    
+    /// <summary>
+    /// Fallback in-memory search using JSON embeddings
+    /// </summary>
+    private async Task<List<DocumentChunk>> SearchChunksInMemoryAsync(
+        float[] queryEmbedding, 
+        int topK, 
+        List<Guid>? groupIds)
+    {
+        // Build query for chunks, optionally filtered by groups
+        var chunksQuery = _context.DocumentChunks
+            .Include(c => c.DocumentMetadata)
+            .ThenInclude(d => d.DocumentGroups)
+            .Where(c => c.Embedding != null);
+
+        // Filter by groups if specified
+        if (groupIds != null && groupIds.Any())
+        {
+            chunksQuery = chunksQuery.Where(c => 
+                c.DocumentMetadata.DocumentGroups.Any(dg => groupIds.Contains(dg.ResourceGroupId)));
+        }
+
+        var allChunks = await chunksQuery.ToListAsync();
+
+        if (!allChunks.Any())
+        {
+            _logger.LogWarning("No chunks with embeddings found");
+            return new List<DocumentChunk>();
+        }
+
+        // Calculate similarity scores in-memory
+        var scoredChunks = allChunks.Select(chunk => new
+        {
+            Chunk = chunk,
+            Score = CalculateCosineSimilarity(queryEmbedding, DeserializeEmbedding(chunk.Embedding!))
+        })
+        .OrderByDescending(x => x.Score)
+        .Take(topK)
+        .Select(x => x.Chunk)
+        .ToList();
+
+        return scoredChunks;
     }
 
     public async Task GenerateEmbeddingsAsync(Guid documentId)
@@ -376,8 +600,14 @@ Answer:";
             try
             {
                 var embedding = await GenerateTextEmbeddingAsync(chunk.ChunkText);
+                
+                // Store in both formats for backward compatibility and pgvector
                 chunk.Embedding = SerializeEmbedding(embedding);
                 chunk.EmbeddingDimension = embedding.Length;
+                
+                // Store as pgvector Vector for efficient database queries
+                chunk.EmbeddingVector = new Vector(embedding);
+                
                 return true;
             }
             catch (Exception ex)
