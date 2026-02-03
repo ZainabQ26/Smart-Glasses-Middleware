@@ -989,7 +989,9 @@ Answer:";
                 sources.Add(new DocumentSource
                 {
                     DocumentId = reminder.Id,
-                    FileName = $"Reminder: {reminder.InputText.Substring(0, Math.Min(30, reminder.InputText.Length))}...",
+                    FileName = reminder.InputText.Length > 30 
+                        ? $"Reminder: {reminder.InputText.Substring(0, 30)}..."
+                        : $"Reminder: {reminder.InputText}",
                     PageNumber = 0,
                     ChunkId = Guid.Empty,
                     ChunkText = reminder.InputText
@@ -1065,7 +1067,7 @@ Answer:";
             {
                 var combinedSources = new List<DocumentSource>();
                 combinedSources.AddRange(reminderResult.Sources);
-                combinedSources.AddRange(documentResult.Sources.Take(Math.Max(1, topK - reminderResult.Sources.Count)));
+                combinedSources.AddRange(documentResult.Sources.Take(Math.Max(0, topK - reminderResult.Sources.Count)));
 
                 var contextBuilder = new StringBuilder();
                 
