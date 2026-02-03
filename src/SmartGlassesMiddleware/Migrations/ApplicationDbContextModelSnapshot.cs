@@ -251,6 +251,15 @@ namespace SmartGlassesMiddleware.Migrations
                     b.Navigation("ResourceGroup");
                 });
 
+            modelBuilder.Entity("SmartGlassesMiddleware.Models.RagEntry", b =>
+                {
+                    b.HasOne("SmartGlassesMiddleware.Models.ManagedFile", null)
+                        .WithMany()
+                        .HasForeignKey("FileId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("SmartGlassesMiddleware.Models.ManagedFile", b =>
                 {
                     b.Navigation("FileGroups");
