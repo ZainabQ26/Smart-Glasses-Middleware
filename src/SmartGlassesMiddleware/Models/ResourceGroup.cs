@@ -13,6 +13,8 @@ public class ResourceGroup
     // Navigation properties
     public List<ManagedFileGroup> FileGroups { get; set; } = new();
     public List<ManagedPromptGroup> PromptGroups { get; set; } = new();
+    public List<DocumentGroup> DocumentGroups { get; set; } = new();
+    public List<Conversation> Conversations { get; set; } = new();
 }
 
 /// <summary>
