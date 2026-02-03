@@ -16,6 +16,8 @@ public class ApplicationDbContext : DbContext
     public DbSet<ResourceGroup> ResourceGroups { get; set; }
     public DbSet<DocumentMetadata> DocumentMetadatas { get; set; }
     public DbSet<DocumentChunk> DocumentChunks { get; set; }
+    public DbSet<Conversation> Conversations { get; set; }
+    public DbSet<ChatMessage> ChatMessages { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -112,6 +114,33 @@ public class ApplicationDbContext : DbContext
             entity.HasOne(e => e.ResourceGroup)
                 .WithMany(g => g.DocumentGroups)
                 .HasForeignKey(e => e.ResourceGroupId);
+        });
+
+        modelBuilder.Entity<Conversation>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Title).IsRequired().HasMaxLength(500);
+            entity.Property(e => e.CreatedAt).IsRequired();
+            entity.Property(e => e.UpdatedAt).IsRequired();
+            entity.Property(e => e.IsActive).IsRequired();
+            
+            entity.HasOne(e => e.ResourceGroup)
+                .WithMany(g => g.Conversations)
+                .HasForeignKey(e => e.ResourceGroupId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<ChatMessage>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Role).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.Content).IsRequired();
+            entity.Property(e => e.Timestamp).IsRequired();
+            
+            entity.HasOne(e => e.Conversation)
+                .WithMany(c => c.Messages)
+                .HasForeignKey(e => e.ConversationId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

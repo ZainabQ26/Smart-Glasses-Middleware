@@ -201,6 +201,7 @@ builder.Services.AddSingleton<IMetricsService, MetricsService>();
 builder.Services.AddScoped<IDocumentProcessingService, DocumentProcessingService>();
 builder.Services.AddScoped<IRAGService, RAGService>();
 builder.Services.AddScoped<IDocumentHighlightService, DocumentHighlightService>();
+builder.Services.AddScoped<IConversationService, ConversationService>();
 // Transcription service (server-side) — registered as a typed HTTP client with timeout configuration
 builder.Services.AddHttpClient<ITranscriptionService, HttpTranscriptionService>((sp, client) =>
 {

@@ -13,6 +13,7 @@ namespace SmartGlassesMiddleware.Services;
 public interface IRAGService
 {
     Task<QueryResult> QueryDocumentsAsync(string query, int topK = 5, List<Guid>? groupIds = null);
+    Task<QueryResult> QueryDocumentsWithConversationAsync(string query, Guid conversationId, int topK = 5, List<Guid>? groupIds = null);
     Task<List<DocumentChunk>> SearchChunksAsync(string query, int topK = 5, List<Guid>? groupIds = null);
     Task GenerateEmbeddingsAsync(Guid documentId);
     Task<int> ReprocessFailedDocumentsAsync();
@@ -63,7 +64,7 @@ public class RAGService : IRAGService
                 };
             }
 
-            // Build context from chunks
+            // Build context from chunks (with token budgeting)
             var context = await BuildContextFromChunksAsync(relevantChunks, groupIds);
 
             // Generate response using AI with context
@@ -98,6 +99,105 @@ Answer:";
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error querying documents with query: {Query}", query);
+            throw;
+        }
+    }
+
+    public async Task<QueryResult> QueryDocumentsWithConversationAsync(
+        string query, 
+        Guid conversationId, 
+        int topK = 5, 
+        List<Guid>? groupIds = null)
+    {
+        try
+        {
+            // Get recent conversation messages
+            var recentMessages = await _context.ChatMessages
+                .Where(m => m.ConversationId == conversationId)
+                .OrderByDescending(m => m.Timestamp)
+                .Take(5) // Last 5 messages for context
+                .OrderBy(m => m.Timestamp)
+                .ToListAsync();
+
+            // Search for relevant chunks
+            var relevantChunks = await SearchChunksAsync(query, topK, groupIds);
+
+            // Build context from chunks (with token budgeting)
+            var contextBuilder = new StringBuilder();
+            
+            // Add conversation history first (if it fits in budget)
+            if (recentMessages.Any())
+            {
+                contextBuilder.AppendLine("--- Recent Conversation ---");
+                int historyTokens = 0;
+                foreach (var msg in recentMessages)
+                {
+                    var msgText = $"{msg.Role}: {msg.Content}";
+                    var msgTokens = EstimateTokens(msgText);
+                    
+                    if (historyTokens + msgTokens > _maxContextTokens / 4) // Reserve 25% for history
+                        break;
+                        
+                    contextBuilder.AppendLine(msgText);
+                    historyTokens += msgTokens;
+                }
+                contextBuilder.AppendLine();
+            }
+
+            // Add document context (with remaining budget)
+            var usedTokens = EstimateTokens(contextBuilder.ToString());
+            var remainingBudget = _maxContextTokens - usedTokens;
+            
+            if (remainingBudget > 500 && relevantChunks.Any())
+            {
+                contextBuilder.AppendLine("--- Document Context ---");
+                
+                foreach (var chunk in relevantChunks)
+                {
+                    var chunkHeader = $"[From {chunk.DocumentMetadata.FileName}, Page {chunk.PageNumber}]:";
+                    var chunkText = chunk.ChunkText;
+                    var chunkTokens = EstimateTokens(chunkHeader + chunkText);
+                    
+                    if (usedTokens + chunkTokens > _maxContextTokens)
+                        break;
+                        
+                    contextBuilder.AppendLine(chunkHeader);
+                    contextBuilder.AppendLine(chunkText);
+                    contextBuilder.AppendLine();
+                    usedTokens += chunkTokens;
+                }
+            }
+
+            // Generate response with full context
+            var prompt = $@"Based on the conversation history and document context, answer the question.
+
+{contextBuilder}
+
+Current Question: {query}
+
+Answer:";
+
+            var (_, response, _) = await _aiService.ProcessRequestAsync(prompt);
+            
+            // Build sources list
+            var sources = relevantChunks.Select(c => new DocumentSource
+            {
+                DocumentId = c.DocumentMetadataId,
+                FileName = c.DocumentMetadata.FileName,
+                PageNumber = c.PageNumber,
+                ChunkId = c.Id,
+                ChunkText = c.ChunkText.Length > 200 ? c.ChunkText.Substring(0, 200) + "..." : c.ChunkText
+            }).ToList();
+            
+            return new QueryResult
+            {
+                Answer = response,
+                Sources = sources
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error querying documents with conversation context");
             throw;
         }
     }
