@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using SmartGlassesMiddleware.Models;
+using Pgvector.EntityFrameworkCore;
 
 namespace SmartGlassesMiddleware.Data;
 
@@ -19,10 +20,14 @@ public class ApplicationDbContext : DbContext
     public DbSet<DocumentGroup> DocumentGroups { get; set; }
     public DbSet<Conversation> Conversations { get; set; }
     public DbSet<ChatMessage> ChatMessages { get; set; }
+    public DbSet<AIInteractionLog> AIInteractionLogs { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+        
+        // Enable pgvector extension
+        modelBuilder.HasPostgresExtension("vector");
 
         modelBuilder.Entity<RequestHistory>(entity =>
         {
@@ -100,10 +105,19 @@ public class ApplicationDbContext : DbContext
             entity.Property(e => e.ChunkIndex).IsRequired();
             entity.Property(e => e.CreatedAt).IsRequired();
             
+            // Configure vector column for pgvector similarity search
+            entity.Property(e => e.EmbeddingVector)
+                .HasColumnType("vector(384)"); // 384-dimensional embeddings
+            
             entity.HasOne(e => e.DocumentMetadata)
                 .WithMany(d => d.Chunks)
                 .HasForeignKey(e => e.DocumentMetadataId)
                 .OnDelete(DeleteBehavior.Cascade);
+                
+            // Create index on vector column for efficient similarity search
+            entity.HasIndex(e => e.EmbeddingVector)
+                .HasMethod("ivfflat")
+                .HasOperators("vector_cosine_ops");
         });
 
         modelBuilder.Entity<DocumentGroup>(entity =>
@@ -142,6 +156,32 @@ public class ApplicationDbContext : DbContext
                 .WithMany(c => c.Messages)
                 .HasForeignKey(e => e.ConversationId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+        
+        modelBuilder.Entity<AIInteractionLog>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Input).IsRequired();
+            entity.Property(e => e.Output).IsRequired();
+            entity.Property(e => e.ModelUsed).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.DelegationReason).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.Timestamp).IsRequired();
+            entity.Property(e => e.Success).IsRequired();
+            
+            entity.HasOne(e => e.ResourceGroup)
+                .WithMany()
+                .HasForeignKey(e => e.ResourceGroupId)
+                .OnDelete(DeleteBehavior.SetNull);
+                
+            entity.HasOne(e => e.Conversation)
+                .WithMany()
+                .HasForeignKey(e => e.ConversationId)
+                .OnDelete(DeleteBehavior.SetNull);
+                
+            // Index for querying logs by timestamp
+            entity.HasIndex(e => e.Timestamp);
+            // Index for querying by model
+            entity.HasIndex(e => e.ModelUsed);
         });
     }
 }
