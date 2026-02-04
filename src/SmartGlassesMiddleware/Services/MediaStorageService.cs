@@ -1,5 +1,6 @@
 using Minio;
 using Minio.DataModel.Args;
+using System.Security.Cryptography;
 
 namespace SmartGlassesMiddleware.Services;
 
@@ -8,6 +9,9 @@ public interface IMediaStorageService
     Task<string> UploadMediaAsync(Stream fileStream, string fileName, string contentType);
     Task<Stream> DownloadMediaAsync(string key);
     Task DeleteMediaAsync(string key);
+    string ComputeContentHash(Stream fileStream);
+    Task<string> UploadFileAsync(string key, Stream fileStream, string contentType);
+    Task<Stream> DownloadFileAsync(string key);
 }
 
 public class MinioMediaStorageService : IMediaStorageService
@@ -99,5 +103,56 @@ public class MinioMediaStorageService : IMediaStorageService
             _logger.LogError(ex, "Error deleting media from MinIO: {Key}", key);
             throw;
         }
+    }
+
+    public string ComputeContentHash(Stream fileStream)
+    {
+        using var sha256 = SHA256.Create();
+        var originalPosition = fileStream.Position;
+        fileStream.Position = 0;
+        
+        var hash = sha256.ComputeHash(fileStream);
+        fileStream.Position = originalPosition;
+        
+        return Convert.ToHexString(hash);
+    }
+
+    public async Task<string> UploadFileAsync(string key, Stream fileStream, string contentType)
+    {
+        try
+        {
+            // Ensure bucket exists
+            var bucketExistsArgs = new BucketExistsArgs().WithBucket(_bucketName);
+            bool found = await _minioClient.BucketExistsAsync(bucketExistsArgs);
+            
+            if (!found)
+            {
+                var makeBucketArgs = new MakeBucketArgs().WithBucket(_bucketName);
+                await _minioClient.MakeBucketAsync(makeBucketArgs);
+            }
+
+            // Upload file with provided key
+            var putObjectArgs = new PutObjectArgs()
+                .WithBucket(_bucketName)
+                .WithObject(key)
+                .WithStreamData(fileStream)
+                .WithObjectSize(fileStream.Length)
+                .WithContentType(contentType);
+
+            await _minioClient.PutObjectAsync(putObjectArgs);
+
+            _logger.LogInformation("Uploaded file to MinIO: {Key}", key);
+            return key;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error uploading file to MinIO");
+            throw;
+        }
+    }
+
+    public async Task<Stream> DownloadFileAsync(string key)
+    {
+        return await DownloadMediaAsync(key);
     }
 }
