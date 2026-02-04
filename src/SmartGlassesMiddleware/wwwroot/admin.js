@@ -196,7 +196,6 @@ function createFileCard(file) {
         ` : ''}
         <div class="card-actions">
             <button data-action="preview-file" data-file-id="${id}" data-file-name="${escapeHtml(fileName)}" class="secondary">Preview</button>
-            <button data-action="add-to-group-file" data-file-id="${id}" data-file-label="${escapeHtml(label)}">Add to Group</button>
             <button class="delete" data-file-id="${id}" data-action="delete-file">Delete</button>
         </div>
     `;
@@ -207,9 +206,6 @@ function createFileCard(file) {
     });
     div.querySelector('[data-action="delete-file"]').addEventListener('click', (e) => {
         deleteFile(e.target.dataset.fileId);
-    });
-    div.querySelector('[data-action="add-to-group-file"]').addEventListener('click', (e) => {
-        showQuickAddToGroup(e.target.dataset.fileId, 'file', e.target.dataset.fileLabel);
     });
     
     return div;
@@ -266,9 +262,15 @@ async function deleteFile(id) {
     }
 }
 
+// Store current preview file info
+let currentPreviewFile = { id: null, fileName: null };
+
 async function previewFile(id, fileName) {
     const previewContainer = document.getElementById('file-preview');
     const previewContent = document.getElementById('preview-content');
+    
+    // Store file info for download button
+    currentPreviewFile = { id, fileName };
     
     previewContent.innerHTML = '<p style="color: #95a5a6;">Loading preview...</p>';
     previewContainer.style.display = 'block';
@@ -276,21 +278,25 @@ async function previewFile(id, fileName) {
     // Scroll to preview
     previewContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     
-    const fileUrl = `/api/media/file/${id}`;
+    const cacheBuster = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    const previewUrl = `${API_BASE}/files/${id}/preview?v=${cacheBuster}`;
     const ext = fileName.split('.').pop().toLowerCase();
     
     if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) {
-        previewContent.innerHTML = `<img src="${fileUrl}" alt="${escapeHtml(fileName)}" style="max-width: 100%; max-height: 500px; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">`;
+        const img = new Image();
+        img.onload = function() {
+            previewContent.innerHTML = `<img src="${previewUrl}" alt="${escapeHtml(fileName)}" style="max-width: 100%; max-height: 500px; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">`;
+        };
+        img.onerror = function() {
+            previewContent.innerHTML = '<p style="color: #e74c3c;">Failed to load image. The file may not exist or there was an error.</p>';
+        };
+        img.src = previewUrl;
     } else if (ext === 'pdf') {
-        previewContent.innerHTML = `<embed src="${fileUrl}" type="application/pdf" width="100%" height="600px" style="border-radius: 4px;">`;
+        previewContent.innerHTML = `<embed src="${previewUrl}" type="application/pdf" width="100%" height="600px" style="border-radius: 4px;">`;
     } else {
         previewContent.innerHTML = `<p style="color: #e74c3c;">Preview not available for this file type.</p>`;
     }
 }
-
-document.getElementById('close-preview').addEventListener('click', () => {
-    document.getElementById('file-preview').style.display = 'none';
-});
 
 // Prompts with lazy loading
 async function loadPrompts(reset = false) {
@@ -330,10 +336,17 @@ async function loadPrompts(reset = false) {
             
             const fragment = document.createDocumentFragment();
             promptsData.forEach(prompt => {
-                const div = createPromptCard(prompt);
-                fragment.appendChild(div);
+                console.log('[CREATE PROMPT CARD] Creating card for prompt:', prompt);
+                try {
+                    const div = createPromptCard(prompt);
+                    fragment.appendChild(div);
+                    console.log('[CREATE PROMPT CARD] Card created and appended');
+                } catch (err) {
+                    console.error('[CREATE PROMPT CARD] Error creating card:', err);
+                }
             });
             list.appendChild(fragment);
+            console.log('[PROMPTS] Fragment appended to list, children count:', list.children.length);
             
             state.prompts.hasMore = pagination.hasNext || pagination.HasNext;
             state.prompts.page++;
@@ -375,16 +388,12 @@ function createPromptCard(prompt) {
             </div>
         ` : ''}
         <div class="card-actions">
-            <button data-action="add-to-group-prompt" data-prompt-id="${id}" data-prompt-name="${escapeHtml(name)}">Add to Group</button>
             <button data-action="edit-prompt" data-prompt-id="${id}" data-prompt-name="${escapeHtml(name)}" data-prompt-text="${escapeHtml(promptText)}">Edit</button>
             <button class="delete" data-action="delete-prompt" data-prompt-id="${id}">Delete</button>
         </div>
     `;
     
     // Attach event listeners
-    div.querySelector('[data-action="add-to-group-prompt"]').addEventListener('click', (e) => {
-        showQuickAddToGroup(e.target.dataset.promptId, 'prompt', e.target.dataset.promptName);
-    });
     div.querySelector('[data-action="edit-prompt"]').addEventListener('click', (e) => {
         editPrompt(e.target.dataset.promptId, e.target.dataset.promptName, e.target.dataset.promptText);
     });
@@ -1059,6 +1068,19 @@ async function init() {
     }
     
     try {
+        // Setup preview modal event listeners
+        document.getElementById('close-preview').addEventListener('click', () => {
+            document.getElementById('file-preview').style.display = 'none';
+        });
+        document.getElementById('download-file').addEventListener('click', () => {
+            if (currentPreviewFile.id) {
+                const downloadUrl = `${API_BASE}/files/${currentPreviewFile.id}/download`;
+                window.location.href = downloadUrl;
+            } else {
+                showMessage('No file selected for download', 'error');
+            }
+        });
+        
         // Load initial data with reset=true to ensure fresh load
         console.log('[INIT] Loading initial data...');
         const results = await Promise.allSettled([

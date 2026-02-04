@@ -258,6 +258,56 @@ public class AdminController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Preview a managed file (inline display)
+    /// </summary>
+    [HttpGet("files/{id}/preview")]
+    public async Task<ActionResult> PreviewFile(Guid id)
+    {
+        var file = await _context.ManagedFiles.FindAsync(id);
+        if (file == null)
+        {
+            return NotFound();
+        }
+
+        try
+        {
+            var stream = await _mediaStorageService.DownloadMediaAsync(file.StorageKey);
+            // Return file inline (for preview in browser)
+            return File(stream, file.ContentType);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error previewing file {FileId}", id);
+            return StatusCode(500);
+        }
+    }
+
+    /// <summary>
+    /// Download a managed file (force download)
+    /// </summary>
+    [HttpGet("files/{id}/download")]
+    public async Task<ActionResult> DownloadFile(Guid id)
+    {
+        var file = await _context.ManagedFiles.FindAsync(id);
+        if (file == null)
+        {
+            return NotFound();
+        }
+
+        try
+        {
+            var stream = await _mediaStorageService.DownloadMediaAsync(file.StorageKey);
+            // Force download with filename
+            return File(stream, file.ContentType, file.FileName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error downloading file {FileId}", id);
+            return StatusCode(500);
+        }
+    }
+
     #endregion
 
     #region Prompts
