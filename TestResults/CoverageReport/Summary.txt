@@ -1,25 +1,25 @@
 Summary
-  Generated on: 02/04/2026 - 17:02:55
-  Coverage date: 02/04/2026 - 17:02:48
+  Generated on: 02/04/2026 - 17:04:54
+  Coverage date: 02/04/2026 - 17:04:46
   Parser: Cobertura
   Assemblies: 1
   Classes: 84
   Files: 62
-  Line coverage: 52.8%
-  Covered lines: 3705
-  Uncovered lines: 3301
+  Line coverage: 53.1%
+  Covered lines: 3726
+  Uncovered lines: 3280
   Coverable lines: 7006
   Total lines: 10553
-  Branch coverage: 50.6% (615 of 1214)
-  Covered branches: 615
+  Branch coverage: 50.9% (618 of 1214)
+  Covered branches: 618
   Total branches: 1214
   Method coverage: 83.5% (381 of 456)
-  Full method coverage: 69.2% (316 of 456)
+  Full method coverage: 69.5% (317 of 456)
   Covered methods: 381
-  Fully covered methods: 316
+  Fully covered methods: 317
   Total methods: 456
 
-SmartGlassesMiddleware                                                  52.8%
+SmartGlassesMiddleware                                                  53.1%
   Microsoft.AspNetCore.OpenApi.Generated                                 0.8%
   Program                                                                 42%
   SmartGlassesMiddleware.Controllers.AddMessageRequest                   100%
@@ -69,7 +69,7 @@ SmartGlassesMiddleware                                                  52.8%
   SmartGlassesMiddleware.Services.AdvancedTaskHandler                   91.8%
   SmartGlassesMiddleware.Services.AssemblyExtensions                      75%
   SmartGlassesMiddleware.Services.BackgroundTaskCleanupService          36.8%
-  SmartGlassesMiddleware.Services.BackgroundTaskHostedService             40%
+  SmartGlassesMiddleware.Services.BackgroundTaskHostedService            100%
   SmartGlassesMiddleware.Services.BackgroundTaskQueue                     68%
   SmartGlassesMiddleware.Services.ConfigurationReloadToken               100%
   SmartGlassesMiddleware.Services.ConfigurationSection                  85.7%
