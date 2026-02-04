@@ -428,23 +428,38 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
-// Ensure database is created (guarded to avoid test-time provider conflicts)
+// Apply EF Core migrations at startup if enabled (guarded to avoid test-time provider conflicts)
 using (var scope = app.Services.CreateScope())
 {
     try
     {
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        db.Database.EnsureCreated();
+        var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+
+        // Check configuration key first, then environment variable. Default: disabled.
+        var migrateSetting = configuration.GetValue<bool?>("MigrateOnStartup");
+        var migrateEnv = Environment.GetEnvironmentVariable("MIGRATE_ON_STARTUP");
+        var shouldMigrate = migrateSetting ?? string.Equals(migrateEnv, "true", StringComparison.OrdinalIgnoreCase);
+
+        if (shouldMigrate)
+        {
+            db.Database.Migrate();
+        }
+        else
+        {
+            var logger = scope.ServiceProvider.GetService<ILogger<Program>>();
+            logger?.LogInformation("Skipping database migration on startup (MigrateOnStartup not enabled).");
+        }
     }
     catch (InvalidOperationException ex)
     {
         var logger = scope.ServiceProvider.GetService<ILogger<Program>>();
-        logger?.LogWarning(ex, "Skipping EnsureCreated during startup (likely test environment with multiple EF providers)");
+        logger?.LogWarning(ex, "Skipping Database.Migrate during startup (likely test environment with multiple EF providers)");
     }
     catch (Exception ex)
     {
         var logger = scope.ServiceProvider.GetService<ILogger<Program>>();
-        logger?.LogWarning(ex, "Failed to ensure database created during startup; continuing");
+        logger?.LogWarning(ex, "Failed to apply migrations during startup; continuing");
     }
 }
 
@@ -571,6 +586,35 @@ app.MapGet("/health", async (IServiceProvider services) =>
     }
     checks["postgres"] = new { healthy = dbOk, error = dbError };
     allHealthy &= dbOk;
+
+    // Check for pending EF Core migrations
+    var migrationsPending = false;
+    int pendingMigrationsCount = 0;
+    string? migrationsError = null;
+    try
+    {
+        var pending = db.Database.GetPendingMigrations();
+        pendingMigrationsCount = pending.Count();
+        migrationsPending = pendingMigrationsCount > 0;
+
+        // Determine whether automatic migration-on-startup is enabled
+        var migrateSetting = configuration.GetValue<bool?>("MigrateOnStartup");
+        var migrateEnv = Environment.GetEnvironmentVariable("MIGRATE_ON_STARTUP");
+        var autoMigrateEnabled = migrateSetting ?? string.Equals(migrateEnv, "true", StringComparison.OrdinalIgnoreCase);
+
+        checks["migrations"] = new { pending = migrationsPending, pendingCount = pendingMigrationsCount, autoApplyOnStartup = autoMigrateEnabled };
+
+        // Consider unhealthy if there are pending migrations and they will not be applied automatically
+        if (migrationsPending && !autoMigrateEnabled)
+        {
+            allHealthy &= false;
+        }
+    }
+    catch (Exception ex)
+    {
+        migrationsError = ex.Message;
+        checks["migrations"] = new { pending = false, pendingCount = 0, error = migrationsError };
+    }
 
     // Check Redis
     var redisOk = false;

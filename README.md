@@ -4,24 +4,65 @@ This repository contains the backend middleware for a smart glasses application.
 
 ## Features
 
-- **Multi-modal API**: Accepts requests via text, audio, images, and video.
-- **AI Task Detection & Routing**: Uses a local AI model (Ollama) with Microsoft Semantic Kernel to classify incoming tasks. Simple tasks are handled locally, while complex queries are intelligently routed to a more advanced AI model.
-- **Extensible Task System**: Dynamically load custom task handlers by dropping C# source files or compiled DLLs into the `tasks` directory. This allows for easy extension of the middleware's capabilities without needing to recompile the main application. See the [Task Handlers](#task-handlers) section for more details.
-- **Advanced RAG Pipeline**: A sophisticated Retrieval-Augmented Generation pipeline for document interaction.
   - **Multi-format Document Processing**: Extracts text and layout information from PDFs (digital and scanned), DOCX, TXT, and various image formats.
   - **Vector Embeddings**: Generates embeddings for document chunks using configurable models and stores them in PostgreSQL with `pgvector` for efficient similarity searches.
   - **Semantic Querying**: Understands the meaning behind your questions to find the most relevant information.
   - **Document Highlighting**: Pinpoints and highlights the exact location of information within your documents.
   - **Resource Groups**: Organize documents and prompts into groups for targeted querying.
   - For more details, see the [RAG Process Documentation](docs/RAG_PROCESS.md).
-- **Comprehensive Admin API**: A rich set of endpoints for managing the system's resources, including documents, prompts, and resource groups.
-- **Real-time Notifications**: Uses SignalR and Redis Pub/Sub to provide real-time notifications about background task completion.
-- **Robust Storage**:
   - **PostgreSQL**: For storing request history, document metadata, and vector embeddings.
   - **MinIO**: For scalable storage of media files (images, videos, audio) and documents.
   - **Redis**: For response caching and pub/sub messaging.
-- **Monitoring & Health Checks**: Includes `/health` and `/metrics` endpoints for monitoring the application's status and performance.
 
+## Database Migrations
+
+The application now applies Entity Framework Core migrations at startup (`db.Database.Migrate()`).
+For production deployments it's recommended to run migrations explicitly as part of your deployment pipeline using:
+
+```bash
+dotnet ef database update --project src/SmartGlassesMiddleware
+```
+
+This ensures predictable schema changes; automatic migration-on-startup is convenient for development and simple setups but may not be appropriate for all production workflows.
+
+You can control migration-on-startup behavior using either the `MigrateOnStartup` configuration key (e.g., in `appsettings.json` or environment variables) or the `MIGRATE_ON_STARTUP` environment variable. Example:
+
+```json
+{
+  "MigrateOnStartup": true
+}
+```
+
+Or set the environment variable:
+
+```bash
+export MIGRATE_ON_STARTUP=true
+```
+
+If neither is set, automatic migration on startup is disabled.
+
+### CI / Deployment Step
+
+For production deployments it's recommended to apply migrations explicitly as part of your CI/CD pipeline rather than relying on automatic migration at startup. A deployment step should:
+
+- Build the application (or ensure the runtime tooling is available).
+- Run EF Migrations against the target database using the connection string for that environment, for example:
+
+```bash
+dotnet ef database update --project src/SmartGlassesMiddleware --no-build
+```
+
+- Alternatively, generate an idempotent SQL migration script and apply it with your database tooling:
+
+```bash
+dotnet ef migrations script --idempotent --project src/SmartGlassesMiddleware -o migration.sql
+# then apply `migration.sql` with psql or your DBA tooling
+```
+
+Notes:
+- Running `dotnet ef database update` from CI requires the `dotnet-ef` tool and access to the production database; ensure credentials and network access are handled securely.
+- Generating SQL scripts and having DBAs apply them is often preferred for controlled production deployments.
+- If you enable `MigrateOnStartup` (or `MIGRATE_ON_STARTUP=true`), the service will attempt to apply migrations at startup; the `/health` endpoint will report pending migrations and be marked unhealthy when migrations are pending but auto-apply is disabled.
 ## Architecture
 
 The application is built on a modern .NET 8 stack, with a focus on modularity and scalability.
