@@ -39,11 +39,11 @@ public class TranscriptionServiceTests
         var responseJson = JsonSerializer.Serialize(new { text = "Hello world" });
         var mockHandler = CreateMockHttpHandler(HttpStatusCode.OK, responseJson);
         var httpClient = new HttpClient(mockHandler.Object);
-        
+
         var mockConfig = new Mock<IConfiguration>();
         mockConfig.Setup(c => c["Transcription:Endpoint"])
             .Returns("http://localhost:8935/transcriptions");
-        
+
         var mockLogger = new Mock<ILogger<HttpTranscriptionService>>();
         var service = new HttpTranscriptionService(httpClient, mockConfig.Object, mockLogger.Object);
 
@@ -63,11 +63,11 @@ public class TranscriptionServiceTests
         var responseJson = JsonSerializer.Serialize(new { transcription = "Test transcription" });
         var mockHandler = CreateMockHttpHandler(HttpStatusCode.OK, responseJson);
         var httpClient = new HttpClient(mockHandler.Object);
-        
+
         var mockConfig = new Mock<IConfiguration>();
         mockConfig.Setup(c => c["Transcription:Endpoint"])
             .Returns("http://localhost:8935/transcriptions");
-        
+
         var mockLogger = new Mock<ILogger<HttpTranscriptionService>>();
         var service = new HttpTranscriptionService(httpClient, mockConfig.Object, mockLogger.Object);
 
@@ -87,11 +87,11 @@ public class TranscriptionServiceTests
         var responseJson = JsonSerializer.Serialize(new { result = "Result text" });
         var mockHandler = CreateMockHttpHandler(HttpStatusCode.OK, responseJson);
         var httpClient = new HttpClient(mockHandler.Object);
-        
+
         var mockConfig = new Mock<IConfiguration>();
         mockConfig.Setup(c => c["Transcription:Endpoint"])
             .Returns("http://localhost:8935/transcriptions");
-        
+
         var mockLogger = new Mock<ILogger<HttpTranscriptionService>>();
         var service = new HttpTranscriptionService(httpClient, mockConfig.Object, mockLogger.Object);
 
@@ -111,11 +111,11 @@ public class TranscriptionServiceTests
         var rawResponse = "Plain text transcription";
         var mockHandler = CreateMockHttpHandler(HttpStatusCode.OK, rawResponse);
         var httpClient = new HttpClient(mockHandler.Object);
-        
+
         var mockConfig = new Mock<IConfiguration>();
         mockConfig.Setup(c => c["Transcription:Endpoint"])
             .Returns("http://localhost:8935/transcriptions");
-        
+
         var mockLogger = new Mock<ILogger<HttpTranscriptionService>>();
         var service = new HttpTranscriptionService(httpClient, mockConfig.Object, mockLogger.Object);
 
@@ -134,11 +134,11 @@ public class TranscriptionServiceTests
         // Arrange
         var mockHandler = CreateMockHttpHandler(HttpStatusCode.InternalServerError, "Error");
         var httpClient = new HttpClient(mockHandler.Object);
-        
+
         var mockConfig = new Mock<IConfiguration>();
         mockConfig.Setup(c => c["Transcription:Endpoint"])
             .Returns("http://localhost:8935/transcriptions");
-        
+
         var mockLogger = new Mock<ILogger<HttpTranscriptionService>>();
         var service = new HttpTranscriptionService(httpClient, mockConfig.Object, mockLogger.Object);
 
@@ -162,12 +162,12 @@ public class TranscriptionServiceTests
                 ItExpr.IsAny<HttpRequestMessage>(),
                 ItExpr.IsAny<CancellationToken>())
             .ThrowsAsync(new HttpRequestException("Network error"));
-        
+
         var httpClient = new HttpClient(mockHandler.Object);
         var mockConfig = new Mock<IConfiguration>();
         mockConfig.Setup(c => c["Transcription:Endpoint"])
             .Returns("http://localhost:8935/transcriptions");
-        
+
         var mockLogger = new Mock<ILogger<HttpTranscriptionService>>();
         var service = new HttpTranscriptionService(httpClient, mockConfig.Object, mockLogger.Object);
 
@@ -191,12 +191,12 @@ public class TranscriptionServiceTests
                 ItExpr.IsAny<HttpRequestMessage>(),
                 ItExpr.IsAny<CancellationToken>())
             .ThrowsAsync(new TaskCanceledException("Timeout"));
-        
+
         var httpClient = new HttpClient(mockHandler.Object);
         var mockConfig = new Mock<IConfiguration>();
         mockConfig.Setup(c => c["Transcription:Endpoint"])
             .Returns("http://localhost:8935/transcriptions");
-        
+
         var mockLogger = new Mock<ILogger<HttpTranscriptionService>>();
         var service = new HttpTranscriptionService(httpClient, mockConfig.Object, mockLogger.Object);
 
@@ -216,11 +216,11 @@ public class TranscriptionServiceTests
         var responseJson = JsonSerializer.Serialize(new { text = "Test" });
         var mockHandler = CreateMockHttpHandler(HttpStatusCode.OK, responseJson);
         var httpClient = new HttpClient(mockHandler.Object);
-        
+
         var mockConfig = new Mock<IConfiguration>();
         mockConfig.Setup(c => c["Transcription:Endpoint"])
             .Returns((string?)null);
-        
+
         var mockLogger = new Mock<ILogger<HttpTranscriptionService>>();
         var service = new HttpTranscriptionService(httpClient, mockConfig.Object, mockLogger.Object);
 
@@ -240,11 +240,11 @@ public class TranscriptionServiceTests
         var responseJson = JsonSerializer.Serialize(new { text = "Test" });
         var mockHandler = CreateMockHttpHandler(HttpStatusCode.OK, responseJson);
         var httpClient = new HttpClient(mockHandler.Object);
-        
+
         var mockConfig = new Mock<IConfiguration>();
         mockConfig.Setup(c => c["Transcription:Endpoint"])
             .Returns("http://localhost:8935/transcriptions");
-        
+
         var mockLogger = new Mock<ILogger<HttpTranscriptionService>>();
         var service = new HttpTranscriptionService(httpClient, mockConfig.Object, mockLogger.Object);
 

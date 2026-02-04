@@ -14,7 +14,7 @@ public class AudioRequest
     [Required(ErrorMessage = "Audio data is required")]
     [StringLength(int.MaxValue, MinimumLength = 1, ErrorMessage = "Audio data cannot be empty")]
     public string AudioBase64 { get; set; } = string.Empty;
-    
+
     [StringLength(10000, ErrorMessage = "Transcription must not exceed 10000 characters")]
     public string? Transcription { get; set; }
 }

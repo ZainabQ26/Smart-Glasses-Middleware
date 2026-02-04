@@ -22,7 +22,7 @@ public class BackgroundTaskQueueTests
         var mockDb = new Mock<IDatabase>();
         var mockLogger = new Mock<ILogger<BackgroundTaskQueue>>();
         var mockHub = new Mock<IHubContext<TaskHub>>();
-        
+
         var inMemorySettings = new System.Collections.Generic.Dictionary<string, string?>
         {
             {"BackgroundTasks:RetentionSeconds", "60"}
@@ -73,7 +73,7 @@ public class BackgroundTaskQueueTests
         var mockDb = new Mock<IDatabase>();
         var mockLogger = new Mock<ILogger<BackgroundTaskQueue>>();
         var mockHub = new Mock<IHubContext<TaskHub>>();
-        
+
         var inMemorySettings = new System.Collections.Generic.Dictionary<string, string?>
         {
             {"BackgroundTasks:RetentionSeconds", "60"}
@@ -119,7 +119,7 @@ public class BackgroundTaskQueueTests
         var mockDb = new Mock<IDatabase>();
         var mockLogger = new Mock<ILogger<BackgroundTaskQueue>>();
         var mockHub = new Mock<IHubContext<TaskHub>>();
-        
+
         var inMemorySettings = new System.Collections.Generic.Dictionary<string, string?>
         {
             {"BackgroundTasks:RetentionSeconds", "60"}
@@ -160,7 +160,7 @@ public class BackgroundTaskQueueTests
         var mockDb = new Mock<IDatabase>();
         var mockLogger = new Mock<ILogger<BackgroundTaskQueue>>();
         var mockHub = new Mock<IHubContext<TaskHub>>();
-        
+
         var inMemorySettings = new System.Collections.Generic.Dictionary<string, string?>
         {
             {"BackgroundTasks:RetentionSeconds", "60"}
@@ -193,7 +193,7 @@ public class BackgroundTaskQueueTests
         var mockHub = new Mock<IHubContext<TaskHub>>();
         var mockClients = new Mock<IHubClients>();
         var mockClientProxy = new Mock<IClientProxy>();
-        
+
         var inMemorySettings = new System.Collections.Generic.Dictionary<string, string?>
         {
             {"BackgroundTasks:RetentionSeconds", "60"}

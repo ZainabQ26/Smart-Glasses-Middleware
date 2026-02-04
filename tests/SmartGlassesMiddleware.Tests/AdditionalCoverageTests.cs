@@ -24,7 +24,7 @@ public class ServicesCoverageTests
     {
         var serviceType = typeof(SmartGlassesMiddleware.Services.HistoryService);
         Assert.NotNull(serviceType);
-        
+
         var method = serviceType.GetMethod("GetHistoryByTypeAsync");
         Assert.NotNull(method);
     }
@@ -41,9 +41,9 @@ public class ServicesCoverageTests
         var mockStorage = new Mock<IMediaStorageService>();
 
         // Act & Assert - Constructor should not throw
-        var exception = Record.Exception(() => 
+        var exception = Record.Exception(() =>
             new DocumentHighlightService(mockContext, mockLogger.Object, mockStorage.Object));
-        
+
         Assert.Null(exception);
     }
 }
@@ -58,7 +58,7 @@ public class TaskHandlersCoverageTests
         var mockLogger = new Mock<ILogger<SmartGlassesMiddleware.Services.DeleteReminderTaskHandler>>();
 
         var handler = new SmartGlassesMiddleware.Services.DeleteReminderTaskHandler(
-            mockHistory.Object, 
+            mockHistory.Object,
             mockLogger.Object);
 
         // Act
@@ -77,7 +77,7 @@ public class TaskHandlersCoverageTests
         var mockLogger = new Mock<ILogger<SmartGlassesMiddleware.Services.EditReminderTaskHandler>>();
 
         var handler = new SmartGlassesMiddleware.Services.EditReminderTaskHandler(
-            mockHistory.Object, 
+            mockHistory.Object,
             mockLogger.Object);
 
         // Act
@@ -98,7 +98,7 @@ public class TaskHandlersCoverageTests
             .ThrowsAsync(new Exception("Test error"));
 
         var handler = new SmartGlassesMiddleware.Services.DocumentQueryTaskHandler(
-            mockRAG.Object, 
+            mockRAG.Object,
             mockLogger.Object);
 
         // Act
@@ -119,7 +119,7 @@ public class TaskHandlersCoverageTests
         var mockLogger = new Mock<ILogger<SmartGlassesMiddleware.Services.DocumentSearchTaskHandler>>();
 
         var handler = new SmartGlassesMiddleware.Services.DocumentSearchTaskHandler(
-            context, 
+            context,
             mockLogger.Object);
 
         // Act
@@ -161,7 +161,7 @@ public class ConfigurationCoverageTests
         // Arrange
         var mockConfig = new Mock<IConfiguration>();
         var mockSection = new Mock<IConfigurationSection>();
-        
+
         mockConfig.Setup(c => c.GetSection(It.IsAny<string>())).Returns(mockSection.Object);
 
         // Act

@@ -34,13 +34,13 @@ public class ConversationModelTests
         {
             Title = "Test Conversation"
         };
-        
+
         conversation.Messages.Add(new ChatMessage
         {
             Role = "user",
             Content = "Hello"
         });
-        
+
         conversation.Messages.Add(new ChatMessage
         {
             Role = "assistant",

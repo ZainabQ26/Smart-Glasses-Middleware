@@ -51,7 +51,7 @@ public class DocumentProcessingServiceEnhancedTests
             DocumentType = "txt",
             IsProcessed = true
         };
-        
+
         doc.Chunks.Add(new DocumentChunk
         {
             Id = Guid.NewGuid(),
@@ -60,7 +60,7 @@ public class DocumentProcessingServiceEnhancedTests
             PageNumber = 1,
             ChunkIndex = 0
         });
-        
+
         doc.Chunks.Add(new DocumentChunk
         {
             Id = Guid.NewGuid(),
@@ -104,7 +104,7 @@ public class AssemblyLoadTests
         Assert.NotNull(assembly);
         Assert.Contains("SmartGlassesMiddleware", assembly.FullName);
     }
-    
+
     [Fact]
     public void Controllers_Assembly_HasTypes()
     {

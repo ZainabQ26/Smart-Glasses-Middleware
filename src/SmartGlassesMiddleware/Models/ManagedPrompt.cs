@@ -11,7 +11,7 @@ public class ManagedPrompt
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
     public bool IsPinned { get; set; } = false; // Pinned prompts are prioritized in context
-    
+
     // Navigation property for groups
     public List<ManagedPromptGroup> PromptGroups { get; set; } = new();
 }

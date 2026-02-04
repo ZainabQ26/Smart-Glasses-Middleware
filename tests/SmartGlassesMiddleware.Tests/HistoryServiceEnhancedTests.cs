@@ -85,9 +85,9 @@ public class HistoryServiceEnhancedTests
             RequestType = "first",
             Timestamp = DateTime.UtcNow.AddMinutes(-2)
         });
-        
+
         await Task.Delay(10); // Small delay
-        
+
         var second = await _service.SaveRequestAsync(new RequestHistory
         {
             RequestType = "second",
@@ -114,7 +114,7 @@ public class HistoryServiceEnhancedTests
             DetectedTask = "reminder",
             InputText = "Remind me to call"
         });
-        
+
         await _service.SaveRequestAsync(new RequestHistory
         {
             RequestType = "other",
@@ -144,7 +144,7 @@ public class HistoryServiceEnhancedTests
 
         // Act
         var deleted = await _service.DeleteReminderAsync(reminder.Id);
-        
+
         // Verify it's deleted
         var history = await _service.GetHistoryByIdAsync(reminder.Id);
 
@@ -177,7 +177,7 @@ public class HistoryServiceEnhancedTests
 
         // Act
         var updated = await _service.UpdateReminderAsync(reminder.Id, "Updated reminder text");
-        
+
         // Verify update
         var retrieved = await _service.GetHistoryByIdAsync(reminder.Id);
 

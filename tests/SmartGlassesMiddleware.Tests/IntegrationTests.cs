@@ -33,13 +33,13 @@ public class IntegrationTests : IClassFixture<WebApplicationFactory<Program>>
                     d => d.ServiceType == typeof(ApplicationDbContext));
                 if (dbContextDescriptor2 != null)
                     services.Remove(dbContextDescriptor2);
-                
+
                 // Add in-memory database
                 services.AddDbContext<ApplicationDbContext>(options =>
                 {
                     options.UseInMemoryDatabase("TestDb");
                 });
-                
+
                 // Replace IBackgroundTaskQueue with a test implementation that completes immediately
                 services.AddSingleton<IBackgroundTaskQueue, TestBackgroundTaskQueue>();
             });

@@ -47,7 +47,7 @@ public class MetricsService : IMetricsService
     public void RecordRequestDuration(string endpoint, TimeSpan duration)
     {
         var metrics = _metrics.GetOrAdd(endpoint, _ => new EndpointMetrics());
-        
+
         lock (metrics)
         {
             // Update average duration using cumulative moving average

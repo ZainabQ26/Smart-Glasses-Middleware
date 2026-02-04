@@ -248,9 +248,9 @@ public class MediaRagServiceTests
 
         var fileId1 = Guid.NewGuid();
         await service.ProcessFileForRagAsync(fileId1, "old.mp3", "audio/mp3", "key1", "meeting content");
-        
+
         await Task.Delay(10);
-        
+
         var fileId2 = Guid.NewGuid();
         await service.ProcessFileForRagAsync(fileId2, "new.mp3", "audio/mp3", "key2", "meeting content");
 
@@ -311,7 +311,7 @@ public class MediaRagServiceTests
         // Arrange - use a disposed context to trigger error
         var context = GetInMemoryContext();
         context.Dispose();
-        
+
         var mockMediaStorage = new Mock<IMediaStorageService>();
         var mockLogger = new Mock<ILogger<RagService>>();
         var service = new RagService(context, mockMediaStorage.Object, mockLogger.Object);

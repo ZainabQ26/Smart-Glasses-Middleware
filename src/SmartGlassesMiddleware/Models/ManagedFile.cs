@@ -13,7 +13,7 @@ public class ManagedFile
     public string? ContentHash { get; set; }
     public DateTime UploadedAt { get; set; }
     public long FileSize { get; set; }
-    
+
     // Navigation property for groups
     public List<ManagedFileGroup> FileGroups { get; set; } = new();
 }

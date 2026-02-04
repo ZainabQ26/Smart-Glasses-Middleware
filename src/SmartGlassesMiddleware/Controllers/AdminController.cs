@@ -48,7 +48,7 @@ public class AdminController : ControllerBase
         if (pageSize < 1 || pageSize > MaxPageSize) pageSize = DefaultPageSize;
 
         var cacheKey = $"admin:files:page:{page}:size:{pageSize}";
-        
+
         // Try to get from cache first
         var cachedResult = await _cacheService.GetAsync<object>(cacheKey);
         if (cachedResult != null)
@@ -129,11 +129,11 @@ public class AdminController : ControllerBase
             // Compute content hash for deduplication
             using var hashStream = request.File.OpenReadStream();
             var contentHash = _mediaStorageService.ComputeContentHash(hashStream);
-            
+
             // Check if file with same hash already exists
             var existingFile = await _context.ManagedFiles
                 .FirstOrDefaultAsync(f => f.ContentHash == contentHash);
-            
+
             if (existingFile != null)
             {
                 _logger.LogInformation("File with hash {Hash} already exists as {FileId}, returning existing file", contentHash, existingFile.Id);
@@ -273,7 +273,7 @@ public class AdminController : ControllerBase
         if (pageSize < 1 || pageSize > MaxPageSize) pageSize = DefaultPageSize;
 
         var cacheKey = $"admin:prompts:page:{page}:size:{pageSize}";
-        
+
         // Try to get from cache first
         var cachedResult = await _cacheService.GetAsync<object>(cacheKey);
         if (cachedResult != null)
@@ -507,7 +507,7 @@ public class AdminController : ControllerBase
         if (pageSize < 1 || pageSize > MaxPageSize) pageSize = DefaultPageSize;
 
         var cacheKey = $"admin:groups:page:{page}:size:{pageSize}";
-        
+
         // Try to get from cache first
         var cachedResult = await _cacheService.GetAsync<object>(cacheKey);
         if (cachedResult != null)
@@ -938,7 +938,7 @@ public class AdminController : ControllerBase
             // Invalidate cache pattern - remove all files cache keys in parallel
             var totalCount = await _context.ManagedFiles.CountAsync();
             var totalPages = (int)Math.Ceiling(totalCount / (double)DefaultPageSize);
-            
+
             var tasks = new List<Task>();
             for (int page = 1; page <= totalPages + 1; page++)
             {
@@ -962,7 +962,7 @@ public class AdminController : ControllerBase
         {
             var totalCount = await _context.ManagedPrompts.CountAsync();
             var totalPages = (int)Math.Ceiling(totalCount / (double)DefaultPageSize);
-            
+
             var tasks = new List<Task>();
             for (int page = 1; page <= totalPages + 1; page++)
             {
@@ -986,7 +986,7 @@ public class AdminController : ControllerBase
         {
             var totalCount = await _context.ResourceGroups.CountAsync();
             var totalPages = (int)Math.Ceiling(totalCount / (double)DefaultPageSize);
-            
+
             var tasks = new List<Task>();
             for (int page = 1; page <= totalPages + 1; page++)
             {

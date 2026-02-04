@@ -32,7 +32,7 @@ public class RAGServiceTests
         _kernel = new Kernel();
         _mockConfiguration = new Mock<IConfiguration>();
         _mockTaskDispatcher = new Mock<ITaskDispatcher>();
-        
+
         // Setup configuration defaults using GetValue<T> method
         _mockConfiguration.Setup(c => c.GetSection("RAG:MaxRetries").Value).Returns("3");
         _mockConfiguration.Setup(c => c.GetSection("RAG:RetryDelayMs").Value).Returns("1000");
@@ -47,13 +47,13 @@ public class RAGServiceTests
         var services = new ServiceCollection();
         services.AddSingleton(_mockTaskDispatcher.Object);
         _serviceProvider = services.BuildServiceProvider();
-        
+
         // Create in-memory database for testing
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString())
             .Options;
         _context = new ApplicationDbContext(options);
-        
+
         _service = new RAGService(
             _context,
             _mockLogger.Object,

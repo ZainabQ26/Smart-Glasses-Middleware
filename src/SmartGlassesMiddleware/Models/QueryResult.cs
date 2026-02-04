@@ -6,32 +6,32 @@ namespace SmartGlassesMiddleware.Models;
 public class QueryResult
 {
     public string Answer { get; set; } = string.Empty;
-    
+
     /// <summary>
     /// All sources that were provided to the AI as context
     /// </summary>
     public List<DocumentSource> Sources { get; set; } = new();
-    
+
     /// <summary>
     /// Sources that the AI explicitly referenced in its answer
     /// </summary>
     public List<DocumentSource> ReferencedSources { get; set; } = new();
-    
+
     /// <summary>
     /// Whether the advanced model was used for this query
     /// </summary>
     public bool UsedAdvancedModel { get; set; }
-    
+
     /// <summary>
     /// Which model processed the query
     /// </summary>
     public string ModelUsed { get; set; } = string.Empty;
-    
+
     /// <summary>
     /// Estimated tokens in the query context
     /// </summary>
     public int TokenCount { get; set; }
-    
+
     /// <summary>
     /// Reason for delegation to advanced model (if applicable)
     /// </summary>
