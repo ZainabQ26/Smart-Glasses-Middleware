@@ -1,5 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
+using Microsoft.AspNetCore.Http;
+using Moq;
 using Xunit;
 using SmartGlassesMiddleware.Models;
 
@@ -103,4 +106,157 @@ public class ModelTests
         Assert.True(history.UsedAdvancedModel);
         Assert.Equal("key", history.MediaStorageKey);
     }
+
+    #region TaskRequest Tests
+
+    [Fact]
+    public void TaskRequest_ValidText_ShouldPass()
+    {
+        // Arrange
+        var request = new TaskRequest { Text = "Valid task text" };
+        var context = new ValidationContext(request);
+        var results = new List<ValidationResult>();
+
+        // Act
+        var isValid = Validator.TryValidateObject(request, context, results, true);
+
+        // Assert
+        Assert.True(isValid);
+        Assert.Empty(results);
+    }
+
+    [Fact]
+    public void TaskRequest_EmptyText_ShouldFail()
+    {
+        // Arrange
+        var request = new TaskRequest { Text = "" };
+        var context = new ValidationContext(request);
+        var results = new List<ValidationResult>();
+
+        // Act
+        var isValid = Validator.TryValidateObject(request, context, results, true);
+
+        // Assert
+        Assert.False(isValid);
+        Assert.NotEmpty(results);
+    }
+
+    #endregion
+
+    #region AudioRequest Tests
+
+    [Fact]
+    public void AudioRequest_ValidData_ShouldPass()
+    {
+        // Arrange
+        var request = new AudioRequest
+        {
+            AudioBase64 = "base64encodedaudiodata",
+            Transcription = "Optional transcription"
+        };
+        var context = new ValidationContext(request);
+        var results = new List<ValidationResult>();
+
+        // Act
+        var isValid = Validator.TryValidateObject(request, context, results, true);
+
+        // Assert
+        Assert.True(isValid);
+    }
+
+    [Fact]
+    public void AudioRequest_NullTranscription_ShouldPass()
+    {
+        // Arrange
+        var request = new AudioRequest
+        {
+            AudioBase64 = "validaudio",
+            Transcription = null
+        };
+        var context = new ValidationContext(request);
+        var results = new List<ValidationResult>();
+
+        // Act
+        var isValid = Validator.TryValidateObject(request, context, results, true);
+
+        // Assert
+        Assert.True(isValid);
+    }
+
+    #endregion
+
+    #region MediaRequest Tests
+
+    [Fact]
+    public void MediaRequest_ValidData_ShouldPass()
+    {
+        // Arrange
+        var request = new MediaRequest
+        {
+            Prompt = "Process these files",
+            Transcription = "Audio transcription"
+        };
+        var context = new ValidationContext(request);
+        var results = new List<ValidationResult>();
+
+        // Act
+        var isValid = Validator.TryValidateObject(request, context, results, true);
+
+        // Assert
+        Assert.True(isValid);
+    }
+
+    [Fact]
+    public void MediaRequest_WithFiles_ShouldStoreFiles()
+    {
+        // Arrange
+        var mockFile = new Mock<IFormFile>();
+        var request = new MediaRequest
+        {
+            Files = new List<IFormFile> { mockFile.Object }
+        };
+
+        // Assert
+        Assert.NotNull(request.Files);
+        Assert.Single(request.Files);
+    }
+
+    #endregion
+
+    #region TaskResponse Tests
+
+    [Fact]
+    public void TaskResponse_DefaultValues_ShouldBeSet()
+    {
+        // Arrange & Act
+        var response = new TaskResponse();
+
+        // Assert
+        Assert.Equal(string.Empty, response.Task);
+        Assert.Equal(string.Empty, response.Response);
+        Assert.False(response.UsedAdvancedModel);
+        Assert.Equal(Guid.Empty, response.RequestId);
+    }
+
+    [Fact]
+    public void TaskResponse_SetProperties_ShouldPersist()
+    {
+        // Arrange
+        var taskId = Guid.NewGuid();
+        var response = new TaskResponse
+        {
+            Task = "reminder",
+            Response = "Reminder saved",
+            UsedAdvancedModel = true,
+            RequestId = taskId
+        };
+
+        // Assert
+        Assert.Equal("reminder", response.Task);
+        Assert.Equal("Reminder saved", response.Response);
+        Assert.True(response.UsedAdvancedModel);
+        Assert.Equal(taskId, response.RequestId);
+    }
+
+    #endregion
 }
