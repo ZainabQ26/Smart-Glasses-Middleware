@@ -117,7 +117,7 @@ public class DocumentsControllerTests
         var okResult = Assert.IsType<OkObjectResult>(result);
         var value = okResult.Value;
         Assert.NotNull(value);
-        
+
         // Verify processing was called
         mockProcessing.Verify(s => s.ProcessDocumentAsync(It.IsAny<Stream>(), "test.pdf", "application/pdf"), Times.Once);
         mockRag.Verify(s => s.GenerateEmbeddingsAsync(documentId), Times.Once);
@@ -164,7 +164,7 @@ public class DocumentsControllerTests
             .Build();
 
         var controller = CreateController(configuration: config);
-        
+
         // Create a file larger than 1 MB
         var largeContent = new string('x', 2 * 1024 * 1024); // 2 MB
         var file = CreateMockFormFile("large.pdf", largeContent, "application/pdf");
@@ -194,7 +194,7 @@ public class DocumentsControllerTests
         await context.SaveChangesAsync();
 
         var documentId = Guid.NewGuid();
-        
+
         mockProcessing.Setup(s => s.ProcessDocumentAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<string>()))
             .ReturnsAsync((Stream stream, string fileName, string contentType) =>
             {
@@ -223,7 +223,7 @@ public class DocumentsControllerTests
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result);
         Assert.NotNull(okResult.Value);
-        
+
         // Verify groups were added
         var savedGroups = await context.DocumentGroups.Where(dg => dg.DocumentMetadataId == documentId).ToListAsync();
         Assert.Equal(2, savedGroups.Count);
@@ -748,7 +748,7 @@ public class DocumentsControllerTests
 
         // Assert
         Assert.IsType<NoContentResult>(result);
-        
+
         var deletedDoc = await context.DocumentMetadatas.FindAsync(documentId);
         Assert.Null(deletedDoc);
     }
@@ -946,7 +946,7 @@ public class DocumentsControllerTests
 
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result);
-        
+
         var groups = await context.DocumentGroups.Where(dg => dg.DocumentMetadataId == documentId).ToListAsync();
         Assert.Single(groups);
         Assert.Equal(newGroupId, groups[0].ResourceGroupId);

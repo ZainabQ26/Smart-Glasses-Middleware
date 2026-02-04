@@ -439,9 +439,9 @@ public class AudioControllerTests
 
         // Assert
         mockHistory.Verify(h => h.SaveRequestAsync(
-            It.Is<RequestHistory>(r => 
-                r.RequestType == "Audio" && 
-                r.InputText == transcription && 
+            It.Is<RequestHistory>(r =>
+                r.RequestType == "Audio" &&
+                r.InputText == transcription &&
                 r.MediaStorageKey == storageKey)), Times.Once);
     }
 

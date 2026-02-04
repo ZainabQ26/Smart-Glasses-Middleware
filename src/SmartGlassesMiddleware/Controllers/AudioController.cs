@@ -64,7 +64,7 @@ public class AudioController : ControllerBase
                 pd.Errors.Add("audioBase64", new[] { "Audio data cannot be empty" });
                 pd.Extensions["requestId"] = HttpContext.TraceIdentifier;
                 pd.Extensions["timestamp"] = DateTime.UtcNow.ToString("o");
-                
+
                 return BadRequest(pd);
             }
 
@@ -73,7 +73,7 @@ public class AudioController : ControllerBase
             try
             {
                 audioBytes = Convert.FromBase64String(request.AudioBase64);
-                
+
                 if (audioBytes.Length == 0)
                 {
                     var pd = new ValidationProblemDetails
@@ -87,7 +87,7 @@ public class AudioController : ControllerBase
                     pd.Errors.Add("audioBase64", new[] { "Audio data decoded to empty byte array" });
                     pd.Extensions["requestId"] = HttpContext.TraceIdentifier;
                     pd.Extensions["timestamp"] = DateTime.UtcNow.ToString("o");
-                    
+
                     return BadRequest(pd);
                 }
             }
@@ -104,7 +104,7 @@ public class AudioController : ControllerBase
                 pd.Errors.Add("audioBase64", new[] { "Invalid base64 format" });
                 pd.Extensions["requestId"] = HttpContext.TraceIdentifier;
                 pd.Extensions["timestamp"] = DateTime.UtcNow.ToString("o");
-                
+
                 return BadRequest(pd);
             }
 
@@ -179,7 +179,7 @@ public class AudioController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing audio request");
-            
+
             var pd = new ProblemDetails
             {
                 Type = "https://tools.ietf.org/html/rfc7231#section-6.6.1",
@@ -190,7 +190,7 @@ public class AudioController : ControllerBase
             };
             pd.Extensions["requestId"] = HttpContext.TraceIdentifier;
             pd.Extensions["timestamp"] = DateTime.UtcNow.ToString("o");
-            
+
             return StatusCode(500, pd);
         }
     }

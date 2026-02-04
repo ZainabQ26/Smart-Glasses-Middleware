@@ -37,9 +37,9 @@ public class ConversationsController : ControllerBase
         try
         {
             var conversation = await _conversationService.CreateConversationAsync(
-                request.Title, 
+                request.Title,
                 request.ResourceGroupId);
-            
+
             return CreatedAtAction(nameof(GetConversation), new { id = conversation.Id }, conversation);
         }
         catch (Exception ex)
@@ -58,7 +58,7 @@ public class ConversationsController : ControllerBase
     public async Task<IActionResult> GetConversation(Guid id)
     {
         var conversation = await _conversationService.GetConversationAsync(id);
-        
+
         if (conversation == null)
             return NotFound();
 
@@ -87,11 +87,11 @@ public class ConversationsController : ControllerBase
         try
         {
             var message = await _conversationService.AddMessageAsync(
-                id, 
-                request.Role, 
-                request.Content, 
+                id,
+                request.Role,
+                request.Content,
                 request.Model);
-            
+
             return CreatedAtAction(nameof(GetConversation), new { id }, message);
         }
         catch (ArgumentException ex)
@@ -122,16 +122,16 @@ public class ConversationsController : ControllerBase
 
             // Query with conversation context
             var result = await _ragService.QueryDocumentsWithConversationAsync(
-                request.Query, 
-                id, 
-                request.TopK ?? 5, 
+                request.Query,
+                id,
+                request.TopK ?? 5,
                 request.GroupIds);
 
             // Add assistant response to conversation
             await _conversationService.AddMessageAsync(
-                id, 
-                "assistant", 
-                result.Answer, 
+                id,
+                "assistant",
+                result.Answer,
                 request.Model ?? "default");
 
             return Ok(result);
@@ -154,7 +154,7 @@ public class ConversationsController : ControllerBase
         try
         {
             var summary = await _conversationService.SummarizeConversationAsync(id);
-            
+
             // Optionally generate embedding for the summary
             if (generateEmbedding && !string.IsNullOrEmpty(summary))
             {
@@ -168,7 +168,7 @@ public class ConversationsController : ControllerBase
                     _logger.LogInformation("Generated embedding for conversation {ConversationId} summary", id);
                 }
             }
-            
+
             return Ok(new { summary, embeddingGenerated = generateEmbedding });
         }
         catch (ArgumentException ex)

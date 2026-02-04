@@ -25,8 +25,8 @@ public class AdvancedTaskHandler : ITaskHandler
 
         if (string.IsNullOrEmpty(endpoint))
         {
-                _logger.LogWarning("Advanced model endpoint not configured (AI:AdvancedModelEndpoint)");
-                return "Advanced model endpoint is not configured.";
+            _logger.LogWarning("Advanced model endpoint not configured (AI:AdvancedModelEndpoint)");
+            return "Advanced model endpoint is not configured.";
         }
 
         try

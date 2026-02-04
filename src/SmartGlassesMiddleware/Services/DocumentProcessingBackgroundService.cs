@@ -37,7 +37,7 @@ public class DocumentProcessingBackgroundService : BackgroundService
 
         // Then check periodically
         using var timer = new PeriodicTimer(TimeSpan.FromMinutes(_checkIntervalMinutes));
-        
+
         try
         {
             while (await timer.WaitForNextTickAsync(stoppingToken))
@@ -59,7 +59,7 @@ public class DocumentProcessingBackgroundService : BackgroundService
             var ragService = scope.ServiceProvider.GetRequiredService<IRAGService>();
 
             var unprocessedDocs = await ragService.GetUnprocessedDocumentsAsync();
-            
+
             if (unprocessedDocs.Any())
             {
                 _logger.LogInformation("Found {Count} unprocessed documents. Starting reprocessing...", unprocessedDocs.Count);

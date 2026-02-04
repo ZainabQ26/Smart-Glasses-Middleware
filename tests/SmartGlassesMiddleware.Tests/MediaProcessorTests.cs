@@ -27,7 +27,7 @@ public class MediaProcessorTests
         var audioStream = new MemoryStream(new byte[] { 1, 2, 3, 4 });
         mockMediaStorage.Setup(m => m.DownloadMediaAsync(It.IsAny<string>()))
             .ReturnsAsync(audioStream);
-        
+
         mockTranscription.Setup(t => t.TranscribeAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("Hello world");
 
@@ -69,7 +69,7 @@ public class MediaProcessorTests
             "audio.wav",
             "audio/wav",
             It.IsAny<CancellationToken>()), Times.Once);
-        
+
         Assert.Equal("Hello world", entry.MediaItems[0].Transcription);
     }
 
@@ -85,7 +85,7 @@ public class MediaProcessorTests
 
         mockAI.Setup(a => a.ProcessRequestAsync(It.IsAny<string>()))
             .ReturnsAsync(("task", "response", false));
-        
+
         var savedHistory = new RequestHistory { Id = Guid.NewGuid() };
         mockHistory.Setup(h => h.SaveRequestAsync(It.IsAny<RequestHistory>()))
             .ReturnsAsync(savedHistory);
@@ -141,7 +141,7 @@ public class MediaProcessorTests
 
         mockAI.Setup(a => a.ProcessRequestAsync(It.IsAny<string>()))
             .ReturnsAsync(("task", "response", false));
-        
+
         var savedHistory = new RequestHistory { Id = Guid.NewGuid() };
         mockHistory.Setup(h => h.SaveRequestAsync(It.IsAny<RequestHistory>()))
             .ReturnsAsync(savedHistory);
@@ -186,7 +186,7 @@ public class MediaProcessorTests
 
         mockAI.Setup(a => a.ProcessRequestAsync(It.IsAny<string>()))
             .ReturnsAsync(("media_task", "AI processed response", true));
-        
+
         var savedHistory = new RequestHistory { Id = Guid.NewGuid() };
         mockHistory.Setup(h => h.SaveRequestAsync(It.IsAny<RequestHistory>()))
             .ReturnsAsync(savedHistory);
@@ -217,8 +217,8 @@ public class MediaProcessorTests
         var result = await processor.ProcessBackgroundTaskAsync(entry);
 
         // Assert
-        mockAI.Verify(a => a.ProcessRequestAsync(It.Is<string>(s => 
-            s.Contains("Analyze this") && 
+        mockAI.Verify(a => a.ProcessRequestAsync(It.Is<string>(s =>
+            s.Contains("Analyze this") &&
             s.Contains("image.jpg"))), Times.Once);
     }
 
@@ -234,7 +234,7 @@ public class MediaProcessorTests
 
         mockAI.Setup(a => a.ProcessRequestAsync(It.IsAny<string>()))
             .ReturnsAsync(("task", "response", false));
-        
+
         var savedHistory = new RequestHistory { Id = Guid.NewGuid() };
         mockHistory.Setup(h => h.SaveRequestAsync(It.IsAny<RequestHistory>()))
             .ReturnsAsync(savedHistory);
@@ -281,7 +281,7 @@ public class MediaProcessorTests
 
         mockAI.Setup(a => a.ProcessRequestAsync(It.IsAny<string>()))
             .ReturnsAsync(("task", "response", false));
-        
+
         var historyId = Guid.NewGuid();
         var savedHistory = new RequestHistory { Id = historyId };
         mockHistory.Setup(h => h.SaveRequestAsync(It.IsAny<RequestHistory>()))
@@ -328,7 +328,7 @@ public class MediaProcessorTests
 
         mockAI.Setup(a => a.ProcessRequestAsync(It.IsAny<string>()))
             .ReturnsAsync(("task", "response", false));
-        
+
         mockHistory.Setup(h => h.SaveRequestAsync(It.IsAny<RequestHistory>()))
             .ThrowsAsync(new Exception("Database error"));
 
@@ -374,13 +374,13 @@ public class MediaProcessorTests
         var audioStream = new MemoryStream(new byte[] { 1, 2, 3, 4 });
         mockMediaStorage.Setup(m => m.DownloadMediaAsync(It.IsAny<string>()))
             .ReturnsAsync(audioStream);
-        
+
         mockTranscription.Setup(t => t.TranscribeAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("Transcribed");
 
         mockAI.Setup(a => a.ProcessRequestAsync(It.IsAny<string>()))
             .ReturnsAsync(("task", "response", false));
-        
+
         var savedHistory = new RequestHistory { Id = Guid.NewGuid() };
         mockHistory.Setup(h => h.SaveRequestAsync(It.IsAny<RequestHistory>()))
             .ReturnsAsync(savedHistory);
@@ -393,7 +393,7 @@ public class MediaProcessorTests
             mockLogger.Object);
 
         var testExtensions = new[] { ".wav", ".mp3", ".m4a", ".flac", ".aac" };
-        
+
         foreach (var ext in testExtensions)
         {
             var entry = new BackgroundTaskEntry

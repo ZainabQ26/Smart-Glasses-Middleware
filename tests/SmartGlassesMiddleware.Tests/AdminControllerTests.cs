@@ -220,7 +220,7 @@ public class AdminControllerTests
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result);
         Assert.NotNull(okResult.Value);
-        
+
         // Verify it's the existing file
         var savedFile = await context.ManagedFiles.FindAsync(existingFile.Id);
         Assert.NotNull(savedFile);
@@ -1572,7 +1572,7 @@ public class AdminControllerTests
         // Assert
         var createdResult = Assert.IsType<CreatedAtActionResult>(result);
         Assert.NotNull(createdResult.Value);
-        
+
         // Verify in database
         var savedGroup = await context.ResourceGroups.FirstOrDefaultAsync();
         Assert.NotNull(savedGroup);

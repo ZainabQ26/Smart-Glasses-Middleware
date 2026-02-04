@@ -17,7 +17,7 @@ public class DocumentHighlightTaskHandler : ITaskHandler
     public string Name => "document-highlight";
 
     public DocumentHighlightTaskHandler(
-        ApplicationDbContext context, 
+        ApplicationDbContext context,
         IDocumentHighlightService highlightService,
         ILogger<DocumentHighlightTaskHandler> logger)
     {
@@ -33,16 +33,16 @@ public class DocumentHighlightTaskHandler : ITaskHandler
             // Parse input to extract document ID and text to highlight
             // Expected format: "highlight [text] in document [id]"
             // Or: "document [id] highlight [text]"
-            
+
             Guid documentId = Guid.Empty;
             string highlightText = input.Trim();
-            
+
             // Try to extract document ID and highlight text
             var lowerInput = input.ToLower();
             if (lowerInput.Contains("document "))
             {
                 var parts = input.Split(new[] { "document ", "highlight " }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                
+
                 foreach (var part in parts)
                 {
                     if (Guid.TryParse(part.Trim(), out var parsedId))
@@ -88,7 +88,7 @@ public class DocumentHighlightTaskHandler : ITaskHandler
 
             // Generate highlighted document
             var highlightedStream = await _highlightService.HighlightDocumentAsync(
-                documentId, 
+                documentId,
                 chunkIds
             );
 
@@ -98,8 +98,8 @@ public class DocumentHighlightTaskHandler : ITaskHandler
             var response = $"✅ Document '{document.FileName}' highlighted successfully!\n\n";
             response += $"📄 Document: {document.FileName}\n";
             response += $"🔍 Highlighted text: '{highlightText}'\n";
-            response += $"📍 Found on {matchingChunks.Count} chunk(s) across " + 
-                       $"{distinctPages.Count} page(s): " + 
+            response += $"📍 Found on {matchingChunks.Count} chunk(s) across " +
+                       $"{distinctPages.Count} page(s): " +
                        string.Join(", ", distinctPages);
             response += $"\n\n💡 Use API endpoint: GET /api/documents/{documentId}/highlight";
 

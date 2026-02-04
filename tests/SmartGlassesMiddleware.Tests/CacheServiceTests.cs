@@ -44,7 +44,7 @@ public class CacheServiceTests
         // Arrange
         var testObject = new { Name = "Test", Value = 123 };
         var serialized = JsonSerializer.Serialize(testObject);
-        
+
         var mockDb = new Mock<IDatabase>();
         mockDb.Setup(db => db.StringGetAsync(It.IsAny<RedisKey>(), It.IsAny<CommandFlags>()))
             .ReturnsAsync((RedisValue)serialized);

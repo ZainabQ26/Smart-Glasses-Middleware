@@ -335,7 +335,7 @@ public class MediaControllerTests
         // Assert
         var acceptedResult = Assert.IsType<AcceptedResult>(result);
         Assert.NotNull(acceptedResult.Location);
-        
+
         // Verify all files were processed
         mockMediaStorage.Verify(s => s.UploadMediaAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<string>()), Times.Exactly(3));
     }
@@ -535,7 +535,7 @@ public class MediaControllerTests
         var context = GetInMemoryContext();
         var mockMediaStorage = new Mock<IMediaStorageService>();
         var mockTranscription = new Mock<ITranscriptionService>();
-        
+
         mockMediaStorage.Setup(s => s.ComputeContentHash(It.IsAny<Stream>()))
             .Returns("hash123");
         mockTranscription.Setup(s => s.TranscribeAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<string>()))
@@ -550,7 +550,7 @@ public class MediaControllerTests
             Headers = new HeaderDictionary(),
             ContentType = "audio/wav"
         };
-        
+
         var formCollection = new FormCollection(
             new Dictionary<string, Microsoft.Extensions.Primitives.StringValues>
             {
@@ -745,7 +745,7 @@ public class MediaControllerTests
 
         // Assert
         Assert.IsType<AcceptedResult>(result);
-        
+
         var savedFiles = await context.ManagedFiles.ToListAsync();
         Assert.Single(savedFiles);
         Assert.Equal("test.jpg", savedFiles[0].FileName);

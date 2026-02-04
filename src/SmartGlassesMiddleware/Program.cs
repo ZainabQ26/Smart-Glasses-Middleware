@@ -57,7 +57,7 @@ builder.Services.Configure<ApiBehaviorOptions>(options =>
 builder.Services.AddOpenApi();
 
 // Configure PostgreSQL
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") 
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
     ?? "Host=localhost;Database=smartglasses;Username=postgres;Password=postgres";
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseNpgsql(connectionString, o => o.UseVector()));
@@ -84,7 +84,7 @@ builder.Services.AddSingleton<IMinioClient>(sp =>
     var endpoint = builder.Configuration["MinIO:Endpoint"] ?? "localhost:9000";
     var accessKey = builder.Configuration["MinIO:AccessKey"] ?? "minioadmin";
     var secretKey = builder.Configuration["MinIO:SecretKey"] ?? "minioadmin";
-    
+
     return new MinioClient()
         .WithEndpoint(endpoint)
         .WithCredentials(accessKey, secretKey)
@@ -95,10 +95,10 @@ builder.Services.AddSingleton<IMinioClient>(sp =>
 builder.Services.AddSingleton<Kernel>(sp =>
 {
     var kernelBuilder = Kernel.CreateBuilder();
-    
+
     var ollamaEndpoint = builder.Configuration["AI:OllamaEndpoint"] ?? "http://localhost:11434";
     var ollamaModel = builder.Configuration["AI:OllamaModel"] ?? "llama2";
-    
+
     // Add Ollama chat completion service using OpenAI-compatible endpoint.
     // Note: Ollama doesn't require an API key for local endpoints; the API key
     // parameter is present for OpenAI-compatible overloads and is unused here.
@@ -107,7 +107,7 @@ builder.Services.AddSingleton<Kernel>(sp =>
         modelId: ollamaModel,
         apiKey: notUsedPlaceholderApiKey,
         endpoint: new Uri(ollamaEndpoint));
-    
+
     return kernelBuilder.Build();
 });
 
@@ -283,14 +283,14 @@ Assembly? CompileSourceFiles(string[] filePaths, ILogger logger)
 
 // Task dispatcher (configurable handler selection)
 builder.Services.AddScoped<ITaskDispatcher, TaskDispatcher>();
-    builder.Services.AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();
-    builder.Services.AddScoped<IMediaProcessor, MediaProcessor>();
-    builder.Services.AddHostedService<BackgroundTaskHostedService>();
-    if (!builder.Environment.IsEnvironment("Testing") && !string.IsNullOrWhiteSpace(redisConnection))
-    {
-        builder.Services.AddHostedService<BackgroundTaskCleanupService>();
-    }
-    builder.Services.AddHostedService<DocumentProcessingBackgroundService>();
+builder.Services.AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();
+builder.Services.AddScoped<IMediaProcessor, MediaProcessor>();
+builder.Services.AddHostedService<BackgroundTaskHostedService>();
+if (!builder.Environment.IsEnvironment("Testing") && !string.IsNullOrWhiteSpace(redisConnection))
+{
+    builder.Services.AddHostedService<BackgroundTaskCleanupService>();
+}
+builder.Services.AddHostedService<DocumentProcessingBackgroundService>();
 
 // Add SignalR for real-time notifications
 builder.Services.AddSignalR();
@@ -310,7 +310,7 @@ if (rateLimitEnabled)
     builder.Services.AddRateLimiter(options =>
     {
         var requestsPerMinute = builder.Configuration.GetValue<int?>("RateLimiting:RequestsPerMinute") ?? 60;
-        
+
         options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
             RateLimitPartition.GetFixedWindowLimiter(
                 partitionKey: context.User.Identity?.Name ?? context.Request.Headers.Host.ToString(),
@@ -326,7 +326,7 @@ if (rateLimitEnabled)
         {
             context.HttpContext.Response.StatusCode = 429;
             context.HttpContext.Response.ContentType = "application/problem+json";
-            
+
             var problemDetails = new ProblemDetails
             {
                 Title = "Too Many Requests",
@@ -335,7 +335,7 @@ if (rateLimitEnabled)
                 Instance = context.HttpContext.Request.Path
             };
             problemDetails.Extensions["retryAfter"] = "60";
-            
+
             await context.HttpContext.Response.WriteAsJsonAsync(problemDetails, token);
         };
     });
@@ -348,9 +348,9 @@ builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
-        var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() 
+        var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
             ?? new[] { "http://localhost:3000", "http://localhost:5000" };
-        
+
         if (builder.Environment.IsDevelopment())
         {
             // In development, allow any origin for easier testing
@@ -375,21 +375,21 @@ try
 {
     var config = app.Services.GetRequiredService<IConfiguration>();
     var logger = app.Services.GetRequiredService<ILogger<Program>>();
-    
+
     // Validate database connection string
     var dbConnStr = config.GetConnectionString("DefaultConnection");
     if (string.IsNullOrWhiteSpace(dbConnStr))
     {
         logger.LogWarning("Database connection string not properly configured. Using default localhost connection.");
     }
-    
+
     // Validate Redis connection
     var redisConnStr = config.GetConnectionString("Redis");
     if (string.IsNullOrWhiteSpace(redisConnStr))
     {
         logger.LogWarning("Redis connection string not configured. Using default localhost:6379.");
     }
-    
+
     // Validate MinIO configuration
     var minioAccessKey = config["MinIO:AccessKey"];
     var minioSecretKey = config["MinIO:SecretKey"];
@@ -397,21 +397,21 @@ try
     {
         logger.LogWarning("MinIO credentials not properly configured. Using default credentials.");
     }
-    
+
     // Validate AI configuration
     var ollamaEndpoint = config["AI:OllamaEndpoint"];
     if (string.IsNullOrWhiteSpace(ollamaEndpoint))
     {
         logger.LogWarning("Ollama endpoint not configured. AI features may not work correctly.");
     }
-    
+
     // Validate transcription endpoint
     var transcriptionEndpoint = config["Transcription:Endpoint"];
     if (string.IsNullOrWhiteSpace(transcriptionEndpoint))
     {
         logger.LogWarning("Transcription endpoint not configured. Audio transcription may not work correctly.");
     }
-    
+
     logger.LogInformation("Configuration validation completed.");
 }
 catch (Exception ex)
@@ -482,7 +482,7 @@ app.Use(async (context, next) =>
     var startTime = DateTime.UtcNow;
     var endpoint = context.Request.Path.ToString();
     var metricsService = context.RequestServices.GetService<IMetricsService>();
-    
+
     try
     {
         metricsService?.IncrementRequestCount(endpoint);
@@ -747,7 +747,7 @@ app.MapGet("/metrics", (IMetricsService metricsService, HttpContext context, ICo
             return Results.Forbid();
         }
     }
-    
+
     var summary = metricsService.GetSummary();
     return Results.Ok(new
     {

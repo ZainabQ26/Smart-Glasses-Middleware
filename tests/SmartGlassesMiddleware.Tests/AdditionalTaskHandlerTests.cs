@@ -240,7 +240,7 @@ public class AdditionalTaskHandlerTests
             .UseInMemoryDatabase(databaseName: "TestDb_DocSearchFind_" + Guid.NewGuid())
             .Options;
         using var context = new ApplicationDbContext(options);
-        
+
         var docId = Guid.NewGuid();
         var doc = new DocumentMetadata
         {
@@ -388,7 +388,7 @@ public class AdditionalTaskHandlerTests
         var mockLogger = new Mock<ILogger<OCRTaskHandler>>();
         var mockProcessingService = new Mock<IDocumentProcessingService>();
         var mockRagService = new Mock<IRAGService>();
-        
+
         var docId = Guid.NewGuid();
         var metadata = new DocumentMetadata
         {
@@ -420,7 +420,7 @@ public class AdditionalTaskHandlerTests
         var mockLogger = new Mock<ILogger<OCRTaskHandler>>();
         var mockProcessingService = new Mock<IDocumentProcessingService>();
         var mockRagService = new Mock<IRAGService>();
-        
+
         var docId = Guid.NewGuid();
         mockProcessingService.Setup(p => p.ReprocessDocumentAsync(docId))
             .ThrowsAsync(new Exception("Processing error"));

@@ -31,20 +31,20 @@ public class OCRTaskHandler : ITaskHandler
             // 1. Accept an image file path or document ID
             // 2. Process the image with Tesseract OCR
             // 3. Return extracted text
-            
+
             _logger.LogInformation("OCR task requested with input: {Input}", input);
 
             // Check if input is a file path or document ID
             if (Guid.TryParse(input.Trim(), out var documentId))
             {
-                  var metadata = await _processingService.ReprocessDocumentAsync(documentId);
-                  await _ragService.GenerateEmbeddingsAsync(documentId);
+                var metadata = await _processingService.ReprocessDocumentAsync(documentId);
+                await _ragService.GenerateEmbeddingsAsync(documentId);
 
-                  return $"Manual OCR retry complete for document {documentId}. " +
-                      $"Chunks: {metadata.Chunks.Count}. " +
-                      $"ProcessedAt: {metadata.ProcessedAt:O}. " +
-                      "If OCR is not configured, pages without text may still be empty. " +
-                      "Configure Tesseract and retry to enable full OCR.";
+                return $"Manual OCR retry complete for document {documentId}. " +
+                    $"Chunks: {metadata.Chunks.Count}. " +
+                    $"ProcessedAt: {metadata.ProcessedAt:O}. " +
+                    "If OCR is not configured, pages without text may still be empty. " +
+                    "Configure Tesseract and retry to enable full OCR.";
             }
 
             return "OCR task handler is ready but requires Tesseract configuration.\n\n" +

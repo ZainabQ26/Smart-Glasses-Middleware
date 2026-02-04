@@ -29,7 +29,7 @@ public class BackgroundTaskHostedServiceTests
         };
 
         var cts = new CancellationTokenSource();
-        
+
         mockQueue.SetupSequence(q => q.DequeueAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(entry)
             .ReturnsAsync((BackgroundTaskEntry?)null); // Return null to stop the loop
@@ -82,7 +82,7 @@ public class BackgroundTaskHostedServiceTests
 
         var cts = new CancellationTokenSource();
         BackgroundTaskEntry? failedEntry = null;
-        
+
         mockQueue.SetupSequence(q => q.DequeueAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(entry)
             .ReturnsAsync((BackgroundTaskEntry?)null);
