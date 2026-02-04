@@ -336,6 +336,17 @@ public class RedisPubSubBridgeTests
             }
         };
         var message = JsonSerializer.Serialize(complexPayload);
+        // Capture the payload forwarded to SignalR
+        _mockClientProxy
+            .Setup(c => c.SendCoreAsync(
+                "TaskCompleted",
+                It.IsAny<object[]>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<string, object[], CancellationToken>((method, args, ct) =>
+            {
+                capturedPayload = args != null && args.Length > 0 ? args[0] : null;
+            })
+            .Returns(Task.CompletedTask);
 
         // Act
         messageHandler?.Invoke(new RedisChannel("background:task:completed", RedisChannel.PatternMode.Literal), message);
