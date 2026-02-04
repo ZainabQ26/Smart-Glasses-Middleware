@@ -409,7 +409,7 @@ public class RedisPubSubBridgeTests
     public async Task StartAsync_WithoutSubscriber_ShouldNotThrow()
     {
         // Arrange
-        _mockRedis.Setup(r => r.GetSubscriber(It.IsAny<object>())).Returns((ISubscriber?)null!);
+        _mockRedis.Setup(r => r.GetSubscriber(It.IsAny<object>())).Returns((ISubscriber)null!);
 
         var service = new RedisPubSubBridge(_mockRedis.Object, _mockHubContext.Object, _mockLogger.Object, _status);
 
