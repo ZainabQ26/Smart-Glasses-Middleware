@@ -58,8 +58,9 @@ public class CacheServiceTests
 
         // Assert
         Assert.NotNull(result);
-        Assert.Equal("Test", result!.GetProperty("Name").GetString());
-        Assert.Equal(123, result!.GetProperty("Value").GetInt32());
+        var elem = (JsonElement)result;
+        Assert.Equal("Test", elem.GetProperty("Name").GetString());
+        Assert.Equal(123, elem.GetProperty("Value").GetInt32());
     }
 
     [Fact]
