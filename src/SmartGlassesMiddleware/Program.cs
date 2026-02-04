@@ -512,17 +512,17 @@ using (var scope = app.Services.CreateScope())
     try
     {
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        db.Database.EnsureCreated();
+        db.Database.Migrate();
     }
     catch (InvalidOperationException ex)
     {
         var logger = scope.ServiceProvider.GetService<ILogger<Program>>();
-        logger?.LogWarning(ex, "Skipping EnsureCreated during startup (likely test environment with multiple EF providers)");
+        logger?.LogWarning(ex, "Skipping Migrate during startup (likely test environment with multiple EF providers)");
     }
     catch (Exception ex)
     {
         var logger = scope.ServiceProvider.GetService<ILogger<Program>>();
-        logger?.LogWarning(ex, "Failed to ensure database created during startup; continuing");
+        logger?.LogWarning(ex, "Failed to migrate database during startup; continuing");
     }
 }
 
