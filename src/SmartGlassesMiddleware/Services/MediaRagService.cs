@@ -1,3 +1,4 @@
+#nullable enable
 using Microsoft.EntityFrameworkCore;
 using SmartGlassesMiddleware.Data;
 using SmartGlassesMiddleware.Models;
