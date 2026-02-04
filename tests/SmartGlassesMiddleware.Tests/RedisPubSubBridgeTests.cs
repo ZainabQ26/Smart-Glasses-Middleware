@@ -69,7 +69,7 @@ public class RedisPubSubBridgeTests
             x => x.Log(
                 LogLevel.Information,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("RedisPubSubBridge subscribed")),
+                It.Is<It.IsAnyType>((v, t) => (v.ToString() ?? "").Contains("RedisPubSubBridge subscribed")),
                 It.IsAny<Exception?>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);
@@ -101,7 +101,7 @@ public class RedisPubSubBridgeTests
                 It.IsAny<RedisChannel>(),
                 It.IsAny<Action<RedisChannel, RedisValue>>(),
                 It.IsAny<CommandFlags>()))
-            .Callback<RedisChannel, Action<RedisChannel, RedisValue>, CommandFlags>((ch, handler, flags) =>
+            .Callback((RedisChannel ch, Action<RedisChannel, RedisValue> handler, CommandFlags flags) =>
             {
                 messageHandler = handler;
             });
@@ -138,7 +138,7 @@ public class RedisPubSubBridgeTests
                 It.IsAny<RedisChannel>(),
                 It.IsAny<Action<RedisChannel, RedisValue>>(),
                 It.IsAny<CommandFlags>()))
-            .Callback<RedisChannel, Action<RedisChannel, RedisValue>, CommandFlags>((ch, handler, flags) =>
+            .Callback((RedisChannel ch, Action<RedisChannel, RedisValue> handler, CommandFlags flags) =>
             {
                 messageHandler = handler;
             });
@@ -171,7 +171,7 @@ public class RedisPubSubBridgeTests
                 It.IsAny<RedisChannel>(),
                 It.IsAny<Action<RedisChannel, RedisValue>>(),
                 It.IsAny<CommandFlags>()))
-            .Callback<RedisChannel, Action<RedisChannel, RedisValue>, CommandFlags>((ch, handler, flags) =>
+            .Callback((RedisChannel ch, Action<RedisChannel, RedisValue> handler, CommandFlags flags) =>
             {
                 messageHandler = handler;
             });
@@ -191,7 +191,7 @@ public class RedisPubSubBridgeTests
             x => x.Log(
                 LogLevel.Warning,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Failed to forward pubsub message")),
+                It.Is<It.IsAnyType>((v, t) => (v.ToString() ?? "").Contains("Failed to forward pubsub message")),
                 It.IsAny<Exception?>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);
@@ -211,7 +211,7 @@ public class RedisPubSubBridgeTests
                 It.IsAny<RedisChannel>(),
                 It.IsAny<Action<RedisChannel, RedisValue>>(),
                 It.IsAny<CommandFlags>()))
-            .Callback<RedisChannel, Action<RedisChannel, RedisValue>, CommandFlags>((ch, handler, flags) =>
+            .Callback((RedisChannel ch, Action<RedisChannel, RedisValue> handler, CommandFlags flags) =>
             {
                 messageHandler = handler;
             });
@@ -239,7 +239,7 @@ public class RedisPubSubBridgeTests
             x => x.Log(
                 LogLevel.Warning,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Failed to forward pubsub message")),
+                It.Is<It.IsAnyType>((v, t) => (v.ToString() ?? "").Contains("Failed to forward pubsub message")),
                 It.IsAny<Exception?>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);
@@ -289,7 +289,7 @@ public class RedisPubSubBridgeTests
             x => x.Log(
                 LogLevel.Warning,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Error unsubscribing")),
+                It.Is<It.IsAnyType>((v, t) => (v.ToString() ?? "").Contains("Error unsubscribing")),
                 It.IsAny<Exception?>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);
@@ -317,21 +317,10 @@ public class RedisPubSubBridgeTests
                 It.IsAny<RedisChannel>(),
                 It.IsAny<Action<RedisChannel, RedisValue>>(),
                 It.IsAny<CommandFlags>()))
-            .Callback<RedisChannel, Action<RedisChannel, RedisValue>, CommandFlags>((ch, handler, flags) =>
+            .Callback((RedisChannel ch, Action<RedisChannel, RedisValue> handler, CommandFlags flags) =>
             {
                 messageHandler = handler;
             });
-
-        _mockClientProxy
-            .Setup(c => c.SendCoreAsync(
-                "TaskCompleted",
-                It.IsAny<object[]>(),
-                It.IsAny<CancellationToken>()))
-            .Callback<string, object[], CancellationToken>((method, args, token) =>
-            {
-                capturedPayload = args[0];
-            })
-            .Returns(Task.CompletedTask);
 
         var service = new RedisPubSubBridge(_mockRedis.Object, _mockHubContext.Object, _mockLogger.Object, _status);
         await service.StartAsync(CancellationToken.None);
@@ -375,7 +364,7 @@ public class RedisPubSubBridgeTests
                 It.IsAny<RedisChannel>(),
                 It.IsAny<Action<RedisChannel, RedisValue>>(),
                 It.IsAny<CommandFlags>()))
-            .Callback<RedisChannel, Action<RedisChannel, RedisValue>, CommandFlags>((ch, handler, flags) =>
+            .Callback((RedisChannel ch, Action<RedisChannel, RedisValue> handler, CommandFlags flags) =>
             {
                 messageHandler = handler;
             });
@@ -409,7 +398,9 @@ public class RedisPubSubBridgeTests
     public async Task StartAsync_WithoutSubscriber_ShouldNotThrow()
     {
         // Arrange
-        _mockRedis.Setup(r => r.GetSubscriber(It.IsAny<object>())).Returns((ISubscriber)null!);
+#pragma warning disable CS8625 // Cannot convert null literal to non-nullable reference type.
+        _mockRedis.Setup(r => r.GetSubscriber(It.IsAny<object>())).Returns(default(ISubscriber));
+#pragma warning restore CS8625 // Cannot convert null literal to non-nullable reference type.
 
         var service = new RedisPubSubBridge(_mockRedis.Object, _mockHubContext.Object, _mockLogger.Object, _status);
 
