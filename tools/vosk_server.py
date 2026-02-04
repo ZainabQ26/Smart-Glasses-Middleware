@@ -99,6 +99,8 @@ def transcribe():
 if __name__ == '__main__':
     ok = ensure_model()
     if not ok:
-        print("Model download failed; exiting", file=sys.stderr)
-        sys.exit(1)
+        print("WARNING: Model download failed. Service will start but transcription will not work until model is available.", file=sys.stderr)
+        print("To manually add the model, download it and extract it to: {}".format(MODEL_DIR), file=sys.stderr)
+        # Start the service anyway for development/testing purposes
+        # The health check will report "not ready" until the model is available
     app.run(host='0.0.0.0', port=PORT)
