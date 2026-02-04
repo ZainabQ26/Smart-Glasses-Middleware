@@ -87,7 +87,7 @@ public class HistoryControllerTests
         // Arrange
         var mockHistoryService = new Mock<IHistoryService>();
         mockHistoryService.Setup(s => s.GetRecentHistoryAsync(It.IsAny<int>()))
-            .ReturnsAsync((List<RequestHistory>?)null);
+            .ReturnsAsync((List<RequestHistory>)null!);
 
         var controller = CreateController(historyService: mockHistoryService);
 
