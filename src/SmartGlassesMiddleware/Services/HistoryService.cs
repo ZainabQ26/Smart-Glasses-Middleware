@@ -114,7 +114,7 @@ public class HistoryService : IHistoryService
             }
 
             var reminder = await _context.RequestHistories.FindAsync(id);
-            
+
             if (reminder == null)
             {
                 _logger.LogWarning("UpdateReminderAsync: Reminder not found with ID: {Id}", id);
@@ -130,9 +130,9 @@ public class HistoryService : IHistoryService
             // Update the reminder text
             reminder.InputText = newText.Trim();
             reminder.Response = $"Reminder updated: {reminder.InputText}";
-            
+
             await _context.SaveChangesAsync();
-            
+
             _logger.LogInformation("Updated reminder with ID: {Id}", id);
             return reminder;
         }
@@ -148,7 +148,7 @@ public class HistoryService : IHistoryService
         try
         {
             var reminder = await _context.RequestHistories.FindAsync(id);
-            
+
             if (reminder == null)
             {
                 _logger.LogWarning("DeleteReminderAsync: Reminder not found with ID: {Id}", id);
@@ -163,7 +163,7 @@ public class HistoryService : IHistoryService
 
             _context.RequestHistories.Remove(reminder);
             await _context.SaveChangesAsync();
-            
+
             _logger.LogInformation("Deleted reminder with ID: {Id}", id);
             return true;
         }

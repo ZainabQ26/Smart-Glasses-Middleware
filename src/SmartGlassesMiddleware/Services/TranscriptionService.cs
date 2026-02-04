@@ -32,10 +32,10 @@ public class HttpTranscriptionService : ITranscriptionService
             content.Add(streamContent, "file", fileName);
 
             var response = await _httpClient.PostAsync(_endpoint, content, cancellationToken);
-            
+
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("Transcription service returned {StatusCode}: {ReasonPhrase}", 
+                _logger.LogWarning("Transcription service returned {StatusCode}: {ReasonPhrase}",
                     response.StatusCode, response.ReasonPhrase);
                 return null;
             }

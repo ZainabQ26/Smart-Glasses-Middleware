@@ -17,7 +17,7 @@ public class DocumentMetadata
     public bool IsProcessed { get; set; }
     public DateTime? ProcessedAt { get; set; }
     public string? ProcessingError { get; set; }
-    
+
     // Navigation properties
     public List<DocumentChunk> Chunks { get; set; } = new();
     public List<DocumentGroup> DocumentGroups { get; set; } = new();
@@ -30,7 +30,7 @@ public class DocumentGroup
 {
     public Guid DocumentMetadataId { get; set; }
     public DocumentMetadata DocumentMetadata { get; set; } = null!;
-    
+
     public Guid ResourceGroupId { get; set; }
     public ResourceGroup ResourceGroup { get; set; } = null!;
 }
@@ -43,23 +43,23 @@ public class DocumentChunk
     public Guid Id { get; set; }
     public Guid DocumentMetadataId { get; set; }
     public DocumentMetadata DocumentMetadata { get; set; } = null!;
-    
+
     public string ChunkText { get; set; } = string.Empty;
     public int PageNumber { get; set; }
     public int ChunkIndex { get; set; } // Order within the document
-    
+
     // Positional information (bounding box on page)
     public double? X { get; set; }
     public double? Y { get; set; }
     public double? Width { get; set; }
     public double? Height { get; set; }
-    
+
     // Embedding for semantic search
     public string? Embedding { get; set; } // Stored as JSON array (fallback)
     public int? EmbeddingDimension { get; set; } // Dimension of the embedding vector
-    
+
     // Vector embedding for pgvector (PostgreSQL native vector type)
     public Pgvector.Vector? EmbeddingVector { get; set; }
-    
+
     public DateTime CreatedAt { get; set; }
 }

@@ -150,7 +150,7 @@ public class DocumentHighlightService : IDocumentHighlightService
         // A full implementation would parse the page content to find exact text locations
         // For now, we'll add a note that highlighting is approximate
         _logger.LogInformation("Highlighting text without exact coordinates: {Text}", text.Substring(0, Math.Min(50, text.Length)));
-        
+
         // Could implement text location finding using iText's LocationTextExtractionStrategy
         // For simplicity, we're noting this as a limitation
     }
@@ -162,7 +162,7 @@ public class DocumentHighlightService : IDocumentHighlightService
         try
         {
             using var image = await SixLabors.ImageSharp.Image.LoadAsync(originalImageStream);
-            
+
             image.Mutate(ctx =>
             {
                 foreach (var chunk in chunks)

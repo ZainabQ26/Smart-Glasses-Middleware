@@ -29,10 +29,10 @@ public class DocumentSearchTaskHandler : ITaskHandler
             // Parse input to extract search query
             // Expected format: "find [text] in document [filename or id]"
             // Or just: "[search text]" to search all documents
-            
+
             var searchText = input.Trim();
             string? documentFilter = null;
-            
+
             // Simple parsing logic
             if (input.ToLower().Contains(" in document "))
             {
@@ -57,7 +57,7 @@ public class DocumentSearchTaskHandler : ITaskHandler
 
             if (!string.IsNullOrEmpty(documentFilter))
             {
-                query = query.Where(c => c.DocumentMetadata.FileName.Contains(documentFilter) || 
+                query = query.Where(c => c.DocumentMetadata.FileName.Contains(documentFilter) ||
                                         c.DocumentMetadata.Id.ToString() == documentFilter);
             }
 
@@ -79,7 +79,7 @@ public class DocumentSearchTaskHandler : ITaskHandler
 
             if (!matches.Any())
             {
-                return $"No matches found for '{searchText}'" + 
+                return $"No matches found for '{searchText}'" +
                        (documentFilter != null ? $" in document '{documentFilter}'" : " in any documents");
             }
 
@@ -97,7 +97,7 @@ public class DocumentSearchTaskHandler : ITaskHandler
             }
 
             // Add document IDs for highlighting
-            response += "\n💡 To see highlighted document, use document ID: " + 
+            response += "\n💡 To see highlighted document, use document ID: " +
                        string.Join(", ", matches.Select(m => m.DocumentId).Distinct());
 
             return response;

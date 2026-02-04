@@ -72,7 +72,7 @@ public class RAGService : IRAGService
         try
         {
             var stopwatch = Stopwatch.StartNew();
-            
+
             // Search for relevant chunks
             var relevantChunks = await SearchChunksAsync(query, topK, groupIds);
 
@@ -90,7 +90,7 @@ public class RAGService : IRAGService
 
             // Build context from chunks (with token budgeting)
             var context = await BuildContextFromChunksAsync(relevantChunks, groupIds);
-            
+
             // Estimate token count for the complete prompt
             var promptTemplate = $@"Based on the following context from documents, answer the question. 
 If you reference specific information, mention which page it came from.
@@ -101,27 +101,27 @@ Context:
 Question: {query}
 
 Answer:";
-            
+
             var estimatedTokens = EstimateTokens(promptTemplate);
-            
+
             // Check if we should auto-delegate to advanced AI based on token count
             bool shouldDelegateToAdvancedAI = estimatedTokens > _maxLocalModelTokens;
             string delegationReason = shouldDelegateToAdvancedAI ? "token_threshold_exceeded" : "";
-            
+
             _logger.LogInformation(
                 "Query tokens: {Tokens}, Threshold: {Threshold}, Delegating: {Delegating}",
                 estimatedTokens, _maxLocalModelTokens, shouldDelegateToAdvancedAI);
-            
+
             // Generate response using AI with context
             string response;
             bool usedAdvancedModel;
             string modelUsed;
-            
+
             if (shouldDelegateToAdvancedAI)
             {
                 // Force use of advanced model via task dispatcher
                 _logger.LogInformation("Auto-delegating to advanced AI due to token count: {Tokens}", estimatedTokens);
-                
+
                 var taskDispatcher = _serviceProvider.GetRequiredService<ITaskDispatcher>();
                 var (handled, handlerResponse) = await taskDispatcher.TryHandleAsync("advanced", promptTemplate);
                 if (handled && !string.IsNullOrEmpty(handlerResponse))
@@ -133,16 +133,16 @@ Answer:";
                     _logger.LogWarning("Advanced task handler not available, falling back to local model");
                     response = await GenerateResponseWithLocalModel(promptTemplate);
                 }
-                
+
                 usedAdvancedModel = true;
                 modelUsed = "advanced";
-                
+
                 // Log the interaction
                 await LogAIInteractionAsync(
-                    promptTemplate, 
-                    response, 
-                    "advanced", 
-                    delegationReason, 
+                    promptTemplate,
+                    response,
+                    "advanced",
+                    delegationReason,
                     estimatedTokens,
                     stopwatch.ElapsedMilliseconds,
                     groupIds?.FirstOrDefault());
@@ -153,20 +153,20 @@ Answer:";
                 response = aiResponse;
                 usedAdvancedModel = wasAdvanced;
                 modelUsed = wasAdvanced ? "advanced" : "local";
-                
+
                 if (wasAdvanced)
                 {
                     await LogAIInteractionAsync(
-                        promptTemplate, 
-                        response, 
-                        modelUsed, 
-                        "ai_service_delegation", 
+                        promptTemplate,
+                        response,
+                        modelUsed,
+                        "ai_service_delegation",
                         estimatedTokens,
                         stopwatch.ElapsedMilliseconds,
                         groupIds?.FirstOrDefault());
                 }
             }
-            
+
             // Build sources list
             var sources = relevantChunks.Select(c => new DocumentSource
             {
@@ -176,10 +176,10 @@ Answer:";
                 ChunkId = c.Id,
                 ChunkText = c.ChunkText.Length > 200 ? c.ChunkText.Substring(0, 200) + "..." : c.ChunkText
             }).ToList();
-            
+
             // Analyze response to identify which sources were actually referenced
             var referencedSources = IdentifyReferencedSources(response, sources);
-            
+
             return new QueryResult
             {
                 Answer = response,
@@ -197,14 +197,14 @@ Answer:";
             throw;
         }
     }
-    
+
     /// <summary>
     /// Identifies which sources were actually referenced in the AI response
     /// </summary>
     private List<DocumentSource> IdentifyReferencedSources(string response, List<DocumentSource> allSources)
     {
         var referenced = new List<DocumentSource>();
-        
+
         foreach (var source in allSources)
         {
             // Check if the response mentions the file name or page number
@@ -215,17 +215,17 @@ Answer:";
                 referenced.Add(source);
             }
         }
-        
+
         return referenced;
     }
-    
+
     /// <summary>
     /// Logs AI interactions with advanced models for auditing
     /// </summary>
     private async Task LogAIInteractionAsync(
-        string input, 
-        string output, 
-        string model, 
+        string input,
+        string output,
+        string model,
         string delegationReason,
         int estimatedTokens,
         long responseTimeMs,
@@ -248,10 +248,10 @@ Answer:";
                 ResourceGroupId = groupId,
                 Success = true
             };
-            
+
             _context.AIInteractionLogs.Add(log);
             await _context.SaveChangesAsync();
-            
+
             _logger.LogInformation(
                 "Logged AI interaction: Model={Model}, Tokens={Tokens}, ResponseTime={Ms}ms",
                 model, log.TotalTokens, responseTimeMs);
@@ -264,9 +264,9 @@ Answer:";
     }
 
     public async Task<QueryResult> QueryDocumentsWithConversationAsync(
-        string query, 
-        Guid conversationId, 
-        int topK = 5, 
+        string query,
+        Guid conversationId,
+        int topK = 5,
         List<Guid>? groupIds = null)
     {
         try
@@ -284,7 +284,7 @@ Answer:";
 
             // Build context from chunks (with token budgeting)
             var contextBuilder = new StringBuilder();
-            
+
             // Add conversation history first (if it fits in budget)
             if (recentMessages.Any())
             {
@@ -294,10 +294,10 @@ Answer:";
                 {
                     var msgText = $"{msg.Role}: {msg.Content}";
                     var msgTokens = EstimateTokens(msgText);
-                    
+
                     if (historyTokens + msgTokens > _maxContextTokens / 4) // Reserve 25% for history
                         break;
-                        
+
                     contextBuilder.AppendLine(msgText);
                     historyTokens += msgTokens;
                 }
@@ -307,20 +307,20 @@ Answer:";
             // Add document context (with remaining budget)
             var usedTokens = EstimateTokens(contextBuilder.ToString());
             var remainingBudget = _maxContextTokens - usedTokens;
-            
+
             if (remainingBudget > 500 && relevantChunks.Any())
             {
                 contextBuilder.AppendLine("--- Document Context ---");
-                
+
                 foreach (var chunk in relevantChunks)
                 {
                     var chunkHeader = $"[From {chunk.DocumentMetadata.FileName}, Page {chunk.PageNumber}]:";
                     var chunkText = chunk.ChunkText;
                     var chunkTokens = EstimateTokens(chunkHeader + chunkText);
-                    
+
                     if (usedTokens + chunkTokens > _maxContextTokens)
                         break;
-                        
+
                     contextBuilder.AppendLine(chunkHeader);
                     contextBuilder.AppendLine(chunkText);
                     contextBuilder.AppendLine();
@@ -338,7 +338,7 @@ Current Question: {query}
 Answer:";
 
             var (_, response, _) = await _aiService.ProcessRequestAsync(prompt);
-            
+
             // Build sources list
             var sources = relevantChunks.Select(c => new DocumentSource
             {
@@ -348,7 +348,7 @@ Answer:";
                 ChunkId = c.Id,
                 ChunkText = c.ChunkText.Length > 200 ? c.ChunkText.Substring(0, 200) + "..." : c.ChunkText
             }).ToList();
-            
+
             return new QueryResult
             {
                 Answer = response,
@@ -393,25 +393,25 @@ Answer:";
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error searching chunks");
-            
+
             // Fallback to keyword search
             return await KeywordSearchAsync(query, topK, groupIds);
         }
     }
-    
+
     /// <summary>
     /// Searches chunks using PostgreSQL pgvector for efficient vector similarity
     /// with per-group indexing support
     /// </summary>
     private async Task<List<DocumentChunk>> SearchChunksWithVectorDBAsync(
-        float[] queryEmbedding, 
-        int topK, 
+        float[] queryEmbedding,
+        int topK,
         List<Guid>? groupIds)
     {
         try
         {
             var queryVector = new Vector(queryEmbedding);
-            
+
             // Build base query
             var query = _context.DocumentChunks
                 .Include(c => c.DocumentMetadata)
@@ -422,7 +422,7 @@ Answer:";
             if (groupIds != null && groupIds.Any())
             {
                 _logger.LogInformation("Filtering chunks by {Count} groups for vector search", groupIds.Count);
-                query = query.Where(c => 
+                query = query.Where(c =>
                     c.DocumentMetadata.DocumentGroups.Any(dg => groupIds.Contains(dg.ResourceGroupId)));
             }
 
@@ -430,13 +430,13 @@ Answer:";
             // Since EF Core pgvector extensions may be limited, we'll fetch candidates
             // and sort in-memory for now. In production, use proper vector indexes.
             var candidates = await query.ToListAsync();
-            
+
             if (!candidates.Any())
             {
                 _logger.LogWarning("No chunks with vector embeddings found");
                 return new List<DocumentChunk>();
             }
-            
+
             // Calculate cosine similarity in-memory
             var results = candidates
                 .Select(chunk => new
@@ -450,7 +450,7 @@ Answer:";
                 .ToList();
 
             _logger.LogInformation(
-                "Vector DB search returned {Count} chunks (requested {TopK})", 
+                "Vector DB search returned {Count} chunks (requested {TopK})",
                 results.Count, topK);
 
             return results;
@@ -461,13 +461,13 @@ Answer:";
             return await SearchChunksInMemoryAsync(queryEmbedding, topK, groupIds);
         }
     }
-    
+
     /// <summary>
     /// Fallback in-memory search using JSON embeddings
     /// </summary>
     private async Task<List<DocumentChunk>> SearchChunksInMemoryAsync(
-        float[] queryEmbedding, 
-        int topK, 
+        float[] queryEmbedding,
+        int topK,
         List<Guid>? groupIds)
     {
         // Build query for chunks, optionally filtered by groups
@@ -479,7 +479,7 @@ Answer:";
         // Filter by groups if specified
         if (groupIds != null && groupIds.Any())
         {
-            chunksQuery = chunksQuery.Where(c => 
+            chunksQuery = chunksQuery.Where(c =>
                 c.DocumentMetadata.DocumentGroups.Any(dg => groupIds.Contains(dg.ResourceGroupId)));
         }
 
@@ -510,7 +510,7 @@ Answer:";
         var document = await _context.DocumentMetadatas
             .Include(d => d.Chunks)
             .FirstOrDefaultAsync(d => d.Id == documentId);
-            
+
         if (document == null)
         {
             _logger.LogWarning("Document {DocumentId} not found for embedding generation", documentId);
@@ -519,14 +519,14 @@ Answer:";
 
         var chunks = document.Chunks.ToList();
         var failedChunks = 0;
-        
+
         // Process chunks in batches with controlled concurrency
         var batches = chunks.Chunk(_embeddingBatchSize).ToList();
-        _logger.LogInformation("Processing {ChunkCount} chunks in {BatchCount} batches (batch size: {BatchSize}, concurrency: {Concurrency})", 
+        _logger.LogInformation("Processing {ChunkCount} chunks in {BatchCount} batches (batch size: {BatchSize}, concurrency: {Concurrency})",
             chunks.Count, batches.Count, _embeddingBatchSize, _embeddingMaxConcurrency);
-        
+
         var semaphore = new SemaphoreSlim(_embeddingMaxConcurrency);
-        
+
         foreach (var batch in batches)
         {
             var tasks = batch.Select(async chunk =>
@@ -545,12 +545,12 @@ Answer:";
                     semaphore.Release();
                 }
             }).ToList();
-            
+
             await Task.WhenAll(tasks);
-            
+
             // Save progress after each batch
             await _context.SaveChangesAsync();
-            _logger.LogDebug("Completed batch with {Success} successes, {Failed} failures", 
+            _logger.LogDebug("Completed batch with {Success} successes, {Failed} failures",
                 batch.Count() - tasks.Count(t => t.IsFaulted), tasks.Count(t => t.IsFaulted));
         }
 
@@ -591,11 +591,11 @@ Answer:";
             {
                 _logger.LogInformation("Reprocessing document {DocumentId}: {FileName}", doc.Id, doc.FileName);
                 await GenerateEmbeddingsAsync(doc.Id);
-                
+
                 doc.IsProcessed = true;
                 doc.ProcessedAt = DateTime.UtcNow;
                 doc.ProcessingError = null;
-                
+
                 reprocessedCount++;
             }
             catch (Exception ex)
@@ -624,28 +624,28 @@ Answer:";
             try
             {
                 var embedding = await GenerateTextEmbeddingAsync(chunk.ChunkText);
-                
+
                 // Store in both formats for backward compatibility and pgvector
                 chunk.Embedding = SerializeEmbedding(embedding);
                 chunk.EmbeddingDimension = embedding.Length;
-                
+
                 // Store as pgvector Vector for efficient database queries
                 chunk.EmbeddingVector = new Vector(embedding);
-                
+
                 return true;
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Attempt {Attempt} failed to generate embedding for chunk {ChunkId}", 
+                _logger.LogWarning(ex, "Attempt {Attempt} failed to generate embedding for chunk {ChunkId}",
                     attempt + 1, chunk.Id);
-                
+
                 if (attempt < _maxRetries - 1)
                 {
                     await Task.Delay(_retryDelayMs * (attempt + 1)); // Exponential backoff
                 }
             }
         }
-        
+
         return false;
     }
 
@@ -655,7 +655,7 @@ Answer:";
         {
             // Try to use Semantic Kernel's embedding service
             var embeddingService = _kernel.Services.GetService(typeof(ITextEmbeddingGenerationService)) as ITextEmbeddingGenerationService;
-            
+
             if (embeddingService != null)
             {
                 var embedding = await embeddingService.GenerateEmbeddingAsync(text);
@@ -685,17 +685,17 @@ Answer:";
         using var sha256 = System.Security.Cryptography.SHA256.Create();
         var textBytes = System.Text.Encoding.UTF8.GetBytes(text);
         var hashBytes = sha256.ComputeHash(textBytes);
-        
+
         const int embeddingDim = 384; // Common embedding dimension
         var embedding = new float[embeddingDim];
-        
+
         // Use hash bytes to seed multiple rounds of hashing for full dimension
         var currentSeed = hashBytes;
         for (int i = 0; i < embeddingDim; i += 32)
         {
             // Generate more bytes by hashing the previous hash
             currentSeed = sha256.ComputeHash(currentSeed);
-            
+
             // Convert bytes to floats
             for (int j = 0; j < 32 && (i + j) < embeddingDim; j++)
             {
@@ -703,7 +703,7 @@ Answer:";
                 embedding[i + j] = (currentSeed[j] / 127.5f) - 1.0f;
             }
         }
-        
+
         // Normalize the vector
         var magnitude = (float)Math.Sqrt(embedding.Sum(x => x * x));
         if (magnitude > 0)
@@ -713,7 +713,7 @@ Answer:";
                 embedding[i] /= magnitude;
             }
         }
-        
+
         return embedding;
     }
 
@@ -735,7 +735,7 @@ Answer:";
             _logger.LogWarning("Empty embedding vector encountered");
             return 0;
         }
-        
+
         if (a.Length != b.Length)
         {
             _logger.LogWarning("Embedding dimension mismatch: {DimA} vs {DimB}", a.Length, b.Length);
@@ -768,7 +768,7 @@ Answer:";
     private async Task<List<DocumentChunk>> KeywordSearchAsync(string query, int topK, List<Guid>? groupIds = null)
     {
         var keywords = query.ToLower().Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
-        
+
         // Build the query incrementally to ensure EF Core can translate it
         var chunksQuery = _context.DocumentChunks
             .Include(c => c.DocumentMetadata)
@@ -779,16 +779,16 @@ Answer:";
         if (keywords.Any())
         {
             IQueryable<DocumentChunk>? keywordQuery = null;
-            
+
             foreach (var keyword in keywords)
             {
                 var localKeyword = keyword; // Capture for closure
                 var currentQuery = _context.DocumentChunks
                     .Where(c => EF.Functions.Like(c.ChunkText.ToLower(), $"%{localKeyword}%"));
-                
+
                 keywordQuery = keywordQuery == null ? currentQuery : keywordQuery.Union(currentQuery);
             }
-            
+
             if (keywordQuery != null)
             {
                 chunksQuery = chunksQuery.Where(c => keywordQuery.Any(kq => kq.Id == c.Id));
@@ -798,7 +798,7 @@ Answer:";
         // Filter by groups if specified
         if (groupIds != null && groupIds.Any())
         {
-            chunksQuery = chunksQuery.Where(c => 
+            chunksQuery = chunksQuery.Where(c =>
                 c.DocumentMetadata.DocumentGroups.Any(dg => groupIds.Contains(dg.ResourceGroupId)));
         }
 
@@ -826,14 +826,14 @@ Answer:";
         var context = new StringBuilder();
         int currentTokens = 0;
         int chunksIncluded = 0;
-        
+
         // Add context from document chunks with token budgeting
         foreach (var chunk in chunks)
         {
             var chunkHeader = $"[From {chunk.DocumentMetadata.FileName}, Page {chunk.PageNumber}]:";
             var chunkText = chunk.ChunkText;
             var chunkTokens = EstimateTokens(chunkHeader + chunkText);
-            
+
             // Check if adding this chunk would exceed budget
             if (currentTokens + chunkTokens > _maxContextTokens)
             {
@@ -850,17 +850,17 @@ Answer:";
                 }
                 break; // Stop adding more chunks
             }
-            
+
             context.AppendLine(chunkHeader);
             context.AppendLine(chunkText);
             context.AppendLine();
             currentTokens += chunkTokens;
             chunksIncluded++;
         }
-        
+
         if (chunksIncluded < chunks.Count)
         {
-            _logger.LogInformation("Token budget: included {Included} of {Total} chunks ({Tokens} tokens used of {Max})", 
+            _logger.LogInformation("Token budget: included {Included} of {Total} chunks ({Tokens} tokens used of {Max})",
                 chunksIncluded, chunks.Count, currentTokens, _maxContextTokens);
         }
 
@@ -881,21 +881,21 @@ Answer:";
             {
                 var groupContextHeader = "--- Additional Context from Groups ---";
                 var headerTokens = EstimateTokens(groupContextHeader);
-                
+
                 if (currentTokens + headerTokens < _maxContextTokens)
                 {
                     context.AppendLine(groupContextHeader);
                     currentTokens += headerTokens;
-                    
+
                     // Add pinned prompts first (they get priority)
                     foreach (var prompt in groupPrompts)
                     {
                         var promptHeader = $"[{prompt.Name}]" + (prompt.IsPinned ? " [PINNED]:" : ":");
                         var promptTokens = EstimateTokens(promptHeader + prompt.PromptText);
-                        
+
                         if (currentTokens + promptTokens > _maxContextTokens)
                             break;
-                            
+
                         context.AppendLine(promptHeader);
                         context.AppendLine(prompt.PromptText);
                         context.AppendLine();
@@ -907,14 +907,14 @@ Answer:";
 
         return context.ToString();
     }
-    
+
     private int EstimateTokens(string text)
     {
         // Rough approximation: ~4 characters per token for English text
         // This is configurable via ApproximateTokensPerChar
         return (int)(text.Length * _tokensPerChar);
     }
-    
+
     private async Task<string> GenerateResponseWithLocalModel(string prompt)
     {
         try
@@ -950,7 +950,7 @@ Answer:";
         try
         {
             _logger.LogInformation("Querying reminders with query: {Query}", query);
-            
+
             // Get all reminders
             var reminders = await _context.RequestHistories
                 .Where(h => h.RequestType == "reminder")
@@ -972,9 +972,9 @@ Answer:";
 
             // Simple keyword matching for reminders
             var relevantReminders = reminders
-                .Where(r => 
+                .Where(r =>
                     r.InputText.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                    query.Split(' ').Any(word => 
+                    query.Split(' ').Any(word =>
                         word.Length > 3 && r.InputText.Contains(word, StringComparison.OrdinalIgnoreCase)))
                 .Take(topK)
                 .ToList();
@@ -989,18 +989,18 @@ Answer:";
             var contextBuilder = new StringBuilder();
             contextBuilder.AppendLine("Your Reminders:");
             contextBuilder.AppendLine();
-            
+
             var sources = new List<DocumentSource>();
             foreach (var reminder in relevantReminders)
             {
                 contextBuilder.AppendLine($"- {reminder.InputText}");
                 contextBuilder.AppendLine($"  (Created: {reminder.Timestamp:yyyy-MM-dd HH:mm})");
                 contextBuilder.AppendLine();
-                
+
                 sources.Add(new DocumentSource
                 {
                     DocumentId = reminder.Id,
-                    FileName = reminder.InputText.Length > 30 
+                    FileName = reminder.InputText.Length > 30
                         ? $"Reminder: {reminder.InputText.Substring(0, 30)}..."
                         : $"Reminder: {reminder.InputText}",
                     PageNumber = 0,
@@ -1010,7 +1010,7 @@ Answer:";
             }
 
             var context = contextBuilder.ToString();
-            
+
             // Generate AI response about the reminders
             var prompt = $@"Based on the user's reminders listed below, answer their question.
 Be helpful and conversational. If they ask about a specific reminder, provide details.
@@ -1052,7 +1052,7 @@ Answer:";
         try
         {
             _logger.LogInformation("Querying documents and reminders with query: {Query}", query);
-            
+
             // Check if query is reminder-specific
             var isReminderQuery = query.Contains("reminder", StringComparison.OrdinalIgnoreCase) ||
                                  query.Contains("remind me", StringComparison.OrdinalIgnoreCase) ||
@@ -1081,7 +1081,7 @@ Answer:";
                 combinedSources.AddRange(documentResult.Sources.Take(Math.Max(0, topK - reminderResult.Sources.Count)));
 
                 var contextBuilder = new StringBuilder();
-                
+
                 if (reminderResult.Sources.Any())
                 {
                     contextBuilder.AppendLine("YOUR REMINDERS:");

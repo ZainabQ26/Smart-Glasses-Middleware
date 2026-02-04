@@ -34,7 +34,7 @@ public class MinioMediaStorageService : IMediaStorageService
             // Ensure bucket exists
             var bucketExistsArgs = new BucketExistsArgs().WithBucket(_bucketName);
             bool found = await _minioClient.BucketExistsAsync(bucketExistsArgs);
-            
+
             if (!found)
             {
                 var makeBucketArgs = new MakeBucketArgs().WithBucket(_bucketName);
@@ -76,7 +76,7 @@ public class MinioMediaStorageService : IMediaStorageService
 
             await _minioClient.GetObjectAsync(getObjectArgs);
             memoryStream.Position = 0;
-            
+
             return memoryStream;
         }
         catch (Exception ex)
@@ -95,7 +95,7 @@ public class MinioMediaStorageService : IMediaStorageService
                 .WithObject(key);
 
             await _minioClient.RemoveObjectAsync(removeObjectArgs);
-            
+
             _logger.LogInformation("Deleted media from MinIO: {Key}", key);
         }
         catch (Exception ex)
@@ -110,10 +110,10 @@ public class MinioMediaStorageService : IMediaStorageService
         using var sha256 = SHA256.Create();
         var originalPosition = fileStream.Position;
         fileStream.Position = 0;
-        
+
         var hash = sha256.ComputeHash(fileStream);
         fileStream.Position = originalPosition;
-        
+
         return Convert.ToHexString(hash);
     }
 
@@ -124,7 +124,7 @@ public class MinioMediaStorageService : IMediaStorageService
             // Ensure bucket exists
             var bucketExistsArgs = new BucketExistsArgs().WithBucket(_bucketName);
             bool found = await _minioClient.BucketExistsAsync(bucketExistsArgs);
-            
+
             if (!found)
             {
                 var makeBucketArgs = new MakeBucketArgs().WithBucket(_bucketName);
