@@ -10,6 +10,7 @@ public class ManagedFile
     public string Label { get; set; } = string.Empty;
     public string ContentType { get; set; } = string.Empty;
     public string StorageKey { get; set; } = string.Empty;
+    public string? ContentHash { get; set; }
     public DateTime UploadedAt { get; set; }
     public long FileSize { get; set; }
     

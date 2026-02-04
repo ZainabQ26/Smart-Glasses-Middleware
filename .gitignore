@@ -106,3 +106,7 @@ Thumbs.db
 
 # Secrets directory (if using docker secrets files locally)
 secrets/
+ 
+# Ignore test result artifacts and large dumps
+tests/**/TestResults/
+*.dmp
