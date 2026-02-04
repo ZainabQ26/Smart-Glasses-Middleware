@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.SemanticKernel;
 using Moq;
 using SmartGlassesMiddleware.Data;
 using SmartGlassesMiddleware.Models;
