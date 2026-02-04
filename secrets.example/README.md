@@ -1,35 +1,38 @@
-secrets.example/
-=================
-Usage
------
+# DEPRECATED: secrets/ Directory
 
-1. Copy the example files into `secrets/` and replace placeholders with real values:
+⚠️ **This directory and the Docker secrets approach has been deprecated.**
 
+## New Configuration Method
+
+All configuration is now managed via a `.env` file in the root directory. This simplifies setup and management.
+
+### Migration Steps
+
+If you were using the old secrets approach:
+
+1. Copy the example environment file:
    ```bash
-   mkdir -p secrets
-   cp -R secrets.example/* secrets/
-   # then edit the files under secrets/
+   cp .env.example .env
    ```
 
-2. Secret filename conventions (simple, no duplicates):
+2. Transfer your secret values from `secrets/` files to the corresponding `.env` variables:
+   - `secrets/postgres_password` → `POSTGRES_PASSWORD` in `.env`
+   - `secrets/minio_access_key` → `MINIO_ACCESS_KEY` in `.env`
+   - `secrets/minio_secret_key` → `MINIO_SECRET_KEY` in `.env`
+   - `secrets/ai_advanced_endpoint` → `AI_ADVANCED_ENDPOINT` in `.env`
 
-   - `postgres_password` — Postgres password (used by Postgres image via `POSTGRES_PASSWORD_FILE` and by the app)
-   - `minio_access_key` — MinIO access key
-   - `minio_secret_key` — MinIO secret key
-   - `ai_advanced_endpoint` — Advanced model endpoint URL
+3. Remove the old `secrets/` directory (optional)
 
-   These names are intentionally simple and unique; the application loads them from `/run/secrets/` and maps them into configuration automatically.
+4. Restart your services: `docker-compose up --build`
 
-3. Start the stack:
+## Why the Change?
 
-   ```bash
-   docker compose up --build
-   ```
+- **Simpler setup**: Single `.env` file instead of multiple secret files
+- **Better developer experience**: Easier to see and manage all settings in one place
+- **Industry standard**: `.env` files are a widely-adopted pattern
+- **Flexibility**: Environment variables can be set via `.env`, shell, or CI/CD without file management
 
-Notes
------
-- `secrets/` is ignored by git; `secrets.example/` is tracked and safe to publish.
-- Do not commit real secrets into the repository.
------
-- `secrets/` is ignored by git; `secrets.example/` is tracked and safe to publish.
-- Do not commit real secrets into the repository.
+## Security Note
+
+The `.env` file is gitignored by default. Never commit `.env` to version control. Only `.env.example` should be committed as a template.
+
