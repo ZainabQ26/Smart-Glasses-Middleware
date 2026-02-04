@@ -58,8 +58,8 @@ public class CacheServiceTests
 
         // Assert
         Assert.NotNull(result);
-        Assert.Equal("Test", result.GetProperty("Name").GetString());
-        Assert.Equal(123, result.GetProperty("Value").GetInt32());
+        Assert.Equal("Test", result!.GetProperty("Name").GetString());
+        Assert.Equal(123, result!.GetProperty("Value").GetInt32());
     }
 
     [Fact]
