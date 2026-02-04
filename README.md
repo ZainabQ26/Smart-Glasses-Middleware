@@ -40,6 +40,14 @@ The easiest way to get started is by using the provided Docker Compose file, whi
 
 ```bash
 # From the repository root
+
+# 1. Copy the example environment file
+cp .env.example .env
+
+# 2. Edit .env and set your configuration values
+# At minimum, update passwords and secrets for security
+
+# 3. Start the services
 docker-compose pull
 docker-compose up --build
 ```
@@ -48,15 +56,42 @@ The API will then be available at `http://localhost:5000`.
 
 ## Configuration
 
-The application is configured via `src/SmartGlassesMiddleware/appsettings.json` and environment variables. Key settings include:
+The application is now configured entirely via a `.env` file for ease of use. All configuration settings are documented in `.env.example`.
 
-- `ConnectionStrings`: For PostgreSQL and Redis.
-- `MinIO`: For MinIO server connection details.
-- `AI`: For configuring Ollama and the advanced AI model endpoints.
-- `RAG`: For tuning the RAG pipeline's behavior (e.g., token limits, embedding settings).
-- `Transcription`: For the server-side transcription service endpoint.
+### Setting up Configuration
 
-Secrets should be managed using Docker secrets or another secure method. The application can read secrets from files in `/run/secrets` and map them to configuration keys. See `Program.cs` for details on the secret mapping logic.
+1. **Copy the example file**: `cp .env.example .env`
+2. **Edit `.env`**: Update the values according to your environment
+3. **Key settings to configure**:
+   - Database credentials (`POSTGRES_PASSWORD`)
+   - MinIO credentials (`MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`)
+   - AI model endpoints (`OLLAMA_ENDPOINT`, `AI_ADVANCED_ENDPOINT`)
+   - Service endpoints (Redis, Transcription, etc.)
+   - Security settings (API keys, CORS origins)
+
+### Configuration Sections
+
+The `.env` file is organized into the following sections:
+
+- **Environment**: ASP.NET environment (Development/Production)
+- **Database**: PostgreSQL connection settings
+- **Redis**: Redis cache configuration
+- **MinIO**: S3-compatible object storage settings
+- **AI Models**: Ollama and advanced model configuration
+- **Transcription**: Speech-to-text service settings
+- **CORS**: Cross-origin request policies
+- **Background Tasks**: Task retention and cleanup settings
+- **Service Timeouts**: Timeout configuration for external services
+- **Rate Limiting**: API rate limiting settings
+- **Metrics**: Monitoring and metrics endpoint protection
+- **RAG**: Retrieval-Augmented Generation pipeline tuning
+- **Logging**: Log level configuration
+
+For detailed descriptions of each setting, see `.env.example`.
+
+### Legacy Configuration Files
+
+The application still uses `appsettings.json` for default values, but **all secrets and environment-specific settings should be in `.env`**. The environment variables from `.env` will override the appsettings.json defaults.
 
 ## API Endpoints
 
