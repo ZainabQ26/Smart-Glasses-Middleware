@@ -33,85 +33,8 @@ using var _preLoggerFactory = LoggerFactory.Create(lb =>
 });
 var _startupLogger = _preLoggerFactory.CreateLogger("Startup");
 
-// Load any Docker secret files from /run/secrets into configuration.
-// Filename convention: use double-underscore to indicate nesting, e.g.
-//   ConnectionStrings__DefaultConnection -> Configuration["ConnectionStrings:DefaultConnection"]
-// This makes it easy to provide any configuration key via a secret file.
-try
-{
-    var secretsPath = "/run/secrets";
-    if (Directory.Exists(secretsPath))
-    {
-        foreach (var file in Directory.GetFiles(secretsPath))
-        {
-            try
-            {
-                var name = Path.GetFileName(file);
-                if (string.IsNullOrWhiteSpace(name)) continue;
-                var key = name.Replace("__", ":");
-                var value = File.ReadAllText(file).Trim();
-                if (!string.IsNullOrEmpty(value))
-                {
-                    builder.Configuration[key] = value;
-                }
-            }
-            catch (Exception ex)
-            {
-                _startupLogger.LogWarning(ex, "Failed to read secret file '{File}'", file);
-            }
-        }
-    }
-}
-catch (Exception ex)
-{
-    _startupLogger.LogWarning(ex, "Error loading secrets");
-}
-
-// Map common simple secret filenames to configuration keys to keep secrets easy to understand
-try
-{
-    // Postgres password: update connection string password
-    var pgPass = builder.Configuration["postgres_password"];
-    if (!string.IsNullOrEmpty(pgPass))
-    {
-        var current = builder.Configuration.GetConnectionString("DefaultConnection")
-                      ?? "Host=localhost;Database=smartglasses;Username=postgres;Password=REPLACE_WITH_ENV_VARIABLE";
-        if (current.IndexOf("Password=", StringComparison.OrdinalIgnoreCase) >= 0)
-        {
-            var parts = current.Split(';').Where(p => !p.TrimStart().StartsWith("Password=", StringComparison.OrdinalIgnoreCase)).ToList();
-            parts.Add($"Password={pgPass}");
-            builder.Configuration["ConnectionStrings:DefaultConnection"] = string.Join(";", parts);
-        }
-        else
-        {
-            builder.Configuration["ConnectionStrings:DefaultConnection"] = current + $";Password={pgPass}";
-        }
-        // remove the raw key to avoid duplication
-        builder.Configuration["postgres_password"] = null;
-    }
-
-    // MinIO keys
-    var minioAccess = builder.Configuration["minio_access_key"];
-    var minioSecret = builder.Configuration["minio_secret_key"];
-    if (!string.IsNullOrEmpty(minioAccess)) builder.Configuration["MinIO:AccessKey"] = minioAccess;
-    if (!string.IsNullOrEmpty(minioSecret)) builder.Configuration["MinIO:SecretKey"] = minioSecret;
-    if (!string.IsNullOrEmpty(minioAccess)) builder.Configuration["minio_access_key"] = null;
-    if (!string.IsNullOrEmpty(minioSecret)) builder.Configuration["minio_secret_key"] = null;
-
-    // Advanced model endpoint (mapped from legacy secret key name if present)
-    var advanced = builder.Configuration["ai_advanced_endpoint"] ?? builder.Configuration["ai_stronger_endpoint"];
-    if (!string.IsNullOrEmpty(advanced))
-    {
-        builder.Configuration["AI:AdvancedModelEndpoint"] = advanced;
-        // remove legacy keys to avoid duplication
-        builder.Configuration["ai_stronger_endpoint"] = null;
-        builder.Configuration["ai_advanced_endpoint"] = null;
-    }
-}
-catch (Exception ex)
-{
-    _startupLogger.LogWarning(ex, "Error mapping secret names");
-}
+// Configuration is now loaded from environment variables (via .env file in docker-compose)
+// No need for Docker secrets file loading since all settings are in .env
 
 // Add services to the container.
 builder.Services.AddControllers();
@@ -455,7 +378,7 @@ try
     
     // Validate database connection string
     var dbConnStr = config.GetConnectionString("DefaultConnection");
-    if (string.IsNullOrWhiteSpace(dbConnStr) || dbConnStr.Contains("SET_IN_secrets"))
+    if (string.IsNullOrWhiteSpace(dbConnStr))
     {
         logger.LogWarning("Database connection string not properly configured. Using default localhost connection.");
     }
@@ -470,8 +393,7 @@ try
     // Validate MinIO configuration
     var minioAccessKey = config["MinIO:AccessKey"];
     var minioSecretKey = config["MinIO:SecretKey"];
-    if (string.IsNullOrWhiteSpace(minioAccessKey) || minioAccessKey.Contains("SET_IN_secrets") ||
-        string.IsNullOrWhiteSpace(minioSecretKey) || minioSecretKey.Contains("SET_IN_secrets"))
+    if (string.IsNullOrWhiteSpace(minioAccessKey) || string.IsNullOrWhiteSpace(minioSecretKey))
     {
         logger.LogWarning("MinIO credentials not properly configured. Using default credentials.");
     }
@@ -688,7 +610,7 @@ app.MapGet("/health", async (IServiceProvider services) =>
     string? ollamaError = null;
     try
     {
-        var ollamaEndpoint = configuration["AI:Endpoint"] ?? "http://ollama:11434";
+        var ollamaEndpoint = configuration["AI:OllamaEndpoint"] ?? "http://ollama:11434";
         using var httpClient = httpClientFactory.CreateClient();
         httpClient.Timeout = TimeSpan.FromSeconds(5);
         var response = await httpClient.GetAsync(ollamaEndpoint);
