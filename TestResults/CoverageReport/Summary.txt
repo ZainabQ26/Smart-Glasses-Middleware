@@ -1,25 +1,25 @@
 Summary
-  Generated on: 02/04/2026 - 17:50:55
-  Coverage date: 02/04/2026 - 17:50:39
+  Generated on: 02/04/2026 - 17:57:20
+  Coverage date: 02/04/2026 - 17:57:11
   Parser: Cobertura
   Assemblies: 1
   Classes: 84
   Files: 62
-  Line coverage: 53.3%
-  Covered lines: 3740
-  Uncovered lines: 3266
+  Line coverage: 53.4%
+  Covered lines: 3746
+  Uncovered lines: 3260
   Coverable lines: 7006
   Total lines: 10553
-  Branch coverage: 50.9% (618 of 1214)
-  Covered branches: 618
+  Branch coverage: 50.9% (619 of 1214)
+  Covered branches: 619
   Total branches: 1214
-  Method coverage: 85.7% (391 of 456)
+  Method coverage: 85.9% (392 of 456)
   Full method coverage: 71.7% (327 of 456)
-  Covered methods: 391
+  Covered methods: 392
   Fully covered methods: 327
   Total methods: 456
 
-SmartGlassesMiddleware                                                  53.3%
+SmartGlassesMiddleware                                                  53.4%
   Microsoft.AspNetCore.OpenApi.Generated                                 0.8%
   Program                                                                 42%
   SmartGlassesMiddleware.Controllers.AddMessageRequest                   100%
@@ -79,7 +79,7 @@ SmartGlassesMiddleware                                                  53.3%
   SmartGlassesMiddleware.Services.DocumentHighlightService              55.4%
   SmartGlassesMiddleware.Services.DocumentHighlightTaskHandler            63%
   SmartGlassesMiddleware.Services.DocumentProcessingBackgroundService   26.6%
-  SmartGlassesMiddleware.Services.DocumentProcessingService             42.3%
+  SmartGlassesMiddleware.Services.DocumentProcessingService             44.9%
   SmartGlassesMiddleware.Services.DocumentQueryTaskHandler              77.2%
   SmartGlassesMiddleware.Services.DocumentSearchTaskHandler             68.5%
   SmartGlassesMiddleware.Services.EditReminderTaskHandler               76.9%
