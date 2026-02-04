@@ -38,11 +38,10 @@ public class MaximumCoverageTests
         var mockServiceProvider = new Mock<IServiceProvider>();
         var mockConfig = new Mock<IConfiguration>();
 
-        // Setup configuration defaults using GetSection().Value method
         mockConfig.Setup(c => c.GetSection("RAG:MaxRetries").Value).Returns("3");
         mockConfig.Setup(c => c.GetSection("RAG:RetryDelayMs").Value).Returns("1000");
         mockConfig.Setup(c => c.GetSection("RAG:MaxContextTokens").Value).Returns("4000");
-        mockConfig.Setup(c => c.GetSection("RAG:MaxLocalModelTokens").Value).Returns("2000");
+        mockConfig.Setup(c => c.GetSection("RAG:MaxLocalModelTokens").Value).Returns("8000");
         mockConfig.Setup(c => c.GetSection("RAG:ApproximateTokensPerChar").Value).Returns("0.25");
         mockConfig.Setup(c => c.GetSection("RAG:EmbeddingBatchSize").Value).Returns("10");
         mockConfig.Setup(c => c.GetSection("RAG:EmbeddingMaxConcurrency").Value).Returns("5");
@@ -72,11 +71,10 @@ public class MaximumCoverageTests
         var mockServiceProvider = new Mock<IServiceProvider>();
         var mockConfig = new Mock<IConfiguration>();
 
-        // Setup configuration defaults using GetSection().Value method
         mockConfig.Setup(c => c.GetSection("RAG:MaxRetries").Value).Returns("3");
         mockConfig.Setup(c => c.GetSection("RAG:RetryDelayMs").Value).Returns("1000");
         mockConfig.Setup(c => c.GetSection("RAG:MaxContextTokens").Value).Returns("4000");
-        mockConfig.Setup(c => c.GetSection("RAG:MaxLocalModelTokens").Value).Returns("2000");
+        mockConfig.Setup(c => c.GetSection("RAG:MaxLocalModelTokens").Value).Returns("8000");
         mockConfig.Setup(c => c.GetSection("RAG:ApproximateTokensPerChar").Value).Returns("0.25");
         mockConfig.Setup(c => c.GetSection("RAG:EmbeddingBatchSize").Value).Returns("10");
         mockConfig.Setup(c => c.GetSection("RAG:EmbeddingMaxConcurrency").Value).Returns("5");
