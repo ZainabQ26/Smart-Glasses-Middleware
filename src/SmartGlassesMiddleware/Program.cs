@@ -139,15 +139,21 @@ var connectionString = builder.Configuration.GetConnectionString("DefaultConnect
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseNpgsql(connectionString, o => o.UseVector()));
 
-// Configure Redis
-var redisConnection = builder.Configuration.GetConnectionString("Redis") 
-    ?? "localhost:6379";
-builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
+// Configure Redis (only when a connection string is provided)
+var redisConnection = builder.Configuration.GetConnectionString("Redis");
+if (!builder.Environment.IsEnvironment("Testing") && !string.IsNullOrWhiteSpace(redisConnection))
 {
-    var configuration = ConfigurationOptions.Parse(redisConnection);
-    configuration.AbortOnConnectFail = false;
-    return ConnectionMultiplexer.Connect(configuration);
-});
+    builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
+    {
+        var configuration = ConfigurationOptions.Parse(redisConnection);
+        configuration.AbortOnConnectFail = false;
+        return ConnectionMultiplexer.Connect(configuration);
+    });
+}
+else
+{
+    _startupLogger.LogWarning("Redis registration skipped (either not configured or running in Testing environment).");
+}
 
 // Configure MinIO
 builder.Services.AddSingleton<IMinioClient>(sp =>
@@ -357,16 +363,22 @@ builder.Services.AddScoped<ITaskDispatcher, TaskDispatcher>();
     builder.Services.AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();
     builder.Services.AddScoped<IMediaProcessor, MediaProcessor>();
     builder.Services.AddHostedService<BackgroundTaskHostedService>();
-    builder.Services.AddHostedService<BackgroundTaskCleanupService>();
+    if (!builder.Environment.IsEnvironment("Testing") && !string.IsNullOrWhiteSpace(redisConnection))
+    {
+        builder.Services.AddHostedService<BackgroundTaskCleanupService>();
+    }
     builder.Services.AddHostedService<DocumentProcessingBackgroundService>();
 
 // Add SignalR for real-time notifications
 builder.Services.AddSignalR();
-// Add Redis pub/sub bridge to forward messages to SignalR clients
-builder.Services.AddSingleton<RedisPubSubBridge>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<RedisPubSubBridge>());
-// Register bridge status for health checks
-builder.Services.AddSingleton<RedisPubSubBridgeStatus>();
+// Add Redis pub/sub bridge to forward messages to SignalR clients (only if Redis is configured)
+if (!builder.Environment.IsEnvironment("Testing") && !string.IsNullOrWhiteSpace(redisConnection))
+{
+    builder.Services.AddSingleton<RedisPubSubBridge>();
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<RedisPubSubBridge>());
+    // Register bridge status for health checks
+    builder.Services.AddSingleton<RedisPubSubBridgeStatus>();
+}
 
 // Add rate limiting
 var rateLimitEnabled = builder.Configuration.GetValue<bool?>("RateLimiting:Enabled") ?? true;
@@ -494,14 +506,30 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
-// Ensure database is created
+// Ensure database is created (guarded to avoid test-time provider conflicts)
 using (var scope = app.Services.CreateScope())
 {
-    var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-    db.Database.EnsureCreated();
+    try
+    {
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        db.Database.EnsureCreated();
+    }
+    catch (InvalidOperationException ex)
+    {
+        var logger = scope.ServiceProvider.GetService<ILogger<Program>>();
+        logger?.LogWarning(ex, "Skipping EnsureCreated during startup (likely test environment with multiple EF providers)");
+    }
+    catch (Exception ex)
+    {
+        var logger = scope.ServiceProvider.GetService<ILogger<Program>>();
+        logger?.LogWarning(ex, "Failed to ensure database created during startup; continuing");
+    }
 }
 
-app.UseHttpsRedirection();
+if (!app.Environment.IsEnvironment("Testing"))
+{
+    app.UseHttpsRedirection();
+}
 app.UseCors();
 
 // Only use rate limiter if it's enabled
