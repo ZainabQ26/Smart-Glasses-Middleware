@@ -1,25 +1,25 @@
 Summary
-  Generated on: 02/04/2026 - 16:58:20
-  Coverage date: 02/04/2026 - 16:57:56
+  Generated on: 02/04/2026 - 17:02:55
+  Coverage date: 02/04/2026 - 17:02:48
   Parser: Cobertura
   Assemblies: 1
   Classes: 84
   Files: 62
-  Line coverage: 49.4%
-  Covered lines: 3461
-  Uncovered lines: 3545
+  Line coverage: 52.8%
+  Covered lines: 3705
+  Uncovered lines: 3301
   Coverable lines: 7006
   Total lines: 10553
-  Branch coverage: 46.3% (563 of 1214)
-  Covered branches: 563
+  Branch coverage: 50.6% (615 of 1214)
+  Covered branches: 615
   Total branches: 1214
-  Method coverage: 79.1% (361 of 456)
-  Full method coverage: 66.4% (303 of 456)
-  Covered methods: 361
-  Fully covered methods: 303
+  Method coverage: 83.5% (381 of 456)
+  Full method coverage: 69.2% (316 of 456)
+  Covered methods: 381
+  Fully covered methods: 316
   Total methods: 456
 
-SmartGlassesMiddleware                                                  49.4%
+SmartGlassesMiddleware                                                  52.8%
   Microsoft.AspNetCore.OpenApi.Generated                                 0.8%
   Program                                                                 42%
   SmartGlassesMiddleware.Controllers.AddMessageRequest                   100%
@@ -66,22 +66,22 @@ SmartGlassesMiddleware                                                  49.4%
   SmartGlassesMiddleware.Models.ResourceGroup                            100%
   SmartGlassesMiddleware.Models.TaskRequest                                0%
   SmartGlassesMiddleware.Models.TaskResponse                               0%
-  SmartGlassesMiddleware.Services.AdvancedTaskHandler                      0%
+  SmartGlassesMiddleware.Services.AdvancedTaskHandler                   91.8%
   SmartGlassesMiddleware.Services.AssemblyExtensions                      75%
   SmartGlassesMiddleware.Services.BackgroundTaskCleanupService          36.8%
   SmartGlassesMiddleware.Services.BackgroundTaskHostedService             40%
-  SmartGlassesMiddleware.Services.BackgroundTaskQueue                   14.8%
+  SmartGlassesMiddleware.Services.BackgroundTaskQueue                     68%
   SmartGlassesMiddleware.Services.ConfigurationReloadToken               100%
   SmartGlassesMiddleware.Services.ConfigurationSection                  85.7%
   SmartGlassesMiddleware.Services.ConfigurationWrapper                   100%
   SmartGlassesMiddleware.Services.ConversationService                    100%
   SmartGlassesMiddleware.Services.DeleteReminderTaskHandler             75.9%
   SmartGlassesMiddleware.Services.DocumentHighlightService              55.4%
-  SmartGlassesMiddleware.Services.DocumentHighlightTaskHandler             0%
+  SmartGlassesMiddleware.Services.DocumentHighlightTaskHandler            63%
   SmartGlassesMiddleware.Services.DocumentProcessingBackgroundService   26.6%
   SmartGlassesMiddleware.Services.DocumentProcessingService             42.3%
-  SmartGlassesMiddleware.Services.DocumentQueryTaskHandler                 0%
-  SmartGlassesMiddleware.Services.DocumentSearchTaskHandler                0%
+  SmartGlassesMiddleware.Services.DocumentQueryTaskHandler              77.2%
+  SmartGlassesMiddleware.Services.DocumentSearchTaskHandler             68.5%
   SmartGlassesMiddleware.Services.EditReminderTaskHandler               75.3%
   SmartGlassesMiddleware.Services.EmptyDisposable                        100%
   SmartGlassesMiddleware.Services.HistoryService                        78.4%
@@ -92,7 +92,7 @@ SmartGlassesMiddleware                                                  49.4%
   SmartGlassesMiddleware.Services.MetricsSummary                         100%
   SmartGlassesMiddleware.Services.MinioMediaStorageService              15.2%
   SmartGlassesMiddleware.Services.OCRRetryTaskHandler                     76%
-  SmartGlassesMiddleware.Services.OCRTaskHandler                           0%
+  SmartGlassesMiddleware.Services.OCRTaskHandler                         100%
   SmartGlassesMiddleware.Services.OllamaAIService                       10.5%
   SmartGlassesMiddleware.Services.RagService                            79.3%
   SmartGlassesMiddleware.Services.RAGService                            41.9%
@@ -103,4 +103,4 @@ SmartGlassesMiddleware                                                  49.4%
   SmartGlassesMiddleware.Services.TaskDispatcher                         100%
   SmartGlassesMiddleware.Services.TimeTaskHandler                        100%
   System.Runtime.CompilerServices                                          0%
-  TemplateTaskHandler                                                      0%
+  TemplateTaskHandler                                                    100%
