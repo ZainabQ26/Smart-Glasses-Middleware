@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<coverage line-rate="0.5318" branch-rate="0.496" version="1.9" timestamp="1770226398" lines-covered="3726" lines-valid="7006" branches-covered="621" branches-valid="1252">
+<coverage line-rate="0.5338" branch-rate="0.496" version="1.9" timestamp="1770227029" lines-covered="3740" lines-valid="7006" branches-covered="621" branches-valid="1252">
   <sources>
     <source>/home/runner/work/Smart-Glasses-Middleware/Smart-Glasses-Middleware/</source>
   </sources>
   <packages>
-    <package name="SmartGlassesMiddleware" line-rate="0.5318" branch-rate="0.496" complexity="1626">
+    <package name="SmartGlassesMiddleware" line-rate="0.5338" branch-rate="0.496" complexity="1626">
       <classes>
         <class name="Program" filename="src/SmartGlassesMiddleware/Program.cs" line-rate="0.4201" branch-rate="0.42979999999999996" complexity="116">
           <methods>
@@ -6432,38 +6432,38 @@
           <methods>
             <method name=".ctor" signature="(SmartGlassesMiddleware.Data.ApplicationDbContext,Microsoft.Extensions.Logging.ILogger`1&lt;SmartGlassesMiddleware.Services.HistoryService&gt;)" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="22" hits="21" branch="False" />
-                <line number="23" hits="21" branch="False" />
-                <line number="24" hits="21" branch="False" />
-                <line number="25" hits="21" branch="False" />
-                <line number="26" hits="21" branch="False" />
+                <line number="22" hits="31" branch="False" />
+                <line number="23" hits="31" branch="False" />
+                <line number="24" hits="31" branch="False" />
+                <line number="25" hits="31" branch="False" />
+                <line number="26" hits="31" branch="False" />
               </lines>
             </method>
           </methods>
           <lines>
-            <line number="22" hits="21" branch="False" />
-            <line number="23" hits="21" branch="False" />
-            <line number="24" hits="21" branch="False" />
-            <line number="25" hits="21" branch="False" />
-            <line number="26" hits="21" branch="False" />
+            <line number="22" hits="31" branch="False" />
+            <line number="23" hits="31" branch="False" />
+            <line number="24" hits="31" branch="False" />
+            <line number="25" hits="31" branch="False" />
+            <line number="26" hits="31" branch="False" />
           </lines>
         </class>
         <class name="SmartGlassesMiddleware.Services.HistoryService/&lt;DeleteReminderAsync&gt;d__8" filename="src/SmartGlassesMiddleware/Services/HistoryService.cs" line-rate="0.85" branch-rate="1" complexity="4">
           <methods>
             <method name="MoveNext" signature="()" line-rate="0.85" branch-rate="1" complexity="4">
               <lines>
-                <line number="147" hits="5" branch="False" />
-                <line number="149" hits="5" branch="False" />
-                <line number="150" hits="5" branch="False" />
-                <line number="152" hits="5" branch="True" condition-coverage="100% (2/2)">
+                <line number="147" hits="7" branch="False" />
+                <line number="149" hits="7" branch="False" />
+                <line number="150" hits="7" branch="False" />
+                <line number="152" hits="7" branch="True" condition-coverage="100% (2/2)">
                   <conditions>
                     <condition number="208" type="jump" coverage="100%" />
                   </conditions>
                 </line>
-                <line number="153" hits="2" branch="False" />
-                <line number="154" hits="2" branch="False" />
-                <line number="155" hits="2" branch="False" />
-                <line number="158" hits="3" branch="True" condition-coverage="100% (2/2)">
+                <line number="153" hits="3" branch="False" />
+                <line number="154" hits="3" branch="False" />
+                <line number="155" hits="3" branch="False" />
+                <line number="158" hits="4" branch="True" condition-coverage="100% (2/2)">
                   <conditions>
                     <condition number="285" type="jump" coverage="100%" />
                   </conditions>
@@ -6471,31 +6471,31 @@
                 <line number="159" hits="1" branch="False" />
                 <line number="160" hits="1" branch="False" />
                 <line number="161" hits="1" branch="False" />
-                <line number="164" hits="2" branch="False" />
-                <line number="165" hits="2" branch="False" />
-                <line number="167" hits="2" branch="False" />
-                <line number="168" hits="2" branch="False" />
+                <line number="164" hits="3" branch="False" />
+                <line number="165" hits="3" branch="False" />
+                <line number="167" hits="3" branch="False" />
+                <line number="168" hits="3" branch="False" />
                 <line number="170" hits="1" branch="False" />
                 <line number="171" hits="0" branch="False" />
                 <line number="172" hits="0" branch="False" />
                 <line number="173" hits="0" branch="False" />
-                <line number="175" hits="4" branch="False" />
+                <line number="175" hits="6" branch="False" />
               </lines>
             </method>
           </methods>
           <lines>
-            <line number="147" hits="5" branch="False" />
-            <line number="149" hits="5" branch="False" />
-            <line number="150" hits="5" branch="False" />
-            <line number="152" hits="5" branch="True" condition-coverage="100% (2/2)">
+            <line number="147" hits="7" branch="False" />
+            <line number="149" hits="7" branch="False" />
+            <line number="150" hits="7" branch="False" />
+            <line number="152" hits="7" branch="True" condition-coverage="100% (2/2)">
               <conditions>
                 <condition number="208" type="jump" coverage="100%" />
               </conditions>
             </line>
-            <line number="153" hits="2" branch="False" />
-            <line number="154" hits="2" branch="False" />
-            <line number="155" hits="2" branch="False" />
-            <line number="158" hits="3" branch="True" condition-coverage="100% (2/2)">
+            <line number="153" hits="3" branch="False" />
+            <line number="154" hits="3" branch="False" />
+            <line number="155" hits="3" branch="False" />
+            <line number="158" hits="4" branch="True" condition-coverage="100% (2/2)">
               <conditions>
                 <condition number="285" type="jump" coverage="100%" />
               </conditions>
@@ -6503,50 +6503,50 @@
             <line number="159" hits="1" branch="False" />
             <line number="160" hits="1" branch="False" />
             <line number="161" hits="1" branch="False" />
-            <line number="164" hits="2" branch="False" />
-            <line number="165" hits="2" branch="False" />
-            <line number="167" hits="2" branch="False" />
-            <line number="168" hits="2" branch="False" />
+            <line number="164" hits="3" branch="False" />
+            <line number="165" hits="3" branch="False" />
+            <line number="167" hits="3" branch="False" />
+            <line number="168" hits="3" branch="False" />
             <line number="170" hits="1" branch="False" />
             <line number="171" hits="0" branch="False" />
             <line number="172" hits="0" branch="False" />
             <line number="173" hits="0" branch="False" />
-            <line number="175" hits="4" branch="False" />
+            <line number="175" hits="6" branch="False" />
           </lines>
         </class>
         <class name="SmartGlassesMiddleware.Services.HistoryService/&lt;GetHistoryByIdAsync&gt;d__5" filename="src/SmartGlassesMiddleware/Services/HistoryService.cs" line-rate="0.5" branch-rate="1" complexity="1">
           <methods>
             <method name="MoveNext" signature="()" line-rate="0.5" branch-rate="1" complexity="1">
               <lines>
-                <line number="65" hits="3" branch="False" />
-                <line number="67" hits="3" branch="False" />
-                <line number="68" hits="3" branch="False" />
+                <line number="65" hits="5" branch="False" />
+                <line number="67" hits="5" branch="False" />
+                <line number="68" hits="5" branch="False" />
                 <line number="70" hits="0" branch="False" />
                 <line number="71" hits="0" branch="False" />
                 <line number="72" hits="0" branch="False" />
                 <line number="73" hits="0" branch="False" />
-                <line number="75" hits="3" branch="False" />
+                <line number="75" hits="5" branch="False" />
               </lines>
             </method>
           </methods>
           <lines>
-            <line number="65" hits="3" branch="False" />
-            <line number="67" hits="3" branch="False" />
-            <line number="68" hits="3" branch="False" />
+            <line number="65" hits="5" branch="False" />
+            <line number="67" hits="5" branch="False" />
+            <line number="68" hits="5" branch="False" />
             <line number="70" hits="0" branch="False" />
             <line number="71" hits="0" branch="False" />
             <line number="72" hits="0" branch="False" />
             <line number="73" hits="0" branch="False" />
-            <line number="75" hits="3" branch="False" />
+            <line number="75" hits="5" branch="False" />
           </lines>
         </class>
         <class name="SmartGlassesMiddleware.Services.HistoryService/&lt;GetHistoryByTypeAsync&gt;d__6" filename="src/SmartGlassesMiddleware/Services/HistoryService.cs" line-rate="0.75" branch-rate="1" complexity="2">
           <methods>
             <method name="MoveNext" signature="()" line-rate="0.75" branch-rate="1" complexity="2">
               <lines>
-                <line number="78" hits="6" branch="False" />
-                <line number="80" hits="6" branch="False" />
-                <line number="81" hits="6" branch="True" condition-coverage="100% (2/2)">
+                <line number="78" hits="7" branch="False" />
+                <line number="80" hits="7" branch="False" />
+                <line number="81" hits="7" branch="True" condition-coverage="100% (2/2)">
                   <conditions>
                     <condition number="73" type="jump" coverage="100%" />
                   </conditions>
@@ -6554,23 +6554,23 @@
                 <line number="82" hits="2" branch="False" />
                 <line number="83" hits="2" branch="False" />
                 <line number="84" hits="2" branch="False" />
-                <line number="87" hits="4" branch="False" />
-                <line number="88" hits="4" branch="False" />
-                <line number="89" hits="4" branch="False" />
-                <line number="90" hits="4" branch="False" />
-                <line number="91" hits="4" branch="False" />
+                <line number="87" hits="5" branch="False" />
+                <line number="88" hits="5" branch="False" />
+                <line number="89" hits="5" branch="False" />
+                <line number="90" hits="5" branch="False" />
+                <line number="91" hits="5" branch="False" />
                 <line number="93" hits="0" branch="False" />
                 <line number="94" hits="0" branch="False" />
                 <line number="95" hits="0" branch="False" />
                 <line number="96" hits="0" branch="False" />
-                <line number="98" hits="6" branch="False" />
+                <line number="98" hits="7" branch="False" />
               </lines>
             </method>
           </methods>
           <lines>
-            <line number="78" hits="6" branch="False" />
-            <line number="80" hits="6" branch="False" />
-            <line number="81" hits="6" branch="True" condition-coverage="100% (2/2)">
+            <line number="78" hits="7" branch="False" />
+            <line number="80" hits="7" branch="False" />
+            <line number="81" hits="7" branch="True" condition-coverage="100% (2/2)">
               <conditions>
                 <condition number="73" type="jump" coverage="100%" />
               </conditions>
@@ -6578,93 +6578,93 @@
             <line number="82" hits="2" branch="False" />
             <line number="83" hits="2" branch="False" />
             <line number="84" hits="2" branch="False" />
-            <line number="87" hits="4" branch="False" />
-            <line number="88" hits="4" branch="False" />
-            <line number="89" hits="4" branch="False" />
-            <line number="90" hits="4" branch="False" />
-            <line number="91" hits="4" branch="False" />
+            <line number="87" hits="5" branch="False" />
+            <line number="88" hits="5" branch="False" />
+            <line number="89" hits="5" branch="False" />
+            <line number="90" hits="5" branch="False" />
+            <line number="91" hits="5" branch="False" />
             <line number="93" hits="0" branch="False" />
             <line number="94" hits="0" branch="False" />
             <line number="95" hits="0" branch="False" />
             <line number="96" hits="0" branch="False" />
-            <line number="98" hits="6" branch="False" />
+            <line number="98" hits="7" branch="False" />
           </lines>
         </class>
         <class name="SmartGlassesMiddleware.Services.HistoryService/&lt;GetRecentHistoryAsync&gt;d__4" filename="src/SmartGlassesMiddleware/Services/HistoryService.cs" line-rate="0.6363" branch-rate="1" complexity="1">
           <methods>
             <method name="MoveNext" signature="()" line-rate="0.6363" branch-rate="1" complexity="1">
               <lines>
-                <line number="49" hits="2" branch="False" />
-                <line number="51" hits="2" branch="False" />
-                <line number="52" hits="2" branch="False" />
-                <line number="53" hits="2" branch="False" />
-                <line number="54" hits="2" branch="False" />
-                <line number="55" hits="2" branch="False" />
+                <line number="49" hits="5" branch="False" />
+                <line number="51" hits="5" branch="False" />
+                <line number="52" hits="5" branch="False" />
+                <line number="53" hits="5" branch="False" />
+                <line number="54" hits="5" branch="False" />
+                <line number="55" hits="5" branch="False" />
                 <line number="57" hits="0" branch="False" />
                 <line number="58" hits="0" branch="False" />
                 <line number="59" hits="0" branch="False" />
                 <line number="60" hits="0" branch="False" />
-                <line number="62" hits="2" branch="False" />
+                <line number="62" hits="5" branch="False" />
               </lines>
             </method>
           </methods>
           <lines>
-            <line number="49" hits="2" branch="False" />
-            <line number="51" hits="2" branch="False" />
-            <line number="52" hits="2" branch="False" />
-            <line number="53" hits="2" branch="False" />
-            <line number="54" hits="2" branch="False" />
-            <line number="55" hits="2" branch="False" />
+            <line number="49" hits="5" branch="False" />
+            <line number="51" hits="5" branch="False" />
+            <line number="52" hits="5" branch="False" />
+            <line number="53" hits="5" branch="False" />
+            <line number="54" hits="5" branch="False" />
+            <line number="55" hits="5" branch="False" />
             <line number="57" hits="0" branch="False" />
             <line number="58" hits="0" branch="False" />
             <line number="59" hits="0" branch="False" />
             <line number="60" hits="0" branch="False" />
-            <line number="62" hits="2" branch="False" />
+            <line number="62" hits="5" branch="False" />
           </lines>
         </class>
         <class name="SmartGlassesMiddleware.Services.HistoryService/&lt;SaveRequestAsync&gt;d__3" filename="src/SmartGlassesMiddleware/Services/HistoryService.cs" line-rate="0.6923" branch-rate="1" complexity="1">
           <methods>
             <method name="MoveNext" signature="()" line-rate="0.6923" branch-rate="1" complexity="1">
               <lines>
-                <line number="29" hits="33" branch="False" />
-                <line number="31" hits="33" branch="False" />
-                <line number="32" hits="33" branch="False" />
-                <line number="33" hits="33" branch="False" />
-                <line number="35" hits="33" branch="False" />
-                <line number="36" hits="33" branch="False" />
-                <line number="38" hits="33" branch="False" />
-                <line number="39" hits="33" branch="False" />
+                <line number="29" hits="56" branch="False" />
+                <line number="31" hits="56" branch="False" />
+                <line number="32" hits="56" branch="False" />
+                <line number="33" hits="56" branch="False" />
+                <line number="35" hits="56" branch="False" />
+                <line number="36" hits="56" branch="False" />
+                <line number="38" hits="56" branch="False" />
+                <line number="39" hits="56" branch="False" />
                 <line number="41" hits="0" branch="False" />
                 <line number="42" hits="0" branch="False" />
                 <line number="43" hits="0" branch="False" />
                 <line number="44" hits="0" branch="False" />
-                <line number="46" hits="33" branch="False" />
+                <line number="46" hits="56" branch="False" />
               </lines>
             </method>
           </methods>
           <lines>
-            <line number="29" hits="33" branch="False" />
-            <line number="31" hits="33" branch="False" />
-            <line number="32" hits="33" branch="False" />
-            <line number="33" hits="33" branch="False" />
-            <line number="35" hits="33" branch="False" />
-            <line number="36" hits="33" branch="False" />
-            <line number="38" hits="33" branch="False" />
-            <line number="39" hits="33" branch="False" />
+            <line number="29" hits="56" branch="False" />
+            <line number="31" hits="56" branch="False" />
+            <line number="32" hits="56" branch="False" />
+            <line number="33" hits="56" branch="False" />
+            <line number="35" hits="56" branch="False" />
+            <line number="36" hits="56" branch="False" />
+            <line number="38" hits="56" branch="False" />
+            <line number="39" hits="56" branch="False" />
             <line number="41" hits="0" branch="False" />
             <line number="42" hits="0" branch="False" />
             <line number="43" hits="0" branch="False" />
             <line number="44" hits="0" branch="False" />
-            <line number="46" hits="33" branch="False" />
+            <line number="46" hits="56" branch="False" />
           </lines>
         </class>
         <class name="SmartGlassesMiddleware.Services.HistoryService/&lt;UpdateReminderAsync&gt;d__7" filename="src/SmartGlassesMiddleware/Services/HistoryService.cs" line-rate="0.8965000000000001" branch-rate="1" complexity="8">
           <methods>
             <method name="MoveNext" signature="()" line-rate="0.8965000000000001" branch-rate="1" complexity="8">
               <lines>
-                <line number="101" hits="6" branch="False" />
-                <line number="103" hits="6" branch="False" />
-                <line number="104" hits="6" branch="True" condition-coverage="100% (2/2)">
+                <line number="101" hits="8" branch="False" />
+                <line number="103" hits="8" branch="False" />
+                <line number="104" hits="8" branch="True" condition-coverage="100% (2/2)">
                   <conditions>
                     <condition number="52" type="jump" coverage="100%" />
                   </conditions>
@@ -6672,7 +6672,7 @@
                 <line number="105" hits="1" branch="False" />
                 <line number="106" hits="1" branch="False" />
                 <line number="107" hits="1" branch="False" />
-                <line number="110" hits="5" branch="True" condition-coverage="100% (2/2)">
+                <line number="110" hits="7" branch="True" condition-coverage="100% (2/2)">
                   <conditions>
                     <condition number="133" type="jump" coverage="100%" />
                   </conditions>
@@ -6680,16 +6680,16 @@
                 <line number="111" hits="1" branch="False" />
                 <line number="112" hits="1" branch="False" />
                 <line number="113" hits="1" branch="False" />
-                <line number="116" hits="4" branch="False" />
-                <line number="118" hits="4" branch="True" condition-coverage="100% (2/2)">
+                <line number="116" hits="6" branch="False" />
+                <line number="118" hits="6" branch="True" condition-coverage="100% (2/2)">
                   <conditions>
                     <condition number="370" type="jump" coverage="100%" />
                   </conditions>
                 </line>
-                <line number="119" hits="1" branch="False" />
-                <line number="120" hits="1" branch="False" />
-                <line number="121" hits="1" branch="False" />
-                <line number="124" hits="3" branch="True" condition-coverage="100% (2/2)">
+                <line number="119" hits="2" branch="False" />
+                <line number="120" hits="2" branch="False" />
+                <line number="121" hits="2" branch="False" />
+                <line number="124" hits="4" branch="True" condition-coverage="100% (2/2)">
                   <conditions>
                     <condition number="447" type="jump" coverage="100%" />
                   </conditions>
@@ -6697,23 +6697,23 @@
                 <line number="125" hits="1" branch="False" />
                 <line number="126" hits="1" branch="False" />
                 <line number="127" hits="1" branch="False" />
-                <line number="131" hits="2" branch="False" />
-                <line number="132" hits="2" branch="False" />
-                <line number="134" hits="2" branch="False" />
-                <line number="136" hits="2" branch="False" />
-                <line number="137" hits="2" branch="False" />
+                <line number="131" hits="3" branch="False" />
+                <line number="132" hits="3" branch="False" />
+                <line number="134" hits="3" branch="False" />
+                <line number="136" hits="3" branch="False" />
+                <line number="137" hits="3" branch="False" />
                 <line number="139" hits="3" branch="False" />
                 <line number="140" hits="0" branch="False" />
                 <line number="141" hits="0" branch="False" />
                 <line number="142" hits="0" branch="False" />
-                <line number="144" hits="3" branch="False" />
+                <line number="144" hits="5" branch="False" />
               </lines>
             </method>
           </methods>
           <lines>
-            <line number="101" hits="6" branch="False" />
-            <line number="103" hits="6" branch="False" />
-            <line number="104" hits="6" branch="True" condition-coverage="100% (2/2)">
+            <line number="101" hits="8" branch="False" />
+            <line number="103" hits="8" branch="False" />
+            <line number="104" hits="8" branch="True" condition-coverage="100% (2/2)">
               <conditions>
                 <condition number="52" type="jump" coverage="100%" />
               </conditions>
@@ -6721,7 +6721,7 @@
             <line number="105" hits="1" branch="False" />
             <line number="106" hits="1" branch="False" />
             <line number="107" hits="1" branch="False" />
-            <line number="110" hits="5" branch="True" condition-coverage="100% (2/2)">
+            <line number="110" hits="7" branch="True" condition-coverage="100% (2/2)">
               <conditions>
                 <condition number="133" type="jump" coverage="100%" />
               </conditions>
@@ -6729,16 +6729,16 @@
             <line number="111" hits="1" branch="False" />
             <line number="112" hits="1" branch="False" />
             <line number="113" hits="1" branch="False" />
-            <line number="116" hits="4" branch="False" />
-            <line number="118" hits="4" branch="True" condition-coverage="100% (2/2)">
+            <line number="116" hits="6" branch="False" />
+            <line number="118" hits="6" branch="True" condition-coverage="100% (2/2)">
               <conditions>
                 <condition number="370" type="jump" coverage="100%" />
               </conditions>
             </line>
-            <line number="119" hits="1" branch="False" />
-            <line number="120" hits="1" branch="False" />
-            <line number="121" hits="1" branch="False" />
-            <line number="124" hits="3" branch="True" condition-coverage="100% (2/2)">
+            <line number="119" hits="2" branch="False" />
+            <line number="120" hits="2" branch="False" />
+            <line number="121" hits="2" branch="False" />
+            <line number="124" hits="4" branch="True" condition-coverage="100% (2/2)">
               <conditions>
                 <condition number="447" type="jump" coverage="100%" />
               </conditions>
@@ -6746,16 +6746,16 @@
             <line number="125" hits="1" branch="False" />
             <line number="126" hits="1" branch="False" />
             <line number="127" hits="1" branch="False" />
-            <line number="131" hits="2" branch="False" />
-            <line number="132" hits="2" branch="False" />
-            <line number="134" hits="2" branch="False" />
-            <line number="136" hits="2" branch="False" />
-            <line number="137" hits="2" branch="False" />
+            <line number="131" hits="3" branch="False" />
+            <line number="132" hits="3" branch="False" />
+            <line number="134" hits="3" branch="False" />
+            <line number="136" hits="3" branch="False" />
+            <line number="137" hits="3" branch="False" />
             <line number="139" hits="3" branch="False" />
             <line number="140" hits="0" branch="False" />
             <line number="141" hits="0" branch="False" />
             <line number="142" hits="0" branch="False" />
-            <line number="144" hits="3" branch="False" />
+            <line number="144" hits="5" branch="False" />
           </lines>
         </class>
         <class name="SmartGlassesMiddleware.Services.MediaProcessor" filename="src/SmartGlassesMiddleware/Services/MediaProcessor.cs" line-rate="1" branch-rate="1" complexity="1">
@@ -10770,11 +10770,11 @@
             <line number="63" hits="4" branch="False" />
           </lines>
         </class>
-        <class name="SmartGlassesMiddleware.Services.DeleteReminderTaskHandler" filename="tasks/DeleteReminderTaskHandler.cs" line-rate="0.9166" branch-rate="1" complexity="3">
+        <class name="SmartGlassesMiddleware.Services.DeleteReminderTaskHandler" filename="tasks/DeleteReminderTaskHandler.cs" line-rate="1" branch-rate="1" complexity="3">
           <methods>
-            <method name="get_Name" signature="()" line-rate="0" branch-rate="1" complexity="1">
+            <method name="get_Name" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="11" hits="0" branch="False" />
+                <line number="11" hits="1" branch="False" />
               </lines>
             </method>
             <method name="ParseDeleteCommand" signature="(System.String)" line-rate="1" branch-rate="1" complexity="1">
@@ -10789,27 +10789,27 @@
             </method>
             <method name=".ctor" signature="(SmartGlassesMiddleware.Services.IHistoryService,Microsoft.Extensions.Logging.ILogger`1&lt;SmartGlassesMiddleware.Services.DeleteReminderTaskHandler&gt;)" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="13" hits="5" branch="False" />
-                <line number="14" hits="5" branch="False" />
-                <line number="15" hits="5" branch="False" />
-                <line number="16" hits="5" branch="False" />
-                <line number="17" hits="5" branch="False" />
+                <line number="13" hits="7" branch="False" />
+                <line number="14" hits="7" branch="False" />
+                <line number="15" hits="7" branch="False" />
+                <line number="16" hits="7" branch="False" />
+                <line number="17" hits="7" branch="False" />
               </lines>
             </method>
           </methods>
           <lines>
-            <line number="11" hits="0" branch="False" />
+            <line number="11" hits="1" branch="False" />
             <line number="93" hits="3" branch="False" />
             <line number="95" hits="3" branch="False" />
             <line number="96" hits="3" branch="False" />
             <line number="99" hits="3" branch="False" />
             <line number="101" hits="3" branch="False" />
             <line number="102" hits="3" branch="False" />
-            <line number="13" hits="5" branch="False" />
-            <line number="14" hits="5" branch="False" />
-            <line number="15" hits="5" branch="False" />
-            <line number="16" hits="5" branch="False" />
-            <line number="17" hits="5" branch="False" />
+            <line number="13" hits="7" branch="False" />
+            <line number="14" hits="7" branch="False" />
+            <line number="15" hits="7" branch="False" />
+            <line number="16" hits="7" branch="False" />
+            <line number="17" hits="7" branch="False" />
           </lines>
         </class>
         <class name="SmartGlassesMiddleware.Services.DeleteReminderTaskHandler/&lt;&gt;c" filename="tasks/DeleteReminderTaskHandler.cs" line-rate="1" branch-rate="1" complexity="2">
@@ -10846,16 +10846,16 @@
           <methods>
             <method name="MoveNext" signature="()" line-rate="0.6923" branch-rate="0.8332999999999999" complexity="12">
               <lines>
-                <line number="20" hits="5" branch="False" />
-                <line number="22" hits="5" branch="False" />
-                <line number="23" hits="5" branch="True" condition-coverage="100% (2/2)">
+                <line number="20" hits="6" branch="False" />
+                <line number="22" hits="6" branch="False" />
+                <line number="23" hits="6" branch="True" condition-coverage="100% (2/2)">
                   <conditions>
                     <condition number="63" type="jump" coverage="100%" />
                   </conditions>
                 </line>
-                <line number="24" hits="1" branch="False" />
-                <line number="25" hits="1" branch="False" />
-                <line number="26" hits="1" branch="False" />
+                <line number="24" hits="2" branch="False" />
+                <line number="25" hits="2" branch="False" />
+                <line number="26" hits="2" branch="False" />
                 <line number="37" hits="4" branch="True" condition-coverage="100% (2/2)">
                   <conditions>
                     <condition number="123" type="jump" coverage="100%" />
@@ -10908,21 +10908,21 @@
                 <line number="86" hits="0" branch="False" />
                 <line number="87" hits="0" branch="False" />
                 <line number="88" hits="0" branch="False" />
-                <line number="90" hits="5" branch="False" />
+                <line number="90" hits="6" branch="False" />
               </lines>
             </method>
           </methods>
           <lines>
-            <line number="20" hits="5" branch="False" />
-            <line number="22" hits="5" branch="False" />
-            <line number="23" hits="5" branch="True" condition-coverage="100% (2/2)">
+            <line number="20" hits="6" branch="False" />
+            <line number="22" hits="6" branch="False" />
+            <line number="23" hits="6" branch="True" condition-coverage="100% (2/2)">
               <conditions>
                 <condition number="63" type="jump" coverage="100%" />
               </conditions>
             </line>
-            <line number="24" hits="1" branch="False" />
-            <line number="25" hits="1" branch="False" />
-            <line number="26" hits="1" branch="False" />
+            <line number="24" hits="2" branch="False" />
+            <line number="25" hits="2" branch="False" />
+            <line number="26" hits="2" branch="False" />
             <line number="37" hits="4" branch="True" condition-coverage="100% (2/2)">
               <conditions>
                 <condition number="123" type="jump" coverage="100%" />
@@ -10975,7 +10975,7 @@
             <line number="86" hits="0" branch="False" />
             <line number="87" hits="0" branch="False" />
             <line number="88" hits="0" branch="False" />
-            <line number="90" hits="5" branch="False" />
+            <line number="90" hits="6" branch="False" />
           </lines>
         </class>
         <class name="SmartGlassesMiddleware.Services.DocumentHighlightTaskHandler" filename="tasks/DocumentHighlightTaskHandler.cs" line-rate="1" branch-rate="1" complexity="2">
@@ -11618,11 +11618,11 @@
             <line number="110" hits="2" branch="False" />
           </lines>
         </class>
-        <class name="SmartGlassesMiddleware.Services.EditReminderTaskHandler" filename="tasks/EditReminderTaskHandler.cs" line-rate="0.909" branch-rate="0.75" complexity="10">
+        <class name="SmartGlassesMiddleware.Services.EditReminderTaskHandler" filename="tasks/EditReminderTaskHandler.cs" line-rate="0.9545" branch-rate="0.75" complexity="10">
           <methods>
-            <method name="get_Name" signature="()" line-rate="0" branch-rate="1" complexity="1">
+            <method name="get_Name" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="11" hits="0" branch="False" />
+                <line number="11" hits="1" branch="False" />
               </lines>
             </method>
             <method name="ParseEditCommand" signature="(System.String)" line-rate="0.9375" branch-rate="0.75" complexity="8">
@@ -11657,16 +11657,16 @@
             </method>
             <method name=".ctor" signature="(SmartGlassesMiddleware.Services.IHistoryService,Microsoft.Extensions.Logging.ILogger`1&lt;SmartGlassesMiddleware.Services.EditReminderTaskHandler&gt;)" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="13" hits="5" branch="False" />
-                <line number="14" hits="5" branch="False" />
-                <line number="15" hits="5" branch="False" />
-                <line number="16" hits="5" branch="False" />
-                <line number="17" hits="5" branch="False" />
+                <line number="13" hits="6" branch="False" />
+                <line number="14" hits="6" branch="False" />
+                <line number="15" hits="6" branch="False" />
+                <line number="16" hits="6" branch="False" />
+                <line number="17" hits="6" branch="False" />
               </lines>
             </method>
           </methods>
           <lines>
-            <line number="11" hits="0" branch="False" />
+            <line number="11" hits="1" branch="False" />
             <line number="92" hits="4" branch="False" />
             <line number="94" hits="4" branch="False" />
             <line number="95" hits="4" branch="False" />
@@ -11693,11 +11693,11 @@
             <line number="112" hits="0" branch="False" />
             <line number="115" hits="1" branch="False" />
             <line number="116" hits="4" branch="False" />
-            <line number="13" hits="5" branch="False" />
-            <line number="14" hits="5" branch="False" />
-            <line number="15" hits="5" branch="False" />
-            <line number="16" hits="5" branch="False" />
-            <line number="17" hits="5" branch="False" />
+            <line number="13" hits="6" branch="False" />
+            <line number="14" hits="6" branch="False" />
+            <line number="15" hits="6" branch="False" />
+            <line number="16" hits="6" branch="False" />
+            <line number="17" hits="6" branch="False" />
           </lines>
         </class>
         <class name="SmartGlassesMiddleware.Services.EditReminderTaskHandler/&lt;&gt;c" filename="tasks/EditReminderTaskHandler.cs" line-rate="1" branch-rate="1" complexity="2">
@@ -11871,77 +11871,77 @@
             </method>
             <method name=".ctor" signature="(Microsoft.Extensions.Logging.ILogger`1&lt;SmartGlassesMiddleware.Services.OCRRetryTaskHandler&gt;,SmartGlassesMiddleware.Services.IDocumentProcessingService,SmartGlassesMiddleware.Services.IRAGService)" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="13" hits="1" branch="False" />
-                <line number="14" hits="1" branch="False" />
-                <line number="15" hits="1" branch="False" />
-                <line number="16" hits="1" branch="False" />
-                <line number="17" hits="1" branch="False" />
-                <line number="18" hits="1" branch="False" />
+                <line number="13" hits="3" branch="False" />
+                <line number="14" hits="3" branch="False" />
+                <line number="15" hits="3" branch="False" />
+                <line number="16" hits="3" branch="False" />
+                <line number="17" hits="3" branch="False" />
+                <line number="18" hits="3" branch="False" />
               </lines>
             </method>
           </methods>
           <lines>
             <line number="11" hits="0" branch="False" />
-            <line number="13" hits="1" branch="False" />
-            <line number="14" hits="1" branch="False" />
-            <line number="15" hits="1" branch="False" />
-            <line number="16" hits="1" branch="False" />
-            <line number="17" hits="1" branch="False" />
-            <line number="18" hits="1" branch="False" />
+            <line number="13" hits="3" branch="False" />
+            <line number="14" hits="3" branch="False" />
+            <line number="15" hits="3" branch="False" />
+            <line number="16" hits="3" branch="False" />
+            <line number="17" hits="3" branch="False" />
+            <line number="18" hits="3" branch="False" />
           </lines>
         </class>
-        <class name="SmartGlassesMiddleware.Services.OCRRetryTaskHandler/&lt;HandleAsync&gt;d__6" filename="tasks/OCRRetryTaskHandler.cs" line-rate="0.7222" branch-rate="0.5" complexity="2">
+        <class name="SmartGlassesMiddleware.Services.OCRRetryTaskHandler/&lt;HandleAsync&gt;d__6" filename="tasks/OCRRetryTaskHandler.cs" line-rate="0.9444" branch-rate="0.5" complexity="2">
           <methods>
-            <method name="MoveNext" signature="()" line-rate="0.7222" branch-rate="0.5" complexity="2">
+            <method name="MoveNext" signature="()" line-rate="0.9444" branch-rate="0.5" complexity="2">
               <lines>
-                <line number="21" hits="1" branch="False" />
-                <line number="23" hits="1" branch="False" />
-                <line number="24" hits="1" branch="False" />
-                <line number="26" hits="1" branch="True" condition-coverage="50% (1/2)">
+                <line number="21" hits="3" branch="False" />
+                <line number="23" hits="3" branch="False" />
+                <line number="24" hits="3" branch="False" />
+                <line number="26" hits="3" branch="True" condition-coverage="50% (1/2)">
                   <conditions>
                     <condition number="100" type="jump" coverage="50%" />
                   </conditions>
                 </line>
-                <line number="27" hits="1" branch="False" />
-                <line number="28" hits="1" branch="False" />
-                <line number="29" hits="1" branch="False" />
-                <line number="31" hits="1" branch="False" />
-                <line number="32" hits="1" branch="False" />
-                <line number="33" hits="1" branch="False" />
-                <line number="34" hits="1" branch="False" />
-                <line number="35" hits="1" branch="False" />
+                <line number="27" hits="3" branch="False" />
+                <line number="28" hits="3" branch="False" />
+                <line number="29" hits="2" branch="False" />
+                <line number="31" hits="2" branch="False" />
+                <line number="32" hits="2" branch="False" />
+                <line number="33" hits="2" branch="False" />
+                <line number="34" hits="2" branch="False" />
+                <line number="35" hits="2" branch="False" />
                 <line number="38" hits="0" branch="False" />
-                <line number="40" hits="0" branch="False" />
-                <line number="41" hits="0" branch="False" />
-                <line number="42" hits="0" branch="False" />
-                <line number="43" hits="0" branch="False" />
-                <line number="45" hits="1" branch="False" />
+                <line number="40" hits="1" branch="False" />
+                <line number="41" hits="1" branch="False" />
+                <line number="42" hits="1" branch="False" />
+                <line number="43" hits="1" branch="False" />
+                <line number="45" hits="3" branch="False" />
               </lines>
             </method>
           </methods>
           <lines>
-            <line number="21" hits="1" branch="False" />
-            <line number="23" hits="1" branch="False" />
-            <line number="24" hits="1" branch="False" />
-            <line number="26" hits="1" branch="True" condition-coverage="50% (1/2)">
+            <line number="21" hits="3" branch="False" />
+            <line number="23" hits="3" branch="False" />
+            <line number="24" hits="3" branch="False" />
+            <line number="26" hits="3" branch="True" condition-coverage="50% (1/2)">
               <conditions>
                 <condition number="100" type="jump" coverage="50%" />
               </conditions>
             </line>
-            <line number="27" hits="1" branch="False" />
-            <line number="28" hits="1" branch="False" />
-            <line number="29" hits="1" branch="False" />
-            <line number="31" hits="1" branch="False" />
-            <line number="32" hits="1" branch="False" />
-            <line number="33" hits="1" branch="False" />
-            <line number="34" hits="1" branch="False" />
-            <line number="35" hits="1" branch="False" />
+            <line number="27" hits="3" branch="False" />
+            <line number="28" hits="3" branch="False" />
+            <line number="29" hits="2" branch="False" />
+            <line number="31" hits="2" branch="False" />
+            <line number="32" hits="2" branch="False" />
+            <line number="33" hits="2" branch="False" />
+            <line number="34" hits="2" branch="False" />
+            <line number="35" hits="2" branch="False" />
             <line number="38" hits="0" branch="False" />
-            <line number="40" hits="0" branch="False" />
-            <line number="41" hits="0" branch="False" />
-            <line number="42" hits="0" branch="False" />
-            <line number="43" hits="0" branch="False" />
-            <line number="45" hits="1" branch="False" />
+            <line number="40" hits="1" branch="False" />
+            <line number="41" hits="1" branch="False" />
+            <line number="42" hits="1" branch="False" />
+            <line number="43" hits="1" branch="False" />
+            <line number="45" hits="3" branch="False" />
           </lines>
         </class>
         <class name="SmartGlassesMiddleware.Services.OCRTaskHandler" filename="tasks/OCRTaskHandler.cs" line-rate="1" branch-rate="1" complexity="2">
@@ -12233,22 +12233,22 @@
             </method>
             <method name="get_Input" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="11" hits="66" branch="False" />
+                <line number="11" hits="69" branch="False" />
               </lines>
             </method>
             <method name="get_Output" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="14" hits="66" branch="False" />
+                <line number="14" hits="69" branch="False" />
               </lines>
             </method>
             <method name="get_ModelUsed" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="17" hits="66" branch="False" />
+                <line number="17" hits="69" branch="False" />
               </lines>
             </method>
             <method name="get_DelegationReason" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="20" hits="38" branch="False" />
+                <line number="20" hits="39" branch="False" />
               </lines>
             </method>
             <method name="get_InputTokens" signature="()" line-rate="1" branch-rate="1" complexity="1">
@@ -12263,7 +12263,7 @@
             </method>
             <method name="get_TotalTokens" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="25" hits="5" branch="False" />
+                <line number="25" hits="7" branch="False" />
               </lines>
             </method>
             <method name="get_EstimatedCost" signature="()" line-rate="1" branch-rate="1" complexity="1">
@@ -12273,7 +12273,7 @@
             </method>
             <method name="get_Timestamp" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="31" hits="33" branch="False" />
+                <line number="31" hits="34" branch="False" />
               </lines>
             </method>
             <method name="get_ResponseTimeMs" signature="()" line-rate="1" branch-rate="1" complexity="1">
@@ -12314,15 +12314,15 @@
           </methods>
           <lines>
             <line number="8" hits="34" branch="False" />
-            <line number="11" hits="66" branch="False" />
-            <line number="14" hits="66" branch="False" />
-            <line number="17" hits="66" branch="False" />
-            <line number="20" hits="38" branch="False" />
+            <line number="11" hits="69" branch="False" />
+            <line number="14" hits="69" branch="False" />
+            <line number="17" hits="69" branch="False" />
+            <line number="20" hits="39" branch="False" />
             <line number="23" hits="2" branch="False" />
             <line number="24" hits="2" branch="False" />
-            <line number="25" hits="5" branch="False" />
+            <line number="25" hits="7" branch="False" />
             <line number="28" hits="5" branch="False" />
-            <line number="31" hits="33" branch="False" />
+            <line number="31" hits="34" branch="False" />
             <line number="32" hits="5" branch="False" />
             <line number="35" hits="5" branch="False" />
             <line number="36" hits="1" branch="False" />
@@ -12436,17 +12436,17 @@
             </method>
             <method name="get_Conversation" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="10" hits="40" branch="False" />
+                <line number="10" hits="43" branch="False" />
               </lines>
             </method>
             <method name="get_Role" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="12" hits="80" branch="False" />
+                <line number="12" hits="87" branch="False" />
               </lines>
             </method>
             <method name="get_Content" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="13" hits="88" branch="False" />
+                <line number="13" hits="97" branch="False" />
               </lines>
             </method>
             <method name="get_Model" signature="()" line-rate="1" branch-rate="1" complexity="1">
@@ -12456,7 +12456,7 @@
             </method>
             <method name="get_Timestamp" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="15" hits="45" branch="False" />
+                <line number="15" hits="47" branch="False" />
               </lines>
             </method>
             <method name="get_TokenCount" signature="()" line-rate="1" branch-rate="1" complexity="1">
@@ -12468,11 +12468,11 @@
           <lines>
             <line number="8" hits="38" branch="False" />
             <line number="9" hits="35" branch="False" />
-            <line number="10" hits="40" branch="False" />
-            <line number="12" hits="80" branch="False" />
-            <line number="13" hits="88" branch="False" />
+            <line number="10" hits="43" branch="False" />
+            <line number="12" hits="87" branch="False" />
+            <line number="13" hits="97" branch="False" />
             <line number="14" hits="35" branch="False" />
-            <line number="15" hits="45" branch="False" />
+            <line number="15" hits="47" branch="False" />
             <line number="18" hits="34" branch="False" />
           </lines>
         </class>
@@ -12485,22 +12485,22 @@
             </method>
             <method name="get_Title" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="27" hits="80" branch="False" />
+                <line number="27" hits="84" branch="False" />
               </lines>
             </method>
             <method name="get_CreatedAt" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="28" hits="29" branch="False" />
+                <line number="28" hits="30" branch="False" />
               </lines>
             </method>
             <method name="get_UpdatedAt" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="29" hits="64" branch="False" />
+                <line number="29" hits="65" branch="False" />
               </lines>
             </method>
             <method name="get_IsActive" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="30" hits="59" branch="False" />
+                <line number="30" hits="61" branch="False" />
               </lines>
             </method>
             <method name="get_ResourceGroupId" signature="()" line-rate="1" branch-rate="1" complexity="1">
@@ -12515,7 +12515,7 @@
             </method>
             <method name="get_Messages" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="37" hits="31" branch="False" />
+                <line number="37" hits="40" branch="False" />
               </lines>
             </method>
             <method name="get_Summary" signature="()" line-rate="1" branch-rate="1" complexity="1">
@@ -12536,13 +12536,13 @@
           </methods>
           <lines>
             <line number="26" hits="99" branch="False" />
-            <line number="27" hits="80" branch="False" />
-            <line number="28" hits="29" branch="False" />
-            <line number="29" hits="64" branch="False" />
-            <line number="30" hits="59" branch="False" />
+            <line number="27" hits="84" branch="False" />
+            <line number="28" hits="30" branch="False" />
+            <line number="29" hits="65" branch="False" />
+            <line number="30" hits="61" branch="False" />
             <line number="33" hits="23" branch="False" />
             <line number="34" hits="0" branch="False" />
-            <line number="37" hits="31" branch="False" />
+            <line number="37" hits="40" branch="False" />
             <line number="40" hits="1" branch="False" />
             <line number="41" hits="2" branch="False" />
             <line number="42" hits="2" branch="False" />
@@ -12552,27 +12552,27 @@
           <methods>
             <method name="get_Id" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="8" hits="91" branch="False" />
+                <line number="8" hits="92" branch="False" />
               </lines>
             </method>
             <method name="get_FileName" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="9" hits="132" branch="False" />
+                <line number="9" hits="134" branch="False" />
               </lines>
             </method>
             <method name="get_OriginalFileName" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="10" hits="75" branch="False" />
+                <line number="10" hits="76" branch="False" />
               </lines>
             </method>
             <method name="get_ContentType" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="11" hits="79" branch="False" />
+                <line number="11" hits="80" branch="False" />
               </lines>
             </method>
             <method name="get_StorageKey" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="12" hits="78" branch="False" />
+                <line number="12" hits="79" branch="False" />
               </lines>
             </method>
             <method name="get_UploadedAt" signature="()" line-rate="1" branch-rate="1" complexity="1">
@@ -12592,7 +12592,7 @@
             </method>
             <method name="get_DocumentType" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="16" hits="124" branch="False" />
+                <line number="16" hits="125" branch="False" />
               </lines>
             </method>
             <method name="get_IsProcessed" signature="()" line-rate="1" branch-rate="1" complexity="1">
@@ -12602,7 +12602,7 @@
             </method>
             <method name="get_ProcessedAt" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="18" hits="12" branch="False" />
+                <line number="18" hits="14" branch="False" />
               </lines>
             </method>
             <method name="get_ProcessingError" signature="()" line-rate="1" branch-rate="1" complexity="1">
@@ -12612,30 +12612,30 @@
             </method>
             <method name="get_Chunks" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="22" hits="90" branch="False" />
+                <line number="22" hits="93" branch="False" />
               </lines>
             </method>
             <method name="get_DocumentGroups" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="23" hits="89" branch="False" />
+                <line number="23" hits="90" branch="False" />
               </lines>
             </method>
           </methods>
           <lines>
-            <line number="8" hits="91" branch="False" />
-            <line number="9" hits="132" branch="False" />
-            <line number="10" hits="75" branch="False" />
-            <line number="11" hits="79" branch="False" />
-            <line number="12" hits="78" branch="False" />
+            <line number="8" hits="92" branch="False" />
+            <line number="9" hits="134" branch="False" />
+            <line number="10" hits="76" branch="False" />
+            <line number="11" hits="80" branch="False" />
+            <line number="12" hits="79" branch="False" />
             <line number="13" hits="47" branch="False" />
             <line number="14" hits="16" branch="False" />
             <line number="15" hits="14" branch="False" />
-            <line number="16" hits="124" branch="False" />
+            <line number="16" hits="125" branch="False" />
             <line number="17" hits="31" branch="False" />
-            <line number="18" hits="12" branch="False" />
+            <line number="18" hits="14" branch="False" />
             <line number="19" hits="4" branch="False" />
-            <line number="22" hits="90" branch="False" />
-            <line number="23" hits="89" branch="False" />
+            <line number="22" hits="93" branch="False" />
+            <line number="23" hits="90" branch="False" />
           </lines>
         </class>
         <class name="SmartGlassesMiddleware.Models.DocumentGroup" filename="src/SmartGlassesMiddleware/Models/DocumentMetadata.cs" line-rate="1" branch-rate="1" complexity="4">
@@ -12682,22 +12682,22 @@
             </method>
             <method name="get_DocumentMetadata" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="45" hits="86" branch="False" />
+                <line number="45" hits="87" branch="False" />
               </lines>
             </method>
             <method name="get_ChunkText" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="47" hits="169" branch="False" />
+                <line number="47" hits="171" branch="False" />
               </lines>
             </method>
             <method name="get_PageNumber" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="48" hits="124" branch="False" />
+                <line number="48" hits="125" branch="False" />
               </lines>
             </method>
             <method name="get_ChunkIndex" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="49" hits="71" branch="False" />
+                <line number="49" hits="72" branch="False" />
               </lines>
             </method>
             <method name="get_X" signature="()" line-rate="1" branch-rate="1" complexity="1">
@@ -12744,10 +12744,10 @@
           <lines>
             <line number="43" hits="78" branch="False" />
             <line number="44" hits="67" branch="False" />
-            <line number="45" hits="86" branch="False" />
-            <line number="47" hits="169" branch="False" />
-            <line number="48" hits="124" branch="False" />
-            <line number="49" hits="71" branch="False" />
+            <line number="45" hits="87" branch="False" />
+            <line number="47" hits="171" branch="False" />
+            <line number="48" hits="125" branch="False" />
+            <line number="49" hits="72" branch="False" />
             <line number="52" hits="3" branch="False" />
             <line number="53" hits="3" branch="False" />
             <line number="54" hits="3" branch="False" />
@@ -12950,7 +12950,7 @@
             <line number="50" hits="4" branch="False" />
           </lines>
         </class>
-        <class name="SmartGlassesMiddleware.Models.RagEntry" filename="src/SmartGlassesMiddleware/Models/RagEntry.cs" line-rate="0.8887999999999999" branch-rate="1" complexity="9">
+        <class name="SmartGlassesMiddleware.Models.RagEntry" filename="src/SmartGlassesMiddleware/Models/RagEntry.cs" line-rate="1" branch-rate="1" complexity="9">
           <methods>
             <method name="get_Id" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
@@ -12964,17 +12964,17 @@
             </method>
             <method name="get_FileName" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="10" hits="50" branch="False" />
+                <line number="10" hits="55" branch="False" />
               </lines>
             </method>
             <method name="get_ContentType" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="11" hits="46" branch="False" />
+                <line number="11" hits="50" branch="False" />
               </lines>
             </method>
             <method name="get_StorageKey" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="12" hits="45" branch="False" />
+                <line number="12" hits="49" branch="False" />
               </lines>
             </method>
             <method name="get_Transcription" signature="()" line-rate="1" branch-rate="1" complexity="1">
@@ -12989,79 +12989,79 @@
             </method>
             <method name="get_IndexedContent" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="15" hits="55" branch="False" />
+                <line number="15" hits="60" branch="False" />
               </lines>
             </method>
-            <method name="get_EmbeddingVector" signature="()" line-rate="0" branch-rate="1" complexity="1">
+            <method name="get_EmbeddingVector" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="16" hits="0" branch="False" />
+                <line number="16" hits="3" branch="False" />
               </lines>
             </method>
           </methods>
           <lines>
             <line number="8" hits="22" branch="False" />
             <line number="9" hits="23" branch="False" />
-            <line number="10" hits="50" branch="False" />
-            <line number="11" hits="46" branch="False" />
-            <line number="12" hits="45" branch="False" />
+            <line number="10" hits="55" branch="False" />
+            <line number="11" hits="50" branch="False" />
+            <line number="12" hits="49" branch="False" />
             <line number="13" hits="38" branch="False" />
             <line number="14" hits="24" branch="False" />
-            <line number="15" hits="55" branch="False" />
-            <line number="16" hits="0" branch="False" />
+            <line number="15" hits="60" branch="False" />
+            <line number="16" hits="3" branch="False" />
           </lines>
         </class>
         <class name="SmartGlassesMiddleware.Models.RequestHistory" filename="src/SmartGlassesMiddleware/Models/RequestHistory.cs" line-rate="1" branch-rate="1" complexity="8">
           <methods>
             <method name="get_Id" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="5" hits="160" branch="False" />
+                <line number="5" hits="211" branch="False" />
               </lines>
             </method>
             <method name="get_Timestamp" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="6" hits="50" branch="False" />
+                <line number="6" hits="76" branch="False" />
               </lines>
             </method>
             <method name="get_RequestType" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="7" hits="172" branch="False" />
+                <line number="7" hits="224" branch="False" />
               </lines>
             </method>
             <method name="get_InputText" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="8" hits="180" branch="False" />
+                <line number="8" hits="228" branch="False" />
               </lines>
             </method>
             <method name="get_DetectedTask" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="9" hits="20" branch="False" />
+                <line number="9" hits="41" branch="False" />
               </lines>
             </method>
             <method name="get_Response" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="10" hits="55" branch="False" />
+                <line number="10" hits="74" branch="False" />
               </lines>
             </method>
             <method name="get_UsedAdvancedModel" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="11" hits="15" branch="False" />
+                <line number="11" hits="16" branch="False" />
               </lines>
             </method>
             <method name="get_MediaStorageKey" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="12" hits="25" branch="False" />
+                <line number="12" hits="28" branch="False" />
               </lines>
             </method>
           </methods>
           <lines>
-            <line number="5" hits="160" branch="False" />
-            <line number="6" hits="50" branch="False" />
-            <line number="7" hits="172" branch="False" />
-            <line number="8" hits="180" branch="False" />
-            <line number="9" hits="20" branch="False" />
-            <line number="10" hits="55" branch="False" />
-            <line number="11" hits="15" branch="False" />
-            <line number="12" hits="25" branch="False" />
+            <line number="5" hits="211" branch="False" />
+            <line number="6" hits="76" branch="False" />
+            <line number="7" hits="224" branch="False" />
+            <line number="8" hits="228" branch="False" />
+            <line number="9" hits="41" branch="False" />
+            <line number="10" hits="74" branch="False" />
+            <line number="11" hits="16" branch="False" />
+            <line number="12" hits="28" branch="False" />
           </lines>
         </class>
         <class name="SmartGlassesMiddleware.Models.ResourceGroup" filename="src/SmartGlassesMiddleware/Models/ResourceGroup.cs" line-rate="1" branch-rate="1" complexity="8">
@@ -13178,51 +13178,51 @@
             <line number="41" hits="6" branch="False" />
           </lines>
         </class>
-        <class name="SmartGlassesMiddleware.Models.TaskRequest" filename="src/SmartGlassesMiddleware/Models/TaskRequest.cs" line-rate="0" branch-rate="1" complexity="1">
+        <class name="SmartGlassesMiddleware.Models.TaskRequest" filename="src/SmartGlassesMiddleware/Models/TaskRequest.cs" line-rate="1" branch-rate="1" complexity="1">
           <methods>
-            <method name="get_Text" signature="()" line-rate="0" branch-rate="1" complexity="1">
+            <method name="get_Text" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="9" hits="0" branch="False" />
+                <line number="9" hits="6" branch="False" />
               </lines>
             </method>
           </methods>
           <lines>
-            <line number="9" hits="0" branch="False" />
+            <line number="9" hits="6" branch="False" />
           </lines>
         </class>
-        <class name="SmartGlassesMiddleware.Models.AudioRequest" filename="src/SmartGlassesMiddleware/Models/TaskRequest.cs" line-rate="0.5" branch-rate="1" complexity="2">
+        <class name="SmartGlassesMiddleware.Models.AudioRequest" filename="src/SmartGlassesMiddleware/Models/TaskRequest.cs" line-rate="1" branch-rate="1" complexity="2">
           <methods>
             <method name="get_AudioBase64" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="16" hits="60" branch="False" />
+                <line number="16" hits="66" branch="False" />
               </lines>
             </method>
-            <method name="get_Transcription" signature="()" line-rate="0" branch-rate="1" complexity="1">
+            <method name="get_Transcription" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="19" hits="0" branch="False" />
+                <line number="19" hits="4" branch="False" />
               </lines>
             </method>
           </methods>
           <lines>
-            <line number="16" hits="60" branch="False" />
-            <line number="19" hits="0" branch="False" />
+            <line number="16" hits="66" branch="False" />
+            <line number="19" hits="4" branch="False" />
           </lines>
         </class>
-        <class name="SmartGlassesMiddleware.Models.MediaRequest" filename="src/SmartGlassesMiddleware/Models/TaskRequest.cs" line-rate="0.8" branch-rate="1" complexity="5">
+        <class name="SmartGlassesMiddleware.Models.MediaRequest" filename="src/SmartGlassesMiddleware/Models/TaskRequest.cs" line-rate="1" branch-rate="1" complexity="5">
           <methods>
             <method name="get_Files" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="25" hits="46" branch="False" />
+                <line number="25" hits="49" branch="False" />
               </lines>
             </method>
             <method name="get_Prompt" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="29" hits="16" branch="False" />
+                <line number="29" hits="18" branch="False" />
               </lines>
             </method>
-            <method name="get_Transcription" signature="()" line-rate="0" branch-rate="1" complexity="1">
+            <method name="get_Transcription" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="33" hits="0" branch="False" />
+                <line number="33" hits="2" branch="False" />
               </lines>
             </method>
             <method name="get_Manifest" signature="()" line-rate="1" branch-rate="1" complexity="1">
@@ -13237,41 +13237,41 @@
             </method>
           </methods>
           <lines>
-            <line number="25" hits="46" branch="False" />
-            <line number="29" hits="16" branch="False" />
-            <line number="33" hits="0" branch="False" />
+            <line number="25" hits="49" branch="False" />
+            <line number="29" hits="18" branch="False" />
+            <line number="33" hits="2" branch="False" />
             <line number="37" hits="19" branch="False" />
             <line number="40" hits="18" branch="False" />
           </lines>
         </class>
-        <class name="SmartGlassesMiddleware.Models.TaskResponse" filename="src/SmartGlassesMiddleware/Models/TaskRequest.cs" line-rate="0" branch-rate="1" complexity="4">
+        <class name="SmartGlassesMiddleware.Models.TaskResponse" filename="src/SmartGlassesMiddleware/Models/TaskRequest.cs" line-rate="1" branch-rate="1" complexity="4">
           <methods>
-            <method name="get_Task" signature="()" line-rate="0" branch-rate="1" complexity="1">
+            <method name="get_Task" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="45" hits="0" branch="False" />
+                <line number="45" hits="5" branch="False" />
               </lines>
             </method>
-            <method name="get_Response" signature="()" line-rate="0" branch-rate="1" complexity="1">
+            <method name="get_Response" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="46" hits="0" branch="False" />
+                <line number="46" hits="5" branch="False" />
               </lines>
             </method>
-            <method name="get_UsedAdvancedModel" signature="()" line-rate="0" branch-rate="1" complexity="1">
+            <method name="get_UsedAdvancedModel" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="47" hits="0" branch="False" />
+                <line number="47" hits="3" branch="False" />
               </lines>
             </method>
-            <method name="get_RequestId" signature="()" line-rate="0" branch-rate="1" complexity="1">
+            <method name="get_RequestId" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="48" hits="0" branch="False" />
+                <line number="48" hits="3" branch="False" />
               </lines>
             </method>
           </methods>
           <lines>
-            <line number="45" hits="0" branch="False" />
-            <line number="46" hits="0" branch="False" />
-            <line number="47" hits="0" branch="False" />
-            <line number="48" hits="0" branch="False" />
+            <line number="45" hits="5" branch="False" />
+            <line number="46" hits="5" branch="False" />
+            <line number="47" hits="3" branch="False" />
+            <line number="48" hits="3" branch="False" />
           </lines>
         </class>
         <class name="SmartGlassesMiddleware.Migrations.AddRagEntries" filename="src/SmartGlassesMiddleware/Migrations/20260203195000_AddRagEntries.cs" line-rate="0" branch-rate="1" complexity="2">
@@ -15818,57 +15818,57 @@
           <methods>
             <method name="get_RequestHistories" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="14" hits="293" branch="False" />
+                <line number="14" hits="339" branch="False" />
               </lines>
             </method>
             <method name="get_ManagedFiles" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="15" hits="323" branch="False" />
+                <line number="15" hits="335" branch="False" />
               </lines>
             </method>
             <method name="get_ManagedPrompts" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="16" hits="278" branch="False" />
+                <line number="16" hits="290" branch="False" />
               </lines>
             </method>
             <method name="get_ResourceGroups" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="17" hits="298" branch="False" />
+                <line number="17" hits="310" branch="False" />
               </lines>
             </method>
             <method name="get_RagEntries" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="18" hits="301" branch="False" />
+                <line number="18" hits="313" branch="False" />
               </lines>
             </method>
             <method name="get_DocumentMetadatas" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="19" hits="318" branch="False" />
+                <line number="19" hits="330" branch="False" />
               </lines>
             </method>
             <method name="get_DocumentChunks" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="20" hits="264" branch="False" />
+                <line number="20" hits="276" branch="False" />
               </lines>
             </method>
             <method name="get_DocumentGroups" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="21" hits="246" branch="False" />
+                <line number="21" hits="258" branch="False" />
               </lines>
             </method>
             <method name="get_Conversations" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="22" hits="312" branch="False" />
+                <line number="22" hits="324" branch="False" />
               </lines>
             </method>
             <method name="get_ChatMessages" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="23" hits="274" branch="False" />
+                <line number="23" hits="286" branch="False" />
               </lines>
             </method>
             <method name="get_AIInteractionLogs" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="24" hits="277" branch="False" />
+                <line number="24" hits="289" branch="False" />
               </lines>
             </method>
             <method name="OnModelCreating" signature="(Microsoft.EntityFrameworkCore.ModelBuilder)" line-rate="0.9456" branch-rate="0.5" complexity="2">
@@ -16065,24 +16065,24 @@
             </method>
             <method name=".ctor" signature="(Microsoft.EntityFrameworkCore.DbContextOptions`1&lt;SmartGlassesMiddleware.Data.ApplicationDbContext&gt;)" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="10" hits="239" branch="False" />
-                <line number="11" hits="239" branch="False" />
-                <line number="12" hits="239" branch="False" />
+                <line number="10" hits="251" branch="False" />
+                <line number="11" hits="251" branch="False" />
+                <line number="12" hits="251" branch="False" />
               </lines>
             </method>
           </methods>
           <lines>
-            <line number="14" hits="293" branch="False" />
-            <line number="15" hits="323" branch="False" />
-            <line number="16" hits="278" branch="False" />
-            <line number="17" hits="298" branch="False" />
-            <line number="18" hits="301" branch="False" />
-            <line number="19" hits="318" branch="False" />
-            <line number="20" hits="264" branch="False" />
-            <line number="21" hits="246" branch="False" />
-            <line number="22" hits="312" branch="False" />
-            <line number="23" hits="274" branch="False" />
-            <line number="24" hits="277" branch="False" />
+            <line number="14" hits="339" branch="False" />
+            <line number="15" hits="335" branch="False" />
+            <line number="16" hits="290" branch="False" />
+            <line number="17" hits="310" branch="False" />
+            <line number="18" hits="313" branch="False" />
+            <line number="19" hits="330" branch="False" />
+            <line number="20" hits="276" branch="False" />
+            <line number="21" hits="258" branch="False" />
+            <line number="22" hits="324" branch="False" />
+            <line number="23" hits="286" branch="False" />
+            <line number="24" hits="289" branch="False" />
             <line number="27" hits="2" branch="False" />
             <line number="28" hits="2" branch="False" />
             <line number="31" hits="2" branch="True" condition-coverage="50% (1/2)">
@@ -16271,9 +16271,9 @@
             <line number="222" hits="2" branch="False" />
             <line number="223" hits="4" branch="False" />
             <line number="224" hits="2" branch="False" />
-            <line number="10" hits="239" branch="False" />
-            <line number="11" hits="239" branch="False" />
-            <line number="12" hits="239" branch="False" />
+            <line number="10" hits="251" branch="False" />
+            <line number="11" hits="251" branch="False" />
+            <line number="12" hits="251" branch="False" />
           </lines>
         </class>
         <class name="SmartGlassesMiddleware.Controllers.AdminController" filename="src/SmartGlassesMiddleware/Controllers/AdminController.cs" line-rate="1" branch-rate="1" complexity="1">
