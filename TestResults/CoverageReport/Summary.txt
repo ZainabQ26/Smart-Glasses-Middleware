@@ -1,0 +1,106 @@
+Summary
+  Generated on: 02/04/2026 - 16:58:20
+  Coverage date: 02/04/2026 - 16:57:56
+  Parser: Cobertura
+  Assemblies: 1
+  Classes: 84
+  Files: 62
+  Line coverage: 49.4%
+  Covered lines: 3461
+  Uncovered lines: 3545
+  Coverable lines: 7006
+  Total lines: 10553
+  Branch coverage: 46.3% (563 of 1214)
+  Covered branches: 563
+  Total branches: 1214
+  Method coverage: 79.1% (361 of 456)
+  Full method coverage: 66.4% (303 of 456)
+  Covered methods: 361
+  Fully covered methods: 303
+  Total methods: 456
+
+SmartGlassesMiddleware                                                  49.4%
+  Microsoft.AspNetCore.OpenApi.Generated                                 0.8%
+  Program                                                                 42%
+  SmartGlassesMiddleware.Controllers.AddMessageRequest                   100%
+  SmartGlassesMiddleware.Controllers.AdminController                    84.8%
+  SmartGlassesMiddleware.Controllers.AIInteractionController              89%
+  SmartGlassesMiddleware.Controllers.AudioController                      90%
+  SmartGlassesMiddleware.Controllers.ConversationQueryRequest            100%
+  SmartGlassesMiddleware.Controllers.ConversationsController             100%
+  SmartGlassesMiddleware.Controllers.CreateConversationRequest           100%
+  SmartGlassesMiddleware.Controllers.DocumentsController                98.6%
+  SmartGlassesMiddleware.Controllers.HighlightRequest                    100%
+  SmartGlassesMiddleware.Controllers.HistoryController                   100%
+  SmartGlassesMiddleware.Controllers.MediaController                    84.8%
+  SmartGlassesMiddleware.Controllers.MoveDocumentRequest                 100%
+  SmartGlassesMiddleware.Controllers.QueryRequest                        100%
+  SmartGlassesMiddleware.Controllers.TasksController                     100%
+  SmartGlassesMiddleware.Controllers.UpdateReminderRequest               100%
+  SmartGlassesMiddleware.Data.ApplicationDbContext                      94.9%
+  SmartGlassesMiddleware.Migrations.AddContentHashAndVectorEmbeddings      0%
+  SmartGlassesMiddleware.Migrations.AddRagEntries                          0%
+  SmartGlassesMiddleware.Migrations.AddRagEntryForeignKey                  0%
+  SmartGlassesMiddleware.Migrations.ApplicationDbContextModelSnapshot      0%
+  SmartGlassesMiddleware.Models.AIInteractionLog                        94.1%
+  SmartGlassesMiddleware.Models.AudioRequest                              50%
+  SmartGlassesMiddleware.Models.BackgroundMediaItem                      100%
+  SmartGlassesMiddleware.Models.BackgroundTaskEntry                      100%
+  SmartGlassesMiddleware.Models.ChatMessage                              100%
+  SmartGlassesMiddleware.Models.Conversation                            90.9%
+  SmartGlassesMiddleware.Models.DocumentChunk                            100%
+  SmartGlassesMiddleware.Models.DocumentGroup                            100%
+  SmartGlassesMiddleware.Models.DocumentMetadata                         100%
+  SmartGlassesMiddleware.Models.DocumentSource                           100%
+  SmartGlassesMiddleware.Models.FileUploadRequest                        100%
+  SmartGlassesMiddleware.Models.GroupRequest                             100%
+  SmartGlassesMiddleware.Models.ManagedFile                              100%
+  SmartGlassesMiddleware.Models.ManagedFileGroup                         100%
+  SmartGlassesMiddleware.Models.ManagedPrompt                            100%
+  SmartGlassesMiddleware.Models.ManagedPromptGroup                       100%
+  SmartGlassesMiddleware.Models.MediaRequest                              80%
+  SmartGlassesMiddleware.Models.PromptRequest                            100%
+  SmartGlassesMiddleware.Models.QueryResult                              100%
+  SmartGlassesMiddleware.Models.RagEntry                                88.8%
+  SmartGlassesMiddleware.Models.RequestHistory                           100%
+  SmartGlassesMiddleware.Models.ResourceGroup                            100%
+  SmartGlassesMiddleware.Models.TaskRequest                                0%
+  SmartGlassesMiddleware.Models.TaskResponse                               0%
+  SmartGlassesMiddleware.Services.AdvancedTaskHandler                      0%
+  SmartGlassesMiddleware.Services.AssemblyExtensions                      75%
+  SmartGlassesMiddleware.Services.BackgroundTaskCleanupService          36.8%
+  SmartGlassesMiddleware.Services.BackgroundTaskHostedService             40%
+  SmartGlassesMiddleware.Services.BackgroundTaskQueue                   14.8%
+  SmartGlassesMiddleware.Services.ConfigurationReloadToken               100%
+  SmartGlassesMiddleware.Services.ConfigurationSection                  85.7%
+  SmartGlassesMiddleware.Services.ConfigurationWrapper                   100%
+  SmartGlassesMiddleware.Services.ConversationService                    100%
+  SmartGlassesMiddleware.Services.DeleteReminderTaskHandler             75.9%
+  SmartGlassesMiddleware.Services.DocumentHighlightService              55.4%
+  SmartGlassesMiddleware.Services.DocumentHighlightTaskHandler             0%
+  SmartGlassesMiddleware.Services.DocumentProcessingBackgroundService   26.6%
+  SmartGlassesMiddleware.Services.DocumentProcessingService             42.3%
+  SmartGlassesMiddleware.Services.DocumentQueryTaskHandler                 0%
+  SmartGlassesMiddleware.Services.DocumentSearchTaskHandler                0%
+  SmartGlassesMiddleware.Services.EditReminderTaskHandler               75.3%
+  SmartGlassesMiddleware.Services.EmptyDisposable                        100%
+  SmartGlassesMiddleware.Services.HistoryService                        78.4%
+  SmartGlassesMiddleware.Services.HttpClientFactory                      100%
+  SmartGlassesMiddleware.Services.HttpTranscriptionService              87.2%
+  SmartGlassesMiddleware.Services.MediaProcessor                         100%
+  SmartGlassesMiddleware.Services.MetricsService                         100%
+  SmartGlassesMiddleware.Services.MetricsSummary                         100%
+  SmartGlassesMiddleware.Services.MinioMediaStorageService              15.2%
+  SmartGlassesMiddleware.Services.OCRRetryTaskHandler                     76%
+  SmartGlassesMiddleware.Services.OCRTaskHandler                           0%
+  SmartGlassesMiddleware.Services.OllamaAIService                       10.5%
+  SmartGlassesMiddleware.Services.RagService                            79.3%
+  SmartGlassesMiddleware.Services.RAGService                            41.9%
+  SmartGlassesMiddleware.Services.RedisCacheService                      100%
+  SmartGlassesMiddleware.Services.RedisPubSubBridge                      100%
+  SmartGlassesMiddleware.Services.RedisPubSubBridgeStatus                100%
+  SmartGlassesMiddleware.Services.ReminderTaskHandler                    100%
+  SmartGlassesMiddleware.Services.TaskDispatcher                         100%
+  SmartGlassesMiddleware.Services.TimeTaskHandler                        100%
+  System.Runtime.CompilerServices                                          0%
+  TemplateTaskHandler                                                      0%
