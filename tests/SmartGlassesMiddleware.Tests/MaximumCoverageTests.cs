@@ -31,9 +31,22 @@ public class MaximumCoverageTests
             .UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString())
             .Options;
         var context = new ApplicationDbContext(options);
-        var mockLogger = new Mock<ILogger<RagService>>();
+        var mockLogger = new Mock<ILogger<RAGService>>();
+        var mockAIService = new Mock<IAIService>();
+        var mockKernel = new Mock<Kernel>();
+        var mockServiceProvider = new Mock<IServiceProvider>();
+        var mockConfig = new Mock<IConfiguration>();
 
-        var service = new RagService(context, mockLogger.Object);
+        mockConfig.Setup(c => c["RAG:MaxRetries"]).Returns("3");
+        mockConfig.Setup(c => c["RAG:RetryDelayMs"]).Returns("1000");
+        mockConfig.Setup(c => c["RAG:MaxContextTokens"]).Returns("4000");
+        mockConfig.Setup(c => c["RAG:MaxLocalModelTokens"]).Returns("8000");
+        mockConfig.Setup(c => c["RAG:EmbeddingBatchSize"]).Returns("10");
+        mockConfig.Setup(c => c["RAG:EmbeddingMaxConcurrency"]).Returns("5");
+        mockConfig.Setup(c => c["RAG:UseVectorDB"]).Returns("false");
+        mockConfig.Setup(c => c["RAG:VectorSimilarityThreshold"]).Returns("0.5");
+
+        var service = new RAGService(context, mockLogger.Object, mockAIService.Object, mockKernel.Object, mockServiceProvider.Object, mockConfig.Object);
 
         // Act
         var result = await service.SearchChunksAsync("", 10);
@@ -43,16 +56,29 @@ public class MaximumCoverageTests
     }
 
     [Fact]
-    public async Task RagService_GetAllDocumentsAsync_ReturnsDocuments()
+    public async Task RagService_GetUnprocessedDocumentsAsync_ReturnsDocuments()
     {
         // Arrange
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString())
             .Options;
         var context = new ApplicationDbContext(options);
-        var mockLogger = new Mock<ILogger<RagService>>();
+        var mockLogger = new Mock<ILogger<RAGService>>();
+        var mockAIService = new Mock<IAIService>();
+        var mockKernel = new Mock<Kernel>();
+        var mockServiceProvider = new Mock<IServiceProvider>();
+        var mockConfig = new Mock<IConfiguration>();
 
-        var service = new RagService(context, mockLogger.Object);
+        mockConfig.Setup(c => c["RAG:MaxRetries"]).Returns("3");
+        mockConfig.Setup(c => c["RAG:RetryDelayMs"]).Returns("1000");
+        mockConfig.Setup(c => c["RAG:MaxContextTokens"]).Returns("4000");
+        mockConfig.Setup(c => c["RAG:MaxLocalModelTokens"]).Returns("8000");
+        mockConfig.Setup(c => c["RAG:EmbeddingBatchSize"]).Returns("10");
+        mockConfig.Setup(c => c["RAG:EmbeddingMaxConcurrency"]).Returns("5");
+        mockConfig.Setup(c => c["RAG:UseVectorDB"]).Returns("false");
+        mockConfig.Setup(c => c["RAG:VectorSimilarityThreshold"]).Returns("0.5");
+
+        var service = new RAGService(context, mockLogger.Object, mockAIService.Object, mockKernel.Object, mockServiceProvider.Object, mockConfig.Object);
 
         var doc = new DocumentMetadata
         {
@@ -64,13 +90,13 @@ public class MaximumCoverageTests
             UploadedAt = DateTime.UtcNow,
             FileSize = 100,
             DocumentType = "pdf",
-            IsProcessed = true
+            IsProcessed = false
         };
         context.DocumentMetadatas.Add(doc);
         await context.SaveChangesAsync();
 
         // Act
-        var result = await service.GetAllDocumentsAsync();
+        var result = await service.GetUnprocessedDocumentsAsync();
 
         // Assert
         Assert.NotNull(result);
