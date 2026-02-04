@@ -5,7 +5,7 @@ services:
     build:
       context: ./tools
       dockerfile: Dockerfile
-    container_name: smartglasses-vosktran
+    container_name: smartglasses-vosk-transcriber
     volumes:
       - models:/models
     environment:
@@ -20,7 +20,6 @@ services:
       interval: 20s
       timeout: 10s
       retries: 3
-    # no external model-downloader dependency
 
   postgres:
     image: postgres:latest
@@ -80,9 +79,6 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-    # GPU device requests intentionally omitted for compatibility
-
-  # faster-whisper removed — using vosk-transcriber instead
   app:
     build:
       context: .
