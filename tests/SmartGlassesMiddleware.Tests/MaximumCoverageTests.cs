@@ -34,20 +34,21 @@ public class MaximumCoverageTests
         var context = new ApplicationDbContext(options);
         var mockLogger = new Mock<ILogger<RAGService>>();
         var mockAIService = new Mock<IAIService>();
-        var mockKernel = new Mock<Kernel>();
+        var kernel = new Kernel();
         var mockServiceProvider = new Mock<IServiceProvider>();
         var mockConfig = new Mock<IConfiguration>();
 
-        mockConfig.Setup(c => c["RAG:MaxRetries"]).Returns("3");
-        mockConfig.Setup(c => c["RAG:RetryDelayMs"]).Returns("1000");
-        mockConfig.Setup(c => c["RAG:MaxContextTokens"]).Returns("4000");
-        mockConfig.Setup(c => c["RAG:MaxLocalModelTokens"]).Returns("8000");
-        mockConfig.Setup(c => c["RAG:EmbeddingBatchSize"]).Returns("10");
-        mockConfig.Setup(c => c["RAG:EmbeddingMaxConcurrency"]).Returns("5");
-        mockConfig.Setup(c => c["RAG:UseVectorDB"]).Returns("false");
-        mockConfig.Setup(c => c["RAG:VectorSimilarityThreshold"]).Returns("0.5");
+        mockConfig.Setup(c => c.GetSection("RAG:MaxRetries").Value).Returns("3");
+        mockConfig.Setup(c => c.GetSection("RAG:RetryDelayMs").Value).Returns("1000");
+        mockConfig.Setup(c => c.GetSection("RAG:MaxContextTokens").Value).Returns("4000");
+        mockConfig.Setup(c => c.GetSection("RAG:MaxLocalModelTokens").Value).Returns("8000");
+        mockConfig.Setup(c => c.GetSection("RAG:ApproximateTokensPerChar").Value).Returns("0.25");
+        mockConfig.Setup(c => c.GetSection("RAG:EmbeddingBatchSize").Value).Returns("10");
+        mockConfig.Setup(c => c.GetSection("RAG:EmbeddingMaxConcurrency").Value).Returns("5");
+        mockConfig.Setup(c => c.GetSection("RAG:UseVectorDB").Value).Returns("false");
+        mockConfig.Setup(c => c.GetSection("RAG:VectorSimilarityThreshold").Value).Returns("0.5");
 
-        var service = new RAGService(context, mockLogger.Object, mockAIService.Object, mockKernel.Object, mockServiceProvider.Object, mockConfig.Object);
+        var service = new RAGService(context, mockLogger.Object, mockAIService.Object, kernel, mockServiceProvider.Object, mockConfig.Object);
 
         // Act
         var result = await service.SearchChunksAsync("", 10);
@@ -66,20 +67,21 @@ public class MaximumCoverageTests
         var context = new ApplicationDbContext(options);
         var mockLogger = new Mock<ILogger<RAGService>>();
         var mockAIService = new Mock<IAIService>();
-        var mockKernel = new Mock<Kernel>();
+        var kernel = new Kernel();
         var mockServiceProvider = new Mock<IServiceProvider>();
         var mockConfig = new Mock<IConfiguration>();
 
-        mockConfig.Setup(c => c["RAG:MaxRetries"]).Returns("3");
-        mockConfig.Setup(c => c["RAG:RetryDelayMs"]).Returns("1000");
-        mockConfig.Setup(c => c["RAG:MaxContextTokens"]).Returns("4000");
-        mockConfig.Setup(c => c["RAG:MaxLocalModelTokens"]).Returns("8000");
-        mockConfig.Setup(c => c["RAG:EmbeddingBatchSize"]).Returns("10");
-        mockConfig.Setup(c => c["RAG:EmbeddingMaxConcurrency"]).Returns("5");
-        mockConfig.Setup(c => c["RAG:UseVectorDB"]).Returns("false");
-        mockConfig.Setup(c => c["RAG:VectorSimilarityThreshold"]).Returns("0.5");
+        mockConfig.Setup(c => c.GetSection("RAG:MaxRetries").Value).Returns("3");
+        mockConfig.Setup(c => c.GetSection("RAG:RetryDelayMs").Value).Returns("1000");
+        mockConfig.Setup(c => c.GetSection("RAG:MaxContextTokens").Value).Returns("4000");
+        mockConfig.Setup(c => c.GetSection("RAG:MaxLocalModelTokens").Value).Returns("8000");
+        mockConfig.Setup(c => c.GetSection("RAG:ApproximateTokensPerChar").Value).Returns("0.25");
+        mockConfig.Setup(c => c.GetSection("RAG:EmbeddingBatchSize").Value).Returns("10");
+        mockConfig.Setup(c => c.GetSection("RAG:EmbeddingMaxConcurrency").Value).Returns("5");
+        mockConfig.Setup(c => c.GetSection("RAG:UseVectorDB").Value).Returns("false");
+        mockConfig.Setup(c => c.GetSection("RAG:VectorSimilarityThreshold").Value).Returns("0.5");
 
-        var service = new RAGService(context, mockLogger.Object, mockAIService.Object, mockKernel.Object, mockServiceProvider.Object, mockConfig.Object);
+        var service = new RAGService(context, mockLogger.Object, mockAIService.Object, kernel, mockServiceProvider.Object, mockConfig.Object);
 
         var doc = new DocumentMetadata
         {
