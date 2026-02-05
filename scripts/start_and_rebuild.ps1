@@ -26,16 +26,16 @@ Write-Host "Starting any stopped services (so all containers are running)..."
 try { docker compose start } catch { }
 
 Write-Host "Waiting for http://localhost:5000/health to return success..."
-$maxAttempts = 30
+$maxAttempts = 24
 $attempt = 0
 while ($attempt -lt $maxAttempts) {
     try {
-        $resp = Invoke-RestMethod -Uri http://localhost:5000/health -TimeoutSec 3 -ErrorAction Stop
+        $resp = Invoke-RestMethod -Uri http://localhost:5000/health -TimeoutSec 5 -ErrorAction Stop
         Write-Host "App is healthy."
         break
     } catch {
         Write-Host -NoNewline "."
-        Start-Sleep -Seconds 1
+        Start-Sleep -Seconds 5
         $attempt++
     }
 }
