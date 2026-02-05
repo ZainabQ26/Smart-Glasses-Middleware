@@ -538,44 +538,28 @@ async function loadGroups(reset = false) {
 
 function createGroupCard(group) {
     const div = document.createElement('div');
-    div.className = 'card';
+    div.style.cssText = 'background: #f5f5f5; padding: 12px; border-radius: 4px; margin-bottom: 10px; position: relative;';
     
     const id = getProp(group, 'id');
     const name = getProp(group, 'name') || 'Untitled';
-    const description = getProp(group, 'description') || '';
-    const createdAt = getProp(group, 'createdAt');
-    const files = getProp(group, 'files') || [];
-    const prompts = getProp(group, 'prompts') || [];
     
     div.innerHTML = `
-        <div class="card-header">
-            <div class="card-title">${escapeHtml(name)}</div>
-        </div>
-        ${description ? `<div style="margin-bottom: 10px; color: #555;">${escapeHtml(description)}</div>` : ''}
-        <div class="card-meta">Created: ${createdAt ? new Date(createdAt).toLocaleString() : 'Unknown'}</div>
-        <div class="group-resources">
-            <div class="group-resources-title">Files (${files.length}):</div>
-            ${files && files.length > 0 ? files.map(f => `<span class="badge">${escapeHtml(getProp(f, 'label') || '')}</span>`).join('') : '<span style="color: #95a5a6; font-size: 0.85rem;">No files</span>'}
-        </div>
-        <div class="group-resources">
-            <div class="group-resources-title">Prompts (${prompts.length}):</div>
-            ${prompts && prompts.length > 0 ? prompts.map(p => `<span class="badge">${escapeHtml(getProp(p, 'name') || '')}</span>`).join('') : '<span style="color: #95a5a6; font-size: 0.85rem;">No prompts</span>'}
-        </div>
-        <div class="card-actions">
-            <button data-action="manage-group" data-group-id="${id}" data-group-name="${escapeHtml(name)}">Manage Resources</button>
-            <button data-action="edit-group" data-group-id="${id}" data-group-name="${escapeHtml(name)}" data-group-description="${escapeHtml(description)}">Edit</button>
-            <button class="delete" data-action="delete-group" data-group-id="${id}">Delete</button>
+        <div style="display: flex; gap: 10px; align-items: center;">
+            <div style="position: relative; flex: 1;">
+                <input type="text" value="${escapeHtml(name)}" readonly data-group-id="${id}" style="width: 100%; padding: 12px 50px 12px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; background: white; cursor: default;">
+                <span class="group-item-paperclip" data-group-id="${id}" data-group-name="${escapeHtml(name)}" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 24px; color: #95a5a6; cursor: pointer;">📎</span>
+            </div>
+            <button type="button" class="group-item-delete" data-group-id="${id}" style="padding: 8px 16px; background: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-size: 14px;">Delete</button>
         </div>
     `;
     
-    // Attach event listeners
-    div.querySelector('[data-action="manage-group"]').addEventListener('click', (e) => {
+    // Attach event listener to paperclip
+    div.querySelector('.group-item-paperclip').addEventListener('click', (e) => {
         manageGroupResources(e.target.dataset.groupId, e.target.dataset.groupName);
     });
-    div.querySelector('[data-action="edit-group"]').addEventListener('click', (e) => {
-        editGroup(e.target.dataset.groupId, e.target.dataset.groupName, e.target.dataset.groupDescription);
-    });
-    div.querySelector('[data-action="delete-group"]').addEventListener('click', (e) => {
+    
+    // Attach event listener to delete button
+    div.querySelector('.group-item-delete').addEventListener('click', (e) => {
         deleteGroup(e.target.dataset.groupId);
     });
     
@@ -603,6 +587,70 @@ document.getElementById('group-form').addEventListener('submit', async (e) => {
         });
         
         if (response.ok) {
+            const result = await response.json();
+            const groupId = result.id || result.Id;
+            
+            console.log('[CREATE GROUP] Group created with ID:', groupId);
+            console.log('[CREATE GROUP] Files to upload:', window.groupSelectedFiles);
+            
+            // Upload files if any are selected
+            if (window.groupSelectedFiles && window.groupSelectedFiles.length > 0) {
+                console.log('[CREATE GROUP] Uploading', window.groupSelectedFiles.length, 'files...');
+                
+                for (const fileObj of window.groupSelectedFiles) {
+                    const formData = new FormData();
+                    formData.append('file', fileObj.file);
+                    formData.append('label', fileObj.name); // Add required label
+                    
+                    try {
+                        console.log('[CREATE GROUP] Uploading file:', fileObj.name);
+                        const uploadRes = await fetch(`${API_BASE}/files`, {
+                            method: 'POST',
+                            body: formData
+                        });
+                        
+                        console.log('[CREATE GROUP] Upload response status:', uploadRes.status);
+                        
+                        if (uploadRes.ok) {
+                            const fileData = await uploadRes.json();
+                            const fileId = fileData.id || fileData.Id;
+                            console.log('[CREATE GROUP] File uploaded with ID:', fileId);
+                            
+                            // Add file to group
+                            const attachRes = await fetch(`${API_BASE}/groups/${groupId}/files/${fileId}`, {
+                                method: 'POST'
+                            });
+                            console.log('[CREATE GROUP] Attach file response status:', attachRes.status);
+                            
+                            if (attachRes.ok) {
+                                console.log('[CREATE GROUP] File successfully attached to group');
+                            } else {
+                                console.error('[CREATE GROUP] Failed to attach file to group');
+                            }
+                        } else {
+                            const errorText = await uploadRes.text();
+                            console.error('[CREATE GROUP] Failed to upload file:', errorText);
+                        }
+                    } catch (uploadError) {
+                        console.error('[CREATE GROUP] Error uploading file:', uploadError);
+                    }
+                }
+                
+                console.log('[CREATE GROUP] All files processed, clearing local list');
+                // Clear files after successful upload - need to use splice to modify the actual array
+                groupSelectedFiles.length = 0; // Clear the array in place
+                window.groupSelectedFiles = groupSelectedFiles;
+                if (typeof window.updateGroupFilesList === 'function') {
+                    window.updateGroupFilesList();
+                }
+                const groupFileSection = document.getElementById('group-file-section');
+                if (groupFileSection) {
+                    groupFileSection.style.display = 'none';
+                }
+            } else {
+                console.log('[CREATE GROUP] No files to upload');
+            }
+            
             showMessage(isEditingGroup ? 'Group updated successfully' : 'Group created successfully');
             cancelEditGroup();
             await loadGroups(true);
@@ -745,69 +793,39 @@ async function manageGroupResources(groupId, groupName) {
         const groupFileIds = new Set(groupFiles.map(f => getProp(f, 'id')));
         const groupPromptIds = new Set(groupPrompts.map(p => getProp(p, 'id')));
         
+        console.log('[MANAGE] Group files:', groupFiles);
+        
         const modalBody = document.getElementById('modal-content-body');
+        
+        // Build files list HTML
+        let filesListHTML = '';
+        if (groupFiles.length === 0) {
+            filesListHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No files attached yet</div>';
+        } else {
+            filesListHTML = groupFiles.map(file => {
+                const fileName = getProp(file, 'originalFileName') || getProp(file, 'fileName') || 'Unknown';
+                const fileId = getProp(file, 'id');
+                return `
+                    <div style="padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0;">
+                        <span style="font-size: 14px; color: #333; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                            ${escapeHtml(fileName)}
+                        </span>
+                    </div>
+                `;
+            }).join('');
+        }
+        
         modalBody.innerHTML = `
-            <h4 style="margin-bottom: 15px;">Group: ${escapeHtml(groupName)}</h4>
-            
-            <div class="section" style="margin-bottom: 20px;">
-                <h5 style="margin-bottom: 10px;">Files</h5>
-                <div class="checkbox-group">
-                    ${allFiles.map(file => {
-                        const fileId = getProp(file, 'id');
-                        const fileName = getProp(file, 'fileName') || 'unknown';
-                        const label = getProp(file, 'label') || fileName;
-                        return `
-                        <div class="checkbox-item">
-                            <label>
-                                <input type="checkbox" 
-                                    value="${fileId}" 
-                                    ${groupFileIds.has(fileId) ? 'checked' : ''}
-                                    data-action="toggle-file"
-                                    data-group-id="${groupId}"
-                                    data-file-id="${fileId}">
-                                ${escapeHtml(label)} (${escapeHtml(fileName)})
-                            </label>
-                        </div>
-                    `}).join('')}
-                    ${allFiles.length === 0 ? '<p style="color: #95a5a6;">No files available</p>' : ''}
+            <div style="border: 2px solid #3498db; border-radius: 8px; padding: 15px; display: flex; flex-direction: column; position: relative;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Files</h3>
+                    <button type="button" onclick="closeManageGroupModal()" style="background: none; border: none; font-size: 20px; color: #95a5a6; cursor: pointer; padding: 0; line-height: 1;">×</button>
                 </div>
-            </div>
-            
-            <div class="section">
-                <h5 style="margin-bottom: 10px;">Prompts</h5>
-                <div class="checkbox-group">
-                    ${allPrompts.map(prompt => {
-                        const promptId = getProp(prompt, 'id');
-                        const promptName = getProp(prompt, 'name') || 'Untitled';
-                        return `
-                        <div class="checkbox-item">
-                            <label>
-                                <input type="checkbox" 
-                                    value="${promptId}" 
-                                    ${groupPromptIds.has(promptId) ? 'checked' : ''}
-                                    data-action="toggle-prompt"
-                                    data-group-id="${groupId}"
-                                    data-prompt-id="${promptId}">
-                                ${escapeHtml(promptName)}
-                            </label>
-                        </div>
-                    `}).join('')}
-                    ${allPrompts.length === 0 ? '<p style="color: #95a5a6;">No prompts available</p>' : ''}
+                <div id="modal-files-list" style="flex: 1; overflow-y: scroll; border: 1px solid #e0e0e0; border-radius: 4px; background: white; max-height: 400px; min-height: 200px;">
+                    ${filesListHTML}
                 </div>
             </div>
         `;
-        
-        // Attach event listeners for checkboxes
-        modalBody.querySelectorAll('[data-action="toggle-file"]').forEach(checkbox => {
-            checkbox.addEventListener('change', (e) => {
-                toggleFileInGroup(e.target.dataset.groupId, e.target.dataset.fileId, e.target.checked);
-            });
-        });
-        modalBody.querySelectorAll('[data-action="toggle-prompt"]').forEach(checkbox => {
-            checkbox.addEventListener('change', (e) => {
-                togglePromptInGroup(e.target.dataset.groupId, e.target.dataset.promptId, e.target.checked);
-            });
-        });
         
         document.getElementById('manage-group-modal').classList.add('active');
     } catch (error) {
@@ -1080,6 +1098,200 @@ async function init() {
                 showMessage('No file selected for download', 'error');
             }
         });
+        
+        // Setup reminders file management
+        let groupSelectedFiles = [];
+        window.groupSelectedFiles = groupSelectedFiles; // Expose to global scope
+        let groupPreviewFile = null;
+        const groupFileInput = document.getElementById('group-file-input');
+        const groupFilesList = document.getElementById('group-files-list');
+        const groupFilesIcon = document.getElementById('group-files-icon');
+        const groupFileSection = document.getElementById('group-file-section');
+        const groupFilesDropdown = document.getElementById('group-files-dropdown');
+        const groupFilesListDropdown = document.getElementById('group-files-list-dropdown');
+        const groupPreviewContent = document.getElementById('group-preview-content');
+        const groupPreviewFilename = document.getElementById('group-preview-filename');
+        
+        // Initialize updateGroupFilesList function first
+        function updateGroupFilesList() {
+            // Update paperclip icon color
+            if (groupFilesIcon) {
+                if (groupSelectedFiles.length === 0) {
+                    groupFilesIcon.style.color = '#95a5a6'; // Gray when no files
+                } else {
+                    groupFilesIcon.style.color = '#3498db'; // Blue when files present
+                }
+            }
+            
+            // Update files list in Files section with checkboxes (only show if files exist)
+            if (groupFilesList) {
+                if (groupSelectedFiles.length === 0) {
+                    groupFilesList.innerHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No files attached yet</div>';
+                } else {
+                    groupFilesList.innerHTML = groupSelectedFiles.map((fileObj, index) => `
+                        <div onclick="toggleGroupFileSelection(${index})" style="padding: 12px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; user-select: none; border-bottom: 1px solid #e0e0e0; ${fileObj.selected ? 'background: #f0f0f0;' : ''}">
+                            <input type="checkbox" ${fileObj.selected ? 'checked' : ''} style="width: 16px; height: 16px; cursor: pointer; margin: 0;" onclick="event.stopPropagation(); toggleGroupFileSelection(${index})">
+                            <span style="font-size: 14px; color: #333; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                ${escapeHtml(fileObj.name)}
+                            </span>
+                        </div>
+                    `).join('');
+                }
+            }
+            
+            // Sync window.groupSelectedFiles
+            window.groupSelectedFiles = groupSelectedFiles;
+            
+            // Update dropdown list
+            if (groupFilesListDropdown) {
+                if (groupSelectedFiles.length === 0) {
+                    groupFilesListDropdown.innerHTML = '<div style="color: #95a5a6; text-align: center; padding: 10px;">No files attached</div>';
+                } else {
+                    groupFilesListDropdown.innerHTML = groupSelectedFiles.map((fileObj, index) => `
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            <span style="font-size: 12px; color: #2c3e50;">${escapeHtml(fileObj.name)}</span>
+                            <button type="button" onclick="removeGroupFile(${index})" style="padding: 2px 8px; background: #e74c3c; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 11px;">Delete</button>
+                        </div>
+                    `).join('');
+                }
+            }
+        }
+        window.updateGroupFilesList = updateGroupFilesList;
+        
+        // Initialize files list display (after elements are defined)
+        updateGroupFilesList();
+        
+        // Show file section when clicking "add file+" button
+        document.getElementById('group-show-file-btn')?.addEventListener('click', () => {
+            const isCurrentlyHidden = groupFileSection.style.display === 'none' || !groupFileSection.style.display;
+            if (isCurrentlyHidden) {
+                groupFileSection.style.display = 'block';
+                document.getElementById('group-preview-panel').style.display = 'block';
+                document.getElementById('group-files-panel').style.display = 'flex';
+            } else {
+                groupFileSection.style.display = 'none';
+            }
+        });
+        
+        // Show only Files panel when clicking paperclip in Reminders
+        groupFilesIcon?.addEventListener('click', () => {
+            const filesPanel = document.getElementById('group-files-panel');
+            const deleteBtn = document.getElementById('group-delete-selected-btn');
+            
+            // Hide preview panel, show only files panel
+            document.getElementById('group-preview-panel').style.display = 'none';
+            filesPanel.style.display = 'flex';
+            filesPanel.setAttribute('data-context', 'reminders');
+            
+            // Show delete button when opened from Reminders
+            if (deleteBtn) {
+                deleteBtn.style.display = 'block';
+            }
+            
+            groupFileSection.style.display = 'block';
+            
+            // Update files list after showing the panel
+            updateGroupFilesList();
+        });
+        
+        // Handle file selection - show preview
+        if (groupFileInput) {
+            groupFileInput.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    groupPreviewFile = file;
+                    groupPreviewFilename.textContent = file.name;
+                    
+                    // Show actual preview
+                    const ext = file.name.split('.').pop().toLowerCase();
+                    if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) {
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            groupPreviewContent.innerHTML = `<img src="${e.target.result}" style="max-width: 100%; max-height: 200px; border-radius: 4px; object-fit: contain;">`;
+                        };
+                        reader.readAsDataURL(file);
+                    } else if (ext === 'pdf') {
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            groupPreviewContent.innerHTML = `<embed src="${e.target.result}" type="application/pdf" width="100%" height="200px" style="border-radius: 4px;">`;
+                        };
+                        reader.readAsDataURL(file);
+                    } else {
+                        groupPreviewContent.innerHTML = `
+                            <div style="text-align: center;">
+                                <div style="font-size: 64px; margin-bottom: 10px;">📄</div>
+                                <div style="color: #7f8c8d; font-size: 12px;">Preview not available</div>
+                            </div>
+                        `;
+                    }
+                }
+            });
+        }
+        
+        // Upload button - adds file to list
+        document.getElementById('group-upload-btn')?.addEventListener('click', () => {
+            if (groupPreviewFile) {
+                if (!groupSelectedFiles.find(f => f.name === groupPreviewFile.name)) {
+                    groupSelectedFiles.push({file: groupPreviewFile, name: groupPreviewFile.name, selected: false});
+                    window.groupSelectedFiles = groupSelectedFiles;
+                    updateGroupFilesList();
+                }
+                // Clear preview
+                groupPreviewFile = null;
+                if (groupPreviewFilename) groupPreviewFilename.textContent = '';
+                if (groupPreviewContent) groupPreviewContent.innerHTML = `<div style="font-size: 48px; color: #95a5a6;">📄</div>`;
+                if (groupFileInput) groupFileInput.value = '';
+            }
+        });
+        
+        // Delete selected files
+        document.getElementById('group-delete-selected-btn')?.addEventListener('click', () => {
+            groupSelectedFiles = groupSelectedFiles.filter(f => !f.selected);
+            window.groupSelectedFiles = groupSelectedFiles;
+            updateGroupFilesList();
+        });
+        
+        function getFileIcon(filename) {
+            const ext = filename.split('.').pop().toLowerCase();
+            if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) return '🖼️';
+            if (ext === 'pdf') return '📕';
+            if (['doc', 'docx'].includes(ext)) return '📘';
+            if (ext === 'txt') return '📄';
+            return '📄';
+        }
+        
+        function getFileIconLarge(filename) {
+            const ext = filename.split('.').pop().toLowerCase();
+            if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) return '🖼️';
+            if (ext === 'pdf') return '📕';
+            if (['doc', 'docx'].includes(ext)) return '📘';
+            if (ext === 'txt') return '📄';
+            return '📄';
+        }
+        
+        // Toggle file selection
+        window.toggleGroupFileSelection = function(index) {
+            groupSelectedFiles[index].selected = !groupSelectedFiles[index].selected;
+            window.groupSelectedFiles = groupSelectedFiles;
+            updateGroupFilesList();
+        };
+        
+        // Remove file from dropdown
+        window.removeGroupFile = function(index) {
+            groupSelectedFiles.splice(index, 1);
+            window.groupSelectedFiles = groupSelectedFiles;
+            updateGroupFilesList();
+        };
+        
+        // Delete selected files from Files panel
+        window.deleteSelectedGroupFiles = function() {
+            const selectedCount = groupSelectedFiles.filter(f => f.selected).length;
+            if (selectedCount === 0) {
+                return; // Nothing to delete
+            }
+            groupSelectedFiles = groupSelectedFiles.filter(fileObj => !fileObj.selected);
+            updateGroupFilesList();
+        };
         
         // Load initial data with reset=true to ensure fresh load
         console.log('[INIT] Loading initial data...');

@@ -445,7 +445,7 @@
         <div class="tabs">
             <button class="tab active" data-tab="files">Files</button>
             <button class="tab" data-tab="prompts">Prompts</button>
-            <button class="tab" data-tab="groups">Groups</button>
+            <button class="tab" data-tab="groups">Reminders</button>
         </div>
 
         <!-- Files Tab -->
@@ -513,24 +513,64 @@
         <!-- Groups Tab -->
         <div id="groups" class="tab-content">
             <div class="section">
-                <h2>Create Group</h2>
+                <h2>Set reminder</h2>
                 <form id="group-form">
                     <input type="hidden" id="group-id">
-                    <div class="form-group">
-                        <label for="group-name">Name</label>
-                        <input type="text" id="group-name" placeholder="Enter group name" required>
+                    <input type="hidden" id="group-description" value="Reminder">
+                    
+                    <!-- Prompt Text Section -->
+                    <div style="margin-bottom: 20px;">
+                        <label style="display: block; margin-bottom: 8px; color: #7f8c8d; font-size: 14px;">Prompt Text</label>
+                        <div style="display: flex; gap: 10px;">
+                            <div style="position: relative; flex: 1;">
+                                <input type="text" id="group-name" placeholder="Enter prompt text..." required style="width: 100%; margin: 0; padding-right: 40px;">
+                                <span id="group-files-icon" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 20px; color: #95a5a6; cursor: pointer;">📎</span>
+                            </div>
+                            <button type="button" id="group-show-file-btn" style="padding: 8px 16px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">add file+</button>
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label for="group-description">Description (optional)</label>
-                        <textarea id="group-description" placeholder="Enter group description"></textarea>
+                    
+                    <!-- PRVW and Files Section (hidden by default) -->
+                    <div id="group-file-section" style="display: none; margin-bottom: 20px;">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                            <!-- Preview Panel -->
+                            <div id="group-preview-panel" style="border: 2px solid #3498db; border-radius: 8px; padding: 15px; position: relative;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                    <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Preview</h3>
+                                    <button type="button" onclick="document.getElementById('group-preview-panel').style.display='none'" style="background: none; border: none; font-size: 20px; color: #95a5a6; cursor: pointer; padding: 0; line-height: 1;">×</button>
+                                </div>
+                                <div id="group-preview-content" style="min-height: 200px; background: #f8f9fa; border-radius: 4px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; overflow: hidden;">
+                                    <div style="font-size: 48px; color: #95a5a6; margin-bottom: 10px;">📄</div>
+                                </div>
+                                <div id="group-preview-filename" style="margin: 10px 0; text-align: center; color: #2c3e50; font-size: 14px; font-weight: 500;"></div>
+                                <div class="form-group">
+                                    <label for="group-file-input">Upload File</label>
+                                    <input type="file" id="group-file-input" accept=".jpg,.jpeg,.png,.pdf,.docx,.txt">
+                                </div>
+                                <button type="button" id="group-upload-btn" style="width: 100%; padding: 10px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Upload</button>
+                            </div>
+                            
+                            <!-- Files Panel -->
+                            <div id="group-files-panel" data-context="reminders" style="border: 1px solid #e0e0e0; border-radius: 8px; padding: 15px; display: flex; flex-direction: column; position: relative;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                    <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Files</h3>
+                                    <button type="button" onclick="document.getElementById('group-files-panel').style.display='none'" style="background: none; border: none; font-size: 20px; color: #95a5a6; cursor: pointer; padding: 0; line-height: 1;">×</button>
+                                </div>
+                                <div id="group-files-list" style="flex: 1; overflow-y: scroll; border: 1px solid #e0e0e0; border-radius: 4px; background: white; max-height: 300px;">
+                                    <!-- Files will appear here when added -->
+                                </div>
+                                <button type="button" id="group-delete-selected-btn" onclick="deleteSelectedGroupFiles()" style="margin-top: 12px; padding: 8px 20px; background: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 500; align-self: flex-end;">Delete</button>
+                            </div>
+                        </div>
                     </div>
-                    <button type="submit" id="group-submit-btn">Create Group</button>
+                    
+                    <button type="submit" id="group-submit-btn">Create Reminder</button>
                     <button type="button" id="group-cancel-btn" class="secondary" style="display: none;">Cancel</button>
                 </form>
             </div>
 
             <div class="section">
-                <h2>Resource Groups</h2>
+                <h2>Reminders Set</h2>
                 <div id="groups-list"></div>
             </div>
         </div>
@@ -539,7 +579,7 @@
     <!-- Manage Group Resources Modal -->
     <div id="manage-group-modal" class="modal">
         <div class="modal-content">
-            <div class="modal-header">
+            <div class="modal-header" style="display: none;">
                 <h3>Manage Group Resources</h3>
                 <button class="close-modal" id="close-modal-btn">&times;</button>
             </div>
