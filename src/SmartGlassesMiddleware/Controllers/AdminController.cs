@@ -1069,7 +1069,14 @@ public class AdminController : ControllerBase
     #endregion
 }
 
+/// <summary>
+/// Request model for cache invalidation endpoint
+/// </summary>
 public class InvalidateCacheRequest
 {
+    /// <summary>
+    /// List of cache targets to invalidate. Valid values: "files", "prompts", "groups".
+    /// If null or empty, all caches will be invalidated.
+    /// </summary>
     public List<string>? Targets { get; set; }
 }

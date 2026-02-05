@@ -198,8 +198,10 @@ public class OpenApiContractTests
             currentDir = Directory.GetParent(currentDir)?.FullName;
         }
         
-        // Fallback to a common pattern
-        return Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "..", "..", "..", ".."));
+        // If not found, throw a descriptive exception
+        throw new FileNotFoundException(
+            "Could not find openapi.json in current directory or any parent directories. " +
+            "This test should be run from within the repository structure.");
     }
 }
 
