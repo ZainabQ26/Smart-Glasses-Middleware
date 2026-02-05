@@ -9,10 +9,18 @@ $ErrorActionPreference = 'Stop'
 Push-Location (Join-Path $PSScriptRoot '..')
 
 Write-Host "Building 'app' image..."
+Write-Host "Ensuring dependent images are available (pulling when needed)..."
+try {
+    docker compose pull
+} catch {
+    Write-Host "docker compose pull failed or some images not available; proceeding."
+}
+
+Write-Host "Building 'app' image..."
 docker compose build app
 
-Write-Host "Recreating 'app' container (no dependencies)..."
-docker compose up -d --force-recreate --no-deps app
+Write-Host "Recreating 'app' container (start dependencies if missing)..."
+docker compose up -d --force-recreate app
 
 Write-Host "Starting any stopped services (so all containers are running)..."
 try { docker compose start } catch { }
