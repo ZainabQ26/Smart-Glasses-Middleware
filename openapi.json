@@ -18,7 +18,9 @@
       "get": {
         "summary": "Health check endpoint",
         "description": "Checks the health status of all dependent services including PostgreSQL, Redis, MinIO, Ollama AI, and the Vosk transcription service. Returns a comprehensive health report with individual service statuses.",
-        "tags": ["System"],
+        "tags": [
+          "System"
+        ],
         "operationId": "getHealth",
         "responses": {
           "200": {
@@ -607,7 +609,7 @@
         }
       }
     },
-    "/api/transcribe": {
+    "/api/audio": {
       "post": {
         "tags": [
           "Audio"
@@ -698,7 +700,7 @@
         }
       }
     },
-    "/api/Conversations": {
+    "/api/conversations": {
       "post": {
         "tags": [
           "Conversations"
@@ -795,7 +797,7 @@
         }
       }
     },
-    "/api/Conversations/{id}": {
+    "/api/conversations/{id}": {
       "get": {
         "tags": [
           "Conversations"
@@ -856,7 +858,7 @@
         }
       }
     },
-    "/api/Conversations/{id}/messages": {
+    "/api/conversations/{id}/messages": {
       "post": {
         "tags": [
           "Conversations"
@@ -937,7 +939,7 @@
         }
       }
     },
-    "/api/Conversations/{id}/query": {
+    "/api/conversations/{id}/query": {
       "post": {
         "tags": [
           "Conversations"
@@ -998,7 +1000,7 @@
         }
       }
     },
-    "/api/Conversations/{id}/summarize": {
+    "/api/conversations/{id}/summarize": {
       "post": {
         "tags": [
           "Conversations"
@@ -1067,7 +1069,7 @@
         }
       }
     },
-    "/api/Conversations/{id}/archive": {
+    "/api/conversations/{id}/archive": {
       "post": {
         "tags": [
           "Conversations"
@@ -1091,7 +1093,7 @@
         }
       }
     },
-    "/api/Documents/upload": {
+    "/api/documents/upload": {
       "post": {
         "tags": [
           "Documents"
@@ -1130,8 +1132,28 @@
           "required": true
         },
         "responses": {
-          "200": {
-            "description": "OK",
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Document uploaded and created successfully",
             "content": {
               "text/plain": {
                 "schema": {
@@ -1162,36 +1184,16 @@
                 }
               }
             }
-          },
-          "400": {
-            "description": "Bad Request",
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
           }
         }
       }
     },
-    "/api/Documents/query": {
+    "/api/documents/query": {
       "post": {
         "tags": [
           "Documents"
         ],
-"requestBody": {
+        "requestBody": {
           "content": {
             "application/json": {
               "schema": {
@@ -1210,7 +1212,9 @@
                   "value": {
                     "query": "What did we decide about the budget?",
                     "topK": 5,
-                    "groupIds": ["550e8400-e29b-41d4-a716-446655440000"]
+                    "groupIds": [
+                      "550e8400-e29b-41d4-a716-446655440000"
+                    ]
                   }
                 }
               }
@@ -1269,7 +1273,7 @@
         }
       }
     },
-    "/api/Documents/{documentId}/highlight": {
+    "/api/documents/{documentId}/highlight": {
       "post": {
         "tags": [
           "Documents"
@@ -1350,7 +1354,7 @@
         }
       }
     },
-    "/api/Documents": {
+    "/api/documents": {
       "get": {
         "tags": [
           "Documents"
@@ -1417,7 +1421,7 @@
         }
       }
     },
-    "/api/Documents/{documentId}": {
+    "/api/documents/{documentId}": {
       "get": {
         "tags": [
           "Documents"
@@ -1520,7 +1524,7 @@
         }
       }
     },
-    "/api/Documents/reprocess": {
+    "/api/documents/reprocess": {
       "post": {
         "tags": [
           "Documents"
@@ -1533,7 +1537,7 @@
         }
       }
     },
-    "/api/Documents/unprocessed": {
+    "/api/documents/unprocessed": {
       "get": {
         "tags": [
           "Documents"
@@ -1546,7 +1550,7 @@
         }
       }
     },
-    "/api/Documents/{id}/move": {
+    "/api/documents/{id}/move": {
       "post": {
         "tags": [
           "Documents"
@@ -1610,38 +1614,29 @@
         }
       }
     },
-    "/api/History": {
+    "/api/history": {
       "get": {
+        "summary": "Retrieve request history",
+        "description": "Fetches recent request history entries from the database, including both audio and media processing requests. Supports pagination via the count parameter to retrieve a specific number of recent entries.",
         "tags": [
           "History"
         ],
+        "operationId": "getHistory",
         "parameters": [
           {
             "name": "count",
             "in": "query",
             "schema": {
-              "pattern": "^-?(?:0|[1-9]\\d*)$",
-              "type": [
-                "integer",
-                "string"
-              ],
-              "format": "int32",
+              "type": "integer",
               "default": 10
-            }
+            },
+            "description": "Number of recent history entries to retrieve"
           }
         ],
         "responses": {
           "200": {
-            "description": "OK",
+            "description": "List of recent history entries",
             "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/RequestHistory"
-                  }
-                }
-              },
               "application/json": {
                 "schema": {
                   "type": "array",
@@ -1656,9 +1651,9 @@
                       {
                         "id": "550e8400-e29b-41d4-a716-446655440001",
                         "requestType": "Audio",
-                        "inputText": "Set a reminder for tomorrow at 3 PM",
-                        "detectedTask": "reminder",
-                        "response": "Reminder set for tomorrow at 3 PM",
+                        "inputText": "What time is it in Tokyo?",
+                        "detectedTask": "time",
+                        "response": "The current time in Tokyo is 7:30 PM JST.",
                         "usedAdvancedModel": false,
                         "mediaStorageKey": null,
                         "timestamp": "2026-01-28T10:30:00Z"
@@ -1666,11 +1661,11 @@
                       {
                         "id": "550e8400-e29b-41d4-a716-446655440002",
                         "requestType": "Media",
-                        "inputText": "What is in this image?",
+                        "inputText": "Describe this photo",
                         "detectedTask": "general",
-                        "response": "The image shows a sunset over the ocean with birds flying in the distance.",
+                        "response": "The photo shows a scenic mountain landscape with snow-capped peaks and a lake in the foreground.",
                         "usedAdvancedModel": true,
-                        "mediaStorageKey": "media/2026-01-28/image123.jpg",
+                        "mediaStorageKey": "media/2026-01-28/photo456.jpg",
                         "timestamp": "2026-01-28T09:15:00Z"
                       }
                     ]
@@ -1686,11 +1681,31 @@
                 }
               }
             }
+          },
+          "500": {
+            "description": "Internal server error during processing",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
           }
         }
       }
     },
-    "/api/History/{id}": {
+    "/api/history/{id}": {
       "get": {
         "tags": [
           "History"
@@ -1730,7 +1745,7 @@
         }
       }
     },
-    "/api/History/reminders": {
+    "/api/history/reminders": {
       "get": {
         "tags": [
           "History"
@@ -1783,7 +1798,7 @@
         }
       }
     },
-    "/api/History/type/{requestType}": {
+    "/api/history/type/{requestType}": {
       "get": {
         "tags": [
           "History"
@@ -1844,7 +1859,7 @@
         }
       }
     },
-    "/api/History/reminders/{id}": {
+    "/api/history/reminders/{id}": {
       "put": {
         "tags": [
           "History"
@@ -1925,7 +1940,7 @@
         }
       }
     },
-    "/api/History/reminders/query": {
+    "/api/history/reminders/query": {
       "post": {
         "tags": [
           "History"
@@ -1974,12 +1989,14 @@
         }
       }
     },
-    "/api/ask": {
+    "/api/media": {
       "post": {
-      "tags": ["Media"],
-      "summary": "Process media files (images, videos, audio) with optional AI prompt",
-      "description": "Accepts multipart/form-data with media files and optional prompts. All uploaded files are stored in MinIO, processed through RAG indexing, and analyzed by AI. Audio files are automatically transcribed. This endpoint supports multiple file uploads and processes them asynchronously. Fields:\n- files: One or more media files (images, videos, audio)\n- prompt: Optional text prompt for AI processing\n- promptAudio: Optional audio file containing the prompt (mutually exclusive with prompt)\n- manifest: Optional JSON array specifying file processing order\n- perFileTranscriptions: Optional JSON object mapping filenames to transcriptions\n\nSupported file formats:\n- Images: .jpg, .jpeg, .png, .gif\n- Videos: .mp4, .avi, .mov\n- Audio: .wav, .mp3, .m4a, .flac, .aac",
-      "operationId": "askWithMedia",
+        "tags": [
+          "Media"
+        ],
+        "summary": "Process media files (images, videos, audio) with optional AI prompt",
+        "description": "Accepts multipart/form-data with media files and optional prompts. All uploaded files are stored in MinIO, processed through RAG indexing, and analyzed by AI. Audio files are automatically transcribed. This endpoint supports multiple file uploads and processes them asynchronously. Fields:\n- files: One or more media files (images, videos, audio)\n- prompt: Optional text prompt for AI processing\n- promptAudio: Optional audio file containing the prompt (mutually exclusive with prompt)\n- manifest: Optional JSON array specifying file processing order\n- perFileTranscriptions: Optional JSON object mapping filenames to transcriptions\n\nSupported file formats:\n- Images: .jpg, .jpeg, .png, .gif\n- Videos: .mp4, .avi, .mov\n- Audio: .wav, .mp3, .m4a, .flac, .aac",
+        "operationId": "askWithMedia",
         "requestBody": {
           "description": "Media request containing files and optional prompt",
           "content": {
@@ -2082,7 +2099,9 @@
             "description": "Invalid request format or unsupported file types",
             "content": {
               "application/problem+json": {
-                "schema": { "$ref": "#/components/schemas/ProblemDetails" },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                },
                 "examples": {
                   "invalidRequest": {
                     "summary": "Invalid file type",
@@ -2091,7 +2110,7 @@
                       "title": "Validation Failed",
                       "status": 400,
                       "detail": "File 'bad.exe' has an unsupported file type. Allowed types: .jpg, .jpeg, .png, .gif, .mp4, .avi, .mov, .wav, .mp3, .m4a, .flac, .aac",
-                      "instance": "/api/ask",
+                      "instance": "/api/media",
                       "requestId": "00000000-0000-0000-0000-000000000004",
                       "timestamp": "2026-01-28T00:00:00Z"
                     }
@@ -2114,7 +2133,9 @@
             "description": "Server Error",
             "content": {
               "application/problem+json": {
-                "schema": { "$ref": "#/components/schemas/ProblemDetails" },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                },
                 "examples": {
                   "serverError": {
                     "summary": "Internal error",
@@ -2123,7 +2144,7 @@
                       "title": "Internal Server Error",
                       "status": 500,
                       "detail": "An unexpected error occurred.",
-                      "instance": "/api/ask",
+                      "instance": "/api/media",
                       "requestId": "00000000-0000-0000-0000-000000000003",
                       "timestamp": "2026-01-28T00:00:00Z"
                     }
@@ -2135,91 +2156,11 @@
         }
       }
     },
-
-    "/api/history": {
-      "get": {
-        "summary": "Retrieve request history",
-        "description": "Fetches recent request history entries from the database, including both audio and media processing requests. Supports pagination via the count parameter to retrieve a specific number of recent entries.",
-        "tags": ["History"],
-        "operationId": "getHistory",
-        "parameters": [
-          { "name": "count", "in": "query", "schema": { "type": "integer", "default": 10 }, "description": "Number of recent history entries to retrieve" }
-        ],
-        "responses": {
-          "200": {
-            "description": "List of recent history entries",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/RequestHistory"
-                  }
-                },
-                "examples": {
-                  "recentHistory": {
-                    "summary": "Recent history entries",
-                    "value": [
-                      {
-                        "id": "550e8400-e29b-41d4-a716-446655440001",
-                        "requestType": "Audio",
-                        "inputText": "What time is it in Tokyo?",
-                        "detectedTask": "time",
-                        "response": "The current time in Tokyo is 7:30 PM JST.",
-                        "usedAdvancedModel": false,
-                        "mediaStorageKey": null,
-                        "timestamp": "2026-01-28T10:30:00Z"
-                      },
-                      {
-                        "id": "550e8400-e29b-41d4-a716-446655440002",
-                        "requestType": "Media",
-                        "inputText": "Describe this photo",
-                        "detectedTask": "general",
-                        "response": "The photo shows a scenic mountain landscape with snow-capped peaks and a lake in the foreground.",
-                        "usedAdvancedModel": true,
-                        "mediaStorageKey": "media/2026-01-28/photo456.jpg",
-                        "timestamp": "2026-01-28T09:15:00Z"
-                      }
-                    ]
-                  }
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/RequestHistory"
-                  }
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal server error during processing",
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/tasks/{id}": {
       "get": {
-        "tags": ["Tasks"],
+        "tags": [
+          "Tasks"
+        ],
         "summary": "Get background task status",
         "description": "Retrieves the status and result for a background processing task created by /api/ask.",
         "operationId": "getTask",
@@ -2242,12 +2183,33 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "id": { "type": "string", "format": "uuid" },
-                    "status": { "type": "string" },
-                    "createdAt": { "type": "string", "format": "date-time" },
-                    "updatedAt": { "type": "string", "format": "date-time" },
-                    "error": { "type": ["string", "null"] },
-                    "result": { "type": ["object", "null"] }
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "error": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "result": {
+                      "type": [
+                        "object",
+                        "null"
+                      ]
+                    }
                   }
                 },
                 "examples": {
@@ -2277,12 +2239,33 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "id": { "type": "string", "format": "uuid" },
-                    "status": { "type": "string" },
-                    "createdAt": { "type": "string", "format": "date-time" },
-                    "updatedAt": { "type": "string", "format": "date-time" },
-                    "error": { "type": ["string", "null"] },
-                    "result": { "type": ["object", "null"] }
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "error": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "result": {
+                      "type": [
+                        "object",
+                        "null"
+                      ]
+                    }
                   }
                 },
                 "examples": {
@@ -2305,7 +2288,9 @@
             "description": "Task not found",
             "content": {
               "application/problem+json": {
-                "schema": { "$ref": "#/components/schemas/ProblemDetails" },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                },
                 "examples": {
                   "notFound": {
                     "summary": "Task not found",
@@ -2330,12 +2315,33 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "id": { "type": "string", "format": "uuid" },
-                    "status": { "type": "string" },
-                    "createdAt": { "type": "string", "format": "date-time" },
-                    "updatedAt": { "type": "string", "format": "date-time" },
-                    "error": { "type": ["string", "null"] },
-                    "result": { "type": ["object", "null"] }
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "error": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "result": {
+                      "type": [
+                        "object",
+                        "null"
+                      ]
+                    }
                   }
                 },
                 "examples": {
@@ -2361,7 +2367,9 @@
       "get": {
         "summary": "Retrieve application metrics and performance statistics",
         "description": "Returns real-time application metrics including request counts, error rates, average response times, and timestamps for each API endpoint. Useful for monitoring system performance and identifying bottlenecks.",
-        "tags": ["System"],
+        "tags": [
+          "System"
+        ],
         "operationId": "getMetrics",
         "responses": {
           "200": {
@@ -2371,7 +2379,10 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "timestamp": { "type": "string", "format": "date-time" },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
                     "endpoints": {
                       "type": "object",
                       "additionalProperties": {
@@ -2386,13 +2397,13 @@
                     "value": {
                       "timestamp": "2026-01-28T12:00:00Z",
                       "endpoints": {
-                        "/api/transcribe": {
+                        "/api/audio": {
                           "totalRequests": 150,
                           "totalErrors": 2,
                           "averageDurationMs": 245.5,
                           "lastRequestUtc": "2026-01-28T11:58:30Z"
                         },
-                        "/api/ask": {
+                        "/api/media": {
                           "totalRequests": 89,
                           "totalErrors": 1,
                           "averageDurationMs": 1520.3,
@@ -2412,19 +2423,30 @@
       "get": {
         "summary": "List managed files with pagination",
         "description": "Retrieves a paginated list of all files uploaded through the admin panel. All files returned have been processed through the RAG system for AI searchability. Supports caching for improved performance.",
-        "tags": ["Admin"],
+        "tags": [
+          "Admin"
+        ],
         "operationId": "getAdminFiles",
         "parameters": [
           {
             "name": "page",
             "in": "query",
-            "schema": { "type": "integer", "default": 1, "minimum": 1 },
+            "schema": {
+              "type": "integer",
+              "default": 1,
+              "minimum": 1
+            },
             "description": "Page number for pagination"
           },
           {
             "name": "pageSize",
             "in": "query",
-            "schema": { "type": "integer", "default": 20, "minimum": 1, "maximum": 100 },
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "minimum": 1,
+              "maximum": 100
+            },
             "description": "Number of items per page"
           }
         ],
@@ -2468,7 +2490,9 @@
       "post": {
         "summary": "Upload a new file with label",
         "description": "Uploads a file to MinIO storage, saves metadata to PostgreSQL, and automatically processes it through the RAG system for AI indexing. The file becomes immediately searchable and referenceable by AI. Files are deduplicated by content hash - if the same file is uploaded again, the existing file is returned instead of creating a duplicate.",
-        "tags": ["Admin"],
+        "tags": [
+          "Admin"
+        ],
         "operationId": "uploadAdminFile",
         "requestBody": {
           "required": true,
@@ -2477,10 +2501,20 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "file": { "type": "string", "format": "binary", "description": "File to upload" },
-                  "label": { "type": "string", "description": "Human-readable label for the file" }
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "File to upload"
+                  },
+                  "label": {
+                    "type": "string",
+                    "description": "Human-readable label for the file"
+                  }
                 },
-                "required": ["file", "label"]
+                "required": [
+                  "file",
+                  "label"
+                ]
               }
             }
           }
@@ -2576,6 +2610,61 @@
           }
         }
       }
+    },
+    "/api/admin/cache/invalidate": {
+      "post": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Invalidate specific cache or all caches",
+        "description": "Invalidates the specified caches or all caches if no targets are provided. Targets can include 'files', 'prompts', and 'groups'.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "targets": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "files",
+                        "prompts",
+                        "groups"
+                      ]
+                    },
+                    "description": "List of cache targets to invalidate. If empty or null, all caches are invalidated."
+                  }
+                }
+              },
+              "examples": {
+                "invalidateAll": {
+                  "summary": "Invalidate all caches",
+                  "value": {}
+                },
+                "invalidateSpecific": {
+                  "summary": "Invalidate specific caches",
+                  "value": {
+                    "targets": [
+                      "files",
+                      "prompts"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Cache invalidated successfully"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2583,58 +2672,60 @@
       "AudioRequest": {
         "type": "object",
         "description": "Request payload for audio transcription containing base64-encoded audio data",
-        "properties": { 
-          "audioBase64": { 
+        "properties": {
+          "audioBase64": {
             "type": "string",
             "description": "Base64-encoded audio data (WAV, MP3, M4A, FLAC, or AAC format)",
             "example": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA="
-          } 
+          }
         },
-        "required": ["audioBase64"]
+        "required": [
+          "audioBase64"
+        ]
       },
       "AudioUploadResponse": {
         "type": "object",
         "description": "Response from audio transcription including storage location, transcription text, and request ID",
-        "properties": { 
-          "storageKey": { 
+        "properties": {
+          "storageKey": {
             "type": "string",
             "description": "MinIO storage key where the audio file is stored",
             "example": "audio/2026-01-28/recording_20260128_103045.wav"
-          }, 
-          "transcription": { 
+          },
+          "transcription": {
             "type": "string",
             "description": "Transcribed text from the audio file",
             "example": "Hello world, this is a test recording"
-          }, 
-          "requestId": { 
-            "type": "string", 
+          },
+          "requestId": {
+            "type": "string",
             "format": "uuid",
             "description": "Unique identifier for tracking this request in history",
             "example": "550e8400-e29b-41d4-a716-446655440200"
-          } 
+          }
         }
       },
       "MediaUploadResponse": {
         "type": "object",
         "description": "Response from media processing including AI analysis, detected task, and processed file information",
         "properties": {
-          "task": { 
+          "task": {
             "type": "string",
             "description": "The AI-detected task type (e.g., 'general', 'reminder', 'time', etc.)",
             "example": "general"
           },
-          "response": { 
+          "response": {
             "type": "string",
             "description": "AI-generated response based on the media and prompt",
             "example": "The image shows a beautiful sunset over the ocean with sailboats in the distance"
           },
-          "usedAdvancedModel": { 
+          "usedAdvancedModel": {
             "type": "boolean",
             "description": "Whether the request was processed by the advanced AI model (true) or local model (false)",
             "example": true
           },
-          "requestId": { 
-            "type": "string", 
+          "requestId": {
+            "type": "string",
             "format": "uuid",
             "description": "Unique identifier for this request",
             "example": "550e8400-e29b-41d4-a716-446655440100"
@@ -2645,22 +2736,22 @@
             "items": {
               "type": "object",
               "properties": {
-                "fileName": { 
+                "fileName": {
                   "type": "string",
                   "description": "Original filename of the uploaded file",
                   "example": "sunset_photo.jpg"
                 },
-                "contentType": { 
+                "contentType": {
                   "type": "string",
                   "description": "MIME type of the file",
                   "example": "image/jpeg"
                 },
-                "storageKey": { 
+                "storageKey": {
                   "type": "string",
                   "description": "MinIO storage location",
                   "example": "media/2026-01-28/sunset_photo.jpg"
                 },
-                "transcription": { 
+                "transcription": {
                   "type": "string",
                   "description": "Transcription text for audio/video files (null for images)",
                   "nullable": true,
@@ -2761,8 +2852,12 @@
           },
           "resourceGroup": {
             "oneOf": [
-              { "type": "null" },
-              { "$ref": "#/components/schemas/ResourceGroup" }
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ResourceGroup"
+              }
             ]
           },
           "conversationId": {
@@ -2774,8 +2869,12 @@
           },
           "conversation": {
             "oneOf": [
-              { "type": "null" },
-              { "$ref": "#/components/schemas/Conversation" }
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Conversation"
+              }
             ]
           },
           "success": {
@@ -3135,7 +3234,7 @@
               "$ref": "#/components/schemas/DocumentChunk"
             }
           },
-          "documentGroups": { }
+          "documentGroups": {}
         },
         "description": "Represents metadata for a document uploaded to the RAG system"
       },
