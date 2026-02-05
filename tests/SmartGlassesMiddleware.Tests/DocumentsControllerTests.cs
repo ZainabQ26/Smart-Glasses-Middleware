@@ -114,9 +114,10 @@ public class DocumentsControllerTests
         var result = await controller.UploadDocument(file);
 
         // Assert
-        var okResult = Assert.IsType<OkObjectResult>(result);
-        var value = okResult.Value;
+        var createdResult = Assert.IsType<CreatedAtActionResult>(result);
+        var value = createdResult.Value;
         Assert.NotNull(value);
+        Assert.Equal(nameof(DocumentsController.GetDocument), createdResult.ActionName);
 
         // Verify processing was called
         mockProcessing.Verify(s => s.ProcessDocumentAsync(It.IsAny<Stream>(), "test.pdf", "application/pdf"), Times.Once);
@@ -221,8 +222,8 @@ public class DocumentsControllerTests
         var result = await controller.UploadDocument(file, groupIds);
 
         // Assert
-        var okResult = Assert.IsType<OkObjectResult>(result);
-        Assert.NotNull(okResult.Value);
+        var createdResult = Assert.IsType<CreatedAtActionResult>(result);
+        Assert.NotNull(createdResult.Value);
 
         // Verify groups were added
         var savedGroups = await context.DocumentGroups.Where(dg => dg.DocumentMetadataId == documentId).ToListAsync();
@@ -256,9 +257,9 @@ public class DocumentsControllerTests
         var result = await controller.UploadDocument(file);
 
         // Assert
-        // Should still return OK even if embedding generation fails
-        var okResult = Assert.IsType<OkObjectResult>(result);
-        Assert.NotNull(okResult.Value);
+        // Should still return Created even if embedding generation fails
+        var createdResult = Assert.IsType<CreatedAtActionResult>(result);
+        Assert.NotNull(createdResult.Value);
     }
 
     [Fact]

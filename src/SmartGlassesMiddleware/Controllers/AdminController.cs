@@ -1014,4 +1014,62 @@ public class AdminController : ControllerBase
     }
 
     #endregion
+
+    #region Cache Management
+
+    /// <summary>
+    /// Invalidate specific cache or all caches
+    /// </summary>
+    [HttpPost("cache/invalidate")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> InvalidateCache([FromBody] InvalidateCacheRequest? request = null)
+    {
+        try
+        {
+            if (request == null || request.Targets == null || request.Targets.Count == 0)
+            {
+                // Invalidate all caches if no targets specified
+                await InvalidateAllCaches();
+                _logger.LogInformation("Invalidated all admin caches");
+            }
+            else
+            {
+                foreach (var target in request.Targets)
+                {
+                    switch (target.ToLowerInvariant())
+                    {
+                        case "files":
+                            await InvalidateFilesCache();
+                            _logger.LogInformation("Invalidated files cache");
+                            break;
+                        case "prompts":
+                            await InvalidatePromptsCache();
+                            _logger.LogInformation("Invalidated prompts cache");
+                            break;
+                        case "groups":
+                            await InvalidateGroupsCache();
+                            _logger.LogInformation("Invalidated groups cache");
+                            break;
+                        default:
+                            _logger.LogWarning("Unknown cache target: {Target}", target);
+                            break;
+                    }
+                }
+            }
+
+            return NoContent();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error invalidating cache");
+            return StatusCode(500, new { error = "Failed to invalidate cache", details = ex.Message });
+        }
+    }
+
+    #endregion
+}
+
+public class InvalidateCacheRequest
+{
+    public List<string>? Targets { get; set; }
 }

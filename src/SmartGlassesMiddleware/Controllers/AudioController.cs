@@ -9,7 +9,7 @@ namespace SmartGlassesMiddleware.Controllers;
 /// Handles audio transcription requests
 /// </summary>
 [ApiController]
-[Route("api/transcribe")]
+[Route("api/audio")]
 public class AudioController : ControllerBase
 {
     private readonly IMediaStorageService _mediaStorageService;

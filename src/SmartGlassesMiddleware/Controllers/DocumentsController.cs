@@ -40,7 +40,7 @@ public class DocumentsController : ControllerBase
     /// Upload and process a document (PDF, DOCX, TXT, or image)
     /// </summary>
     [HttpPost("upload")]
-    [ProducesResponseType(typeof(DocumentMetadata), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(DocumentMetadata), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> UploadDocument(IFormFile file, [FromForm] List<Guid>? groupIds = null)
     {
@@ -89,7 +89,7 @@ public class DocumentsController : ControllerBase
                 // Don't fail the upload, background service will retry
             }
 
-            return Ok(new
+            return CreatedAtAction(nameof(GetDocument), new { documentId = document.Id }, new
             {
                 document.Id,
                 document.FileName,

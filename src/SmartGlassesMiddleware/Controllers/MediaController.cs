@@ -10,7 +10,7 @@ namespace SmartGlassesMiddleware.Controllers;
 /// Handles media processing requests including images, videos, and audio files
 /// </summary>
 [ApiController]
-[Route("api/ask")]
+[Route("api/media")]
 public class MediaController : ControllerBase
 {
     private readonly IMediaStorageService _mediaStorageService;
