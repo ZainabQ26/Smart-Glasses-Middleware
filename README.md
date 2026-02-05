@@ -130,6 +130,34 @@ The `.env` file is organized into the following sections:
 
 For detailed descriptions of each setting, see `.env.example`.
 
+**Persisting Data on Host (Windows)**
+
+- To persist service data to specific host directories on Windows, set the following variables in your `.env` to the desired absolute paths (or keep named volumes):
+
+```powershell
+# Example Windows host-path bind mounts
+POSTGRES_DATA_VOLUME=C:/docker-data/postgres
+MINIO_DATA_VOLUME=C:/docker-data/minio
+OLLAMA_DATA_VOLUME=C:/docker-data/ollama
+VOSK_MODELS_VOLUME=C:/docker-data/vosk-models
+```
+
+- Notes:
+  - Use forward slashes (`/`) in Windows paths when used in `docker-compose`.
+  - If you prefer Docker-managed named volumes, keep the defaults (e.g., `postgres-data`).
+  - Ensure Docker Desktop has filesystem access to the chosen host directories.
+
+- Start the stack after configuring `.env`:
+
+```powershell
+# From repository root
+cp .env.example .env    # or copy manually in File Explorer
+# Edit .env (e.g. with Notepad or VS Code)
+# Then start the services
+docker-compose pull
+docker-compose up -d --build
+```
+
 ### Legacy Configuration Files
 
 The application still uses `appsettings.json` for default values, but **all secrets and environment-specific settings should be in `.env`**. The environment variables from `.env` will override the appsettings.json defaults.
