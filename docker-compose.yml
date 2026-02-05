@@ -22,7 +22,7 @@ services:
       retries: 3
 
   postgres:
-    image: postgres:latest
+    image: pgvector/pgvector:pg17
     container_name: smartglasses-postgres
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-smartglasses}
