@@ -23,13 +23,32 @@ def ensure_model():
     zip_path = f"/tmp/{MODEL_NAME}.zip"
     try:
         import requests
+        from requests.adapters import HTTPAdapter
+        from urllib3.util.retry import Retry
+        
         print(f"Downloading Vosk model from {MODEL_URL} to {zip_path}")
-        r = requests.get(MODEL_URL, stream=True, timeout=300)
+        
+        # Configure retry strategy with longer timeout
+        session = requests.Session()
+        retry_strategy = Retry(
+            total=5,
+            backoff_factor=1,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["GET"]
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+        
+        # Download with extended timeout (15 minutes for the read timeout)
+        r = session.get(MODEL_URL, stream=True, timeout=(10, 900))
         r.raise_for_status()
+        
         with open(zip_path, "wb") as f:
-            for chunk in r.iter_content(chunk_size=8192):
+            for chunk in r.iter_content(chunk_size=65536):  # Larger chunks for stability
                 if chunk:
                     f.write(chunk)
+        
         print("Extracting model...")
         with zipfile.ZipFile(zip_path, 'r') as z:
             z.extractall(os.path.dirname(MODEL_DIR))
