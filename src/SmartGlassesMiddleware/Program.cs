@@ -500,19 +500,27 @@ app.Use(async (context, next) =>
     }
 });
 
-// Add a consistent request id header for all responses so clients can correlate errors with logs
+// Add a consistent request id and correlation id header for all responses
 app.Use(async (context, next) =>
 {
+    // Check for incoming X-Correlation-ID header or generate a new one
+    var correlationId = context.Request.Headers["X-Correlation-ID"].FirstOrDefault()
+        ?? context.Request.Headers["X-CorrelationId"].FirstOrDefault()
+        ?? Guid.NewGuid().ToString();
+    
     var requestId = Activity.Current?.Id ?? context.TraceIdentifier;
-    // ensure header is added even if later middleware short-circuits
+    
+    // ensure headers are added even if later middleware short-circuits
     context.Response.OnStarting(() =>
     {
         context.Response.Headers["X-Request-Id"] = requestId;
+        context.Response.Headers["X-Correlation-ID"] = correlationId;
         return Task.CompletedTask;
     });
 
     // make available to controllers and exception handlers
     context.Items["RequestId"] = requestId;
+    context.Items["CorrelationId"] = correlationId;
     await next();
 });
 
