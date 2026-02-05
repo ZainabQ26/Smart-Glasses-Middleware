@@ -49,6 +49,12 @@ def health():
     return ("ok", 200) if ok else ("not ready", 503)
 
 
+@app.route('/transcribe/health')
+def transcribe_health():
+    ok = os.path.exists(MODEL_DIR) and os.listdir(MODEL_DIR)
+    return ("ok", 200) if ok else ("not ready", 503)
+
+
 @app.route('/transcribe', methods=['POST'])
 def transcribe():
     try:
