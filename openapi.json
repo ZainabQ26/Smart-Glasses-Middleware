@@ -2,7 +2,7 @@
   "openapi": "3.1.1",
   "info": {
     "title": "Smart Glasses Middleware API",
-    "description": "A comprehensive middleware API for smart glasses that processes audio, images, videos, and text with AI-powered task detection and intelligent routing. Features include RAG (Retrieval-Augmented Generation) indexing for all uploaded files, making them easily searchable and referenceable by AI.",
+    "description": "A comprehensive middleware API for smart glasses that processes audio, images, videos, and text with AI-powered task detection and intelligent routing. Features include RAG (Retrieval-Augmented Generation) indexing for all uploaded files, making them easily searchable and referenceable by AI.\n\n## Global Headers\n\nAll API responses include the following headers for tracing and debugging:\n\n- **X-Request-Id**: A unique identifier for each request. This can be used to correlate requests with server logs.\n- **X-Correlation-ID**: A correlation identifier that can be provided by the client or will be auto-generated. This allows tracking requests across multiple services.\n\n### Correlation ID Usage\n\nClients can provide a correlation ID in the request:\n```\nX-Correlation-ID: <your-correlation-id>\n```\n\nIf not provided, the server will generate one and include it in the response. The same correlation ID should be used when making related requests to trace a complete workflow.\n\n## Rate Limiting\n\nThe API implements rate limiting to ensure fair usage. By default, clients are limited to 60 requests per minute.\n\nWhen rate limited, the API returns a 429 status code with a ProblemDetails response.\n\n## Error Handling\n\nThe API uses RFC 7807 Problem Details for consistent error responses. All errors return a JSON object with the following structure:\n\n```json\n{\n  \"type\": \"https://tools.ietf.org/html/rfc7231#section-6.5.1\",\n  \"title\": \"Error Title\",\n  \"status\": 400,\n  \"detail\": \"Detailed error message\",\n  \"instance\": \"/api/endpoint\",\n  \"requestId\": \"unique-request-id\",\n  \"timestamp\": \"2024-01-01T00:00:00Z\"\n}\n```\n",
     "version": "1.0.0",
     "contact": {
       "name": "Smart Glasses Middleware Support"
@@ -17,14 +17,60 @@
     "/health": {
       "get": {
         "summary": "Health check endpoint",
-        "description": "Checks the health status of all dependent services including PostgreSQL, Redis, MinIO, Ollama AI, and the Vosk transcription service. Returns a comprehensive health report with individual service statuses.",
+        "description": "Checks the health status of all dependent services including PostgreSQL, Redis, MinIO, Ollama AI, and the Vosk transcription service. \nReturns a comprehensive health report with individual service statuses.\n\nThis endpoint is used for monitoring and should not be cached. It's designed for use by load balancers, orchestration systems, and monitoring tools.",
         "tags": [
-          "System"
+          "Operations"
         ],
         "operationId": "getHealth",
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "All services are healthy"
+          },
+          "503": {
+            "description": "One or more services are unhealthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "Healthy",
+                        "Unhealthy"
+                      ]
+                    },
+                    "checks": {
+                      "type": "object",
+                      "properties": {
+                        "postgres": {
+                          "type": "object"
+                        },
+                        "redis": {
+                          "type": "object"
+                        },
+                        "minio": {
+                          "type": "object"
+                        },
+                        "ollama": {
+                          "type": "object"
+                        },
+                        "vosk-transcriber": {
+                          "type": "object"
+                        },
+                        "redis-pubsub-bridge": {
+                          "type": "object"
+                        }
+                      }
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -2365,15 +2411,15 @@
     },
     "/metrics": {
       "get": {
-        "summary": "Retrieve application metrics and performance statistics",
-        "description": "Returns real-time application metrics including request counts, error rates, average response times, and timestamps for each API endpoint. Useful for monitoring system performance and identifying bottlenecks.",
+        "summary": "Application metrics endpoint",
+        "description": "Returns application-level metrics including request counts, error rates, and response times per endpoint.\n\n**Authentication:** In production environments, this endpoint requires an X-API-Key header for authentication.\n\nThis endpoint is designed for monitoring and observability tools like Prometheus, Grafana, or custom dashboards.",
         "tags": [
-          "System"
+          "Operations"
         ],
         "operationId": "getMetrics",
         "responses": {
           "200": {
-            "description": "Application metrics and statistics",
+            "description": "Metrics retrieved successfully",
             "content": {
               "application/json": {
                 "schema": {
@@ -2385,38 +2431,31 @@
                     },
                     "endpoints": {
                       "type": "object",
-                      "additionalProperties": {
-                        "$ref": "#/components/schemas/MetricsSummary"
-                      }
-                    }
-                  }
-                },
-                "examples": {
-                  "metricsExample": {
-                    "summary": "Metrics example",
-                    "value": {
-                      "timestamp": "2026-01-28T12:00:00Z",
-                      "endpoints": {
-                        "/api/audio": {
-                          "totalRequests": 150,
-                          "totalErrors": 2,
-                          "averageDurationMs": 245.5,
-                          "lastRequestUtc": "2026-01-28T11:58:30Z"
-                        },
-                        "/api/media": {
-                          "totalRequests": 89,
-                          "totalErrors": 1,
-                          "averageDurationMs": 1520.3,
-                          "lastRequestUtc": "2026-01-28T11:59:45Z"
-                        }
-                      }
+                      "description": "Metrics grouped by endpoint"
                     }
                   }
                 }
               }
             }
+          },
+          "401": {
+            "description": "Unauthorized - API key missing or invalid"
+          },
+          "403": {
+            "description": "Forbidden - API key not configured in production"
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "description": "API key for accessing metrics in production (not required in development)",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ]
       }
     },
     "/api/admin/files": {
@@ -3493,39 +3532,38 @@
       },
       "ProblemDetails": {
         "type": "object",
+        "description": "RFC 7807 Problem Details for HTTP APIs",
         "properties": {
           "type": {
-            "type": [
-              "null",
-              "string"
-            ]
+            "type": "string",
+            "format": "uri",
+            "description": "A URI reference that identifies the problem type"
           },
           "title": {
-            "type": [
-              "null",
-              "string"
-            ]
+            "type": "string",
+            "description": "A short, human-readable summary of the problem"
           },
           "status": {
-            "pattern": "^-?(?:0|[1-9]\\d*)$",
-            "type": [
-              "null",
-              "integer",
-              "string"
-            ],
-            "format": "int32"
+            "type": "integer",
+            "description": "The HTTP status code"
           },
           "detail": {
-            "type": [
-              "null",
-              "string"
-            ]
+            "type": "string",
+            "description": "A human-readable explanation specific to this occurrence of the problem"
           },
           "instance": {
-            "type": [
-              "null",
-              "string"
-            ]
+            "type": "string",
+            "format": "uri",
+            "description": "A URI reference that identifies the specific occurrence of the problem"
+          },
+          "requestId": {
+            "type": "string",
+            "description": "The unique request identifier for debugging"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The timestamp when the error occurred"
           }
         }
       },
@@ -3765,6 +3803,47 @@
             }
           }
         }
+      },
+      "ValidationProblemDetails": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ProblemDetails"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "errors": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "description": "Field-level validation errors"
+              }
+            }
+          }
+        ],
+        "description": "RFC 7807 Problem Details with validation errors"
+      }
+    },
+    "headers": {
+      "X-Request-Id": {
+        "description": "A unique identifier for this request, useful for debugging and log correlation",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "example": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00"
+      },
+      "X-Correlation-ID": {
+        "description": "A correlation identifier that can be provided by the client or will be auto-generated. Use this to track requests across multiple services.",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "example": "550e8400-e29b-41d4-a716-446655440000"
       }
     }
   },
@@ -3795,6 +3874,10 @@
     },
     {
       "name": "Tasks"
+    },
+    {
+      "name": "Operations",
+      "description": "Operational endpoints for health checks, metrics, and monitoring. These endpoints are typically used by infrastructure and observability tools."
     }
   ]
 }
