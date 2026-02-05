@@ -724,7 +724,7 @@ public class ConversationsControllerTests
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result);
         mockRagService.Verify(s => s.GenerateTextEmbeddingJsonAsync(summary), Times.Once);
-        
+
         var updatedConversation = await context.Conversations.FindAsync(conversationId);
         Assert.NotNull(updatedConversation);
         Assert.Equal(embeddingJson, updatedConversation.SummaryEmbedding);

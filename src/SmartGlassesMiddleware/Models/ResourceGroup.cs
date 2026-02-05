@@ -9,7 +9,7 @@ public class ResourceGroup
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
     public DateTime CreatedAt { get; set; }
-    
+
     // Navigation properties
     public List<ManagedFileGroup> FileGroups { get; set; } = new();
     public List<ManagedPromptGroup> PromptGroups { get; set; } = new();
@@ -24,7 +24,7 @@ public class ManagedFileGroup
 {
     public Guid ManagedFileId { get; set; }
     public ManagedFile ManagedFile { get; set; } = null!;
-    
+
     public Guid ResourceGroupId { get; set; }
     public ResourceGroup ResourceGroup { get; set; } = null!;
 }
@@ -36,7 +36,7 @@ public class ManagedPromptGroup
 {
     public Guid ManagedPromptId { get; set; }
     public ManagedPrompt ManagedPrompt { get; set; } = null!;
-    
+
     public Guid ResourceGroupId { get; set; }
     public ResourceGroup ResourceGroup { get; set; } = null!;
 }

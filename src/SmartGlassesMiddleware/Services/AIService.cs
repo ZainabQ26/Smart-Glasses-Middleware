@@ -77,7 +77,7 @@ Task:";
                     // Fall through to use local model as fallback
                 }
             }
-            
+
             // If we have a concrete handler for the detected task, invoke it via dispatcher
             if (_knownTasks.Contains(detectedTask))
             {
@@ -139,7 +139,7 @@ Please provide a helpful and concise response:";
 
             var responseContent = await response.Content.ReadAsStringAsync();
             var result = JsonSerializer.Deserialize<JsonElement>(responseContent);
-            
+
             return result.GetProperty("response").GetString() ?? "No response from advanced model.";
         }
         catch (Exception ex)

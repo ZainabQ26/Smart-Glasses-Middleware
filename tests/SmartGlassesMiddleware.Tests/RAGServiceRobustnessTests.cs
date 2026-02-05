@@ -32,7 +32,7 @@ public class RAGServiceRobustnessTests
         _kernel = new Kernel();
         _mockConfiguration = new Mock<IConfiguration>();
         _mockTaskDispatcher = new Mock<ITaskDispatcher>();
-        
+
         // Setup configuration defaults using GetSection method
         _mockConfiguration.Setup(c => c.GetSection("RAG:MaxRetries").Value).Returns("3");
         _mockConfiguration.Setup(c => c.GetSection("RAG:RetryDelayMs").Value).Returns("1000");
@@ -47,13 +47,13 @@ public class RAGServiceRobustnessTests
         var services = new ServiceCollection();
         services.AddSingleton(_mockTaskDispatcher.Object);
         _serviceProvider = services.BuildServiceProvider();
-        
+
         // Create in-memory database for testing
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString())
             .Options;
         _context = new ApplicationDbContext(options);
-        
+
         _service = new RAGService(
             _context,
             _mockLogger.Object,
@@ -70,10 +70,10 @@ public class RAGServiceRobustnessTests
         // Arrange
         var group1Id = Guid.NewGuid();
         var group2Id = Guid.NewGuid();
-        
+
         var doc1 = CreateTestDocument("doc1.txt", group1Id);
         var doc2 = CreateTestDocument("doc2.txt", group2Id);
-        
+
         _context.DocumentMetadatas.AddRange(doc1, doc2);
         await _context.SaveChangesAsync();
 
@@ -82,8 +82,8 @@ public class RAGServiceRobustnessTests
 
         // Assert
         Assert.NotEmpty(results);
-        Assert.All(results, chunk => 
-            Assert.Contains(chunk.DocumentMetadata.DocumentGroups, 
+        Assert.All(results, chunk =>
+            Assert.Contains(chunk.DocumentMetadata.DocumentGroups,
                 dg => dg.ResourceGroupId == group1Id));
     }
 
@@ -93,14 +93,14 @@ public class RAGServiceRobustnessTests
         // Arrange
         var processedDoc = CreateTestDocument("processed.txt", Guid.NewGuid());
         processedDoc.IsProcessed = true;
-        
+
         var unprocessedDoc = CreateTestDocument("unprocessed.txt", Guid.NewGuid());
         unprocessedDoc.IsProcessed = false;
-        
+
         var failedDoc = CreateTestDocument("failed.txt", Guid.NewGuid());
         failedDoc.IsProcessed = true;
         failedDoc.ProcessingError = "Some error";
-        
+
         _context.DocumentMetadatas.AddRange(processedDoc, unprocessedDoc, failedDoc);
         await _context.SaveChangesAsync();
 
@@ -124,7 +124,7 @@ public class RAGServiceRobustnessTests
             Name = "Test Group",
             CreatedAt = DateTime.UtcNow
         };
-        
+
         var prompt = new ManagedPrompt
         {
             Id = Guid.NewGuid(),
@@ -132,7 +132,7 @@ public class RAGServiceRobustnessTests
             PromptText = "This is additional context from the group.",
             CreatedAt = DateTime.UtcNow
         };
-        
+
         var promptGroup = new ManagedPromptGroup
         {
             ManagedPromptId = prompt.Id,
@@ -140,11 +140,11 @@ public class RAGServiceRobustnessTests
             ResourceGroupId = groupId,
             ResourceGroup = group
         };
-        
+
         group.PromptGroups.Add(promptGroup);
-        
+
         var doc = CreateTestDocument("test.txt", groupId);
-        
+
         _context.ResourceGroups.Add(group);
         _context.ManagedPrompts.Add(prompt);
         _context.DocumentMetadatas.Add(doc);
@@ -193,7 +193,7 @@ public class RAGServiceRobustnessTests
         };
 
         doc.Chunks.Add(chunk);
-        
+
         doc.DocumentGroups.Add(new DocumentGroup
         {
             DocumentMetadataId = doc.Id,

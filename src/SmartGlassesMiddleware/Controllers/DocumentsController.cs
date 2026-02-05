@@ -121,8 +121,8 @@ public class DocumentsController : ControllerBase
         try
         {
             var result = await _ragService.QueryDocumentsAsync(
-                request.Query, 
-                request.TopK ?? 5, 
+                request.Query,
+                request.TopK ?? 5,
                 request.GroupIds);
 
             return Ok(result);
@@ -161,7 +161,7 @@ public class DocumentsController : ControllerBase
 
             var document = await _context.DocumentMetadatas.FindAsync(documentId);
             var fileName = $"highlighted_{document?.FileName ?? "document"}";
-            
+
             return File(highlightedStream, document?.ContentType ?? "application/pdf", fileName);
         }
         catch (FileNotFoundException ex)
@@ -255,7 +255,7 @@ public class DocumentsController : ControllerBase
     public async Task<IActionResult> DeleteDocument(Guid documentId)
     {
         var document = await _context.DocumentMetadatas.FindAsync(documentId);
-        
+
         if (document == null)
             return NotFound();
 

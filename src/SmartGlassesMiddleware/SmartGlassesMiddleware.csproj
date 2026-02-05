@@ -22,6 +22,9 @@
     <PackageReference Include="Polly.Extensions.Http" Version="3.0.0" />
     <PackageReference Include="StackExchange.Redis" Version="2.8.16" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" />
+    <PackageReference Include="Microsoft.CodeAnalysis.NetAnalyzers" Version="10.0.102">
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
     <PackageReference Include="Pgvector.EntityFrameworkCore" Version="0.3.0" />
     <!-- Document processing packages -->
     <PackageReference Include="itext7" Version="8.0.5" />

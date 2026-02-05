@@ -291,23 +291,23 @@ public class MediaController : ControllerBase
                     pd.Errors.Add("files", new[] { $"Invalid file type: {file.FileName}" });
                     pd.Extensions["requestId"] = HttpContext.TraceIdentifier;
                     pd.Extensions["timestamp"] = DateTime.UtcNow.ToString("o");
-                    
+
                     return BadRequest(pd);
                 }
 
                 using var uploadStream = file.OpenReadStream();
                 var contentType = file.ContentType ?? "application/octet-stream";
-                
+
                 // Compute content hash for deduplication
                 var contentHash = _mediaStorageService.ComputeContentHash(uploadStream);
-                
+
                 // Check if file with same hash already exists
                 var existingFile = await _context.ManagedFiles
                     .FirstOrDefaultAsync(f => f.ContentHash == contentHash);
-                
+
                 string storageKey;
                 Guid fileId;
-                
+
                 if (existingFile != null)
                 {
                     // File already exists, reuse it
@@ -319,7 +319,7 @@ public class MediaController : ControllerBase
                 {
                     // Upload new file
                     storageKey = await _mediaStorageService.UploadMediaAsync(uploadStream, file.FileName, contentType);
-                    
+
                     // Create ManagedFile record
                     var managedFile = new ManagedFile
                     {
@@ -387,7 +387,7 @@ public class MediaController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing media request");
-            
+
             var pd = new ProblemDetails
             {
                 Type = "https://tools.ietf.org/html/rfc7231#section-6.6.1",
@@ -398,7 +398,7 @@ public class MediaController : ControllerBase
             };
             pd.Extensions["requestId"] = HttpContext.TraceIdentifier;
             pd.Extensions["timestamp"] = DateTime.UtcNow.ToString("o");
-            
+
             return StatusCode(500, pd);
         }
     }

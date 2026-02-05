@@ -32,9 +32,9 @@ public class EditReminderTaskHandler : ITaskHandler
             // "update [old] to [new]"
             // "edit [old] to [new]"
             // "change reminder about [old] to [new]"
-            
+
             var parsedInput = ParseEditCommand(input);
-            
+
             if (parsedInput.oldText == null || parsedInput.newText == null)
             {
                 return "I couldn't understand what you want to edit. Try saying something like 'change my reminder about milk to buy eggs' or 'edit buy milk to buy bread'.";
@@ -54,7 +54,7 @@ public class EditReminderTaskHandler : ITaskHandler
 
             if (matchingReminders.Count > 1)
             {
-                var reminderList = string.Join("\n", matchingReminders.Take(5).Select((r, i) => 
+                var reminderList = string.Join("\n", matchingReminders.Take(5).Select((r, i) =>
                     $"{i + 1}. {r.InputText} (created {r.Timestamp:yyyy-MM-dd HH:mm} UTC)"));
                 return $"I found {matchingReminders.Count} reminders matching '{parsedInput.oldText}':\n\n{reminderList}\n\nPlease be more specific about which reminder you want to edit.";
             }
@@ -101,10 +101,10 @@ public class EditReminderTaskHandler : ITaskHandler
         {
             var oldText = toMatch.Groups[1].Value.Trim();
             var newText = toMatch.Groups[2].Value.Trim();
-            
+
             // Clean up common phrases
             oldText = Regex.Replace(oldText, @"^(the\s+)?(reminder\s+)?(about\s+)?", "", RegexOptions.IgnoreCase).Trim();
-            
+
             if (!string.IsNullOrWhiteSpace(oldText) && !string.IsNullOrWhiteSpace(newText))
             {
                 return (oldText, newText);

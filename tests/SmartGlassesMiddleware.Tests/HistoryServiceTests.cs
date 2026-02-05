@@ -354,7 +354,7 @@ public class HistoryServiceTests
         });
 
         // Act & Assert
-        await Assert.ThrowsAsync<ArgumentException>(() => 
+        await Assert.ThrowsAsync<ArgumentException>(() =>
             service.UpdateReminderAsync(reminder.Id, ""));
     }
 
@@ -376,7 +376,7 @@ public class HistoryServiceTests
         var longText = new string('a', 1001);
 
         // Act & Assert
-        await Assert.ThrowsAsync<ArgumentException>(() => 
+        await Assert.ThrowsAsync<ArgumentException>(() =>
             service.UpdateReminderAsync(reminder.Id, longText));
     }
 
@@ -396,7 +396,7 @@ public class HistoryServiceTests
         });
 
         // Act & Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(() => 
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
             service.UpdateReminderAsync(history.Id, "New text"));
     }
 
@@ -478,7 +478,7 @@ public class HistoryServiceTests
         });
 
         // Act & Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(() => 
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
             service.DeleteReminderAsync(history.Id));
     }
 

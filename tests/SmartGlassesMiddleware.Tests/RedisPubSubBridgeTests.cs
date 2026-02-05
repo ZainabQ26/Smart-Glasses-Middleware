@@ -69,9 +69,9 @@ public class RedisPubSubBridgeTests
             x => x.Log(
                 LogLevel.Information,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString().Contains("RedisPubSubBridge subscribed")),
-                It.IsAny<Exception>(),
-                It.IsAny<Func<It.IsAnyType, Exception, string>>()),
+                It.Is<It.IsAnyType>((v, t) => (v.ToString() ?? "").Contains("RedisPubSubBridge subscribed")),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);
     }
 
@@ -94,14 +94,14 @@ public class RedisPubSubBridgeTests
     public async Task MessageReceived_ShouldForwardToSignalR()
     {
         // Arrange
-        Action<RedisChannel, RedisValue> messageHandler = null;
+        Action<RedisChannel, RedisValue>? messageHandler = null;
 
         _mockSubscriber
             .Setup(s => s.Subscribe(
                 It.IsAny<RedisChannel>(),
                 It.IsAny<Action<RedisChannel, RedisValue>>(),
                 It.IsAny<CommandFlags>()))
-            .Callback<RedisChannel, Action<RedisChannel, RedisValue>, CommandFlags>((ch, handler, flags) =>
+            .Callback((RedisChannel ch, Action<RedisChannel, RedisValue> handler, CommandFlags flags) =>
             {
                 messageHandler = handler;
             });
@@ -131,14 +131,14 @@ public class RedisPubSubBridgeTests
     public async Task MessageReceived_ShouldUpdateStatusOnSuccess()
     {
         // Arrange
-        Action<RedisChannel, RedisValue> messageHandler = null;
+        Action<RedisChannel, RedisValue>? messageHandler = null;
 
         _mockSubscriber
             .Setup(s => s.Subscribe(
                 It.IsAny<RedisChannel>(),
                 It.IsAny<Action<RedisChannel, RedisValue>>(),
                 It.IsAny<CommandFlags>()))
-            .Callback<RedisChannel, Action<RedisChannel, RedisValue>, CommandFlags>((ch, handler, flags) =>
+            .Callback((RedisChannel ch, Action<RedisChannel, RedisValue> handler, CommandFlags flags) =>
             {
                 messageHandler = handler;
             });
@@ -164,14 +164,14 @@ public class RedisPubSubBridgeTests
     public async Task MessageReceived_ShouldHandleInvalidJson()
     {
         // Arrange
-        Action<RedisChannel, RedisValue> messageHandler = null;
+        Action<RedisChannel, RedisValue>? messageHandler = null;
 
         _mockSubscriber
             .Setup(s => s.Subscribe(
                 It.IsAny<RedisChannel>(),
                 It.IsAny<Action<RedisChannel, RedisValue>>(),
                 It.IsAny<CommandFlags>()))
-            .Callback<RedisChannel, Action<RedisChannel, RedisValue>, CommandFlags>((ch, handler, flags) =>
+            .Callback((RedisChannel ch, Action<RedisChannel, RedisValue> handler, CommandFlags flags) =>
             {
                 messageHandler = handler;
             });
@@ -191,9 +191,9 @@ public class RedisPubSubBridgeTests
             x => x.Log(
                 LogLevel.Warning,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString().Contains("Failed to forward pubsub message")),
-                It.IsAny<Exception>(),
-                It.IsAny<Func<It.IsAnyType, Exception, string>>()),
+                It.Is<It.IsAnyType>((v, t) => (v.ToString() ?? "").Contains("Failed to forward pubsub message")),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);
 
         Assert.False(_status.IsSubscribed);
@@ -204,14 +204,14 @@ public class RedisPubSubBridgeTests
     public async Task MessageReceived_ShouldHandleSignalRFailure()
     {
         // Arrange
-        Action<RedisChannel, RedisValue> messageHandler = null;
+        Action<RedisChannel, RedisValue>? messageHandler = null;
 
         _mockSubscriber
             .Setup(s => s.Subscribe(
                 It.IsAny<RedisChannel>(),
                 It.IsAny<Action<RedisChannel, RedisValue>>(),
                 It.IsAny<CommandFlags>()))
-            .Callback<RedisChannel, Action<RedisChannel, RedisValue>, CommandFlags>((ch, handler, flags) =>
+            .Callback((RedisChannel ch, Action<RedisChannel, RedisValue> handler, CommandFlags flags) =>
             {
                 messageHandler = handler;
             });
@@ -239,9 +239,9 @@ public class RedisPubSubBridgeTests
             x => x.Log(
                 LogLevel.Warning,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString().Contains("Failed to forward pubsub message")),
-                It.IsAny<Exception>(),
-                It.IsAny<Func<It.IsAnyType, Exception, string>>()),
+                It.Is<It.IsAnyType>((v, t) => (v.ToString() ?? "").Contains("Failed to forward pubsub message")),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);
 
         Assert.False(_status.IsSubscribed);
@@ -289,9 +289,9 @@ public class RedisPubSubBridgeTests
             x => x.Log(
                 LogLevel.Warning,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString().Contains("Error unsubscribing")),
-                It.IsAny<Exception>(),
-                It.IsAny<Func<It.IsAnyType, Exception, string>>()),
+                It.Is<It.IsAnyType>((v, t) => (v.ToString() ?? "").Contains("Error unsubscribing")),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);
     }
 
@@ -309,29 +309,18 @@ public class RedisPubSubBridgeTests
     public async Task MessageReceived_WithComplexPayload_ShouldForwardCorrectly()
     {
         // Arrange
-        Action<RedisChannel, RedisValue> messageHandler = null;
-        object capturedPayload = null;
+        Action<RedisChannel, RedisValue>? messageHandler = null;
+        object? capturedPayload = null;
 
         _mockSubscriber
             .Setup(s => s.Subscribe(
                 It.IsAny<RedisChannel>(),
                 It.IsAny<Action<RedisChannel, RedisValue>>(),
                 It.IsAny<CommandFlags>()))
-            .Callback<RedisChannel, Action<RedisChannel, RedisValue>, CommandFlags>((ch, handler, flags) =>
+            .Callback((RedisChannel ch, Action<RedisChannel, RedisValue> handler, CommandFlags flags) =>
             {
                 messageHandler = handler;
             });
-
-        _mockClientProxy
-            .Setup(c => c.SendCoreAsync(
-                "TaskCompleted",
-                It.IsAny<object[]>(),
-                It.IsAny<CancellationToken>()))
-            .Callback<string, object[], CancellationToken>((method, args, token) =>
-            {
-                capturedPayload = args[0];
-            })
-            .Returns(Task.CompletedTask);
 
         var service = new RedisPubSubBridge(_mockRedis.Object, _mockHubContext.Object, _mockLogger.Object, _status);
         await service.StartAsync(CancellationToken.None);
@@ -347,6 +336,17 @@ public class RedisPubSubBridgeTests
             }
         };
         var message = JsonSerializer.Serialize(complexPayload);
+        // Capture the payload forwarded to SignalR
+        _mockClientProxy
+            .Setup(c => c.SendCoreAsync(
+                "TaskCompleted",
+                It.IsAny<object[]>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<string, object[], CancellationToken>((method, args, ct) =>
+            {
+                capturedPayload = args != null && args.Length > 0 ? args[0] : null;
+            })
+            .Returns(Task.CompletedTask);
 
         // Act
         messageHandler?.Invoke(new RedisChannel("background:task:completed", RedisChannel.PatternMode.Literal), message);
@@ -367,7 +367,7 @@ public class RedisPubSubBridgeTests
     public async Task MultipleMessages_ShouldAllBeForwarded()
     {
         // Arrange
-        Action<RedisChannel, RedisValue> messageHandler = null;
+        Action<RedisChannel, RedisValue>? messageHandler = null;
         var forwardedCount = 0;
 
         _mockSubscriber
@@ -375,7 +375,7 @@ public class RedisPubSubBridgeTests
                 It.IsAny<RedisChannel>(),
                 It.IsAny<Action<RedisChannel, RedisValue>>(),
                 It.IsAny<CommandFlags>()))
-            .Callback<RedisChannel, Action<RedisChannel, RedisValue>, CommandFlags>((ch, handler, flags) =>
+            .Callback((RedisChannel ch, Action<RedisChannel, RedisValue> handler, CommandFlags flags) =>
             {
                 messageHandler = handler;
             });
@@ -409,7 +409,9 @@ public class RedisPubSubBridgeTests
     public async Task StartAsync_WithoutSubscriber_ShouldNotThrow()
     {
         // Arrange
-        _mockRedis.Setup(r => r.GetSubscriber(It.IsAny<object>())).Returns((ISubscriber)null);
+#pragma warning disable CS8625 // Cannot convert null literal to non-nullable reference type.
+        _mockRedis.Setup(r => r.GetSubscriber(It.IsAny<object>())).Returns(default(ISubscriber));
+#pragma warning restore CS8625 // Cannot convert null literal to non-nullable reference type.
 
         var service = new RedisPubSubBridge(_mockRedis.Object, _mockHubContext.Object, _mockLogger.Object, _status);
 

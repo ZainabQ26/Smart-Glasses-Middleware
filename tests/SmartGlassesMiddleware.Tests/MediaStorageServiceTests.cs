@@ -19,11 +19,11 @@ public class MediaStorageServiceTests
         var mockClient = new Mock<IMinioClient>();
         var mockConfig = new Mock<IConfiguration>();
         var mockLogger = new Mock<ILogger<MinioMediaStorageService>>();
-        
+
         mockConfig.Setup(c => c["MinIO:BucketName"]).Returns("test-bucket");
-        
+
         var service = new MinioMediaStorageService(mockClient.Object, mockConfig.Object, mockLogger.Object);
-        
+
         var content = "This is a test file content";
         var stream1 = new MemoryStream(Encoding.UTF8.GetBytes(content));
         var stream2 = new MemoryStream(Encoding.UTF8.GetBytes(content));
@@ -44,11 +44,11 @@ public class MediaStorageServiceTests
         var mockClient = new Mock<IMinioClient>();
         var mockConfig = new Mock<IConfiguration>();
         var mockLogger = new Mock<ILogger<MinioMediaStorageService>>();
-        
+
         mockConfig.Setup(c => c["MinIO:BucketName"]).Returns("test-bucket");
-        
+
         var service = new MinioMediaStorageService(mockClient.Object, mockConfig.Object, mockLogger.Object);
-        
+
         var content1 = "This is test content 1";
         var content2 = "This is test content 2";
         var stream1 = new MemoryStream(Encoding.UTF8.GetBytes(content1));
@@ -69,11 +69,11 @@ public class MediaStorageServiceTests
         var mockClient = new Mock<IMinioClient>();
         var mockConfig = new Mock<IConfiguration>();
         var mockLogger = new Mock<ILogger<MinioMediaStorageService>>();
-        
+
         mockConfig.Setup(c => c["MinIO:BucketName"]).Returns("test-bucket");
-        
+
         var service = new MinioMediaStorageService(mockClient.Object, mockConfig.Object, mockLogger.Object);
-        
+
         var content = "This is a test file content";
         var stream = new MemoryStream(Encoding.UTF8.GetBytes(content));
         stream.Position = 10; // Move position

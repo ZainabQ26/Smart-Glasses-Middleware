@@ -27,13 +27,13 @@ public class ConversationServiceTests
     {
         var mockSection = new Mock<IConfigurationSection>();
         mockSection.Setup(s => s.Value).Returns("0.25");
-        
+
         var mockConfig = new Mock<IConfiguration>();
         mockConfig.Setup(c => c.GetSection("RAG:ApproximateTokensPerChar"))
             .Returns(mockSection.Object);
         mockConfig.Setup(c => c["RAG:ApproximateTokensPerChar"])
             .Returns("0.25");
-        
+
         return mockConfig.Object;
     }
 
@@ -205,7 +205,7 @@ public class ConversationServiceTests
         var service = new ConversationService(context, mockLogger.Object, config);
 
         // Act & Assert
-        await Assert.ThrowsAsync<ArgumentException>(() => 
+        await Assert.ThrowsAsync<ArgumentException>(() =>
             service.AddMessageAsync(Guid.NewGuid(), "user", "Hello"));
     }
 
@@ -386,7 +386,7 @@ public class ConversationServiceTests
         var service = new ConversationService(context, mockLogger.Object, config);
 
         // Act & Assert
-        await Assert.ThrowsAsync<ArgumentException>(() => 
+        await Assert.ThrowsAsync<ArgumentException>(() =>
             service.SummarizeConversationAsync(Guid.NewGuid()));
     }
 
@@ -420,7 +420,7 @@ public class ConversationServiceTests
         var service = new ConversationService(context, mockLogger.Object, config);
 
         // Act & Assert
-        var exception = await Record.ExceptionAsync(() => 
+        var exception = await Record.ExceptionAsync(() =>
             service.ArchiveConversationAsync(Guid.NewGuid()));
         Assert.Null(exception);
     }

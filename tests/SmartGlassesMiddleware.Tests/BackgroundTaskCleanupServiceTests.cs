@@ -57,9 +57,9 @@ public class BackgroundTaskCleanupServiceTests
             x => x.Log(
                 LogLevel.Information,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString().Contains("Background task cleanup service started")),
-                It.IsAny<Exception>(),
-                It.IsAny<Func<It.IsAnyType, Exception, string>>()),
+                It.Is<It.IsAnyType>((v, t) => (v.ToString() ?? "").Contains("Background task cleanup service started")),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);
     }
 
@@ -67,7 +67,7 @@ public class BackgroundTaskCleanupServiceTests
     public async Task ExecuteAsync_ShouldUseDefaultCleanupInterval_WhenNotConfigured()
     {
         // Arrange
-        _mockConfiguration.Setup(c => c.GetSection("BackgroundTasks:CleanupIntervalMinutes").Value).Returns((string)null);
+        _mockConfiguration.Setup(c => c.GetSection("BackgroundTasks:CleanupIntervalMinutes")!.Value).Returns((string?)null);
 
         var service = new BackgroundTaskCleanupService(_mockRedis.Object, _mockLogger.Object, _mockConfiguration.Object);
         var cts = new CancellationTokenSource();
@@ -86,9 +86,9 @@ public class BackgroundTaskCleanupServiceTests
             x => x.Log(
                 LogLevel.Information,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString().Contains("00:05:00")),
-                It.IsAny<Exception>(),
-                It.IsAny<Func<It.IsAnyType, Exception, string>>()),
+                It.Is<It.IsAnyType>((v, t) => (v.ToString() ?? "").Contains("00:05:00")),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);
     }
 
