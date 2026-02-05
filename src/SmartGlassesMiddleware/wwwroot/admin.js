@@ -810,6 +810,10 @@ async function manageGroupResources(groupId, groupName) {
                         <span style="font-size: 14px; color: #333; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
                             ${escapeHtml(fileName)}
                         </span>
+                        <button type="button" onclick="previewReminderFile('${fileId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')"
+                            style="padding: 4px 12px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">
+                            Preview
+                        </button>
                     </div>
                 `;
             }).join('');
@@ -1000,6 +1004,58 @@ function closeManageGroupModal() {
     document.getElementById('manage-group-modal').classList.remove('active');
 }
 
+// Preview file from reminder modal
+async function previewReminderFile(fileId, fileName) {
+    const modal = document.getElementById('reminder-file-preview-modal');
+    const modalContent = document.getElementById('reminder-file-preview-content');
+    const modalTitle = document.getElementById('reminder-file-preview-title');
+    
+    modalTitle.textContent = fileName;
+    modalContent.innerHTML = '<p style="color: #95a5a6; text-align: center; padding: 20px;">Loading preview...</p>';
+    modal.style.display = 'flex';
+    
+    const cacheBuster = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    const previewUrl = `${API_BASE}/files/${fileId}/preview?v=${cacheBuster}`;
+    const ext = fileName.split('.').pop().toLowerCase();
+    
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) {
+        const img = new Image();
+        img.onload = function() {
+            modalContent.innerHTML = `<img src="${previewUrl}" alt="${escapeHtml(fileName)}" style="max-width: 100%; max-height: 55vh; width: auto; height: auto; border-radius: 4px; object-fit: contain; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">`;
+        };
+        img.onerror = function() {
+            modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load image. The file may not exist or there was an error.</p>';
+        };
+        img.src = previewUrl;
+    } else if (ext === 'pdf') {
+        modalContent.innerHTML = `<embed src="${previewUrl}" type="application/pdf" width="100%" height="55vh" style="border-radius: 4px; min-height: 400px;">`;
+    } else if (['txt', 'json', 'xml', 'csv', 'md'].includes(ext)) {
+        try {
+            const response = await fetch(previewUrl);
+            if (response.ok) {
+                const text = await response.text();
+                modalContent.innerHTML = `<pre style="text-align: left; max-height: 55vh; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(text)}</pre>`;
+            } else {
+                modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load file.</p>';
+            }
+        } catch (error) {
+            modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load file.</p>';
+        }
+    } else {
+        modalContent.innerHTML = `
+            <div style="text-align: center; padding: 40px;">
+                <div style="font-size: 64px; margin-bottom: 20px;">📄</div>
+                <p style="color: #7f8c8d; font-size: 14px;">Preview not available for this file type.</p>
+                <p style="color: #95a5a6; font-size: 12px; margin-top: 10px;">File: ${escapeHtml(fileName)}</p>
+            </div>
+        `;
+    }
+}
+
+function closeReminderFilePreviewModal() {
+    document.getElementById('reminder-file-preview-modal').style.display = 'none';
+}
+
 // Utility functions
 function escapeHtml(text) {
     if (!text) return '';
@@ -1129,11 +1185,12 @@ async function init() {
                     groupFilesList.innerHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No files attached yet</div>';
                 } else {
                     groupFilesList.innerHTML = groupSelectedFiles.map((fileObj, index) => `
-                        <div onclick="toggleGroupFileSelection(${index})" style="padding: 12px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; user-select: none; border-bottom: 1px solid #e0e0e0; ${fileObj.selected ? 'background: #f0f0f0;' : ''}">
-                            <input type="checkbox" ${fileObj.selected ? 'checked' : ''} style="width: 16px; height: 16px; cursor: pointer; margin: 0;" onclick="event.stopPropagation(); toggleGroupFileSelection(${index})">
-                            <span style="font-size: 14px; color: #333; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                        <div style="padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0; ${fileObj.selected ? 'background: #f0f0f0;' : ''}">
+                            <input type="checkbox" ${fileObj.selected ? 'checked' : ''} style="width: 16px; height: 16px; cursor: pointer; margin: 0;" onclick="toggleGroupFileSelection(${index})">
+                            <span onclick="toggleGroupFileSelection(${index})" style="font-size: 14px; color: #333; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; user-select: none;">
                                 ${escapeHtml(fileObj.name)}
                             </span>
+                            <button type="button" onclick="event.stopPropagation(); previewGroupFile(${index})" style="padding: 4px 12px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">Preview</button>
                         </div>
                     `).join('');
                 }
@@ -1275,6 +1332,79 @@ async function init() {
             window.groupSelectedFiles = groupSelectedFiles;
             updateGroupFilesList();
         };
+        
+        // Preview group file
+        window.previewGroupFile = function(index) {
+            const fileObj = groupSelectedFiles[index];
+            if (!fileObj || !fileObj.file) {
+                showMessage('File not available for preview', 'error');
+                return;
+            }
+            
+            const file = fileObj.file;
+            const modal = document.getElementById('group-file-preview-modal');
+            const modalContent = document.getElementById('group-file-preview-content');
+            const modalTitle = document.getElementById('group-file-preview-title');
+            
+            modalTitle.textContent = file.name;
+            modalContent.innerHTML = '<p style="color: #95a5a6; text-align: center; padding: 20px;">Loading preview...</p>';
+            modal.style.display = 'flex';
+            
+            const ext = file.name.split('.').pop().toLowerCase();
+            
+            if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    modalContent.innerHTML = `<img src="${e.target.result}" style="max-width: 100%; max-height: 55vh; width: auto; height: auto; border-radius: 4px; object-fit: contain;">`;
+                };
+                reader.onerror = function() {
+                    modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load image.</p>';
+                };
+                reader.readAsDataURL(file);
+            } else if (ext === 'pdf') {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    modalContent.innerHTML = `<embed src="${e.target.result}" type="application/pdf" width="100%" height="55vh" style="border-radius: 4px; min-height: 400px;">`;
+                };
+                reader.onerror = function() {
+                    modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load PDF.</p>';
+                };
+                reader.readAsDataURL(file);
+            } else if (['txt', 'json', 'xml', 'csv', 'md'].includes(ext)) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const text = e.target.result;
+                    modalContent.innerHTML = `<pre style="text-align: left; max-height: 55vh; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(text)}</pre>`;
+                };
+                reader.onerror = function() {
+                    modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load text file.</p>';
+                };
+                reader.readAsText(file);
+            } else {
+                modalContent.innerHTML = `
+                    <div style="text-align: center; padding: 40px;">
+                        <div style="font-size: 64px; margin-bottom: 20px;">📄</div>
+                        <p style="color: #7f8c8d; font-size: 14px;">Preview not available for this file type.</p>
+                        <p style="color: #95a5a6; font-size: 12px; margin-top: 10px;">File: ${escapeHtml(file.name)}</p>
+                        <p style="color: #95a5a6; font-size: 12px;">Size: ${formatFileSize(file.size)}</p>
+                    </div>
+                `;
+            }
+        };
+        
+        // Close modal when clicking outside
+        document.getElementById('group-file-preview-modal')?.addEventListener('click', function(e) {
+            if (e.target === this) {
+                this.style.display = 'none';
+            }
+        });
+        
+        // Close reminder file preview modal when clicking outside
+        document.getElementById('reminder-file-preview-modal')?.addEventListener('click', function(e) {
+            if (e.target === this) {
+                this.style.display = 'none';
+            }
+        });
         
         // Remove file from dropdown
         window.removeGroupFile = function(index) {
