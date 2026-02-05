@@ -44,7 +44,7 @@ public class CacheServiceTests
         // Arrange
         var testObject = new { Name = "Test", Value = 123 };
         var serialized = JsonSerializer.Serialize(testObject);
-        
+
         var mockDb = new Mock<IDatabase>();
         mockDb.Setup(db => db.StringGetAsync(It.IsAny<RedisKey>(), It.IsAny<CommandFlags>()))
             .ReturnsAsync((RedisValue)serialized);
@@ -58,8 +58,9 @@ public class CacheServiceTests
 
         // Assert
         Assert.NotNull(result);
-        Assert.Equal("Test", result.GetProperty("Name").GetString());
-        Assert.Equal(123, result.GetProperty("Value").GetInt32());
+        var elem = (JsonElement)result;
+        Assert.Equal("Test", elem.GetProperty("Name").GetString());
+        Assert.Equal(123, elem.GetProperty("Value").GetInt32());
     }
 
     [Fact]

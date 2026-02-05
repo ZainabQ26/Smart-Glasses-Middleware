@@ -24,13 +24,13 @@ public class DocumentProcessingServiceTests
     {
         _mockLogger = new Mock<ILogger<DocumentProcessingService>>();
         _mockStorageService = new Mock<IMediaStorageService>();
-        
+
         // Create in-memory database for testing
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString())
             .Options;
         _context = new ApplicationDbContext(options);
-        
+
         _service = new DocumentProcessingService(
             _mockLogger.Object,
             _mockStorageService.Object,
@@ -60,7 +60,7 @@ public class DocumentProcessingServiceTests
         Assert.Equal("txt", result.DocumentType);
         Assert.True(result.IsProcessed);
         Assert.NotEmpty(result.Chunks);
-        
+
         // Verify storage was called
         _mockStorageService.Verify(
             s => s.UploadFileAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string>()),

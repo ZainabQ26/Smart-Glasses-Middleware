@@ -9,25 +9,33 @@ $ErrorActionPreference = 'Stop'
 Push-Location (Join-Path $PSScriptRoot '..')
 
 Write-Host "Building 'app' image..."
+Write-Host "Ensuring dependent images are available (pulling when needed)..."
+try {
+    docker compose pull
+} catch {
+    Write-Host "docker compose pull failed or some images not available; proceeding."
+}
+
+Write-Host "Building 'app' image..."
 docker compose build app
 
-Write-Host "Recreating 'app' container (no dependencies)..."
-docker compose up -d --force-recreate --no-deps app
+Write-Host "Recreating 'app' container (start dependencies if missing)..."
+docker compose up -d --force-recreate app
 
 Write-Host "Starting any stopped services (so all containers are running)..."
 try { docker compose start } catch { }
 
 Write-Host "Waiting for http://localhost:5000/health to return success..."
-$maxAttempts = 30
+$maxAttempts = 24
 $attempt = 0
 while ($attempt -lt $maxAttempts) {
     try {
-        $resp = Invoke-RestMethod -Uri http://localhost:5000/health -TimeoutSec 3 -ErrorAction Stop
+        $resp = Invoke-RestMethod -Uri http://localhost:5000/health -TimeoutSec 5 -ErrorAction Stop
         Write-Host "App is healthy."
         break
     } catch {
         Write-Host -NoNewline "."
-        Start-Sleep -Seconds 1
+        Start-Sleep -Seconds 5
         $attempt++
     }
 }

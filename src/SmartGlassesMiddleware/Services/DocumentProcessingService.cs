@@ -40,11 +40,11 @@ public class DocumentProcessingService : IDocumentProcessingService
     {
         var documentType = DetermineDocumentType(fileName, contentType);
         var storageKey = $"documents/{Guid.NewGuid()}/{fileName}";
-        
+
         // Store the original file
         fileStream.Position = 0;
         await _storageService.UploadFileAsync(storageKey, fileStream, contentType);
-        
+
         var metadata = new DocumentMetadata
         {
             Id = Guid.NewGuid(),
@@ -146,7 +146,7 @@ public class DocumentProcessingService : IDocumentProcessingService
     private string DetermineDocumentType(string fileName, string contentType)
     {
         var extension = Path.GetExtension(fileName).ToLowerInvariant();
-        
+
         return extension switch
         {
             ".pdf" => "pdf",
@@ -222,7 +222,7 @@ public class DocumentProcessingService : IDocumentProcessingService
         {
             using var doc = WordprocessingDocument.Open(docxStream, false);
             var body = doc.MainDocumentPart?.Document?.Body;
-            
+
             if (body != null)
             {
                 var paragraphs = body.Elements<Paragraph>();
@@ -270,13 +270,13 @@ public class DocumentProcessingService : IDocumentProcessingService
     private async Task<List<DocumentChunk>> ExtractFromImageAsync(Stream imageStream, Guid documentId)
     {
         var chunks = new List<DocumentChunk>();
-        
+
         try
         {
             // For images, we would use OCR
             // This is a placeholder - full implementation would require Tesseract configuration
             _logger.LogWarning("Image OCR not fully implemented. Requires Tesseract configuration.");
-            
+
             // Create a placeholder chunk
             var chunk = new DocumentChunk
             {
@@ -287,7 +287,7 @@ public class DocumentProcessingService : IDocumentProcessingService
                 ChunkIndex = 0,
                 CreatedAt = DateTime.UtcNow
             };
-            
+
             chunks.Add(chunk);
         }
         catch (Exception ex)
@@ -302,22 +302,22 @@ public class DocumentProcessingService : IDocumentProcessingService
     private List<DocumentChunk> CreateTextChunks(string text, int pageNumber, Guid documentId, ref int chunkIndex)
     {
         var chunks = new List<DocumentChunk>();
-        
+
         if (string.IsNullOrWhiteSpace(text))
             return chunks;
 
         var startIndex = 0;
-        
+
         while (startIndex < text.Length)
         {
             var endIndex = Math.Min(startIndex + ChunkSize, text.Length);
-            
+
             // Try to break at sentence or word boundary
             if (endIndex < text.Length)
             {
                 var lastPeriod = text.LastIndexOf('.', endIndex, Math.Min(100, endIndex - startIndex));
                 var lastSpace = text.LastIndexOf(' ', endIndex, Math.Min(100, endIndex - startIndex));
-                
+
                 if (lastPeriod > startIndex)
                     endIndex = lastPeriod + 1;
                 else if (lastSpace > startIndex)
@@ -325,7 +325,7 @@ public class DocumentProcessingService : IDocumentProcessingService
             }
 
             var chunkText = text.Substring(startIndex, endIndex - startIndex).Trim();
-            
+
             if (!string.IsNullOrWhiteSpace(chunkText))
             {
                 var chunk = new DocumentChunk
@@ -337,7 +337,7 @@ public class DocumentProcessingService : IDocumentProcessingService
                     ChunkIndex = chunkIndex++,
                     CreatedAt = DateTime.UtcNow
                 };
-                
+
                 chunks.Add(chunk);
             }
 

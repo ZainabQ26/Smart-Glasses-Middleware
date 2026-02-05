@@ -19,7 +19,7 @@ public class BackgroundTaskCleanupService : BackgroundService
     {
         _redis = redis;
         _logger = logger;
-        
+
         // Run cleanup every 5 minutes by default
         var intervalMinutes = configuration.GetValue<int?>("BackgroundTasks:CleanupIntervalMinutes") ?? 5;
         _cleanupInterval = TimeSpan.FromMinutes(intervalMinutes);
@@ -56,7 +56,7 @@ public class BackgroundTaskCleanupService : BackgroundService
         {
             var db = _redis.GetDatabase();
             var server = _redis.GetServers().FirstOrDefault();
-            
+
             if (server == null)
             {
                 _logger.LogWarning("No Redis server available for cleanup");
@@ -68,12 +68,12 @@ public class BackgroundTaskCleanupService : BackgroundService
             // Redis automatically removes keys with expired TTL, so manual deletion is not needed.
             var monitoredCount = 0;
             var pattern = TaskKeyPrefix + "*";
-            
+
             await foreach (var key in server.KeysAsync(pattern: pattern))
             {
                 monitoredCount++;
                 var ttl = await db.KeyTimeToLiveAsync(key);
-                
+
                 // If key has no TTL (meaning it won't expire), log a warning
                 // TTL is null when key doesn't exist or has no expiration
                 if (ttl == null)

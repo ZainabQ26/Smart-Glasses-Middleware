@@ -32,15 +32,15 @@ public class DeleteReminderTaskHandler : ITaskHandler
             // "remove [text]"
             // "delete reminder about [text]"
             // "remove my reminder to [text]"
-            
+
             // Check if user wants to delete all reminders first (before parsing)
             if (Regex.IsMatch(input, @"\b(all|every|everything)\b.*\b(reminder|reminders)\b", RegexOptions.IgnoreCase))
             {
                 return "For safety, I can't delete all reminders at once. Please delete them one at a time or be specific about which ones to delete.";
             }
-            
+
             var searchText = ParseDeleteCommand(input);
-            
+
             if (string.IsNullOrWhiteSpace(searchText))
             {
                 return "I couldn't understand which reminder you want to delete. Try saying something like 'delete my reminder about milk' or 'remove buy bread reminder'.";
@@ -60,7 +60,7 @@ public class DeleteReminderTaskHandler : ITaskHandler
 
             if (matchingReminders.Count > 1)
             {
-                var reminderList = string.Join("\n", matchingReminders.Take(5).Select((r, i) => 
+                var reminderList = string.Join("\n", matchingReminders.Take(5).Select((r, i) =>
                     $"{i + 1}. {r.InputText} (created {r.Timestamp:yyyy-MM-dd HH:mm} UTC)"));
                 return $"I found {matchingReminders.Count} reminders matching '{searchText}':\n\n{reminderList}\n\nPlease be more specific about which reminder you want to delete.";
             }
@@ -94,10 +94,10 @@ public class DeleteReminderTaskHandler : ITaskHandler
         // Remove common prefixes
         var cleanInput = Regex.Replace(input, @"^(please\s+)?(can you\s+)?(i want to\s+)?(i'd like to\s+)?", "", RegexOptions.IgnoreCase);
         cleanInput = Regex.Replace(cleanInput, @"^(delete|remove|cancel|clear|erase)\s+(my\s+)?(reminder\s+)?(about\s+|to\s+|for\s+)?", "", RegexOptions.IgnoreCase);
-        
+
         // Clean up trailing phrases
         cleanInput = Regex.Replace(cleanInput, @"\s+(reminder|please|thanks)$", "", RegexOptions.IgnoreCase);
-        
+
         return cleanInput.Trim();
     }
 }

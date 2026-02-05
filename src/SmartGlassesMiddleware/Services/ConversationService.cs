@@ -97,10 +97,10 @@ public class ConversationService : IConversationService
         };
 
         _context.ChatMessages.Add(message);
-        
+
         // Update conversation timestamp
         conversation.UpdatedAt = DateTime.UtcNow;
-        
+
         await _context.SaveChangesAsync();
 
         _logger.LogDebug("Added {Role} message to conversation {ConversationId}", role, conversationId);
@@ -121,7 +121,7 @@ public class ConversationService : IConversationService
     {
         // Simple heuristic: check if there's an active conversation in the last hour
         var recentConversation = await _context.Conversations
-            .Where(c => c.IsActive && 
+            .Where(c => c.IsActive &&
                         c.UpdatedAt > DateTime.UtcNow.AddHours(-1) &&
                         (!groupId.HasValue || c.ResourceGroupId == groupId))
             .OrderByDescending(c => c.UpdatedAt)
@@ -135,10 +135,10 @@ public class ConversationService : IConversationService
 
         // Create new conversation
         // Try to extract title from first message (first 50 chars)
-        var title = userMessage.Length > 50 
-            ? userMessage.Substring(0, 50) + "..." 
+        var title = userMessage.Length > 50
+            ? userMessage.Substring(0, 50) + "..."
             : userMessage;
-        
+
         _logger.LogInformation("Creating new conversation based on user message");
         return await CreateConversationAsync(title, groupId);
     }
@@ -162,7 +162,7 @@ public class ConversationService : IConversationService
         summary += $"Topic: {conversation.Title}\n";
         summary += $"Messages: {messages.Count}\n";
         summary += "Key points:\n";
-        
+
         // Include first 2 and last 2 messages
         var keyMessages = messages.Take(2).Concat(messages.TakeLast(2)).Distinct();
         foreach (var msg in keyMessages)
@@ -186,7 +186,7 @@ public class ConversationService : IConversationService
             conversation.IsActive = false;
             conversation.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
-            
+
             _logger.LogInformation("Archived conversation {ConversationId}", conversationId);
         }
     }

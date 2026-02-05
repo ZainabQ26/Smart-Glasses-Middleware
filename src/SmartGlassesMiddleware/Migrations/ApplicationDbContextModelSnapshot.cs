@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
+using Pgvector;
 using SmartGlassesMiddleware.Data;
 
 #nullable disable
@@ -17,10 +18,274 @@ namespace SmartGlassesMiddleware.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.2")
+                .HasAnnotation("ProductVersion", "10.0.0")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
+            NpgsqlModelBuilderExtensions.HasPostgresExtension(modelBuilder, "vector");
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
+
+            modelBuilder.Entity("SmartGlassesMiddleware.Models.AIInteractionLog", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ConversationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("DelegationReason")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasColumnType("text");
+
+                    b.Property<decimal?>("EstimatedCost")
+                        .HasColumnType("numeric");
+
+                    b.Property<string>("Input")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("InputTokens")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ModelUsed")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("Output")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("OutputTokens")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("ResourceGroupId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("ResponseTimeMs")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("Success")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime>("Timestamp")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("TotalTokens")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConversationId");
+
+                    b.HasIndex("ModelUsed");
+
+                    b.HasIndex("ResourceGroupId");
+
+                    b.HasIndex("Timestamp");
+
+                    b.ToTable("AIInteractionLogs");
+                });
+
+            modelBuilder.Entity("SmartGlassesMiddleware.Models.ChatMessage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Content")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("ConversationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Model")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTime>("Timestamp")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("TokenCount")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConversationId");
+
+                    b.ToTable("ChatMessages");
+                });
+
+            modelBuilder.Entity("SmartGlassesMiddleware.Models.Conversation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid?>("ResourceGroupId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Summary")
+                        .HasColumnType("text");
+
+                    b.Property<string>("SummaryEmbedding")
+                        .HasColumnType("text");
+
+                    b.Property<int?>("SummaryEmbeddingDimension")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ResourceGroupId");
+
+                    b.ToTable("Conversations");
+                });
+
+            modelBuilder.Entity("SmartGlassesMiddleware.Models.DocumentChunk", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("ChunkIndex")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ChunkText")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("DocumentMetadataId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Embedding")
+                        .HasColumnType("text");
+
+                    b.Property<int?>("EmbeddingDimension")
+                        .HasColumnType("integer");
+
+                    b.Property<Vector>("EmbeddingVector")
+                        .HasColumnType("vector(384)");
+
+                    b.Property<double?>("Height")
+                        .HasColumnType("double precision");
+
+                    b.Property<int>("PageNumber")
+                        .HasColumnType("integer");
+
+                    b.Property<double?>("Width")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("X")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("Y")
+                        .HasColumnType("double precision");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DocumentMetadataId");
+
+                    b.HasIndex("EmbeddingVector");
+
+                    NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("EmbeddingVector"), "ivfflat");
+                    NpgsqlIndexBuilderExtensions.HasOperators(b.HasIndex("EmbeddingVector"), new[] { "vector_cosine_ops" });
+
+                    b.ToTable("DocumentChunks");
+                });
+
+            modelBuilder.Entity("SmartGlassesMiddleware.Models.DocumentGroup", b =>
+                {
+                    b.Property<Guid>("DocumentMetadataId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ResourceGroupId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("DocumentMetadataId", "ResourceGroupId");
+
+                    b.HasIndex("ResourceGroupId");
+
+                    b.ToTable("DocumentGroups");
+                });
+
+            modelBuilder.Entity("SmartGlassesMiddleware.Models.DocumentMetadata", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("DocumentType")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<long>("FileSize")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool>("IsProcessed")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("OriginalFileName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<DateTime?>("ProcessedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ProcessingError")
+                        .HasColumnType("text");
+
+                    b.Property<string>("StorageKey")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("TotalPages")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UploadedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("DocumentMetadatas");
+                });
 
             modelBuilder.Entity("SmartGlassesMiddleware.Models.ManagedFile", b =>
                 {
@@ -86,6 +351,9 @@ namespace SmartGlassesMiddleware.Migrations
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsPinned")
+                        .HasColumnType("boolean");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -225,6 +493,74 @@ namespace SmartGlassesMiddleware.Migrations
                     b.ToTable("ResourceGroups");
                 });
 
+            modelBuilder.Entity("SmartGlassesMiddleware.Models.AIInteractionLog", b =>
+                {
+                    b.HasOne("SmartGlassesMiddleware.Models.Conversation", "Conversation")
+                        .WithMany()
+                        .HasForeignKey("ConversationId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("SmartGlassesMiddleware.Models.ResourceGroup", "ResourceGroup")
+                        .WithMany()
+                        .HasForeignKey("ResourceGroupId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Conversation");
+
+                    b.Navigation("ResourceGroup");
+                });
+
+            modelBuilder.Entity("SmartGlassesMiddleware.Models.ChatMessage", b =>
+                {
+                    b.HasOne("SmartGlassesMiddleware.Models.Conversation", "Conversation")
+                        .WithMany("Messages")
+                        .HasForeignKey("ConversationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Conversation");
+                });
+
+            modelBuilder.Entity("SmartGlassesMiddleware.Models.Conversation", b =>
+                {
+                    b.HasOne("SmartGlassesMiddleware.Models.ResourceGroup", "ResourceGroup")
+                        .WithMany("Conversations")
+                        .HasForeignKey("ResourceGroupId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("ResourceGroup");
+                });
+
+            modelBuilder.Entity("SmartGlassesMiddleware.Models.DocumentChunk", b =>
+                {
+                    b.HasOne("SmartGlassesMiddleware.Models.DocumentMetadata", "DocumentMetadata")
+                        .WithMany("Chunks")
+                        .HasForeignKey("DocumentMetadataId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("DocumentMetadata");
+                });
+
+            modelBuilder.Entity("SmartGlassesMiddleware.Models.DocumentGroup", b =>
+                {
+                    b.HasOne("SmartGlassesMiddleware.Models.DocumentMetadata", "DocumentMetadata")
+                        .WithMany("DocumentGroups")
+                        .HasForeignKey("DocumentMetadataId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("SmartGlassesMiddleware.Models.ResourceGroup", "ResourceGroup")
+                        .WithMany("DocumentGroups")
+                        .HasForeignKey("ResourceGroupId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("DocumentMetadata");
+
+                    b.Navigation("ResourceGroup");
+                });
+
             modelBuilder.Entity("SmartGlassesMiddleware.Models.ManagedFileGroup", b =>
                 {
                     b.HasOne("SmartGlassesMiddleware.Models.ManagedFile", "ManagedFile")
@@ -272,6 +608,18 @@ namespace SmartGlassesMiddleware.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("SmartGlassesMiddleware.Models.Conversation", b =>
+                {
+                    b.Navigation("Messages");
+                });
+
+            modelBuilder.Entity("SmartGlassesMiddleware.Models.DocumentMetadata", b =>
+                {
+                    b.Navigation("Chunks");
+
+                    b.Navigation("DocumentGroups");
+                });
+
             modelBuilder.Entity("SmartGlassesMiddleware.Models.ManagedFile", b =>
                 {
                     b.Navigation("FileGroups");
@@ -284,6 +632,10 @@ namespace SmartGlassesMiddleware.Migrations
 
             modelBuilder.Entity("SmartGlassesMiddleware.Models.ResourceGroup", b =>
                 {
+                    b.Navigation("Conversations");
+
+                    b.Navigation("DocumentGroups");
+
                     b.Navigation("FileGroups");
 
                     b.Navigation("PromptGroups");
