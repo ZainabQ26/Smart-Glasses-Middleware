@@ -28,7 +28,7 @@ public class ReminderTaskHandler : ITaskHandler
 
             // Trim and validate the input
             var reminderText = input.Trim();
-            
+
             // Optional: Add a reasonable length limit to prevent abuse
             if (reminderText.Length > 1000)
             {
@@ -46,7 +46,7 @@ public class ReminderTaskHandler : ITaskHandler
             };
 
             var savedHistory = await _historyService.SaveRequestAsync(history);
-            
+
             _logger.LogInformation("Reminder saved successfully with ID: {ReminderId}", savedHistory.Id);
 
             return $"Okay — I've saved that reminder: \"{reminderText}\"";

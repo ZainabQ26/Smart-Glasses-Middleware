@@ -185,7 +185,7 @@ public class TaskHandlerTests
     }
 
     // Edit Reminder Handler Tests
-    
+
     [Fact]
     public async Task EditReminderTaskHandler_Edits_Reminder_Successfully()
     {
@@ -202,7 +202,7 @@ public class TaskHandlerTests
         mockHistoryService
             .Setup(s => s.GetHistoryByTypeAsync("reminder", 100))
             .ReturnsAsync(new List<RequestHistory> { existingReminder });
-        
+
         mockHistoryService
             .Setup(s => s.UpdateReminderAsync(existingReminder.Id, "Buy eggs"))
             .ReturnsAsync(new RequestHistory
@@ -306,7 +306,7 @@ public class TaskHandlerTests
     }
 
     // Delete Reminder Handler Tests
-    
+
     [Fact]
     public async Task DeleteReminderTaskHandler_Deletes_Reminder_Successfully()
     {
@@ -323,7 +323,7 @@ public class TaskHandlerTests
         mockHistoryService
             .Setup(s => s.GetHistoryByTypeAsync("reminder", 100))
             .ReturnsAsync(new List<RequestHistory> { existingReminder });
-        
+
         mockHistoryService
             .Setup(s => s.DeleteReminderAsync(existingReminder.Id))
             .ReturnsAsync(true);
@@ -412,7 +412,7 @@ public class TaskHandlerTests
         mockHistoryService
             .Setup(s => s.GetHistoryByTypeAsync("reminder", 100))
             .ReturnsAsync(new List<RequestHistory>());
-        
+
         var mockLogger = new Mock<ILogger<DeleteReminderTaskHandler>>();
         var handler = new DeleteReminderTaskHandler(mockHistoryService.Object, mockLogger.Object);
 

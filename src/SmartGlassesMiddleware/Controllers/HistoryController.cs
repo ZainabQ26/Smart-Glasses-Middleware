@@ -13,7 +13,7 @@ public class HistoryController : ControllerBase
     private readonly ILogger<HistoryController> _logger;
 
     public HistoryController(
-        IHistoryService historyService, 
+        IHistoryService historyService,
         IRAGService ragService,
         ILogger<HistoryController> logger)
     {
@@ -86,11 +86,11 @@ public class HistoryController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error getting reminders");
-            var pd = new ProblemDetails 
-            { 
-                Title = "Internal Server Error", 
-                Detail = "An error occurred retrieving reminders", 
-                Status = StatusCodes.Status500InternalServerError 
+            var pd = new ProblemDetails
+            {
+                Title = "Internal Server Error",
+                Detail = "An error occurred retrieving reminders",
+                Status = StatusCodes.Status500InternalServerError
             };
             pd.Extensions["requestId"] = HttpContext.TraceIdentifier;
             pd.Extensions["timestamp"] = DateTime.UtcNow.ToString("o");
@@ -110,11 +110,11 @@ public class HistoryController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error getting history by type: {Type}", requestType);
-            var pd = new ProblemDetails 
-            { 
-                Title = "Internal Server Error", 
-                Detail = "An error occurred retrieving history", 
-                Status = StatusCodes.Status500InternalServerError 
+            var pd = new ProblemDetails
+            {
+                Title = "Internal Server Error",
+                Detail = "An error occurred retrieving history",
+                Status = StatusCodes.Status500InternalServerError
             };
             pd.Extensions["requestId"] = HttpContext.TraceIdentifier;
             pd.Extensions["timestamp"] = DateTime.UtcNow.ToString("o");
@@ -138,7 +138,7 @@ public class HistoryController : ControllerBase
             }
 
             var updatedReminder = await _historyService.UpdateReminderAsync(id, request.Text);
-            
+
             if (updatedReminder == null)
             {
                 return NotFound(new ProblemDetails
@@ -192,7 +192,7 @@ public class HistoryController : ControllerBase
         try
         {
             var deleted = await _historyService.DeleteReminderAsync(id);
-            
+
             if (!deleted)
             {
                 return NotFound(new ProblemDetails
