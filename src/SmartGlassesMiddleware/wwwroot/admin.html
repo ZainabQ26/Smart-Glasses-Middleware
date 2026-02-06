@@ -432,6 +432,285 @@
             width: 300px;
             height: 300px;
         }
+
+        /* Modern Prompts Layout */
+        .prompts-container {
+            display: grid;
+            grid-template-columns: 250px 1fr;
+            gap: 20px;
+            align-items: start;
+        }
+
+        @media (max-width: 968px) {
+            .prompts-container {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .prompt-sidebar {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            min-height: 500px;
+            position: sticky;
+            top: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border: 1px solid #e0e0e0;
+        }
+
+        .prompt-sidebar h3 {
+            color: #2c3e50;
+            font-size: 1.1rem;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+
+        .prompt-form-card {
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .prompt-form-card h2 {
+            font-size: 1.5rem;
+            margin-bottom: 25px;
+            color: #2c3e50;
+        }
+
+        .prompt-list-container {
+            min-height: 400px;
+        }
+
+        .prompt-item {
+            background: #f8f9fa;
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 10px;
+            border: 1px solid #e0e0e0;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .prompt-item:hover {
+            background: #e9ecef;
+            transform: translateX(3px);
+            border-color: #3498db;
+        }
+
+        .prompt-item.selected {
+            background: #3498db;
+            border-color: #2980b9;
+            box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
+        }
+
+        .prompt-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .prompt-name {
+            font-size: 0.9rem;
+            font-weight: 500;
+            color: #2c3e50;
+            flex: 1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .prompt-item.selected .prompt-name {
+            color: white;
+        }
+
+        .prompt-meta {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .prompt-level {
+            font-size: 0.7rem;
+            padding: 2px 8px;
+            border-radius: 10px;
+            background: #ecf0f1;
+            color: #7f8c8d;
+            font-weight: 500;
+        }
+
+        .prompt-item.selected .prompt-level {
+            background: rgba(255, 255, 255, 0.3);
+            color: white;
+        }
+
+        .prompt-text-preview {
+            display: none;
+        }
+
+        .prompt-actions {
+            display: none;
+        }
+
+        .new-conversation-btn {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            margin-bottom: 15px;
+            width: 100%;
+            transition: all 0.3s ease;
+        }
+
+        .new-conversation-btn:hover {
+            background: #2980b9;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .btn-gradient {
+            background: #3498db;
+            border: none;
+            color: white;
+            padding: 10px 24px;
+            border-radius: 6px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .btn-gradient:hover {
+            background: #2980b9;
+        }
+
+        .btn-track {
+            background: #3498db;
+            min-width: 100px;
+        }
+
+        .btn-track:hover {
+            background: #2980b9;
+        }
+
+        .response-section {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+        }
+
+        .response-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .response-header h3 {
+            font-size: 1rem;
+            color: #2c3e50;
+            margin: 0;
+        }
+
+        .response-content {
+            min-height: 100px;
+            padding: 15px;
+            background: white;
+            border-radius: 6px;
+            border: 1px solid #ddd;
+            color: #555;
+        }
+
+        .prompt-input-large {
+            min-height: 200px !important;
+        }
+
+        .sidebar-prompt-item {
+            font-size: 0.85rem;
+            color: #555;
+            padding: 8px 0;
+            border-bottom: 1px solid #e0e0e0;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .sidebar-prompt-item:hover {
+            color: #3498db;
+            padding-left: 5px;
+        }
+
+        .sidebar-prompt-item.active {
+            color: #3498db;
+            font-weight: 600;
+        }
+
+        .empty-sidebar {
+            color: #95a5a6;
+            text-align: center;
+            font-size: 0.85rem;
+            margin-top: 20px;
+        }
+
+        .prompt-text-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .prompt-text-row input {
+            flex: 1;
+        }
+
+        .add-file-btn {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            white-space: nowrap;
+            transition: all 0.3s ease;
+        }
+
+        .add-file-btn:hover {
+            background: #2980b9;
+        }
+
+        .input-with-icon {
+            position: relative;
+            display: flex;
+            align-items: center;
+            flex: 1;
+        }
+
+        .input-with-icon input {
+            padding-right: 40px;
+        }
+
+        .paperclip-btn {
+            background: #ecf0f1;
+            border: none;
+            color: #7f8c8d;
+            font-size: 1.2rem;
+            cursor: pointer;
+            padding: 10px 15px;
+            border-radius: 6px;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .paperclip-btn:hover {
+            background: #d5dbdb;
+            color: #3498db;
+        }
     </style>
 </head>
 <body>
@@ -487,26 +766,75 @@
 
         <!-- Prompts Tab -->
         <div id="prompts" class="tab-content">
-            <div class="section">
-                <h2>Add Prompt</h2>
-                <form id="prompt-form">
-                    <input type="hidden" id="prompt-id">
-                    <div class="form-group">
-                        <label for="prompt-name">Name</label>
-                        <input type="text" id="prompt-name" placeholder="Enter prompt name" required>
+            <div class="prompts-container">
+                <div class="prompt-sidebar">
+                    <h3>Auto Groups</h3>
+                    <div id="prompts-list"></div>
+                </div>
+                
+                <div class="prompt-form-card">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <h2 id="prompt-form-title" style="margin: 0;">Prompt</h2>
+                        <button type="button" id="new-chat-btn" style="padding: 8px 16px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">New Chat</button>
                     </div>
-                    <div class="form-group">
-                        <label for="prompt-text">Prompt Text</label>
-                        <textarea id="prompt-text" placeholder="Enter prompt text" required></textarea>
-                    </div>
-                    <button type="submit" id="prompt-submit-btn">Add Prompt</button>
-                    <button type="button" id="prompt-cancel-btn" class="secondary" style="display: none;">Cancel</button>
-                </form>
-            </div>
+                    <form id="prompt-form">
+                        <input type="hidden" id="prompt-id">
+                        <div class="form-group">
+                            <label for="prompt-name">Prompt Text</label>
+                            <div style="display: flex; gap: 10px;">
+                                <div style="position: relative; flex: 1;">
+                                    <input type="text" id="prompt-name" placeholder="Enter prompt text" required style="width: 100%; margin: 0; padding-right: 40px;">
+                                    <span id="prompt-files-icon" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 20px; color: #95a5a6; cursor: pointer;">📎</span>
+                                </div>
+                                <button type="button" id="prompt-show-file-btn" style="padding: 8px 16px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">add file+</button>
+                                <button type="button" id="prompt-send-btn" style="padding: 8px 16px; background: #27ae60; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Send</button>
+                            </div>
+                        </div>
+                    </form>
 
-            <div class="section">
-                <h2>Saved Prompts</h2>
-                <div id="prompts-list"></div>
+                    <!-- File Section (hidden by default) -->
+                    <div id="prompt-file-section" style="display: none; margin-bottom: 20px;">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                            <!-- Preview Panel -->
+                            <div id="prompt-preview-panel" style="border: 2px solid #3498db; border-radius: 8px; padding: 15px; position: relative;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                    <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Preview</h3>
+                                    <button type="button" onclick="document.getElementById('prompt-preview-panel').style.display='none'" style="background: none; border: none; font-size: 20px; color: #95a5a6; cursor: pointer; padding: 0; line-height: 1;">×</button>
+                                </div>
+                                <div id="prompt-preview-content" style="min-height: 200px; background: #f8f9fa; border-radius: 4px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; overflow: hidden;">
+                                    <div style="font-size: 48px; color: #95a5a6; margin-bottom: 10px;">📄</div>
+                                </div>
+                                <div id="prompt-preview-filename" style="margin: 10px 0; text-align: center; color: #2c3e50; font-size: 14px; font-weight: 500;"></div>
+                                <div class="form-group">
+                                    <label for="prompt-file-input">Upload File</label>
+                                    <input type="file" id="prompt-file-input" accept=".jpg,.jpeg,.png,.pdf,.docx,.txt">
+                                </div>
+                                <button type="button" id="prompt-upload-btn" style="width: 100%; padding: 10px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Upload</button>
+                            </div>
+                            
+                            <!-- Files Panel -->
+                            <div id="prompt-files-panel" data-context="prompts" style="border: 1px solid #e0e0e0; border-radius: 8px; padding: 15px; display: flex; flex-direction: column; position: relative;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                    <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Files</h3>
+                                    <button type="button" onclick="document.getElementById('prompt-files-panel').style.display='none'" style="background: none; border: none; font-size: 20px; color: #95a5a6; cursor: pointer; padding: 0; line-height: 1;">×</button>
+                                </div>
+                                <div id="prompt-files-list" style="flex: 1; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; background: white; max-height: 300px;">
+                                    <!-- Files will appear here when added -->
+                                </div>
+                                <button type="button" id="prompt-delete-selected-btn" onclick="deleteSelectedPromptFiles()" style="margin-top: 12px; padding: 8px 20px; background: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 500; align-self: flex-end;">Delete</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="prompt-response-section" class="response-section" style="margin-top: 20px;">
+                        <div class="response-header">
+                            <h3>Response</h3>
+                        </div>
+                        <div id="response-content" class="response-content">
+                            <span style="color: #999;">Enter a prompt and click Send to get a response</span>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 

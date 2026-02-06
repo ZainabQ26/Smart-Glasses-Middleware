@@ -351,7 +351,7 @@ async function loadPrompts(reset = false) {
             state.prompts.hasMore = pagination.hasNext || pagination.HasNext;
             state.prompts.page++;
         } else if (reset) {
-            list.innerHTML = '<div class="empty-state"><p>No prompts created yet</p></div>';
+            list.innerHTML = '<div class="empty-sidebar">No prompts yet</div>';
         }
         
         state.prompts.loading = false;
@@ -364,99 +364,192 @@ async function loadPrompts(reset = false) {
 
 function createPromptCard(prompt) {
     const div = document.createElement('div');
-    div.className = 'card';
+    div.className = 'sidebar-prompt-item';
     
     const id = getProp(prompt, 'id');
     const name = getProp(prompt, 'name') || 'Untitled';
     const promptText = getProp(prompt, 'promptText') || '';
-    const createdAt = getProp(prompt, 'createdAt');
-    const updatedAt = getProp(prompt, 'updatedAt');
-    const groups = getProp(prompt, 'groups') || [];
     
-    div.innerHTML = `
-        <div class="card-header">
-            <div class="card-title">${escapeHtml(name)}</div>
-        </div>
-        <div class="card-meta">
-            Created: ${createdAt ? new Date(createdAt).toLocaleString() : 'Unknown'}
-            ${updatedAt ? ` | Updated: ${new Date(updatedAt).toLocaleString()}` : ''}
-        </div>
-        <div style="margin-top: 10px; padding: 10px; background-color: #f8f9fa; border-radius: 4px; white-space: pre-wrap;">${escapeHtml(promptText)}</div>
-        ${groups && groups.length > 0 ? `
-            <div style="margin-top: 8px;">
-                ${groups.map(g => `<span class="badge">${escapeHtml(getProp(g, 'name') || '')}</span>`).join('')}
-            </div>
-        ` : ''}
-        <div class="card-actions">
-            <button data-action="edit-prompt" data-prompt-id="${id}" data-prompt-name="${escapeHtml(name)}" data-prompt-text="${escapeHtml(promptText)}">Edit</button>
-            <button class="delete" data-action="delete-prompt" data-prompt-id="${id}">Delete</button>
-        </div>
-    `;
+    // Truncate name for sidebar
+    const displayName = name.length > 25 ? name.substring(0, 25) + '...' : name;
     
-    // Attach event listeners
-    div.querySelector('[data-action="edit-prompt"]').addEventListener('click', (e) => {
-        editPrompt(e.target.dataset.promptId, e.target.dataset.promptName, e.target.dataset.promptText);
-    });
-    div.querySelector('[data-action="delete-prompt"]').addEventListener('click', (e) => {
-        deletePrompt(e.target.dataset.promptId);
+    div.textContent = displayName;
+    div.dataset.promptId = id;
+    div.dataset.promptName = name;
+    div.dataset.promptText = promptText;
+    
+    // Click to load prompt
+    div.addEventListener('click', () => {
+        document.querySelectorAll('.sidebar-prompt-item').forEach(item => item.classList.remove('active'));
+        div.classList.add('active');
+        loadPromptIntoForm(id, name, promptText);
     });
     
     return div;
 }
 
-let isEditingPrompt = false;
+// Auto Groups are view-only - no form submission needed
+// Removed form submission handler as Auto Groups display conversation history and files
 
-document.getElementById('prompt-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const id = document.getElementById('prompt-id').value;
-    const name = document.getElementById('prompt-name').value;
-    const text = document.getElementById('prompt-text').value;
+function loadPromptIntoForm(id, name, text) {
+    document.getElementById('prompt-form-title').textContent = 'Prompt';
     
-    const data = { name, promptText: text };
-    
+    // Parse conversation history and files from the prompt text
+    // Assuming text is stored as JSON string with {messages: [], files: []}
+    let messages = [];
+    let files = [];
     try {
-        const url = isEditingPrompt ? `${API_BASE}/prompts/${id}` : `${API_BASE}/prompts`;
-        const method = isEditingPrompt ? 'PUT' : 'POST';
-        
-        const response = await fetch(url, {
-            method,
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data)
-        });
-        
-        if (response.ok) {
-            showMessage(isEditingPrompt ? 'Prompt updated successfully' : 'Prompt created successfully');
-            cancelEditPrompt();
-            await loadPrompts(true);
-            await loadAllGroups(true);
-        } else {
-            const error = await response.json();
-            showMessage(error.detail || 'Error saving prompt', 'error');
-        }
-    } catch (error) {
-        showMessage('Error saving prompt: ' + error.message, 'error');
+        const data = JSON.parse(text);
+        messages = data.messages || [];
+        files = data.files || [];
+    } catch {
+        // Fallback to old format
+        messages = [
+            {role: 'user', content: name},
+            {role: 'bot', content: text}
+        ];
     }
-});
-
-function editPrompt(id, name, text) {
-    isEditingPrompt = true;
-    document.getElementById('prompt-id').value = id;
-    document.getElementById('prompt-name').value = name;
-    document.getElementById('prompt-text').value = text;
-    document.getElementById('prompt-submit-btn').textContent = 'Update Prompt';
-    document.getElementById('prompt-cancel-btn').style.display = 'inline-block';
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    
+    // Show the conversation history in a scrollable box
+    const conversationHTML = messages.map(msg => `
+        <div style="margin-bottom: 12px;">
+            <div style="color: ${msg.role === 'user' ? '#3498db' : '#27ae60'}; font-weight: 600; margin-bottom: 4px;">${msg.role === 'user' ? 'User' : 'Bot'}:</div>
+            <div style="color: #555; padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
+        </div>
+    `).join('');
+    
+    // Show attached files in a scrollable box
+    const filesHTML = files.length > 0 ? `
+        <div style="margin-top: 15px; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+            <div style="font-weight: 600; color: #2c3e50; margin-bottom: 10px;">Attached Files</div>
+            <div style="max-height: 150px; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; padding: 10px; background: white;">
+                ${files.map(f => `<div style="padding: 4px 0; color: #555;">📎 ${escapeHtml(f)}</div>`).join('')}
+            </div>
+        </div>
+    ` : '';
+    
+    const responseContent = document.getElementById('response-content');
+    responseContent.innerHTML = `
+        <div style="margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #e0e0e0;">
+            <div style="color: #2c3e50; font-weight: 600; margin-bottom: 8px;">Auto Group: ${escapeHtml(name)}</div>
+        </div>
+        <div style="max-height: 400px; overflow-y: auto; padding: 10px; border: 1px solid #e0e0e0; border-radius: 4px; background: #fafafa;">
+            ${conversationHTML}
+        </div>
+        ${filesHTML}
+    `;
 }
 
-function cancelEditPrompt() {
-    isEditingPrompt = false;
-    document.getElementById('prompt-form').reset();
-    document.getElementById('prompt-id').value = '';
-    document.getElementById('prompt-submit-btn').textContent = 'Add Prompt';
-    document.getElementById('prompt-cancel-btn').style.display = 'none';
+function createNewPrompt() {
+    document.querySelectorAll('.sidebar-prompt-item').forEach(item => item.classList.remove('active'));
+    document.getElementById('prompt-form-title').textContent = 'Prompt';
+    
+    // Reset conversation history
+    currentConversationHistory = [];
+    
+    // Reset response section
+    const responseContent = document.getElementById('response-content');
+    if (responseContent) {
+        responseContent.innerHTML = '<span style="color: #999;">Enter a prompt and click Send to get a response</span>';
+    }
+    
+    // Clear input
+    const promptInput = document.getElementById('prompt-name');
+    if (promptInput) {
+        promptInput.value = '';
+    }
 }
 
-document.getElementById('prompt-cancel-btn').addEventListener('click', cancelEditPrompt);
+// Handle file attachments for prompts
+let promptPreviewFile = null;
+let promptSelectedFiles = [];
+let currentConversationHistory = []; // Track conversation messages
+window.promptSelectedFiles = promptSelectedFiles;
+
+function updatePromptFilesList() {
+    const filesList = document.getElementById('prompt-files-list');
+    const promptFilesIcon = document.getElementById('prompt-files-icon');
+    
+    if (!filesList) return;
+    
+    // Update paperclip icon color
+    if (promptFilesIcon) {
+        if (promptSelectedFiles.length === 0) {
+            promptFilesIcon.style.color = '#95a5a6'; // Gray when no files
+        } else {
+            promptFilesIcon.style.color = '#3498db'; // Blue when files present
+        }
+    }
+    
+    if (promptSelectedFiles.length === 0) {
+        filesList.innerHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No files to show</div>';
+    } else {
+        filesList.innerHTML = promptSelectedFiles.map((fileObj, index) => `
+            <div style="padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0; ${fileObj.selected ? 'background: #f0f0f0;' : ''}">
+                <input type="checkbox" ${fileObj.selected ? 'checked' : ''} style="width: 16px; height: 16px; cursor: pointer; margin: 0;" onclick="togglePromptFileSelection(${index})">
+                <span onclick="togglePromptFileSelection(${index})" style="font-size: 14px; color: #333; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; user-select: none;">
+                    ${escapeHtml(fileObj.file.name)}
+                </span>
+            </div>
+        `).join('');
+    }
+}
+
+function togglePromptFileSelection(index) {
+    if (promptSelectedFiles[index]) {
+        promptSelectedFiles[index].selected = !promptSelectedFiles[index].selected;
+        updatePromptFilesList();
+    }
+}
+
+function removePromptFile(index) {
+    promptSelectedFiles.splice(index, 1);
+    updatePromptFilesList();
+    showMessage('File removed', 'success');
+}
+
+async function deleteSelectedPromptFiles() {
+    const selected = promptSelectedFiles.filter(f => f.selected);
+    if (selected.length === 0) {
+        showMessage('No files selected', 'error');
+        return;
+    }
+    
+    if (!confirm(`Delete ${selected.length} file(s)?`)) {
+        return;
+    }
+    
+    // Delete files from server if they have IDs
+    for (const fileObj of selected) {
+        if (fileObj.id) {
+            try {
+                const deleteRes = await fetch(`${API_BASE}/files/${fileObj.id}`, {
+                    method: 'DELETE'
+                });
+                if (!deleteRes.ok) {
+                    console.error(`Failed to delete file ${fileObj.name} from server`);
+                }
+            } catch (error) {
+                console.error('Error deleting file from server:', error);
+            }
+        }
+    }
+    
+    // Remove from local list
+    promptSelectedFiles = promptSelectedFiles.filter(f => !f.selected);
+    updatePromptFilesList();
+    showMessage(`${selected.length} file(s) deleted`, 'success');
+    
+    // Reload files list to reflect deletion
+    if (typeof loadFiles === 'function') {
+        loadFiles(true);
+    }
+}
+
+window.updatePromptFilesList = updatePromptFilesList;
+window.togglePromptFileSelection = togglePromptFileSelection;
+window.removePromptFile = removePromptFile;
+window.deleteSelectedPromptFiles = deleteSelectedPromptFiles;
 
 async function deletePrompt(id) {
     if (!confirm('Are you sure you want to delete this prompt?')) return;
@@ -478,6 +571,54 @@ async function deletePrompt(id) {
         showMessage('Error deleting prompt: ' + error.message, 'error');
     }
 }
+
+// Prompt response tracking functions
+function showPromptResponse(promptName, promptText) {
+    const responseContent = document.getElementById('response-content');
+    
+    responseContent.innerHTML = `
+        <div style="margin-bottom: 10px; color: #666;">
+            <strong>Selected:</strong> ${escapeHtml(promptName)}
+        </div>
+        <div style="padding: 10px; background: #f8f9fa; border-radius: 4px; font-size: 0.9rem; color: #555;">
+            ${escapeHtml(promptText.substring(0, 200))}${promptText.length > 200 ? '...' : ''}
+        </div>
+        <div style="margin-top: 10px; color: #999; font-size: 0.85rem;">
+            Click "Track" to monitor this prompt's usage
+        </div>
+    `;
+}
+
+function hidePromptResponse() {
+    const responseContent = document.getElementById('response-content');
+    responseContent.innerHTML = '<span style="color: #999;">Click Track to monitor prompt responses</span>';
+}
+
+function trackPrompt() {
+    const responseContent = document.getElementById('response-content');
+    const selectedItem = document.querySelector('.sidebar-prompt-item.active');
+    
+    if (!selectedItem) {
+        showMessage('Please select a prompt first', 'error');
+        return;
+    }
+    
+    responseContent.innerHTML = `
+        <div style="text-align: center; padding: 20px;">
+            <div style="color: #3498db; font-size: 1.2rem; margin-bottom: 10px;">📊 Tracking Active</div>
+            <div style="color: #666; font-size: 0.9rem;">Monitoring prompt usage and responses...</div>
+            <div style="margin-top: 15px; padding: 10px; background: #e8f5e9; border-radius: 4px; color: #2e7d32;">
+                ✓ Ready to track interactions
+            </div>
+        </div>
+    `;
+    
+    showMessage('Tracking enabled for selected prompt');
+}
+
+// Make functions globally available
+window.trackPrompt = trackPrompt;
+window.createNewPrompt = createNewPrompt;
 
 // Groups with lazy loading
 async function loadGroups(reset = false) {
@@ -1152,6 +1293,288 @@ async function init() {
                 window.location.href = downloadUrl;
             } else {
                 showMessage('No file selected for download', 'error');
+            }
+        });
+        
+        // Setup prompts file management
+        const promptFileInput = document.getElementById('prompt-file-input');
+        const promptFilesList = document.getElementById('prompt-files-list');
+        const promptFilesIcon = document.getElementById('prompt-files-icon');
+        const promptFileSection = document.getElementById('prompt-file-section');
+        const promptPreviewContent = document.getElementById('prompt-preview-content');
+        const promptPreviewFilename = document.getElementById('prompt-preview-filename');
+        
+        updatePromptFilesList();
+        
+        // Show file section when clicking "add file+" button
+        document.getElementById('prompt-show-file-btn')?.addEventListener('click', () => {
+            const isCurrentlyHidden = promptFileSection.style.display === 'none' || !promptFileSection.style.display;
+            if (isCurrentlyHidden) {
+                promptFileSection.style.display = 'block';
+                document.getElementById('prompt-preview-panel').style.display = 'block';
+                document.getElementById('prompt-files-panel').style.display = 'flex';
+            } else {
+                promptFileSection.style.display = 'none';
+            }
+        });
+        
+        // Show only Files panel when clicking paperclip in Prompts
+        promptFilesIcon?.addEventListener('click', () => {
+            const filesPanel = document.getElementById('prompt-files-panel');
+            
+            // Hide preview panel, show only files panel
+            document.getElementById('prompt-preview-panel').style.display = 'none';
+            filesPanel.style.display = 'flex';
+            filesPanel.setAttribute('data-context', 'prompts');
+            
+            promptFileSection.style.display = 'block';
+            
+            // Update files list after showing the panel
+            updatePromptFilesList();
+        });
+        
+        // Handle file selection - show preview
+        if (promptFileInput) {
+            promptFileInput.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    promptPreviewFile = file;
+                    if (promptPreviewFilename) {
+                        promptPreviewFilename.textContent = file.name;
+                    }
+                    
+                    // Show actual preview based on file type (like reminders)
+                    const ext = file.name.split('.').pop().toLowerCase();
+                    if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) {
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            promptPreviewContent.innerHTML = `<img src="${e.target.result}" style="max-width: 100%; max-height: 200px; border-radius: 4px; object-fit: contain;">`;
+                        };
+                        reader.readAsDataURL(file);
+                    } else if (ext === 'pdf') {
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            promptPreviewContent.innerHTML = `<embed src="${e.target.result}" type="application/pdf" width="100%" height="200px" style="border-radius: 4px;">`;
+                        };
+                        reader.readAsDataURL(file);
+                    } else {
+                        promptPreviewContent.innerHTML = `
+                            <div style="text-align: center;">
+                                <div style="font-size: 64px; margin-bottom: 10px;">📄</div>
+                                <div style="color: #7f8c8d; font-size: 12px;">Preview not available</div>
+                            </div>
+                        `;
+                    }
+                }
+            });
+        }
+        
+        // Upload button - uploads file to server and adds to list
+        document.getElementById('prompt-upload-btn')?.addEventListener('click', async () => {
+            if (!promptPreviewFile) {
+                showMessage('Please select a file first', 'error');
+                return;
+            }
+            
+            // Check if file already exists in list
+            if (promptSelectedFiles.find(f => f.name === promptPreviewFile.name)) {
+                showMessage('File already uploaded', 'error');
+                return;
+            }
+            
+            try {
+                // Upload file to server
+                const formData = new FormData();
+                formData.append('file', promptPreviewFile);
+                formData.append('label', promptPreviewFile.name);
+                
+                const uploadRes = await fetch(`${API_BASE}/files`, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!uploadRes.ok) {
+                    const errorText = await uploadRes.text();
+                    throw new Error(`Upload failed: ${errorText}`);
+                }
+                
+                const fileData = await uploadRes.json();
+                const fileId = fileData.id || fileData.Id;
+                
+                // Add uploaded file to list with server ID
+                promptSelectedFiles.push({
+                    file: promptPreviewFile, 
+                    name: promptPreviewFile.name, 
+                    selected: false,
+                    id: fileId
+                });
+                window.promptSelectedFiles = promptSelectedFiles;
+                updatePromptFilesList();
+                showMessage(`File "${promptPreviewFile.name}" uploaded successfully`, 'success');
+                
+                // Clear preview
+                promptPreviewFile = null;
+                if (promptPreviewFilename) promptPreviewFilename.textContent = '';
+                if (promptPreviewContent) promptPreviewContent.innerHTML = `<div style="font-size: 48px; color: #95a5a6;">📄</div>`;
+                if (promptFileInput) promptFileInput.value = '';
+                
+                // Reload files list to show the new file
+                if (typeof loadFiles === 'function') {
+                    loadFiles(true);
+                }
+            } catch (error) {
+                console.error('Error uploading file:', error);
+                showMessage(`Failed to upload file: ${error.message}`, 'error');
+            }
+        });
+        
+        // Send button function - sends prompt to API
+        const sendPrompt = async () => {
+            const promptText = document.getElementById('prompt-name')?.value;
+            const responseContent = document.getElementById('response-content');
+            
+            if (!promptText || !promptText.trim()) {
+                showMessage('Please enter a prompt text', 'error');
+                return;
+            }
+            
+            try {
+                // Show loading state
+                responseContent.innerHTML = `
+                    <div style="text-align: center; padding: 20px; color: #3498db;">
+                        <div style="font-size: 1.2rem; margin-bottom: 10px;">⏳ Sending...</div>
+                        <div style="font-size: 0.9rem; color: #666;">Processing your request...</div>
+                    </div>
+                `;
+                
+                // Send query to documents endpoint (use full path, not API_BASE)
+                const queryResponse = await fetch('/api/documents/query', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({query: promptText, topK: 5})
+                });
+                
+                if (!queryResponse.ok) {
+                    const errorData = await queryResponse.json().catch(() => ({}));
+                    throw new Error(errorData.error || errorData.details || `Server error: ${queryResponse.status}`);
+                }
+                
+                const result = await queryResponse.json();
+                const answer = result.answer || result.Answer || 'No response received';
+                
+                // Get current attached files
+                const attachedFiles = promptSelectedFiles.map(f => ({
+                    name: f.file?.name || f.name,
+                    id: f.id
+                }));
+                
+                // Add to conversation history with files
+                currentConversationHistory.push({role: 'user', content: promptText, files: attachedFiles});
+                currentConversationHistory.push({role: 'bot', content: answer});
+                
+                // Display the full conversation history
+                const conversationHTML = currentConversationHistory.map(msg => `
+                    <div style="margin-bottom: 12px;">
+                        <div style="color: ${msg.role === 'user' ? '#3498db' : '#27ae60'}; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
+                            <span>${msg.role === 'user' ? 'User' : 'Bot'}:</span>
+                            ${msg.files && msg.files.length > 0 ? `<span style="font-size: 16px; color: #3498db; cursor: pointer;" title="${msg.files.length} file(s) attached: ${msg.files.map(f => f.name).join(', ')}">📎</span>` : ''}
+                        </div>
+                        <div style="color: #555; padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
+                    </div>
+                `).join('');
+                
+                responseContent.innerHTML = `
+                    <div style="max-height: 500px; overflow-y: auto; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+                        ${conversationHTML}
+                    </div>
+                    ${result.sources && result.sources.length > 0 ? `
+                    <div style="margin-top: 15px; padding: 10px; background: white; border: 1px solid #dee2e6; border-radius: 4px;">
+                        <div style="font-weight: 600; color: #2c3e50; margin-bottom: 8px; font-size: 0.9rem;">Sources:</div>
+                        <div style="font-size: 0.85rem; color: #666;">${result.sources.length} document(s) referenced</div>
+                    </div>
+                    ` : ''}
+                `;
+                
+                // Clear input for next message
+                document.getElementById('prompt-name').value = '';
+                
+                showMessage('Response received successfully', 'success');
+                
+            } catch (error) {
+                console.error('Error sending prompt:', error);
+                responseContent.innerHTML = `
+                    <div style="text-align: center; padding: 20px; color: #e74c3c;">
+                        <div style="font-size: 1.2rem; margin-bottom: 10px;">❌ Error</div>
+                        <div style="font-size: 0.9rem;">${escapeHtml(error.message)}</div>
+                    </div>
+                `;
+                showMessage(`Error: ${error.message}`, 'error');
+            }
+        };
+        
+        // Send button click handler
+        document.getElementById('prompt-send-btn')?.addEventListener('click', sendPrompt);
+        
+        // Enter key handler for prompt text input
+        document.getElementById('prompt-name')?.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                sendPrompt();
+            }
+        });
+        
+        // New Chat button - saves current conversation to Auto Groups
+        document.getElementById('new-chat-btn')?.addEventListener('click', async () => {
+            if (currentConversationHistory.length === 0) {
+                showMessage('No conversation to save', 'error');
+                return;
+            }
+            
+            // Get the first user message as the name
+            const firstMessage = currentConversationHistory.find(m => m.role === 'user');
+            const chatName = firstMessage ? firstMessage.content.substring(0, 50) : 'Untitled Chat';
+            
+            // Get file names from uploaded files
+            const fileNames = promptSelectedFiles.map(f => f.name);
+            
+            // Create JSON string with conversation and files
+            const conversationData = JSON.stringify({
+                messages: currentConversationHistory,
+                files: fileNames
+            });
+            
+            try {
+                // Save to prompts (Auto Groups)
+                const response = await fetch(`${API_BASE}/prompts`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        name: chatName,
+                        promptText: conversationData
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to save conversation');
+                }
+                
+                showMessage('Conversation saved to Auto Groups', 'success');
+                
+                // Reset for new chat
+                currentConversationHistory = [];
+                promptSelectedFiles = [];
+                window.promptSelectedFiles = promptSelectedFiles;
+                updatePromptFilesList();
+                
+                document.getElementById('prompt-name').value = '';
+                document.getElementById('response-content').innerHTML = '<span style="color: #999;">Enter a prompt and click Send to get a response</span>';
+                
+                // Reload prompts list to show new Auto Group
+                loadPrompts(true);
+                
+            } catch (error) {
+                console.error('Error saving conversation:', error);
+                showMessage('Failed to save conversation', 'error');
             }
         });
         
