@@ -574,8 +574,8 @@ app.UseExceptionHandler(errorApp =>
 
 app.MapControllers();
 
-// Map SignalR hubs
-app.MapHub<SmartGlassesMiddleware.Hubs.TaskHub>("/hubs/tasks");
+// Add a test minimal API endpoint to verify routing works
+app.MapGet("/test", () => "Test endpoint works!");
 
 // Helper methods for retry policies
 static IAsyncPolicy<HttpResponseMessage> GetRetryPolicy()
@@ -787,6 +787,9 @@ app.MapGet("/metrics", (IMetricsService metricsService, HttpContext context, ICo
         endpoints = summary
     });
 });
+
+// Map SignalR hubs LAST to avoid routing issues
+app.MapHub<SmartGlassesMiddleware.Hubs.TaskHub>("/hubs/tasks");
 
 app.Run();
 
