@@ -146,6 +146,13 @@ public class DocumentsController : ControllerBase
                 await _monitoringService.CompleteRequest(requestId, false, error: "Request timed out");
             return StatusCode(504, new { error = "Request timed out", details = ex.Message });
         }
+        catch (OperationCanceledException ex)
+        {
+            _logger.LogWarning(ex, "Query was cancelled (client disconnected) for query: {Query}", request.Query);
+            if (requestId != null)
+                await _monitoringService.CompleteRequest(requestId, false, error: "Request cancelled by client");
+            return StatusCode(499, new { error = "Request cancelled", details = "Client disconnected" });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error querying documents");
