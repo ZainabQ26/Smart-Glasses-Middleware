@@ -453,9 +453,11 @@ using (var scope = app.Services.CreateScope())
             
             if (completedTask == timeoutTask)
             {
-                logger?.LogError("Database migration timed out after 30 seconds. " +
+                var errorMessage = "Database migration timed out after 30 seconds. " +
                     "This usually means another instance is holding the migration lock. " +
-                    "Application will continue but may have schema issues.");
+                    "Application startup aborted to prevent schema issues.";
+                logger?.LogCritical(errorMessage);
+                throw new TimeoutException(errorMessage);
             }
             else
             {
@@ -474,10 +476,16 @@ using (var scope = app.Services.CreateScope())
         var logger = scope.ServiceProvider.GetService<ILogger<Program>>();
         logger?.LogWarning(ex, "Skipping Database.Migrate during startup (likely test environment with multiple EF providers)");
     }
+    catch (TimeoutException)
+    {
+        // Re-throw timeout exceptions to prevent app from starting with incomplete migrations
+        throw;
+    }
     catch (Exception ex)
     {
         var logger = scope.ServiceProvider.GetService<ILogger<Program>>();
-        logger?.LogWarning(ex, "Failed to apply migrations during startup; continuing");
+        logger?.LogError(ex, "Failed to apply migrations during startup; aborting application start");
+        throw; // Re-throw to prevent app from starting with schema issues
     }
 }
 
