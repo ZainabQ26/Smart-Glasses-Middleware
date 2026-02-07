@@ -241,6 +241,17 @@ document.getElementById('upload-form').addEventListener('submit', async (e) => {
     }
 });
 
+// Enter key handler for file label input
+document.getElementById('file-label')?.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        const uploadForm = document.getElementById('upload-form');
+        if (uploadForm) {
+            uploadForm.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+        }
+    }
+});
+
 async function deleteFile(id) {
     if (!confirm('Are you sure you want to delete this file?')) return;
     
@@ -792,16 +803,27 @@ document.getElementById('group-form').addEventListener('submit', async (e) => {
                 console.log('[CREATE GROUP] No files to upload');
             }
             
-            showMessage(isEditingGroup ? 'Group updated successfully' : 'Group created successfully');
+            showMessage(isEditingGroup ? 'Reminder updated successfully' : 'Reminder created successfully');
             cancelEditGroup();
             await loadGroups(true);
             await loadAllGroups(true); // Force refresh groups cache
         } else {
             const error = await response.json();
-            showMessage(error.detail || 'Error saving group', 'error');
+            showMessage(error.detail || 'Error saving reminder', 'error');
         }
     } catch (error) {
-        showMessage('Error saving group: ' + error.message, 'error');
+        showMessage('Error saving reminder: ' + error.message, 'error');
+    }
+});
+
+// Enter key handler for reminder/group name input
+document.getElementById('group-name')?.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        const groupForm = document.getElementById('group-form');
+        if (groupForm) {
+            groupForm.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+        }
     }
 });
 
@@ -826,7 +848,7 @@ function cancelEditGroup() {
 document.getElementById('group-cancel-btn').addEventListener('click', cancelEditGroup);
 
 async function deleteGroup(id) {
-    if (!confirm('Are you sure you want to delete this group?')) return;
+    if (!confirm('Are you sure you want to delete this reminder?')) return;
     
     try {
         const response = await fetch(`${API_BASE}/groups/${id}`, {
@@ -834,15 +856,15 @@ async function deleteGroup(id) {
         });
         
         if (response.ok || response.status === 204) {
-            showMessage('Group deleted successfully');
+            showMessage('Reminder deleted successfully');
             await loadGroups(true);
             await loadAllGroups(true); // Force refresh groups cache
         } else {
             const error = await response.json();
-            showMessage(error.detail || 'Error deleting group', 'error');
+            showMessage(error.detail || 'Error deleting reminder', 'error');
         }
     } catch (error) {
-        showMessage('Error deleting group: ' + error.message, 'error');
+        showMessage('Error deleting reminder: ' + error.message, 'error');
     }
 }
 
