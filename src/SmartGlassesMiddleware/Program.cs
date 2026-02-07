@@ -319,12 +319,16 @@ if (rateLimitEnabled)
                 {
                     AutoReplenishment = true,
                     PermitLimit = requestsPerMinute,
-                    QueueLimit = 0,
+                    QueueLimit = 10, // Allow queueing up to 10 requests instead of immediate rejection
                     Window = TimeSpan.FromMinutes(1)
                 }));
 
         options.OnRejected = async (context, token) =>
         {
+            var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
+            logger.LogWarning("Rate limit exceeded for {Path} from {Host}", 
+                context.HttpContext.Request.Path, context.HttpContext.Request.Headers.Host);
+            
             context.HttpContext.Response.StatusCode = 429;
             context.HttpContext.Response.ContentType = "application/problem+json";
 
@@ -422,12 +426,6 @@ catch (Exception ex)
 }
 
 // Configure the HTTP request pipeline.
-app.UseStaticFiles();
-
-if (app.Environment.IsDevelopment())
-{
-    app.MapOpenApi();
-}
 
 // Apply EF Core migrations at startup if enabled (guarded to avoid test-time provider conflicts)
 using (var scope = app.Services.CreateScope())
@@ -462,6 +460,39 @@ using (var scope = app.Services.CreateScope())
         var logger = scope.ServiceProvider.GetService<ILogger<Program>>();
         logger?.LogWarning(ex, "Failed to apply migrations during startup; continuing");
     }
+}
+
+// Add request logging middleware FIRST to track all requests
+app.Use(async (context, next) =>
+{
+    var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+    var requestId = Activity.Current?.Id ?? context.TraceIdentifier;
+    var startTime = DateTime.UtcNow;
+    
+    logger.LogInformation("→ REQUEST START: {Method} {Path} [{RequestId}]", 
+        context.Request.Method, context.Request.Path, requestId);
+    
+    try
+    {
+        await next();
+        var duration = (DateTime.UtcNow - startTime).TotalMilliseconds;
+        logger.LogInformation("← REQUEST END: {Method} {Path} [{RequestId}] - {StatusCode} ({Duration}ms)", 
+            context.Request.Method, context.Request.Path, requestId, context.Response.StatusCode, duration);
+    }
+    catch (Exception ex)
+    {
+        var duration = (DateTime.UtcNow - startTime).TotalMilliseconds;
+        logger.LogError(ex, "✗ REQUEST FAILED: {Method} {Path} [{RequestId}] ({Duration}ms)", 
+            context.Request.Method, context.Request.Path, requestId, duration);
+        throw;
+    }
+});
+
+app.UseStaticFiles();
+
+if (app.Environment.IsDevelopment())
+{
+    app.MapOpenApi();
 }
 
 if (!app.Environment.IsEnvironment("Testing"))
