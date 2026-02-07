@@ -501,6 +501,9 @@ if (!app.Environment.IsEnvironment("Testing"))
 }
 app.UseCors();
 
+// CRITICAL: UseRouting() is required for controller endpoints to work
+app.UseRouting();
+
 // Only use rate limiter if it's enabled
 var rateLimitConfig = app.Configuration.GetValue<bool?>("RateLimiting:Enabled") ?? true;
 if (rateLimitConfig)
