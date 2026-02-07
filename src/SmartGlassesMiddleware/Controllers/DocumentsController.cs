@@ -118,29 +118,24 @@ public class DocumentsController : ControllerBase
     [ProducesResponseType(typeof(QueryResult), StatusCodes.Status200OK)]
     public async Task<IActionResult> QueryDocuments([FromBody] QueryRequest request)
     {
-        _logger.LogInformation("QueryDocuments called with query: {Query}", request.Query);
-        
         if (string.IsNullOrWhiteSpace(request.Query))
             return BadRequest("Query cannot be empty");
 
         string? requestId = null;
         try
         {
-            _logger.LogInformation("About to call monitoring service...");
-            // TEMPORARILY DISABLED - monitoring service might be hanging
-            // requestId = await _monitoringService.StartRequest("DocumentQuery", 
-            //     $"Query: {request.Query.Substring(0, Math.Min(50, request.Query.Length))}...");
-            // await _monitoringService.UpdateRequestStatus(requestId, "Searching documents...");
-            _logger.LogInformation("Calling RAG service...");
-            
+            requestId = await _monitoringService.StartRequest("DocumentQuery", 
+                $"Query: {request.Query.Substring(0, Math.Min(50, request.Query.Length))}...");
+
+            await _monitoringService.UpdateRequestStatus(requestId, "Searching documents...");
+
             var result = await _ragService.QueryDocumentsAsync(
                 request.Query,
                 request.TopK ?? 5,
                 request.GroupIds);
 
-            _logger.LogInformation("RAG service returned result");
-            // await _monitoringService.CompleteRequest(requestId, true, 
-            //     $"Found {result.Sources?.Count ?? 0} sources");
+            await _monitoringService.CompleteRequest(requestId, true, 
+                $"Found {result.Sources?.Count ?? 0} sources");
 
             return Ok(result);
         }
