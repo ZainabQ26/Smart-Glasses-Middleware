@@ -16,6 +16,7 @@ public class DocumentsController : ControllerBase
     private readonly IDocumentHighlightService _highlightService;
     private readonly ApplicationDbContext _context;
     private readonly IConfiguration _configuration;
+    private readonly IRequestMonitoringService _monitoringService;
     private readonly long _maxFileSize;
 
     public DocumentsController(
@@ -24,7 +25,8 @@ public class DocumentsController : ControllerBase
         IRAGService ragService,
         IDocumentHighlightService highlightService,
         ApplicationDbContext context,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IRequestMonitoringService monitoringService)
     {
         _logger = logger;
         _processingService = processingService;
@@ -32,6 +34,7 @@ public class DocumentsController : ControllerBase
         _highlightService = highlightService;
         _context = context;
         _configuration = configuration;
+        _monitoringService = monitoringService;
         var maxFileSizeMB = configuration.GetValue<int?>("RAG:MaxFileSizeMB") ?? 50;
         _maxFileSize = maxFileSizeMB * 1024 * 1024;
     }
@@ -118,18 +121,36 @@ public class DocumentsController : ControllerBase
         if (string.IsNullOrWhiteSpace(request.Query))
             return BadRequest("Query cannot be empty");
 
+        string? requestId = null;
         try
         {
+            requestId = await _monitoringService.StartRequest("DocumentQuery", 
+                $"Query: {request.Query.Substring(0, Math.Min(50, request.Query.Length))}...");
+
+            await _monitoringService.UpdateRequestStatus(requestId, "Searching documents...");
+
             var result = await _ragService.QueryDocumentsAsync(
                 request.Query,
                 request.TopK ?? 5,
                 request.GroupIds);
 
+            await _monitoringService.CompleteRequest(requestId, true, 
+                $"Found {result.Sources?.Count ?? 0} sources");
+
             return Ok(result);
+        }
+        catch (TimeoutException ex)
+        {
+            _logger.LogWarning(ex, "Query timed out for query: {Query}", request.Query);
+            if (requestId != null)
+                await _monitoringService.CompleteRequest(requestId, false, error: "Request timed out");
+            return StatusCode(504, new { error = "Request timed out", details = ex.Message });
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error querying documents");
+            if (requestId != null)
+                await _monitoringService.CompleteRequest(requestId, false, error: ex.Message);
             return StatusCode(500, new { error = "Failed to query documents", details = ex.Message });
         }
     }
