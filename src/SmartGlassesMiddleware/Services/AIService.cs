@@ -8,7 +8,7 @@ namespace SmartGlassesMiddleware.Services;
 
 public interface IAIService
 {
-    Task<(string task, string response, bool usedAdvancedModel)> ProcessRequestAsync(string input);
+    Task<(string task, string response, bool usedAdvancedModel)> ProcessRequestAsync(string input, CancellationToken cancellationToken = default);
 }
 
 public class OllamaAIService : IAIService
@@ -32,7 +32,7 @@ public class OllamaAIService : IAIService
         _knownTasks = _dispatcher.KnownTasks.ToList();
     }
 
-    public async Task<(string task, string response, bool usedAdvancedModel)> ProcessRequestAsync(string input)
+    public async Task<(string task, string response, bool usedAdvancedModel)> ProcessRequestAsync(string input, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -52,9 +52,14 @@ Task:";
             try
             {
                 var chatService = _kernel.GetRequiredService<IChatCompletionService>();
-                var taskResult = await chatService.GetChatMessageContentAsync(taskDetectionPrompt);
+                var taskResult = await chatService.GetChatMessageContentAsync(taskDetectionPrompt, cancellationToken: cancellationToken);
                 detectedTask = taskResult.Content?.Trim().ToLower() ?? "unknown";
                 _logger.LogInformation("Detected task: {Task} for input: {Input}", detectedTask, input);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogWarning("Task detection was cancelled");
+                throw;
             }
             catch (Exception ex)
             {
@@ -103,8 +108,13 @@ User request: {input}
 
 Please provide a helpful and concise response:";
 
-                var response = await chatService.GetChatMessageContentAsync(processingPrompt);
+                var response = await chatService.GetChatMessageContentAsync(processingPrompt, cancellationToken: cancellationToken);
                 return (detectedTask, response.Content ?? "I couldn't process that request.", false);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogWarning("Local model processing was cancelled");
+                throw;
             }
             catch (Exception ex)
             {

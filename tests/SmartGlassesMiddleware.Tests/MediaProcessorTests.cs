@@ -31,7 +31,7 @@ public class MediaProcessorTests
         mockTranscription.Setup(t => t.TranscribeAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("Hello world");
 
-        mockAI.Setup(a => a.ProcessRequestAsync(It.IsAny<string>()))
+        mockAI.Setup(a => a.ProcessRequestAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(("audio_task", "AI response", false));
 
         var savedHistory = new RequestHistory { Id = Guid.NewGuid() };
@@ -83,7 +83,7 @@ public class MediaProcessorTests
         var mockHistory = new Mock<IHistoryService>();
         var mockLogger = new Mock<ILogger<MediaProcessor>>();
 
-        mockAI.Setup(a => a.ProcessRequestAsync(It.IsAny<string>()))
+        mockAI.Setup(a => a.ProcessRequestAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(("task", "response", false));
 
         var savedHistory = new RequestHistory { Id = Guid.NewGuid() };
@@ -139,7 +139,7 @@ public class MediaProcessorTests
         mockTranscription.Setup(t => t.TranscribeAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new Exception("Transcription error"));
 
-        mockAI.Setup(a => a.ProcessRequestAsync(It.IsAny<string>()))
+        mockAI.Setup(a => a.ProcessRequestAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(("task", "response", false));
 
         var savedHistory = new RequestHistory { Id = Guid.NewGuid() };
@@ -171,7 +171,7 @@ public class MediaProcessorTests
 
         // Assert - should continue processing despite transcription failure
         Assert.NotNull(result);
-        mockAI.Verify(a => a.ProcessRequestAsync(It.IsAny<string>()), Times.Once);
+        mockAI.Verify(a => a.ProcessRequestAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -184,7 +184,7 @@ public class MediaProcessorTests
         var mockHistory = new Mock<IHistoryService>();
         var mockLogger = new Mock<ILogger<MediaProcessor>>();
 
-        mockAI.Setup(a => a.ProcessRequestAsync(It.IsAny<string>()))
+        mockAI.Setup(a => a.ProcessRequestAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(("media_task", "AI processed response", true));
 
         var savedHistory = new RequestHistory { Id = Guid.NewGuid() };
@@ -219,7 +219,7 @@ public class MediaProcessorTests
         // Assert
         mockAI.Verify(a => a.ProcessRequestAsync(It.Is<string>(s =>
             s.Contains("Analyze this") &&
-            s.Contains("image.jpg"))), Times.Once);
+            s.Contains("image.jpg")), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -232,7 +232,7 @@ public class MediaProcessorTests
         var mockHistory = new Mock<IHistoryService>();
         var mockLogger = new Mock<ILogger<MediaProcessor>>();
 
-        mockAI.Setup(a => a.ProcessRequestAsync(It.IsAny<string>()))
+        mockAI.Setup(a => a.ProcessRequestAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(("task", "response", false));
 
         var savedHistory = new RequestHistory { Id = Guid.NewGuid() };
@@ -279,7 +279,7 @@ public class MediaProcessorTests
         var mockHistory = new Mock<IHistoryService>();
         var mockLogger = new Mock<ILogger<MediaProcessor>>();
 
-        mockAI.Setup(a => a.ProcessRequestAsync(It.IsAny<string>()))
+        mockAI.Setup(a => a.ProcessRequestAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(("task", "response", false));
 
         var historyId = Guid.NewGuid();
@@ -326,7 +326,7 @@ public class MediaProcessorTests
         var mockHistory = new Mock<IHistoryService>();
         var mockLogger = new Mock<ILogger<MediaProcessor>>();
 
-        mockAI.Setup(a => a.ProcessRequestAsync(It.IsAny<string>()))
+        mockAI.Setup(a => a.ProcessRequestAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(("task", "response", false));
 
         mockHistory.Setup(h => h.SaveRequestAsync(It.IsAny<RequestHistory>()))
@@ -378,7 +378,7 @@ public class MediaProcessorTests
         mockTranscription.Setup(t => t.TranscribeAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("Transcribed");
 
-        mockAI.Setup(a => a.ProcessRequestAsync(It.IsAny<string>()))
+        mockAI.Setup(a => a.ProcessRequestAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(("task", "response", false));
 
         var savedHistory = new RequestHistory { Id = Guid.NewGuid() };

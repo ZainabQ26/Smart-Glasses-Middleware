@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using Xunit;
 using Moq;
@@ -152,7 +153,7 @@ public class RAGServiceRobustnessTests
         await _context.SaveChangesAsync();
 
         _mockAIService
-            .Setup(s => s.ProcessRequestAsync(It.IsAny<string>()))
+            .Setup(s => s.ProcessRequestAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(("task", "response", false));
 
         // Act
@@ -162,7 +163,7 @@ public class RAGServiceRobustnessTests
         Assert.NotNull(result);
         Assert.NotEmpty(result.Answer);
         _mockAIService.Verify(
-            s => s.ProcessRequestAsync(It.Is<string>(p => p.Contains("Context Prompt"))),
+            s => s.ProcessRequestAsync(It.Is<string>(p => p.Contains("Context Prompt")), It.IsAny<CancellationToken>()),
             Times.Once);
     }
 

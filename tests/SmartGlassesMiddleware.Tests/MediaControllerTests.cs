@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -590,7 +591,7 @@ public class MediaControllerTests
         var mockAIService = new Mock<IAIService>();
         var mockHistoryService = new Mock<IHistoryService>();
 
-        mockAIService.Setup(s => s.ProcessRequestAsync(It.IsAny<string>()))
+        mockAIService.Setup(s => s.ProcessRequestAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(("Audio", "Response text", false));
 
         var savedHistory = new RequestHistory
