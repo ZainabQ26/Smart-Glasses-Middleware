@@ -1475,7 +1475,7 @@ async function init() {
                 console.log('[SEND PROMPT] Sending documents query to', documentsUrl, 'payload:', payload);
 
                 const controller = new AbortController();
-                const timeoutMs = 60000;
+                const timeoutMs = 150000; // 150 seconds - longer than server timeout
                 const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
                 const queryResponse = await fetch(documentsUrl, {
