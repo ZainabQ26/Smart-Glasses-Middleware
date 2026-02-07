@@ -134,7 +134,7 @@ Answer:";
                 else
                 {
                     _logger.LogWarning("Advanced task handler not available, falling back to local model");
-                    response = await GenerateResponseWithLocalModel(promptTemplate, cts.Token);
+                    response = await GenerateResponseWithLocalModel(promptTemplate, cts.Token) ?? "I couldn't generate a response.";
                 }
 
                 usedAdvancedModel = true;
@@ -152,8 +152,8 @@ Answer:";
             }
             else
             {
-                var (_, aiResponse, wasAdvanced) = await _aiService.ProcessRequestAsync(promptTemplate);
-                response = aiResponse;
+                var (_, aiResponse, wasAdvanced) = await _aiService.ProcessRequestAsync(promptTemplate, cts.Token);
+                response = aiResponse ?? "I couldn't generate a response.";
                 usedAdvancedModel = wasAdvanced;
                 modelUsed = wasAdvanced ? "advanced" : "local";
 
@@ -212,6 +212,11 @@ Answer:";
     private List<DocumentSource> IdentifyReferencedSources(string response, List<DocumentSource> allSources)
     {
         var referenced = new List<DocumentSource>();
+
+        if (string.IsNullOrEmpty(response))
+        {
+            return referenced;
+        }
 
         foreach (var source in allSources)
         {
