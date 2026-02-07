@@ -434,6 +434,7 @@ using (var scope = app.Services.CreateScope())
     {
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+        var logger = scope.ServiceProvider.GetService<ILogger<Program>>();
 
         // Check configuration key first, then environment variable. Default: disabled.
         var migrateSetting = configuration.GetValue<bool?>("MigrateOnStartup");
@@ -442,11 +443,29 @@ using (var scope = app.Services.CreateScope())
 
         if (shouldMigrate)
         {
-            db.Database.Migrate();
+            logger?.LogInformation("Starting database migration...");
+            
+            // Run migration with a timeout to prevent indefinite hangs on lock acquisition
+            var migrationTask = Task.Run(() => db.Database.Migrate());
+            var timeoutTask = Task.Delay(TimeSpan.FromSeconds(30));
+            
+            var completedTask = await Task.WhenAny(migrationTask, timeoutTask);
+            
+            if (completedTask == timeoutTask)
+            {
+                logger?.LogError("Database migration timed out after 30 seconds. " +
+                    "This usually means another instance is holding the migration lock. " +
+                    "Application will continue but may have schema issues.");
+            }
+            else
+            {
+                // Wait for the actual task to propagate any exceptions
+                await migrationTask;
+                logger?.LogInformation("Database migration completed successfully.");
+            }
         }
         else
         {
-            var logger = scope.ServiceProvider.GetService<ILogger<Program>>();
             logger?.LogInformation("Skipping database migration on startup (MigrateOnStartup not enabled).");
         }
     }
