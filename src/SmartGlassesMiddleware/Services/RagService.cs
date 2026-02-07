@@ -42,6 +42,7 @@ public class RAGService : IRAGService
     private readonly int _embeddingMaxConcurrency;
     private readonly bool _useVectorDB;
     private readonly double _vectorSimilarityThreshold;
+    private readonly int _queryTimeoutSeconds;
 
     public RAGService(
         ApplicationDbContext context,
@@ -65,10 +66,12 @@ public class RAGService : IRAGService
         _embeddingMaxConcurrency = configuration.GetValue<int?>("RAG:EmbeddingMaxConcurrency") ?? 5;
         _useVectorDB = configuration.GetValue<bool?>("RAG:UseVectorDB") ?? true;
         _vectorSimilarityThreshold = configuration.GetValue<double?>("RAG:VectorSimilarityThreshold") ?? 0.7;
+        _queryTimeoutSeconds = configuration.GetValue<int?>("RAG:QueryTimeoutSeconds") ?? 120;
     }
 
     public async Task<QueryResult> QueryDocumentsAsync(string query, int topK = 5, List<Guid>? groupIds = null)
     {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(_queryTimeoutSeconds));
         try
         {
             var stopwatch = Stopwatch.StartNew();
@@ -131,7 +134,7 @@ Answer:";
                 else
                 {
                     _logger.LogWarning("Advanced task handler not available, falling back to local model");
-                    response = await GenerateResponseWithLocalModel(promptTemplate);
+                    response = await GenerateResponseWithLocalModel(promptTemplate, cts.Token);
                 }
 
                 usedAdvancedModel = true;
@@ -190,6 +193,11 @@ Answer:";
                 TokenCount = estimatedTokens,
                 DelegationReason = delegationReason
             };
+        }
+        catch (OperationCanceledException ex)
+        {
+            _logger.LogWarning(ex, "Query timed out after {Timeout}s for query: {Query}", _queryTimeoutSeconds, query);
+            throw new TimeoutException($"Query operation timed out after {_queryTimeoutSeconds} seconds. Please try a simpler query or increase the timeout.", ex);
         }
         catch (Exception ex)
         {
@@ -915,13 +923,18 @@ Answer:";
         return (int)(text.Length * _tokensPerChar);
     }
 
-    private async Task<string> GenerateResponseWithLocalModel(string prompt)
+    private async Task<string> GenerateResponseWithLocalModel(string prompt, CancellationToken cancellationToken = default)
     {
         try
         {
             var chatService = _kernel.GetRequiredService<IChatCompletionService>();
-            var result = await chatService.GetChatMessageContentAsync(prompt);
+            var result = await chatService.GetChatMessageContentAsync(prompt, cancellationToken: cancellationToken);
             return result.Content ?? "No response from local model.";
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning("Local model generation was cancelled/timed out");
+            throw;
         }
         catch (Exception ex)
         {
@@ -947,6 +960,7 @@ Answer:";
 
     public async Task<QueryResult> QueryRemindersAsync(string query, int topK = 10)
     {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(_queryTimeoutSeconds));
         try
         {
             _logger.LogInformation("Querying reminders with query: {Query}", query);
@@ -1022,7 +1036,7 @@ User Question: {query}
 
 Answer:";
 
-            var answer = await GenerateResponseWithLocalModel(prompt);
+            var answer = await GenerateResponseWithLocalModel(prompt, cts.Token);
 
             return new QueryResult
             {
@@ -1031,6 +1045,18 @@ Answer:";
                 UsedAdvancedModel = false,
                 ModelUsed = "local-ollama",
                 TokenCount = EstimateTokens(prompt + answer)
+            };
+        }
+        catch (OperationCanceledException ex)
+        {
+            _logger.LogWarning(ex, "Reminder query timed out after {Timeout}s", _queryTimeoutSeconds);
+            return new QueryResult
+            {
+                Answer = $"Query timed out after {_queryTimeoutSeconds} seconds. Please try a simpler query.",
+                Sources = new List<DocumentSource>(),
+                UsedAdvancedModel = false,
+                ModelUsed = "none",
+                TokenCount = 0
             };
         }
         catch (Exception ex)
@@ -1049,6 +1075,7 @@ Answer:";
 
     public async Task<QueryResult> QueryDocumentsAndRemindersAsync(string query, int topK = 5, List<Guid>? groupIds = null)
     {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(_queryTimeoutSeconds));
         try
         {
             _logger.LogInformation("Querying documents and reminders with query: {Query}", query);
@@ -1111,7 +1138,7 @@ Question: {query}
 
 Answer:";
 
-                var answer = await GenerateResponseWithLocalModel(combinedPrompt);
+                var answer = await GenerateResponseWithLocalModel(combinedPrompt, cts.Token);
 
                 return new QueryResult
                 {
@@ -1130,6 +1157,18 @@ Answer:";
             }
 
             return reminderResult;
+        }
+        catch (OperationCanceledException ex)
+        {
+            _logger.LogWarning(ex, "Combined query timed out after {Timeout}s", _queryTimeoutSeconds);
+            return new QueryResult
+            {
+                Answer = $"Query timed out after {_queryTimeoutSeconds} seconds. Please try a simpler query.",
+                Sources = new List<DocumentSource>(),
+                UsedAdvancedModel = false,
+                ModelUsed = "none",
+                TokenCount = 0
+            };
         }
         catch (Exception ex)
         {
