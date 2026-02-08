@@ -1326,6 +1326,23 @@ async function init() {
         const promptFileSection = document.getElementById('prompt-file-section');
         const promptPreviewContent = document.getElementById('prompt-preview-content');
         const promptPreviewFilename = document.getElementById('prompt-preview-filename');
+        const promptUploadProgress = document.getElementById('prompt-upload-progress');
+        const promptUploadBtn = document.getElementById('prompt-upload-btn');
+        const promptFileInputElement = document.getElementById('prompt-file-input');
+
+        const setPromptUploadLoading = (isLoading) => {
+            if (promptUploadProgress) {
+                promptUploadProgress.style.display = isLoading ? 'block' : 'none';
+            }
+            if (promptUploadBtn) {
+                promptUploadBtn.disabled = isLoading;
+                promptUploadBtn.style.opacity = isLoading ? '0.7' : '1';
+                promptUploadBtn.textContent = isLoading ? 'Uploading...' : 'Upload';
+            }
+            if (promptFileInputElement) {
+                promptFileInputElement.disabled = isLoading;
+            }
+        };
         
         updatePromptFilesList();
         
@@ -1406,6 +1423,7 @@ async function init() {
             }
             
             try {
+                setPromptUploadLoading(true);
                 // Upload file to server
                 const formData = new FormData();
                 formData.append('file', promptPreviewFile);
@@ -1447,6 +1465,8 @@ async function init() {
             } catch (error) {
                 console.error('Error uploading file:', error);
                 showMessage(`Failed to upload file: ${error.message}`, 'error');
+            } finally {
+                setPromptUploadLoading(false);
             }
         });
         
