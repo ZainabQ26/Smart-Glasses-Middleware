@@ -1469,20 +1469,41 @@ async function init() {
                     </div>
                 `;
                 
-                // Send query to documents endpoint (use full path, not API_BASE)
-                const queryResponse = await fetch('/api/documents/query', {
+                // Send query to documents endpoint. Use server-expected property names (Query/TopK)
+                const documentsUrl = '/api/documents/query';
+                const payload = { Query: promptText, TopK: 5 };
+                console.log('[SEND PROMPT] Sending documents query to', documentsUrl, 'payload:', payload);
+
+                const controller = new AbortController();
+                const timeoutMs = 150000; // 150 seconds - longer than server timeout
+                const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+                const queryResponse = await fetch(documentsUrl, {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({query: promptText, topK: 5})
+                    headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+                    body: JSON.stringify(payload),
+                    signal: controller.signal
                 });
-                
-                if (!queryResponse.ok) {
-                    const errorData = await queryResponse.json().catch(() => ({}));
-                    throw new Error(errorData.error || errorData.details || `Server error: ${queryResponse.status}`);
+                clearTimeout(timeoutId);
+
+                console.log('[SEND PROMPT] documents query status:', queryResponse.status, queryResponse.statusText);
+                let result;
+                try {
+                    // Try to parse JSON body (may throw)
+                    result = await queryResponse.json();
+                    console.log('[SEND PROMPT] documents query response JSON:', result);
+                } catch (parseErr) {
+                    const text = await queryResponse.text().catch(() => '');
+                    console.error('[SEND PROMPT] Failed to parse JSON response. Raw response:', text);
+                    throw new Error('Invalid JSON response from server');
                 }
-                
-                const result = await queryResponse.json();
-                const answer = result.answer || result.Answer || 'No response received';
+
+                if (!queryResponse.ok) {
+                    const errorMsg = result?.error || result?.details || result?.message || `Server error: ${queryResponse.status}`;
+                    throw new Error(errorMsg);
+                }
+
+                const answer = result.answer || result.Answer || result.AnswerText || result?.AnswerHtml || result?.answerText || 'No response received';
                 
                 // Get current attached files
                 const attachedFiles = promptSelectedFiles.map(f => ({
@@ -1524,6 +1545,16 @@ async function init() {
                 
             } catch (error) {
                 console.error('Error sending prompt:', error);
+                if (error.name === 'AbortError') {
+                    responseContent.innerHTML = `
+                        <div style="text-align: center; padding: 20px; color: #e67e22;">
+                            <div style="font-size: 1.2rem; margin-bottom: 10px;">⏱️ Timeout</div>
+                            <div style="font-size: 0.9rem;">The server took too long to respond. Try again.</div>
+                        </div>
+                    `;
+                    showMessage('Request timed out after 60 seconds', 'error');
+                    return;
+                }
                 responseContent.innerHTML = `
                     <div style="text-align: center; padding: 20px; color: #e74c3c;">
                         <div style="font-size: 1.2rem; margin-bottom: 10px;">❌ Error</div>

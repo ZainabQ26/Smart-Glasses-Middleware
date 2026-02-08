@@ -40,6 +40,26 @@
             font-size: 2rem;
         }
 
+        .header-nav {
+            text-align: center;
+            margin-top: 10px;
+        }
+
+        .header-nav a {
+            color: #3498db;
+            text-decoration: none;
+            padding: 8px 16px;
+            margin: 0 5px;
+            background: white;
+            border-radius: 4px;
+            font-weight: 500;
+            display: inline-block;
+        }
+
+        .header-nav a:hover {
+            background: #ecf0f1;
+        }
+
         .tabs {
             display: flex;
             gap: 10px;
@@ -716,6 +736,9 @@
 <body>
     <header>
         <h1>Smart Glasses - Admin Panel</h1>
+        <div class="header-nav">
+            <a href="/monitoring.html" target="_blank">📊 Request Monitoring</a>
+        </div>
     </header>
 
     <div class="container">

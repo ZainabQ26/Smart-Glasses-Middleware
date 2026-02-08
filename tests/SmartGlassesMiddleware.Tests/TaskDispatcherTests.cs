@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using SmartGlassesMiddleware.Services;
 using Xunit;
 
@@ -24,7 +25,12 @@ public class TaskDispatcherTests
         var handlerA = new DummyHandler("a", "response-a");
         var handlerB = new DummyHandler("b", "response-b");
 
-        var dispatcher = new TaskDispatcher(config, new[] { handlerA, handlerB });
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        services.AddSingleton<ITaskHandler>(handlerA);
+        services.AddSingleton<ITaskHandler>(handlerB);
+        var provider = services.BuildServiceProvider();
+
+        var dispatcher = new TaskDispatcher(config, provider);
 
         Assert.Contains("a", dispatcher.KnownTasks);
         Assert.DoesNotContain("b", dispatcher.KnownTasks);
@@ -46,7 +52,12 @@ public class TaskDispatcherTests
         var handlerA = new DummyHandler("a", "response-a");
         var handlerB = new DummyHandler("b", "response-b");
 
-        var dispatcher = new TaskDispatcher(config, new[] { handlerA, handlerB });
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        services.AddSingleton<ITaskHandler>(handlerA);
+        services.AddSingleton<ITaskHandler>(handlerB);
+        var provider = services.BuildServiceProvider();
+
+        var dispatcher = new TaskDispatcher(config, provider);
 
         Assert.Contains("a", dispatcher.KnownTasks);
         Assert.Contains("b", dispatcher.KnownTasks);
