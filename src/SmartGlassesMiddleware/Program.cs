@@ -1,7 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using System.Diagnostics;
+using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.AspNetCore.Diagnostics;
+using Microsoft.AspNetCore.HttpLogging;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.SemanticKernel;
 using Minio;
@@ -24,6 +26,10 @@ var builder = WebApplication.CreateBuilder(args);
 // Configure basic logging providers early so we can log during startup
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
+// Increase default logging level to capture HTTP pipeline details during debugging
+builder.Logging.SetMinimumLevel(LogLevel.Debug);
+builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Debug);
+builder.Logging.AddFilter("System.Net.Http.HttpClient", LogLevel.Debug);
 
 // Create a lightweight LoggerFactory for startup logging (avoids BuildServiceProvider)
 using var _preLoggerFactory = LoggerFactory.Create(lb =>
@@ -55,6 +61,15 @@ builder.Services.Configure<ApiBehaviorOptions>(options =>
     };
 });
 builder.Services.AddOpenApi();
+
+// Enable detailed HTTP request/response logging (bodies limited to reasonable size)
+builder.Services.AddHttpLogging(options =>
+{
+    options.LoggingFields = HttpLoggingFields.RequestPropertiesAndHeaders | HttpLoggingFields.RequestBody | HttpLoggingFields.ResponseBody;
+    options.RequestBodyLogLimit = 4096; // bytes
+    options.ResponseBodyLogLimit = 4096; // bytes
+    options.MediaTypeOptions.AddText("application/json");
+});
 
 // Configure PostgreSQL
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
@@ -98,15 +113,36 @@ builder.Services.AddSingleton<Kernel>(sp =>
 
     var ollamaEndpoint = builder.Configuration["AI:OllamaEndpoint"] ?? "http://localhost:11434";
     var ollamaModel = builder.Configuration["AI:OllamaModel"] ?? "llama2";
+    var ollamaEmbeddingModel = builder.Configuration["AI:OllamaEmbeddingModel"] ?? "nomic-embed-text";
 
     // Add Ollama chat completion service using OpenAI-compatible endpoint.
     // Note: Ollama doesn't require an API key for local endpoints; the API key
     // parameter is present for OpenAI-compatible overloads and is unused here.
     const string notUsedPlaceholderApiKey = "not-needed";
+    
+    // Configure with timeout and attach a logging handler to capture outgoing requests
+    var chatHandler = new SmartGlassesMiddleware.Services.HttpLoggingHandler(_preLoggerFactory.CreateLogger("OllamaHttp")) { InnerHandler = new HttpClientHandler() };
+    var httpClient = new HttpClient(chatHandler)
+    {
+        Timeout = TimeSpan.FromSeconds(builder.Configuration.GetValue<int?>("AI:OllamaTimeoutSeconds") ?? 120)
+    };
+
     kernelBuilder.AddOpenAIChatCompletion(
         modelId: ollamaModel,
         apiKey: notUsedPlaceholderApiKey,
-        endpoint: new Uri(ollamaEndpoint));
+        endpoint: new Uri($"{ollamaEndpoint.TrimEnd('/')}/v1"),
+        httpClient: httpClient);
+    
+    // Add Ollama embedding service
+    var embedHandler = new SmartGlassesMiddleware.Services.HttpLoggingHandler(_preLoggerFactory.CreateLogger("OllamaEmbedHttp")) { InnerHandler = new HttpClientHandler() };
+    var embeddingHttpClient = new HttpClient(embedHandler)
+    {
+        Timeout = TimeSpan.FromSeconds(builder.Configuration.GetValue<int?>("AI:OllamaEmbeddingTimeoutSeconds") ?? 120)
+    };
+
+    // Embeddings are provided via the typed IOllamaEmbeddingClient registered
+    // below (used by RAGService). Avoid calling AddOpenAIEmbeddingGenerator
+    // to keep compatibility with the installed SemanticKernel package.
 
     return kernelBuilder.Build();
 });
@@ -126,7 +162,16 @@ builder.Services.AddScoped<IHistoryService, HistoryService>();
 builder.Services.AddScoped<IMediaStorageService, MinioMediaStorageService>();
 builder.Services.AddScoped<ICacheService, RedisCacheService>();
 builder.Services.AddSingleton<IMetricsService, MetricsService>();
+builder.Services.AddSingleton<IRequestMonitoringService, RequestMonitoringService>();
 builder.Services.AddScoped<IRagService, RagService>();
+// Register Ollama embedding client (typed HttpClient)
+builder.Services.AddHttpClient<IOllamaEmbeddingClient, OllamaEmbeddingClient>((sp, http) =>
+{
+    var cfg = sp.GetRequiredService<IConfiguration>();
+    var baseUrl = cfg["AI:OllamaEndpoint"] ?? "http://ollama:11434";
+    http.BaseAddress = new Uri(baseUrl);
+    http.Timeout = TimeSpan.FromSeconds(cfg.GetValue<int?>("AI:OllamaEmbeddingTimeoutSeconds") ?? 120);
+});
 // Document processing and RAG services
 builder.Services.AddScoped<IDocumentProcessingService, DocumentProcessingService>();
 builder.Services.AddScoped<IRAGService, RAGService>();
@@ -283,7 +328,15 @@ Assembly? CompileSourceFiles(string[] filePaths, ILogger logger)
 
 // Task dispatcher (configurable handler selection)
 builder.Services.AddScoped<ITaskDispatcher, TaskDispatcher>();
-builder.Services.AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();
+if (!builder.Environment.IsEnvironment("Testing") && !string.IsNullOrWhiteSpace(redisConnection))
+{
+    builder.Services.AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();
+}
+else
+{
+    // When Redis is not configured (local dev), use an in-memory fallback queue to avoid requiring Redis.
+    builder.Services.AddSingleton<IBackgroundTaskQueue, NoOpBackgroundTaskQueue>();
+}
 builder.Services.AddScoped<IMediaProcessor, MediaProcessor>();
 builder.Services.AddHostedService<BackgroundTaskHostedService>();
 if (!builder.Environment.IsEnvironment("Testing") && !string.IsNullOrWhiteSpace(redisConnection))
@@ -318,12 +371,16 @@ if (rateLimitEnabled)
                 {
                     AutoReplenishment = true,
                     PermitLimit = requestsPerMinute,
-                    QueueLimit = 0,
+                    QueueLimit = 10, // Allow queueing up to 10 requests instead of immediate rejection
                     Window = TimeSpan.FromMinutes(1)
                 }));
 
         options.OnRejected = async (context, token) =>
         {
+            var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
+            logger.LogWarning("Rate limit exceeded for {Path} from {Host}", 
+                context.HttpContext.Request.Path, context.HttpContext.Request.Headers.Host);
+            
             context.HttpContext.Response.StatusCode = 429;
             context.HttpContext.Response.ContentType = "application/problem+json";
 
@@ -421,12 +478,6 @@ catch (Exception ex)
 }
 
 // Configure the HTTP request pipeline.
-app.UseStaticFiles();
-
-if (app.Environment.IsDevelopment())
-{
-    app.MapOpenApi();
-}
 
 // Apply EF Core migrations at startup if enabled (guarded to avoid test-time provider conflicts)
 using (var scope = app.Services.CreateScope())
@@ -435,6 +486,7 @@ using (var scope = app.Services.CreateScope())
     {
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+        var logger = scope.ServiceProvider.GetService<ILogger<Program>>();
 
         // Check configuration key first, then environment variable. Default: disabled.
         var migrateSetting = configuration.GetValue<bool?>("MigrateOnStartup");
@@ -443,11 +495,31 @@ using (var scope = app.Services.CreateScope())
 
         if (shouldMigrate)
         {
-            db.Database.Migrate();
+            logger?.LogInformation("Starting database migration...");
+            
+            // Run migration with a timeout to prevent indefinite hangs on lock acquisition
+            var migrationTask = Task.Run(() => db.Database.Migrate());
+            var timeoutTask = Task.Delay(TimeSpan.FromSeconds(30));
+            
+            var completedTask = await Task.WhenAny(migrationTask, timeoutTask);
+            
+            if (completedTask == timeoutTask)
+            {
+                var errorMessage = "Database migration timed out after 30 seconds. " +
+                    "This usually means another instance is holding the migration lock. " +
+                    "Application startup aborted to prevent schema issues.";
+                logger?.LogCritical(errorMessage);
+                throw new TimeoutException(errorMessage);
+            }
+            else
+            {
+                // Wait for the actual task to propagate any exceptions
+                await migrationTask;
+                logger?.LogInformation("Database migration completed successfully.");
+            }
         }
         else
         {
-            var logger = scope.ServiceProvider.GetService<ILogger<Program>>();
             logger?.LogInformation("Skipping database migration on startup (MigrateOnStartup not enabled).");
         }
     }
@@ -456,11 +528,245 @@ using (var scope = app.Services.CreateScope())
         var logger = scope.ServiceProvider.GetService<ILogger<Program>>();
         logger?.LogWarning(ex, "Skipping Database.Migrate during startup (likely test environment with multiple EF providers)");
     }
+    catch (TimeoutException)
+    {
+        // Re-throw timeout exceptions to prevent app from starting with incomplete migrations
+        throw;
+    }
     catch (Exception ex)
     {
         var logger = scope.ServiceProvider.GetService<ILogger<Program>>();
-        logger?.LogWarning(ex, "Failed to apply migrations during startup; continuing");
+        logger?.LogError(ex, "Failed to apply migrations during startup; aborting application start");
+        throw; // Re-throw to prevent app from starting with schema issues
     }
+}
+
+static bool IsModelPresent(string modelName, HashSet<string> existingModels)
+{
+    if (existingModels.Contains(modelName))
+    {
+        return true;
+    }
+
+    if (!modelName.Contains(':') && existingModels.Contains(modelName + ":latest"))
+    {
+        return true;
+    }
+
+    if (modelName.Contains(':'))
+    {
+        var baseName = modelName.Split(':')[0];
+        if (!string.IsNullOrWhiteSpace(baseName) && existingModels.Contains(baseName))
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+// Optional Ollama model auto-setup on startup (similar to migrations)
+using (var scope = app.Services.CreateScope())
+{
+    var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+    var env = scope.ServiceProvider.GetRequiredService<IHostEnvironment>();
+    var isTestHost = AppDomain.CurrentDomain.GetAssemblies()
+        .Any(a => a.GetName().Name?.StartsWith("xunit", StringComparison.OrdinalIgnoreCase) == true);
+
+    var autoSetupEnabled = configuration.GetValue<bool?>("AI:OllamaAutoSetupOnStartup") ?? false;
+    if (env.IsEnvironment("Testing") || isTestHost)
+    {
+        logger.LogInformation("Skipping Ollama auto-setup in Testing environment.");
+    }
+    else if (!autoSetupEnabled)
+    {
+        logger.LogInformation("Skipping Ollama auto-setup on startup (AI:OllamaAutoSetupOnStartup not enabled).");
+    }
+    else
+    {
+        try
+        {
+            var endpoint = configuration["AI:OllamaEndpoint"] ?? "http://localhost:11434";
+            var modelsToEnsure = new[]
+            {
+                configuration["AI:OllamaModel"],
+                configuration["AI:OllamaEmbeddingModel"]
+            }
+            .Where(m => !string.IsNullOrWhiteSpace(m))
+            .Select(m => m!.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+            if (modelsToEnsure.Count == 0)
+            {
+                logger.LogInformation("Ollama auto-setup skipped (no models configured).");
+            }
+            else
+            {
+                var timeoutSeconds = configuration.GetValue<int?>("AI:OllamaAutoSetupTimeoutSeconds") ?? 600;
+                var failOnError = configuration.GetValue<bool?>("AI:OllamaAutoSetupFailOnError") ?? false;
+                var deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
+                var delay = TimeSpan.FromSeconds(5);
+                Exception? lastError = null;
+
+                using var http = new HttpClient
+                {
+                    BaseAddress = new Uri(endpoint.TrimEnd('/')),
+                    Timeout = TimeSpan.FromSeconds(timeoutSeconds)
+                };
+
+                while (DateTime.UtcNow < deadline)
+                {
+                    var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    try
+                    {
+                        using var listCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                        var listResponse = await http.GetAsync("/api/tags", listCts.Token);
+                        if (!listResponse.IsSuccessStatusCode)
+                        {
+                            var body = await listResponse.Content.ReadAsStringAsync();
+                            logger.LogWarning("Failed to list Ollama models: {Status} {Body}", listResponse.StatusCode, body);
+                            await Task.Delay(delay);
+                            continue;
+                        }
+
+                        var bodyText = await listResponse.Content.ReadAsStringAsync();
+                        using var doc = JsonDocument.Parse(bodyText);
+                        if (doc.RootElement.TryGetProperty("models", out var data))
+                        {
+                            foreach (var item in data.EnumerateArray())
+                            {
+                                if (item.TryGetProperty("name", out var nameEl) && nameEl.ValueKind == JsonValueKind.String)
+                                {
+                                    var name = nameEl.GetString();
+                                    if (!string.IsNullOrWhiteSpace(name))
+                                    {
+                                        existing.Add(name);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        lastError = ex;
+                        logger.LogWarning(ex, "Failed to query Ollama models; retrying.");
+                        await Task.Delay(delay);
+                        continue;
+                    }
+
+                    var missing = modelsToEnsure.Where(m => !IsModelPresent(m, existing)).ToList();
+                    if (missing.Count == 0)
+                    {
+                        logger.LogInformation("Ollama auto-setup complete (all models present).");
+                        break;
+                    }
+
+                    foreach (var model in missing)
+                    {
+                        logger.LogInformation("Pulling Ollama model: {Model}", model);
+                        var pullResponse = await http.PostAsJsonAsync("/api/pull", new { name = model, stream = false });
+                        var pullBody = await pullResponse.Content.ReadAsStringAsync();
+                        if (!pullResponse.IsSuccessStatusCode)
+                        {
+                            logger.LogWarning("Ollama model pull failed: {Model} {Status} {Body}", model, pullResponse.StatusCode, pullBody);
+                            if (failOnError)
+                            {
+                                throw new InvalidOperationException($"Ollama model pull failed for {model}");
+                            }
+                        }
+                        else
+                        {
+                            logger.LogInformation("Ollama model pull completed: {Model}", model);
+                            existing.Add(model);
+                        }
+                    }
+
+                    await Task.Delay(delay);
+                }
+
+                if (DateTime.UtcNow >= deadline)
+                {
+                    logger.LogWarning(lastError, "Ollama auto-setup timed out after {Seconds} seconds", timeoutSeconds);
+                    if (failOnError)
+                    {
+                        throw new InvalidOperationException("Ollama auto-setup timed out", lastError);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            var failOnError = configuration.GetValue<bool?>("AI:OllamaAutoSetupFailOnError") ?? false;
+            logger.LogWarning(ex, "Ollama auto-setup failed");
+            if (failOnError)
+            {
+                throw;
+            }
+        }
+    }
+}
+
+// Add request logging middleware FIRST to track all requests
+// Enable built-in HTTP logging so we can see headers and bodies
+app.UseHttpLogging();
+
+// Add request logging middleware FIRST to track all requests
+app.Use(async (context, next) =>
+{
+    var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+    var requestId = Activity.Current?.Id ?? context.TraceIdentifier;
+    var startTime = DateTime.UtcNow;
+    
+    logger.LogInformation("→ REQUEST START: {Method} {Path} [{RequestId}]", 
+        context.Request.Method, context.Request.Path, requestId);
+    
+    try
+    {
+        await next();
+        var duration = (DateTime.UtcNow - startTime).TotalMilliseconds;
+        logger.LogInformation("← REQUEST END: {Method} {Path} [{RequestId}] - {StatusCode} ({Duration}ms)", 
+            context.Request.Method, context.Request.Path, requestId, context.Response.StatusCode, duration);
+    }
+    catch (Exception ex)
+    {
+        var duration = (DateTime.UtcNow - startTime).TotalMilliseconds;
+        logger.LogError(ex, "✗ REQUEST FAILED: {Method} {Path} [{RequestId}] ({Duration}ms)", 
+            context.Request.Method, context.Request.Path, requestId, duration);
+        throw;
+    }
+});
+
+app.UseStaticFiles();
+
+// Diagnostic middleware: capture raw request body for /api/ask for troubleshooting
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path.HasValue && context.Request.Path.Value!.StartsWith("/api/ask", StringComparison.OrdinalIgnoreCase))
+    {
+        try
+        {
+            context.Request.EnableBuffering();
+            using var reader = new StreamReader(context.Request.Body, leaveOpen: true);
+            var body = await reader.ReadToEndAsync();
+            context.Request.Body.Position = 0;
+            var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+            logger.LogDebug("Raw request body for /api/ask (truncated 8k): {Body}", body.Length > 8192 ? body.Substring(0, 8192) : body);
+        }
+        catch (Exception ex)
+        {
+            var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+            logger.LogWarning(ex, "Failed to read raw request body for /api/ask");
+        }
+    }
+
+    await next();
+});
+
+if (app.Environment.IsDevelopment())
+{
+    app.MapOpenApi();
 }
 
 if (!app.Environment.IsEnvironment("Testing"))
@@ -468,6 +774,9 @@ if (!app.Environment.IsEnvironment("Testing"))
     app.UseHttpsRedirection();
 }
 app.UseCors();
+
+// CRITICAL: UseRouting() is required for controller endpoints to work
+app.UseRouting();
 
 // Only use rate limiter if it's enabled
 var rateLimitConfig = app.Configuration.GetValue<bool?>("RateLimiting:Enabled") ?? true;
@@ -542,8 +851,8 @@ app.UseExceptionHandler(errorApp =>
 
 app.MapControllers();
 
-// Map SignalR hubs
-app.MapHub<SmartGlassesMiddleware.Hubs.TaskHub>("/hubs/tasks");
+// Add a test minimal API endpoint to verify routing works
+app.MapGet("/test", () => "Test endpoint works!");
 
 // Helper methods for retry policies
 static IAsyncPolicy<HttpResponseMessage> GetRetryPolicy()
@@ -755,6 +1064,239 @@ app.MapGet("/metrics", (IMetricsService metricsService, HttpContext context, ICo
         endpoints = summary
     });
 });
+
+// Debug helper endpoint to call IAIService directly (bypasses multipart form parsing)
+app.MapGet("/debug/ai", async (IServiceProvider sp, HttpContext ctx, ILoggerFactory lf) =>
+{
+    var logger = lf.CreateLogger("DebugAI");
+    var input = ctx.Request.Query["input"].ToString();
+    if (string.IsNullOrWhiteSpace(input))
+    {
+        return Results.BadRequest(new { error = "missing input query parameter" });
+    }
+
+    logger.LogInformation("/debug/ai entered; input length {L}", input.Length);
+
+    IAIService aiService;
+    try
+    {
+        logger.LogInformation("Resolving IAIService via DI");
+        aiService = sp.GetRequiredService<IAIService>();
+        logger.LogInformation("IAIService resolved successfully");
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Failed to resolve IAIService");
+        return Results.StatusCode(500);
+    }
+
+    try
+    {
+        logger.LogInformation("Invoking IAIService.ProcessRequestAsync");
+        var (task, response, usedAdvanced) = await aiService.ProcessRequestAsync(input, ctx.RequestAborted);
+        logger.LogInformation("IAIService.ProcessRequestAsync completed");
+        return Results.Ok(new { task, response, usedAdvanced });
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Debug AI call failed");
+        return Results.StatusCode(500);
+    }
+});
+
+// Short-timeout debug endpoint to exercise IAIService with a safety timeout (10s)
+app.MapGet("/debug/ai-nowarn", async (IServiceProvider sp, HttpContext ctx, ILoggerFactory lf) =>
+{
+    var logger = lf.CreateLogger("DebugAINow");
+    var input = ctx.Request.Query["input"].ToString();
+    if (string.IsNullOrWhiteSpace(input))
+    {
+        return Results.BadRequest(new { error = "missing input query parameter" });
+    }
+
+    logger.LogInformation("/debug/ai-nowarn entered; input length {L}", input.Length);
+
+    IAIService aiService;
+    try
+    {
+        aiService = sp.GetRequiredService<IAIService>();
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Failed to resolve IAIService");
+        return Results.StatusCode(500);
+    }
+
+    try
+    {
+        var task = aiService.ProcessRequestAsync(input);
+        var completed = await Task.WhenAny(task, Task.Delay(TimeSpan.FromSeconds(10)));
+        if (completed != task)
+        {
+            logger.LogWarning("IAIService.ProcessRequestAsync did not complete within 10s");
+            return Results.StatusCode(504);
+        }
+
+        var (taskName, response, usedAdvanced) = await task;
+        logger.LogInformation("IAIService.ProcessRequestAsync completed within timeout");
+        return Results.Ok(new { task = taskName, response, usedAdvanced });
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Debug AI call (nowarn) failed");
+        return Results.StatusCode(500);
+    }
+});
+
+// Fire-and-forget debug endpoint to start IAIService processing without waiting
+app.MapGet("/debug/ai-fire", (IServiceProvider sp, HttpContext ctx, ILoggerFactory lf) =>
+{
+    var logger = lf.CreateLogger("DebugAIFire");
+    var input = ctx.Request.Query["input"].ToString();
+    if (string.IsNullOrWhiteSpace(input))
+    {
+        return Results.BadRequest(new { error = "missing input query parameter" });
+    }
+
+    try
+    {
+        var aiService = sp.GetRequiredService<IAIService>();
+        // Launch processing on threadpool and return immediately
+        Task.Run(async () =>
+        {
+            try
+            {
+                logger.LogInformation("Background: invoking IAIService.ProcessRequestAsync");
+                var (t, r, u) = await aiService.ProcessRequestAsync(input);
+                logger.LogInformation("Background: IAIService completed (len={L})", r?.Length ?? 0);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Background AI processing failed");
+            }
+        });
+
+        return Results.Accepted();
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Failed to start background AI processing");
+        return Results.StatusCode(500);
+    }
+});
+
+// Diagnostic endpoint: attempt to resolve IAIService with a short timeout
+app.MapGet("/debug/resolve-ai", async (IServiceProvider sp, ILoggerFactory lf) =>
+{
+    var logger = lf.CreateLogger("DebugResolve");
+    logger.LogInformation("/debug/resolve-ai entered");
+
+    try
+    {
+        var resolveTask = Task.Run(() =>
+        {
+            try
+            {
+                var svc = sp.GetRequiredService<IAIService>();
+                return svc != null;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "IAIService resolution threw");
+                return false;
+            }
+        });
+
+        var completed = await Task.WhenAny(resolveTask, Task.Delay(TimeSpan.FromSeconds(5)));
+        if (completed != resolveTask)
+        {
+            logger.LogWarning("IAIService resolution did not complete within 5s");
+            return Results.StatusCode(504);
+        }
+
+        return resolveTask.Result ? Results.Ok(new { resolved = true }) : Results.StatusCode(500);
+    }
+    catch (Exception ex)
+    {
+        lf.CreateLogger("DebugResolve").LogError(ex, "Unexpected error in /debug/resolve-ai");
+        return Results.StatusCode(500);
+    }
+});
+
+// Resolve components individually to isolate blocking DI resolution
+app.MapGet("/debug/resolve-components", async (IServiceProvider sp, ILoggerFactory lf) =>
+{
+    var logger = lf.CreateLogger("DebugResolveComponents");
+    logger.LogInformation("/debug/resolve-components entered");
+
+    object? kernelResolved = null;
+    object? dispatcherResolved = null;
+    object? httpFactoryResolved = null;
+
+    try
+    {
+        var kTask = Task.Run(() => { try { return (object)sp.GetRequiredService<Kernel>(); } catch (Exception ex) { logger.LogError(ex, "Kernel resolve failed"); return null; } });
+        var dTask = Task.Run(() => { try { return (object)sp.GetRequiredService<ITaskDispatcher>(); } catch (Exception ex) { logger.LogError(ex, "Dispatcher resolve failed"); return null; } });
+        var hTask = Task.Run(() => { try { return (object)sp.GetRequiredService<IHttpClientFactory>(); } catch (Exception ex) { logger.LogError(ex, "HttpClientFactory resolve failed"); return null; } });
+
+        var all = Task.WhenAll(kTask, dTask, hTask);
+        var completed = await Task.WhenAny(all, Task.Delay(TimeSpan.FromSeconds(5)));
+        if (completed != all)
+        {
+            logger.LogWarning("Component resolution timed out");
+            // attempt to read partial results
+            kernelResolved = kTask.IsCompletedSuccessfully ? kTask.Result : null;
+            dispatcherResolved = dTask.IsCompletedSuccessfully ? dTask.Result : null;
+            httpFactoryResolved = hTask.IsCompletedSuccessfully ? hTask.Result : null;
+            return Results.StatusCode(504);
+        }
+
+        kernelResolved = kTask.Result;
+        dispatcherResolved = dTask.Result;
+        httpFactoryResolved = hTask.Result;
+
+        return Results.Ok(new
+        {
+            kernel = kernelResolved != null,
+            dispatcher = dispatcherResolved != null,
+            httpFactory = httpFactoryResolved != null
+        });
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Unexpected error in /debug/resolve-components");
+        return Results.StatusCode(500);
+    }
+});
+
+// Attempt to construct OllamaAIService manually (bypass IHttpClientFactory)
+app.MapGet("/debug/new-ollama", async (IServiceProvider sp, ILoggerFactory lf) =>
+{
+    var logger = lf.CreateLogger("DebugNewOllama");
+    logger.LogInformation("/debug/new-ollama entered");
+
+    try
+    {
+        var kernel = sp.GetRequiredService<Kernel>();
+        var cfg = sp.GetRequiredService<IConfiguration>();
+        var dispatcher = sp.GetRequiredService<ITaskDispatcher>();
+        var log = sp.GetRequiredService<ILogger<OllamaAIService>>();
+
+        // Construct with a fresh HttpClient to avoid IHttpClientFactory
+        var http = new HttpClient() { Timeout = TimeSpan.FromSeconds(30) };
+        var instance = new SmartGlassesMiddleware.Services.OllamaAIService(kernel, http, cfg, log, dispatcher);
+        logger.LogInformation("Manual OllamaAIService constructed successfully");
+        return Results.Ok(new { constructed = true });
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Manual OllamaAIService construction failed");
+        return Results.StatusCode(500);
+    }
+});
+
+// Map SignalR hubs LAST to avoid routing issues
+app.MapHub<SmartGlassesMiddleware.Hubs.TaskHub>("/hubs/tasks");
 
 app.Run();
 
