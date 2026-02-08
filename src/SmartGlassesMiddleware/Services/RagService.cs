@@ -666,22 +666,32 @@ Answer:";
     {
         try
         {
+            _logger.LogInformation("Attempting to generate embedding for text (length: {Length})", text.Length);
+            
             // Try to use Semantic Kernel's embedding service
             var embeddingService = _kernel.Services.GetService(typeof(ITextEmbeddingGenerationService)) as ITextEmbeddingGenerationService;
 
             if (embeddingService != null)
             {
+                _logger.LogInformation("Embedding service found, calling Ollama for embedding generation...");
                 var embedding = await embeddingService.GenerateEmbeddingAsync(text);
-                return embedding.ToArray();
+                var result = embedding.ToArray();
+                _logger.LogInformation("Successfully generated embedding from Ollama (dimension: {Dimension})", result.Length);
+                return result;
+            }
+            else
+            {
+                _logger.LogWarning("No embedding service registered in Kernel, falling back to simple embedding");
             }
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Embedding service not available");
+            _logger.LogError(ex, "Embedding service failed: {Message}. Falling back to simple embedding", ex.Message);
         }
 
         // Fallback: simple hash-based embedding (for demonstration)
         // In production, use a proper embedding model
+        _logger.LogInformation("Using simple hash-based embedding fallback");
         return GenerateSimpleEmbedding(text);
     }
 
@@ -932,8 +942,11 @@ Answer:";
     {
         try
         {
+            _logger.LogInformation("Generating response with local Ollama model...");
             var chatService = _kernel.GetRequiredService<IChatCompletionService>();
+            _logger.LogInformation("Chat service obtained, sending request to Ollama...");
             var result = await chatService.GetChatMessageContentAsync(prompt, cancellationToken: cancellationToken);
+            _logger.LogInformation("Successfully received response from Ollama (length: {Length})", result.Content?.Length ?? 0);
             return result.Content ?? "No response from local model.";
         }
         catch (OperationCanceledException)
@@ -941,9 +954,14 @@ Answer:";
             _logger.LogWarning("Local model generation was cancelled/timed out");
             throw;
         }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogError(ex, "HTTP error connecting to Ollama: {Message}", ex.Message);
+            return $"Error: Cannot connect to Ollama. Please ensure Ollama is running. Details: {ex.Message}";
+        }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error generating response with local model");
+            _logger.LogError(ex, "Error generating response with local model: {Message}", ex.Message);
             return $"Error: {ex.Message}";
         }
     }
