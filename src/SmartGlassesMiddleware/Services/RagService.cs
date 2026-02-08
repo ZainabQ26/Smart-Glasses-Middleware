@@ -1,5 +1,5 @@
 using Microsoft.SemanticKernel;
-using Microsoft.SemanticKernel.Embeddings;
+using Microsoft.Extensions.AI;
 using Microsoft.SemanticKernel.ChatCompletion;
 using SmartGlassesMiddleware.Models;
 using SmartGlassesMiddleware.Data;
@@ -757,7 +757,8 @@ Answer:";
                 _logger.LogWarning(ex, "IOllamaEmbeddingClient failed, will fallback to kernel/service-based embedding");
             }
 
-            var embeddingService = _kernel.Services.GetService(typeof(ITextEmbeddingGenerationService)) as ITextEmbeddingGenerationService;
+            var embeddingService = _kernel.Services.GetService(typeof(IEmbeddingGenerator<string, Embedding<float>>))
+                as IEmbeddingGenerator<string, Embedding<float>>;
 
             if (embeddingService != null)
             {
@@ -765,9 +766,9 @@ Answer:";
                 try
                 {
                     var sw = Stopwatch.StartNew();
-                    var embedding = await embeddingService.GenerateEmbeddingAsync(text);
+                    var embedding = await embeddingService.GenerateAsync(text);
                     sw.Stop();
-                    var result = embedding.ToArray();
+                    var result = embedding.Vector.Span.ToArray();
                     _logger.LogInformation("Successfully generated embedding from kernel service (dimension: {Dimension}) in {Ms}ms", result.Length, sw.ElapsedMilliseconds);
                     return result;
                 }

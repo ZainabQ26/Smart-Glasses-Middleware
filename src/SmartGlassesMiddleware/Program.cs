@@ -140,9 +140,10 @@ builder.Services.AddSingleton<Kernel>(sp =>
         Timeout = TimeSpan.FromSeconds(builder.Configuration.GetValue<int?>("AI:OllamaEmbeddingTimeoutSeconds") ?? 120)
     };
 
-    kernelBuilder.AddOpenAITextEmbeddingGeneration(
+    kernelBuilder.AddOpenAIEmbeddingGenerator(
         modelId: ollamaEmbeddingModel,
         apiKey: notUsedPlaceholderApiKey,
+        endpoint: new Uri($"{ollamaEndpoint.TrimEnd('/')}/v1"),
         httpClient: embeddingHttpClient);
 
     return kernelBuilder.Build();
