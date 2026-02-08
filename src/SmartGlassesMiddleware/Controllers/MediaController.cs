@@ -74,6 +74,7 @@ public class MediaController : ControllerBase
     {
         try
         {
+            _logger.LogInformation("ProcessMedia entry: files={FileCount}, promptProvided={HasPrompt}", request.Files?.Count ?? 0, !string.IsNullOrWhiteSpace(request.Prompt));
 
             string? promptAudioTranscription = null;
             // Aggregate files from the strongly-typed model or raw form parts (guard form access)

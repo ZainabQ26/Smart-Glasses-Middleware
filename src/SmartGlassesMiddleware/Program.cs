@@ -105,28 +105,29 @@ builder.Services.AddSingleton<Kernel>(sp =>
     // parameter is present for OpenAI-compatible overloads and is unused here.
     const string notUsedPlaceholderApiKey = "not-needed";
     
-    // Configure with timeout to prevent hanging
-    var httpClient = new HttpClient
+    // Configure with timeout and attach a logging handler to capture outgoing requests
+    var chatHandler = new SmartGlassesMiddleware.Services.HttpLoggingHandler(_preLoggerFactory.CreateLogger("OllamaHttp")) { InnerHandler = new HttpClientHandler() };
+    var httpClient = new HttpClient(chatHandler)
     {
         Timeout = TimeSpan.FromSeconds(builder.Configuration.GetValue<int?>("AI:OllamaTimeoutSeconds") ?? 30)
     };
-    
+
     kernelBuilder.AddOpenAIChatCompletion(
         modelId: ollamaModel,
         apiKey: notUsedPlaceholderApiKey,
-        endpoint: new Uri(ollamaEndpoint),
+        endpoint: new Uri($"{ollamaEndpoint.TrimEnd('/')}/v1"),
         httpClient: httpClient);
     
     // Add Ollama embedding service
-    var embeddingHttpClient = new HttpClient
+    var embedHandler = new SmartGlassesMiddleware.Services.HttpLoggingHandler(_preLoggerFactory.CreateLogger("OllamaEmbedHttp")) { InnerHandler = new HttpClientHandler() };
+    var embeddingHttpClient = new HttpClient(embedHandler)
     {
         Timeout = TimeSpan.FromSeconds(builder.Configuration.GetValue<int?>("AI:OllamaEmbeddingTimeoutSeconds") ?? 30)
     };
-    
+
     kernelBuilder.AddOpenAITextEmbeddingGeneration(
         modelId: ollamaEmbeddingModel,
         apiKey: notUsedPlaceholderApiKey,
-        endpoint: new Uri(ollamaEndpoint),
         httpClient: embeddingHttpClient);
 
     return kernelBuilder.Build();
@@ -837,6 +838,45 @@ app.MapGet("/metrics", (IMetricsService metricsService, HttpContext context, ICo
         timestamp = DateTime.UtcNow,
         endpoints = summary
     });
+});
+
+// Debug helper endpoint to call IAIService directly (bypasses multipart form parsing)
+app.MapGet("/debug/ai", async (IServiceProvider sp, HttpContext ctx, ILoggerFactory lf) =>
+{
+    var logger = lf.CreateLogger("DebugAI");
+    var input = ctx.Request.Query["input"].ToString();
+    if (string.IsNullOrWhiteSpace(input))
+    {
+        return Results.BadRequest(new { error = "missing input query parameter" });
+    }
+
+    logger.LogInformation("/debug/ai entered; input length {L}", input.Length);
+
+    IAIService aiService;
+    try
+    {
+        logger.LogInformation("Resolving IAIService via DI");
+        aiService = sp.GetRequiredService<IAIService>();
+        logger.LogInformation("IAIService resolved successfully");
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Failed to resolve IAIService");
+        return Results.StatusCode(500);
+    }
+
+    try
+    {
+        logger.LogInformation("Invoking IAIService.ProcessRequestAsync");
+        var (task, response, usedAdvanced) = await aiService.ProcessRequestAsync(input, ctx.RequestAborted);
+        logger.LogInformation("IAIService.ProcessRequestAsync completed");
+        return Results.Ok(new { task, response, usedAdvanced });
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Debug AI call failed");
+        return Results.StatusCode(500);
+    }
 });
 
 // Map SignalR hubs LAST to avoid routing issues
