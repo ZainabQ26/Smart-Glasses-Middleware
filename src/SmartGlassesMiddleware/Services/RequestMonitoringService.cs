@@ -95,12 +95,27 @@ public class RequestMonitoringService : IRequestMonitoringService
 
     private async Task BroadcastUpdate(RequestStatus request)
     {
-        // TEMPORARILY DISABLED - SignalR broadcasting causes deadlock
-        // TODO: Fix SignalR configuration to prevent blocking
-        _ = Task.Run(() =>
+        try
         {
-            _logger.LogDebug("Skipping SignalR broadcast for request {RequestId} (temporarily disabled)", request.RequestId);
-        });
+            // Use Task.Run to prevent blocking and potential deadlocks
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await _hubContext.Clients.All.SendAsync("RequestUpdate", request);
+                    _logger.LogDebug("Broadcast request update {RequestId} to SignalR clients", request.RequestId);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to broadcast request update {RequestId} via SignalR", request.RequestId);
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error initiating SignalR broadcast for request {RequestId}", request.RequestId);
+        }
+        
         await Task.CompletedTask;
     }
 }
