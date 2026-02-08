@@ -530,18 +530,19 @@ async function deleteSelectedPromptFiles() {
         return;
     }
     
-    // Delete files from server if they have IDs
+    // Delete uploaded documents from server if they have IDs
     for (const fileObj of selected) {
-        if (fileObj.id) {
+        const documentId = fileObj.documentId || fileObj.id;
+        if (documentId) {
             try {
-                const deleteRes = await fetch(`${API_BASE}/files/${fileObj.id}`, {
+                const deleteRes = await fetch(`/api/documents/${documentId}`, {
                     method: 'DELETE'
                 });
                 if (!deleteRes.ok) {
-                    console.error(`Failed to delete file ${fileObj.name} from server`);
+                    console.error(`Failed to delete document ${fileObj.name} from server`);
                 }
             } catch (error) {
-                console.error('Error deleting file from server:', error);
+                console.error('Error deleting document from server:', error);
             }
         }
     }
@@ -1408,9 +1409,8 @@ async function init() {
                 // Upload file to server
                 const formData = new FormData();
                 formData.append('file', promptPreviewFile);
-                formData.append('label', promptPreviewFile.name);
                 
-                const uploadRes = await fetch(`${API_BASE}/files`, {
+                const uploadRes = await fetch('/api/documents/upload', {
                     method: 'POST',
                     body: formData
                 });
@@ -1421,14 +1421,14 @@ async function init() {
                 }
                 
                 const fileData = await uploadRes.json();
-                const fileId = fileData.id || fileData.Id;
+                const documentId = fileData.id || fileData.Id;
                 
                 // Add uploaded file to list with server ID
                 promptSelectedFiles.push({
                     file: promptPreviewFile, 
                     name: promptPreviewFile.name, 
                     selected: false,
-                    id: fileId
+                    documentId: documentId
                 });
                 window.promptSelectedFiles = promptSelectedFiles;
                 updatePromptFilesList();
@@ -1471,7 +1471,17 @@ async function init() {
                 
                 // Send query to documents endpoint. Use server-expected property names (Query/TopK)
                 const documentsUrl = '/api/documents/query';
+                const selectedFiles = promptSelectedFiles.some(f => f.selected)
+                    ? promptSelectedFiles.filter(f => f.selected)
+                    : promptSelectedFiles;
+                const documentIds = selectedFiles
+                    .map(f => f.documentId || f.id)
+                    .filter(Boolean);
+
                 const payload = { Query: promptText, TopK: 5 };
+                if (documentIds.length > 0) {
+                    payload.DocumentIds = documentIds;
+                }
                 console.log('[SEND PROMPT] Sending documents query to', documentsUrl, 'payload:', payload);
 
                 const controller = new AbortController();
