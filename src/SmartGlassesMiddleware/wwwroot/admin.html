@@ -404,6 +404,15 @@
             }
         }
 
+        @keyframes promptUploadMove {
+            0% {
+                transform: translateX(-60%);
+            }
+            100% {
+                transform: translateX(140%);
+            }
+        }
+
         /* Better responsive design */
         @media (max-width: 768px) {
             .container {
@@ -828,6 +837,9 @@
                                     <div style="font-size: 48px; color: #95a5a6; margin-bottom: 10px;">📄</div>
                                 </div>
                                 <div id="prompt-preview-filename" style="margin: 10px 0; text-align: center; color: #2c3e50; font-size: 14px; font-weight: 500;"></div>
+                                <div id="prompt-upload-progress" style="display: none; margin: 6px 0 12px 0; height: 6px; background: #e0e0e0; border-radius: 999px; overflow: hidden;">
+                                    <div id="prompt-upload-progress-bar" style="width: 40%; height: 100%; background: linear-gradient(90deg, #3498db, #6bb9f0, #3498db); animation: promptUploadMove 1.2s linear infinite;"></div>
+                                </div>
                                 <div class="form-group">
                                     <label for="prompt-file-input">Upload File</label>
                                     <input type="file" id="prompt-file-input" accept=".jpg,.jpeg,.png,.pdf,.docx,.txt">
