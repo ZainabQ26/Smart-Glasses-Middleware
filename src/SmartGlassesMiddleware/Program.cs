@@ -140,11 +140,9 @@ builder.Services.AddSingleton<Kernel>(sp =>
         Timeout = TimeSpan.FromSeconds(builder.Configuration.GetValue<int?>("AI:OllamaEmbeddingTimeoutSeconds") ?? 120)
     };
 
-    kernelBuilder.AddOpenAIEmbeddingGenerator(
-        modelId: ollamaEmbeddingModel,
-        apiKey: notUsedPlaceholderApiKey,
-        endpoint: new Uri($"{ollamaEndpoint.TrimEnd('/')}/v1"),
-        httpClient: embeddingHttpClient);
+    // Embeddings are provided via the typed IOllamaEmbeddingClient registered
+    // below (used by RAGService). Avoid calling AddOpenAIEmbeddingGenerator
+    // to keep compatibility with the installed SemanticKernel package.
 
     return kernelBuilder.Build();
 });
