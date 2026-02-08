@@ -674,10 +674,20 @@ Answer:";
             if (embeddingService != null)
             {
                 _logger.LogInformation("Embedding service found, calling Ollama for embedding generation...");
-                var embedding = await embeddingService.GenerateEmbeddingAsync(text);
-                var result = embedding.ToArray();
-                _logger.LogInformation("Successfully generated embedding from Ollama (dimension: {Dimension})", result.Length);
-                return result;
+                try
+                {
+                    var sw = Stopwatch.StartNew();
+                    var embedding = await embeddingService.GenerateEmbeddingAsync(text);
+                    sw.Stop();
+                    var result = embedding.ToArray();
+                    _logger.LogInformation("Successfully generated embedding from Ollama (dimension: {Dimension}) in {Ms}ms", result.Length, sw.ElapsedMilliseconds);
+                    return result;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Embedding service call threw an exception after {Ms}ms", ex.Message);
+                    throw;
+                }
             }
             else
             {
@@ -940,15 +950,17 @@ Answer:";
 
     private async Task<string> GenerateResponseWithLocalModel(string prompt, CancellationToken cancellationToken = default)
     {
-        try
-        {
+            try
+            {
             _logger.LogInformation("Generating response with local Ollama model...");
             var chatService = _kernel.GetRequiredService<IChatCompletionService>();
             _logger.LogInformation("Chat service obtained, sending request to Ollama...");
+            var sw = Stopwatch.StartNew();
             var result = await chatService.GetChatMessageContentAsync(prompt, cancellationToken: cancellationToken);
-            _logger.LogInformation("Successfully received response from Ollama (length: {Length})", result.Content?.Length ?? 0);
+            sw.Stop();
+            _logger.LogInformation("Successfully received response from Ollama (length: {Length}) in {Ms}ms", result.Content?.Length ?? 0, sw.ElapsedMilliseconds);
             return result.Content ?? "No response from local model.";
-        }
+            }
         catch (OperationCanceledException)
         {
             _logger.LogWarning("Local model generation was cancelled/timed out");
