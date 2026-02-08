@@ -98,15 +98,36 @@ builder.Services.AddSingleton<Kernel>(sp =>
 
     var ollamaEndpoint = builder.Configuration["AI:OllamaEndpoint"] ?? "http://localhost:11434";
     var ollamaModel = builder.Configuration["AI:OllamaModel"] ?? "llama2";
+    var ollamaEmbeddingModel = builder.Configuration["AI:OllamaEmbeddingModel"] ?? "nomic-embed-text";
 
     // Add Ollama chat completion service using OpenAI-compatible endpoint.
     // Note: Ollama doesn't require an API key for local endpoints; the API key
     // parameter is present for OpenAI-compatible overloads and is unused here.
     const string notUsedPlaceholderApiKey = "not-needed";
+    
+    // Configure with timeout to prevent hanging
+    var httpClient = new HttpClient
+    {
+        Timeout = TimeSpan.FromSeconds(builder.Configuration.GetValue<int?>("AI:OllamaTimeoutSeconds") ?? 30)
+    };
+    
     kernelBuilder.AddOpenAIChatCompletion(
         modelId: ollamaModel,
         apiKey: notUsedPlaceholderApiKey,
-        endpoint: new Uri(ollamaEndpoint));
+        endpoint: new Uri(ollamaEndpoint),
+        httpClient: httpClient);
+    
+    // Add Ollama embedding service
+    var embeddingHttpClient = new HttpClient
+    {
+        Timeout = TimeSpan.FromSeconds(builder.Configuration.GetValue<int?>("AI:OllamaEmbeddingTimeoutSeconds") ?? 30)
+    };
+    
+    kernelBuilder.AddOpenAITextEmbeddingGeneration(
+        modelId: ollamaEmbeddingModel,
+        apiKey: notUsedPlaceholderApiKey,
+        endpoint: new Uri(ollamaEndpoint),
+        httpClient: embeddingHttpClient);
 
     return kernelBuilder.Build();
 });
