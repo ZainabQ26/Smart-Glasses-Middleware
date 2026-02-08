@@ -21,16 +21,19 @@ public class ConversationService : IConversationService
     private readonly ApplicationDbContext _context;
     private readonly ILogger<ConversationService> _logger;
     private readonly IConfiguration _configuration;
+    private readonly IServiceProvider _serviceProvider;
     private readonly double _tokensPerChar;
 
     public ConversationService(
         ApplicationDbContext context,
         ILogger<ConversationService> logger,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IServiceProvider serviceProvider)
     {
         _context = context;
         _logger = logger;
         _configuration = configuration;
+        _serviceProvider = serviceProvider;
         _tokensPerChar = configuration.GetValue<double?>("RAG:ApproximateTokensPerChar") ?? 0.25;
     }
 
@@ -119,7 +122,7 @@ public class ConversationService : IConversationService
 
     public async Task<Conversation> DetectOrCreateConversationAsync(string userMessage, Guid? groupId = null)
     {
-        // Simple heuristic: check if there's an active conversation in the last hour
+        // First, if a groupId was provided, try to continue an active conversation in that group within the last hour
         var recentConversation = await _context.Conversations
             .Where(c => c.IsActive &&
                         c.UpdatedAt > DateTime.UtcNow.AddHours(-1) &&
@@ -133,14 +136,61 @@ public class ConversationService : IConversationService
             return recentConversation;
         }
 
-        // Create new conversation
-        // Try to extract title from first message (first 50 chars)
-        var title = userMessage.Length > 50
+        // Attempt semantic topic detection to auto-group conversations
+        try
+        {
+            var ai = _serviceProvider.GetService(typeof(IAIService)) as IAIService;
+            if (ai != null)
+            {
+                // Ask the AI for a short topic label (keep it brief)
+                var prompt = $"Provide a single short topic label (3 words max) that best describes the following user message. Respond with just the label and nothing else.\n\nMessage: {userMessage}";
+                var (detectedTask, detectedLabel, _) = await ai.ProcessRequestAsync(prompt);
+                var topic = (detectedLabel ?? string.Empty).Trim();
+                if (!string.IsNullOrWhiteSpace(topic))
+                {
+                    // Normalize the topic string
+                    if (topic.Length > 100) topic = topic.Substring(0, 100);
+                    // Try to find or create a ResourceGroup with this topic name
+                    var existingGroup = await _context.ResourceGroups.FirstOrDefaultAsync(r => r.Name == topic);
+                    if (existingGroup == null)
+                    {
+                        existingGroup = new ResourceGroup { Id = Guid.NewGuid(), Name = topic, CreatedAt = DateTime.UtcNow };
+                        _context.ResourceGroups.Add(existingGroup);
+                        await _context.SaveChangesAsync();
+                        _logger.LogInformation("Created ResourceGroup for topic '{Topic}'", topic);
+                    }
+
+                    // Now look for an active recent conversation in this group
+                    var recentInGroup = await _context.Conversations
+                        .Where(c => c.IsActive && c.ResourceGroupId == existingGroup.Id && c.UpdatedAt > DateTime.UtcNow.AddHours(-1))
+                        .OrderByDescending(c => c.UpdatedAt)
+                        .FirstOrDefaultAsync();
+
+                    if (recentInGroup != null)
+                    {
+                        _logger.LogInformation("Joining recent conversation {ConversationId} in topic group '{Topic}'", recentInGroup.Id, topic);
+                        return recentInGroup;
+                    }
+
+                    // Create a new conversation with the topic-based title and attach the group
+                    var title = topic.Length > 50 ? topic.Substring(0, 50) + "..." : topic;
+                    _logger.LogInformation("Creating new conversation with topic '{Topic}'", topic);
+                    return await CreateConversationAsync(title, existingGroup.Id);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Topic detection failed, falling back to time-window heuristic");
+        }
+
+        // Fallback: no topic detected or AI unavailable — create new conversation from message excerpt
+        var fallbackTitle = userMessage.Length > 50
             ? userMessage.Substring(0, 50) + "..."
             : userMessage;
 
-        _logger.LogInformation("Creating new conversation based on user message");
-        return await CreateConversationAsync(title, groupId);
+        _logger.LogInformation("Creating new conversation based on user message (fallback)");
+        return await CreateConversationAsync(fallbackTitle, groupId);
     }
 
     public async Task<string> SummarizeConversationAsync(Guid conversationId)

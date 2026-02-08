@@ -70,10 +70,25 @@ public class MediaController : ControllerBase
     [ProducesResponseType(StatusCodes.Status202Accepted)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
-    public async Task<ActionResult> ProcessMedia([FromForm] MediaRequest request)
+    public async Task<ActionResult> ProcessMedia()
     {
         try
         {
+            // Manually bind form to avoid potential model-binding hangs in some environments
+            MediaRequest request = new MediaRequest();
+            if (Request.HasFormContentType)
+            {
+                var form = await Request.ReadFormAsync();
+                request.Prompt = form.TryGetValue("prompt", out var p) ? p.FirstOrDefault() : null;
+                request.Transcription = form.TryGetValue("input", out var iv) ? iv.FirstOrDefault() : null;
+                request.Manifest = form.TryGetValue("manifest", out var m) ? m.FirstOrDefault() : null;
+                request.PerFileTranscriptions = form.TryGetValue("perFileTranscriptions", out var pf) ? pf.FirstOrDefault() : null;
+                if (form.Files != null && form.Files.Count > 0)
+                {
+                    request.Files = form.Files.ToList();
+                }
+            }
+
             _logger.LogInformation("ProcessMedia entry: files={FileCount}, promptProvided={HasPrompt}", request.Files?.Count ?? 0, !string.IsNullOrWhiteSpace(request.Prompt));
 
             string? promptAudioTranscription = null;

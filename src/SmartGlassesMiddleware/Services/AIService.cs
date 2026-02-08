@@ -30,21 +30,17 @@ public class OllamaAIService : IAIService
         _advancedModelEndpoint = configuration["AI:AdvancedModelEndpoint"] ?? "http://localhost:5000/api/chat";
         _advancedModelName = configuration["AI:AdvancedModelName"] ?? "gpt-4";
         _dispatcher = dispatcher;
-        // Capture known tasks from dispatcher at construction time (tests expect this access)
-        try
-        {
-            _knownTasks = dispatcher?.KnownTasks?.ToList() ?? new List<string>();
-        }
-        catch
-        {
-            _knownTasks = new List<string>();
-        }
+        // Do not eagerly enumerate all task handlers during construction (those handlers
+        // may require heavy services like DB/minio/redis). Resolve known tasks lazily
+        // during request processing if needed. Initialize to empty list here.
+        _knownTasks = new List<string>();
     }
 
     public async Task<(string task, string response, bool usedAdvancedModel)> ProcessRequestAsync(string input, CancellationToken cancellationToken = default)
     {
         try
         {
+            _logger.LogInformation("IAIService.ProcessRequestAsync entered; inputLength={L}", input?.Length ?? 0);
             // First, use Ollama to detect the task
             var taskDetectionPrompt = $@"
 You are a task classifier. Analyze the following input and determine if it matches one of these known tasks: 
@@ -61,7 +57,7 @@ Task:";
             try
             {
                 var chatService = _kernel.GetRequiredService<IChatCompletionService>();
-                _logger.LogDebug("Calling chatService.GetChatMessageContentAsync for task detection");
+                _logger.LogInformation("Invoking chatService.GetChatMessageContentAsync for task detection (info)");
                 var sw = Stopwatch.StartNew();
                 var taskResult = await chatService.GetChatMessageContentAsync(taskDetectionPrompt, cancellationToken: cancellationToken);
                 sw.Stop();

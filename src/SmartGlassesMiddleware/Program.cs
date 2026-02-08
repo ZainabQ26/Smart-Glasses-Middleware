@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.AspNetCore.Diagnostics;
+using Microsoft.AspNetCore.HttpLogging;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.SemanticKernel;
 using Minio;
@@ -24,6 +25,10 @@ var builder = WebApplication.CreateBuilder(args);
 // Configure basic logging providers early so we can log during startup
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
+// Increase default logging level to capture HTTP pipeline details during debugging
+builder.Logging.SetMinimumLevel(LogLevel.Debug);
+builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Debug);
+builder.Logging.AddFilter("System.Net.Http.HttpClient", LogLevel.Debug);
 
 // Create a lightweight LoggerFactory for startup logging (avoids BuildServiceProvider)
 using var _preLoggerFactory = LoggerFactory.Create(lb =>
@@ -55,6 +60,15 @@ builder.Services.Configure<ApiBehaviorOptions>(options =>
     };
 });
 builder.Services.AddOpenApi();
+
+// Enable detailed HTTP request/response logging (bodies limited to reasonable size)
+builder.Services.AddHttpLogging(options =>
+{
+    options.LoggingFields = HttpLoggingFields.RequestPropertiesAndHeaders | HttpLoggingFields.RequestBody | HttpLoggingFields.ResponseBody;
+    options.RequestBodyLogLimit = 4096; // bytes
+    options.ResponseBodyLogLimit = 4096; // bytes
+    options.MediaTypeOptions.AddText("application/json");
+});
 
 // Configure PostgreSQL
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
@@ -314,7 +328,15 @@ Assembly? CompileSourceFiles(string[] filePaths, ILogger logger)
 
 // Task dispatcher (configurable handler selection)
 builder.Services.AddScoped<ITaskDispatcher, TaskDispatcher>();
-builder.Services.AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();
+if (!builder.Environment.IsEnvironment("Testing") && !string.IsNullOrWhiteSpace(redisConnection))
+{
+    builder.Services.AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();
+}
+else
+{
+    // When Redis is not configured (local dev), use an in-memory fallback queue to avoid requiring Redis.
+    builder.Services.AddSingleton<IBackgroundTaskQueue, NoOpBackgroundTaskQueue>();
+}
 builder.Services.AddScoped<IMediaProcessor, MediaProcessor>();
 builder.Services.AddHostedService<BackgroundTaskHostedService>();
 if (!builder.Environment.IsEnvironment("Testing") && !string.IsNullOrWhiteSpace(redisConnection))
@@ -520,6 +542,10 @@ using (var scope = app.Services.CreateScope())
 }
 
 // Add request logging middleware FIRST to track all requests
+// Enable built-in HTTP logging so we can see headers and bodies
+app.UseHttpLogging();
+
+// Add request logging middleware FIRST to track all requests
 app.Use(async (context, next) =>
 {
     var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
@@ -546,6 +572,30 @@ app.Use(async (context, next) =>
 });
 
 app.UseStaticFiles();
+
+// Diagnostic middleware: capture raw request body for /api/ask for troubleshooting
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path.HasValue && context.Request.Path.Value!.StartsWith("/api/ask", StringComparison.OrdinalIgnoreCase))
+    {
+        try
+        {
+            context.Request.EnableBuffering();
+            using var reader = new StreamReader(context.Request.Body, leaveOpen: true);
+            var body = await reader.ReadToEndAsync();
+            context.Request.Body.Position = 0;
+            var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+            logger.LogDebug("Raw request body for /api/ask (truncated 8k): {Body}", body.Length > 8192 ? body.Substring(0, 8192) : body);
+        }
+        catch (Exception ex)
+        {
+            var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+            logger.LogWarning(ex, "Failed to read raw request body for /api/ask");
+        }
+    }
+
+    await next();
+});
 
 if (app.Environment.IsDevelopment())
 {
@@ -883,6 +933,197 @@ app.MapGet("/debug/ai", async (IServiceProvider sp, HttpContext ctx, ILoggerFact
     catch (Exception ex)
     {
         logger.LogError(ex, "Debug AI call failed");
+        return Results.StatusCode(500);
+    }
+});
+
+// Short-timeout debug endpoint to exercise IAIService with a safety timeout (10s)
+app.MapGet("/debug/ai-nowarn", async (IServiceProvider sp, HttpContext ctx, ILoggerFactory lf) =>
+{
+    var logger = lf.CreateLogger("DebugAINow");
+    var input = ctx.Request.Query["input"].ToString();
+    if (string.IsNullOrWhiteSpace(input))
+    {
+        return Results.BadRequest(new { error = "missing input query parameter" });
+    }
+
+    logger.LogInformation("/debug/ai-nowarn entered; input length {L}", input.Length);
+
+    IAIService aiService;
+    try
+    {
+        aiService = sp.GetRequiredService<IAIService>();
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Failed to resolve IAIService");
+        return Results.StatusCode(500);
+    }
+
+    try
+    {
+        var task = aiService.ProcessRequestAsync(input);
+        var completed = await Task.WhenAny(task, Task.Delay(TimeSpan.FromSeconds(10)));
+        if (completed != task)
+        {
+            logger.LogWarning("IAIService.ProcessRequestAsync did not complete within 10s");
+            return Results.StatusCode(504);
+        }
+
+        var (taskName, response, usedAdvanced) = await task;
+        logger.LogInformation("IAIService.ProcessRequestAsync completed within timeout");
+        return Results.Ok(new { task = taskName, response, usedAdvanced });
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Debug AI call (nowarn) failed");
+        return Results.StatusCode(500);
+    }
+});
+
+// Fire-and-forget debug endpoint to start IAIService processing without waiting
+app.MapGet("/debug/ai-fire", (IServiceProvider sp, HttpContext ctx, ILoggerFactory lf) =>
+{
+    var logger = lf.CreateLogger("DebugAIFire");
+    var input = ctx.Request.Query["input"].ToString();
+    if (string.IsNullOrWhiteSpace(input))
+    {
+        return Results.BadRequest(new { error = "missing input query parameter" });
+    }
+
+    try
+    {
+        var aiService = sp.GetRequiredService<IAIService>();
+        // Launch processing on threadpool and return immediately
+        Task.Run(async () =>
+        {
+            try
+            {
+                logger.LogInformation("Background: invoking IAIService.ProcessRequestAsync");
+                var (t, r, u) = await aiService.ProcessRequestAsync(input);
+                logger.LogInformation("Background: IAIService completed (len={L})", r?.Length ?? 0);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Background AI processing failed");
+            }
+        });
+
+        return Results.Accepted();
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Failed to start background AI processing");
+        return Results.StatusCode(500);
+    }
+});
+
+// Diagnostic endpoint: attempt to resolve IAIService with a short timeout
+app.MapGet("/debug/resolve-ai", async (IServiceProvider sp, ILoggerFactory lf) =>
+{
+    var logger = lf.CreateLogger("DebugResolve");
+    logger.LogInformation("/debug/resolve-ai entered");
+
+    try
+    {
+        var resolveTask = Task.Run(() =>
+        {
+            try
+            {
+                var svc = sp.GetRequiredService<IAIService>();
+                return svc != null;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "IAIService resolution threw");
+                return false;
+            }
+        });
+
+        var completed = await Task.WhenAny(resolveTask, Task.Delay(TimeSpan.FromSeconds(5)));
+        if (completed != resolveTask)
+        {
+            logger.LogWarning("IAIService resolution did not complete within 5s");
+            return Results.StatusCode(504);
+        }
+
+        return resolveTask.Result ? Results.Ok(new { resolved = true }) : Results.StatusCode(500);
+    }
+    catch (Exception ex)
+    {
+        lf.CreateLogger("DebugResolve").LogError(ex, "Unexpected error in /debug/resolve-ai");
+        return Results.StatusCode(500);
+    }
+});
+
+// Resolve components individually to isolate blocking DI resolution
+app.MapGet("/debug/resolve-components", async (IServiceProvider sp, ILoggerFactory lf) =>
+{
+    var logger = lf.CreateLogger("DebugResolveComponents");
+    logger.LogInformation("/debug/resolve-components entered");
+
+    object? kernelResolved = null;
+    object? dispatcherResolved = null;
+    object? httpFactoryResolved = null;
+
+    try
+    {
+        var kTask = Task.Run(() => { try { return (object)sp.GetRequiredService<Kernel>(); } catch (Exception ex) { logger.LogError(ex, "Kernel resolve failed"); return null; } });
+        var dTask = Task.Run(() => { try { return (object)sp.GetRequiredService<ITaskDispatcher>(); } catch (Exception ex) { logger.LogError(ex, "Dispatcher resolve failed"); return null; } });
+        var hTask = Task.Run(() => { try { return (object)sp.GetRequiredService<IHttpClientFactory>(); } catch (Exception ex) { logger.LogError(ex, "HttpClientFactory resolve failed"); return null; } });
+
+        var all = Task.WhenAll(kTask, dTask, hTask);
+        var completed = await Task.WhenAny(all, Task.Delay(TimeSpan.FromSeconds(5)));
+        if (completed != all)
+        {
+            logger.LogWarning("Component resolution timed out");
+            // attempt to read partial results
+            kernelResolved = kTask.IsCompletedSuccessfully ? kTask.Result : null;
+            dispatcherResolved = dTask.IsCompletedSuccessfully ? dTask.Result : null;
+            httpFactoryResolved = hTask.IsCompletedSuccessfully ? hTask.Result : null;
+            return Results.StatusCode(504);
+        }
+
+        kernelResolved = kTask.Result;
+        dispatcherResolved = dTask.Result;
+        httpFactoryResolved = hTask.Result;
+
+        return Results.Ok(new
+        {
+            kernel = kernelResolved != null,
+            dispatcher = dispatcherResolved != null,
+            httpFactory = httpFactoryResolved != null
+        });
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Unexpected error in /debug/resolve-components");
+        return Results.StatusCode(500);
+    }
+});
+
+// Attempt to construct OllamaAIService manually (bypass IHttpClientFactory)
+app.MapGet("/debug/new-ollama", async (IServiceProvider sp, ILoggerFactory lf) =>
+{
+    var logger = lf.CreateLogger("DebugNewOllama");
+    logger.LogInformation("/debug/new-ollama entered");
+
+    try
+    {
+        var kernel = sp.GetRequiredService<Kernel>();
+        var cfg = sp.GetRequiredService<IConfiguration>();
+        var dispatcher = sp.GetRequiredService<ITaskDispatcher>();
+        var log = sp.GetRequiredService<ILogger<OllamaAIService>>();
+
+        // Construct with a fresh HttpClient to avoid IHttpClientFactory
+        var http = new HttpClient() { Timeout = TimeSpan.FromSeconds(30) };
+        var instance = new SmartGlassesMiddleware.Services.OllamaAIService(kernel, http, cfg, log, dispatcher);
+        logger.LogInformation("Manual OllamaAIService constructed successfully");
+        return Results.Ok(new { constructed = true });
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Manual OllamaAIService construction failed");
         return Results.StatusCode(500);
     }
 });
