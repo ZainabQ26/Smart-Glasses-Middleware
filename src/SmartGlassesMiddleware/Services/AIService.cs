@@ -30,7 +30,15 @@ public class OllamaAIService : IAIService
         _advancedModelEndpoint = configuration["AI:AdvancedModelEndpoint"] ?? "http://localhost:5000/api/chat";
         _advancedModelName = configuration["AI:AdvancedModelName"] ?? "gpt-4";
         _dispatcher = dispatcher;
-        _knownTasks = new List<string>();
+        // Capture known tasks from dispatcher at construction time (tests expect this access)
+        try
+        {
+            _knownTasks = dispatcher?.KnownTasks?.ToList() ?? new List<string>();
+        }
+        catch
+        {
+            _knownTasks = new List<string>();
+        }
     }
 
     public async Task<(string task, string response, bool usedAdvancedModel)> ProcessRequestAsync(string input, CancellationToken cancellationToken = default)

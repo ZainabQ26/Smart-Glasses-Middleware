@@ -17,6 +17,7 @@ public class AdminController : ControllerBase
     private readonly IMediaStorageService _mediaStorageService;
     private readonly ICacheService _cacheService;
     private readonly IRagService _ragService;
+    private readonly IRAGService _documentRagService;
     private readonly ILogger<AdminController> _logger;
     private const int DefaultPageSize = 20;
     private const int MaxPageSize = 100;
@@ -26,12 +27,14 @@ public class AdminController : ControllerBase
         IMediaStorageService mediaStorageService,
         ICacheService cacheService,
         IRagService ragService,
+        IRAGService documentRagService,
         ILogger<AdminController> logger)
     {
         _context = context;
         _mediaStorageService = mediaStorageService;
         _cacheService = cacheService;
         _ragService = ragService;
+        _documentRagService = documentRagService;
         _logger = logger;
     }
 
@@ -44,8 +47,8 @@ public class AdminController : ControllerBase
     public async Task<ActionResult<object>> GetFiles([FromQuery] int page = 1, [FromQuery] int pageSize = DefaultPageSize)
     {
         // Validate pagination parameters
-        if (page < 1) page = 1;
         if (pageSize < 1 || pageSize > MaxPageSize) pageSize = DefaultPageSize;
+        if (page < 1) page = 1;
 
         var cacheKey = $"admin:files:page:{page}:size:{pageSize}";
 
@@ -305,6 +308,35 @@ public class AdminController : ControllerBase
         {
             _logger.LogError(ex, "Error downloading file {FileId}", id);
             return StatusCode(500);
+        }
+    }
+
+    #endregion
+
+    #region Maintenance
+
+    /// <summary>
+    /// Reindex all documents' embeddings. Use `force=true` to re-embed already processed documents.
+    /// </summary>
+    [HttpPost("reindex")]
+    public async Task<ActionResult> ReindexAll([FromQuery] bool force = false)
+    {
+        try
+        {
+            var reindexed = await _documentRagService.ReindexAllDocumentsAsync(force);
+            // Invalidate relevant caches
+            await InvalidateFilesCache();
+            return Ok(new { reindexed });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to reindex documents");
+            return StatusCode(500, new ProblemDetails
+            {
+                Title = "Reindex Failed",
+                Detail = ex.Message,
+                Status = StatusCodes.Status500InternalServerError
+            });
         }
     }
 

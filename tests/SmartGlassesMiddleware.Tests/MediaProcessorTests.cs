@@ -22,6 +22,7 @@ public class MediaProcessorTests
         var mockTranscription = new Mock<ITranscriptionService>();
         var mockAI = new Mock<IAIService>();
         var mockHistory = new Mock<IHistoryService>();
+        var mockMediaRag = new Mock<IRagService>();
         var mockLogger = new Mock<ILogger<MediaProcessor>>();
 
         var audioStream = new MemoryStream(new byte[] { 1, 2, 3, 4 });
@@ -43,6 +44,7 @@ public class MediaProcessorTests
             mockTranscription.Object,
             mockAI.Object,
             mockHistory.Object,
+            mockMediaRag.Object,
             mockLogger.Object);
 
         var entry = new BackgroundTaskEntry
@@ -81,6 +83,7 @@ public class MediaProcessorTests
         var mockTranscription = new Mock<ITranscriptionService>();
         var mockAI = new Mock<IAIService>();
         var mockHistory = new Mock<IHistoryService>();
+        var mockMediaRag = new Mock<IRagService>();
         var mockLogger = new Mock<ILogger<MediaProcessor>>();
 
         mockAI.Setup(a => a.ProcessRequestAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -95,6 +98,7 @@ public class MediaProcessorTests
             mockTranscription.Object,
             mockAI.Object,
             mockHistory.Object,
+            mockMediaRag.Object,
             mockLogger.Object);
 
         var entry = new BackgroundTaskEntry
@@ -130,6 +134,7 @@ public class MediaProcessorTests
         var mockTranscription = new Mock<ITranscriptionService>();
         var mockAI = new Mock<IAIService>();
         var mockHistory = new Mock<IHistoryService>();
+        var mockMediaRag = new Mock<IRagService>();
         var mockLogger = new Mock<ILogger<MediaProcessor>>();
 
         var audioStream = new MemoryStream(new byte[] { 1, 2, 3, 4 });
@@ -151,6 +156,7 @@ public class MediaProcessorTests
             mockTranscription.Object,
             mockAI.Object,
             mockHistory.Object,
+            mockMediaRag.Object,
             mockLogger.Object);
 
         var entry = new BackgroundTaskEntry
@@ -182,6 +188,7 @@ public class MediaProcessorTests
         var mockTranscription = new Mock<ITranscriptionService>();
         var mockAI = new Mock<IAIService>();
         var mockHistory = new Mock<IHistoryService>();
+        var mockMediaRag = new Mock<IRagService>();
         var mockLogger = new Mock<ILogger<MediaProcessor>>();
 
         mockAI.Setup(a => a.ProcessRequestAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -196,6 +203,7 @@ public class MediaProcessorTests
             mockTranscription.Object,
             mockAI.Object,
             mockHistory.Object,
+            mockMediaRag.Object,
             mockLogger.Object);
 
         var entry = new BackgroundTaskEntry
@@ -230,6 +238,7 @@ public class MediaProcessorTests
         var mockTranscription = new Mock<ITranscriptionService>();
         var mockAI = new Mock<IAIService>();
         var mockHistory = new Mock<IHistoryService>();
+        var mockMediaRag = new Mock<IRagService>();
         var mockLogger = new Mock<ILogger<MediaProcessor>>();
 
         mockAI.Setup(a => a.ProcessRequestAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -244,6 +253,7 @@ public class MediaProcessorTests
             mockTranscription.Object,
             mockAI.Object,
             mockHistory.Object,
+            mockMediaRag.Object,
             mockLogger.Object);
 
         var entry = new BackgroundTaskEntry
@@ -277,6 +287,7 @@ public class MediaProcessorTests
         var mockTranscription = new Mock<ITranscriptionService>();
         var mockAI = new Mock<IAIService>();
         var mockHistory = new Mock<IHistoryService>();
+        var mockMediaRag = new Mock<IRagService>();
         var mockLogger = new Mock<ILogger<MediaProcessor>>();
 
         mockAI.Setup(a => a.ProcessRequestAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -292,6 +303,7 @@ public class MediaProcessorTests
             mockTranscription.Object,
             mockAI.Object,
             mockHistory.Object,
+            mockMediaRag.Object,
             mockLogger.Object);
 
         var entry = new BackgroundTaskEntry
@@ -324,6 +336,7 @@ public class MediaProcessorTests
         var mockTranscription = new Mock<ITranscriptionService>();
         var mockAI = new Mock<IAIService>();
         var mockHistory = new Mock<IHistoryService>();
+        var mockMediaRag = new Mock<IRagService>();
         var mockLogger = new Mock<ILogger<MediaProcessor>>();
 
         mockAI.Setup(a => a.ProcessRequestAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -337,6 +350,7 @@ public class MediaProcessorTests
             mockTranscription.Object,
             mockAI.Object,
             mockHistory.Object,
+            mockMediaRag.Object,
             mockLogger.Object);
 
         var entry = new BackgroundTaskEntry
@@ -369,6 +383,7 @@ public class MediaProcessorTests
         var mockTranscription = new Mock<ITranscriptionService>();
         var mockAI = new Mock<IAIService>();
         var mockHistory = new Mock<IHistoryService>();
+        var mockMediaRag = new Mock<IRagService>();
         var mockLogger = new Mock<ILogger<MediaProcessor>>();
 
         var audioStream = new MemoryStream(new byte[] { 1, 2, 3, 4 });
@@ -390,6 +405,7 @@ public class MediaProcessorTests
             mockTranscription.Object,
             mockAI.Object,
             mockHistory.Object,
+            mockMediaRag.Object,
             mockLogger.Object);
 
         var testExtensions = new[] { ".wav", ".mp3", ".m4a", ".flac", ".aac" };
