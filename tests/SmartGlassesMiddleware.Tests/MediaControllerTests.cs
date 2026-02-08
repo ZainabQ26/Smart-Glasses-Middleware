@@ -82,6 +82,38 @@ public class MediaControllerTests
         return formFile;
     }
 
+    private Task<ActionResult> ProcessMediaAsync(MediaController controller, MediaRequest request)
+    {
+        if (controller.ControllerContext.HttpContext == null)
+        {
+            controller.ControllerContext.HttpContext = new DefaultHttpContext();
+        }
+
+        var hasForm = controller.Request.HasFormContentType && controller.Request.Form != null && controller.Request.Form.Count > 0;
+        if (!hasForm)
+        {
+            var formFields = new Dictionary<string, Microsoft.Extensions.Primitives.StringValues>();
+            if (!string.IsNullOrWhiteSpace(request.Prompt)) formFields["prompt"] = request.Prompt;
+            if (!string.IsNullOrWhiteSpace(request.Manifest)) formFields["manifest"] = request.Manifest;
+            if (!string.IsNullOrWhiteSpace(request.PerFileTranscriptions)) formFields["perFileTranscriptions"] = request.PerFileTranscriptions;
+            if (!string.IsNullOrWhiteSpace(request.Transcription)) formFields["input"] = request.Transcription;
+
+            var files = new FormFileCollection();
+            if (request.Files != null)
+            {
+                foreach (var file in request.Files)
+                {
+                    files.Add(file);
+                }
+            }
+
+            controller.Request.ContentType = "multipart/form-data";
+            controller.Request.Form = new FormCollection(formFields, files);
+        }
+
+        return controller.ProcessMedia();
+    }
+
     #region ProcessMedia - Basic Tests
 
     [Fact]
@@ -112,7 +144,7 @@ public class MediaControllerTests
         };
 
         // Act
-        var result = await controller.ProcessMedia(request);
+        var result = await ProcessMediaAsync(controller, request);
 
         // Assert
         var acceptedResult = Assert.IsType<AcceptedResult>(result);
@@ -132,7 +164,7 @@ public class MediaControllerTests
         };
 
         // Act
-        var result = await controller.ProcessMedia(request);
+        var result = await ProcessMediaAsync(controller, request);
 
         // Assert
         var badRequestResult = Assert.IsType<BadRequestObjectResult>(result);
@@ -167,7 +199,7 @@ public class MediaControllerTests
         };
 
         // Act
-        var result = await controller.ProcessMedia(request);
+        var result = await ProcessMediaAsync(controller, request);
 
         // Assert
         var acceptedResult = Assert.IsType<AcceptedResult>(result);
@@ -201,7 +233,7 @@ public class MediaControllerTests
         };
 
         // Act
-        var result = await controller.ProcessMedia(request);
+        var result = await ProcessMediaAsync(controller, request);
 
         // Assert
         Assert.IsType<AcceptedResult>(result);
@@ -250,7 +282,7 @@ public class MediaControllerTests
         };
 
         // Act
-        var result = await controller.ProcessMedia(request);
+        var result = await ProcessMediaAsync(controller, request);
 
         // Assert
         Assert.IsType<AcceptedResult>(result);
@@ -285,7 +317,7 @@ public class MediaControllerTests
         };
 
         // Act
-        var result = await controller.ProcessMedia(request);
+        var result = await ProcessMediaAsync(controller, request);
 
         // Assert
         Assert.IsType<AcceptedResult>(result);
@@ -331,7 +363,7 @@ public class MediaControllerTests
         };
 
         // Act
-        var result = await controller.ProcessMedia(request);
+        var result = await ProcessMediaAsync(controller, request);
 
         // Assert
         var acceptedResult = Assert.IsType<AcceptedResult>(result);
@@ -384,7 +416,7 @@ public class MediaControllerTests
         };
 
         // Act
-        var result = await controller.ProcessMedia(request);
+        var result = await ProcessMediaAsync(controller, request);
 
         // Assert
         Assert.IsType<AcceptedResult>(result);
@@ -427,7 +459,7 @@ public class MediaControllerTests
         };
 
         // Act
-        var result = await controller.ProcessMedia(request);
+        var result = await ProcessMediaAsync(controller, request);
 
         // Assert
         var badRequestResult = Assert.IsType<BadRequestObjectResult>(result);
@@ -476,7 +508,7 @@ public class MediaControllerTests
         };
 
         // Act
-        var result = await controller.ProcessMedia(request);
+        var result = await ProcessMediaAsync(controller, request);
 
         // Assert
         Assert.IsType<AcceptedResult>(result);
@@ -517,7 +549,7 @@ public class MediaControllerTests
         };
 
         // Act
-        var result = await controller.ProcessMedia(request);
+        var result = await ProcessMediaAsync(controller, request);
 
         // Assert
         var badRequestResult = Assert.IsType<BadRequestObjectResult>(result);
@@ -572,7 +604,7 @@ public class MediaControllerTests
         };
 
         // Act
-        var result = await controller.ProcessMedia(request);
+        var result = await ProcessMediaAsync(controller, request);
 
         // Assert
         var badRequestResult = Assert.IsType<BadRequestObjectResult>(result);
@@ -621,7 +653,7 @@ public class MediaControllerTests
         var request = new MediaRequest();
 
         // Act
-        var result = await controller.ProcessMedia(request);
+        var result = await ProcessMediaAsync(controller, request);
 
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result);
@@ -649,7 +681,7 @@ public class MediaControllerTests
         };
 
         // Act
-        var result = await controller.ProcessMedia(request);
+        var result = await ProcessMediaAsync(controller, request);
 
         // Assert
         var statusCodeResult = Assert.IsType<ObjectResult>(result);
@@ -684,7 +716,7 @@ public class MediaControllerTests
         };
 
         // Act
-        var result = await controller.ProcessMedia(request);
+        var result = await ProcessMediaAsync(controller, request);
 
         // Assert
         // Should still return Accepted even if RAG processing fails
@@ -696,23 +728,25 @@ public class MediaControllerTests
     #region ProcessMedia - Edge Cases
 
     [Fact]
-    public async Task ProcessMedia_With_Empty_Files_List_And_No_Input_Returns_BadRequest()
+    public async Task ProcessMedia_With_Empty_Files_List_And_No_Input_Returns_Accepted()
     {
         // Arrange
-        var controller = CreateController();
+        var mockBgQueue = new Mock<IBackgroundTaskQueue>();
+        mockBgQueue.Setup(q => q.EnqueueAsync(It.IsAny<BackgroundTaskEntry>()))
+            .Returns(Task.CompletedTask);
+
+        var controller = CreateController(backgroundQueue: mockBgQueue);
         var request = new MediaRequest
         {
             Files = new List<IFormFile>()
         };
 
         // Act
-        var result = await controller.ProcessMedia(request);
+        var result = await ProcessMediaAsync(controller, request);
 
         // Assert
-        // The controller should handle this edge case - will throw or return error
-        // In current implementation, it would process with no files and return Accepted
-        // For better validation, we'd want BadRequest, but testing actual behavior
-        Assert.NotNull(result);
+        var acceptedResult = Assert.IsType<AcceptedResult>(result);
+        Assert.NotNull(acceptedResult.Location);
     }
 
     [Fact]
@@ -742,7 +776,7 @@ public class MediaControllerTests
         };
 
         // Act
-        var result = await controller.ProcessMedia(request);
+        var result = await ProcessMediaAsync(controller, request);
 
         // Assert
         Assert.IsType<AcceptedResult>(result);
