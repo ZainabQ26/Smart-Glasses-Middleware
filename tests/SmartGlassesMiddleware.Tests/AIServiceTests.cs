@@ -73,13 +73,13 @@ public class AIServiceTests
     }
 
     [Fact]
-    public void OllamaAIService_Constructor_ShouldGetKnownTasksFromDispatcher()
+    public void OllamaAIService_Constructor_ShouldNotEnumerateKnownTasks()
     {
         // Act
         var service = new OllamaAIService(_kernel, _httpClient, _mockConfiguration.Object, _mockLogger.Object, _mockTaskDispatcher.Object);
 
         // Assert
-        _mockTaskDispatcher.Verify(d => d.KnownTasks, Times.Once);
+        _mockTaskDispatcher.Verify(d => d.KnownTasks, Times.Never);
     }
 
     [Fact(Skip = "Requires actual chat completion service - tested via integration tests")]

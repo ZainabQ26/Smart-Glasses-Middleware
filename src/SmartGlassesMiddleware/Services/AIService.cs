@@ -40,7 +40,24 @@ public class OllamaAIService : IAIService
     {
         try
         {
-            _logger.LogInformation("IAIService.ProcessRequestAsync entered; inputLength={L}", input?.Length ?? 0);
+            if (string.IsNullOrWhiteSpace(input))
+            {
+                return ("unknown", "Please provide a request.", false);
+            }
+
+            if (_knownTasks.Count == 0)
+            {
+                try
+                {
+                    _knownTasks.AddRange(_dispatcher.KnownTasks);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Failed to load known tasks lazily");
+                }
+            }
+
+            _logger.LogInformation("IAIService.ProcessRequestAsync entered; inputLength={L}", input.Length);
             // First, use Ollama to detect the task
             var taskDetectionPrompt = $@"
 You are a task classifier. Analyze the following input and determine if it matches one of these known tasks: 

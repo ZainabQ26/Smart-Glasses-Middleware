@@ -21,7 +21,10 @@ public class TaskDispatcher : ITaskDispatcher
             {
                 using var scope = _serviceProvider.CreateScope();
                 var handlers = scope.ServiceProvider.GetServices<ITaskHandler>();
-                var handlerNames = handlers.Select(h => h.Name.ToLowerInvariant()).ToList();
+                var handlerNames = handlers
+                    .Select(h => (h.Name ?? string.Empty).ToLowerInvariant())
+                    .Where(n => !string.IsNullOrWhiteSpace(n))
+                    .ToList();
 
                 // If configuration specifies a known tasks list, filter to that list
                 try
@@ -32,7 +35,10 @@ public class TaskDispatcher : ITaskDispatcher
                         .ToArray();
                     if (configured != null && configured.Length > 0)
                     {
-                        var allowed = configured.Select(s => s.ToLowerInvariant()).ToHashSet();
+                        var allowed = configured
+                            .Where(s => !string.IsNullOrWhiteSpace(s))
+                            .Select(s => s!.ToLowerInvariant())
+                            .ToHashSet();
                         return handlerNames.Where(n => allowed.Contains(n)).ToList();
                     }
                 }
@@ -64,11 +70,17 @@ public class TaskDispatcher : ITaskDispatcher
         using var scope = _serviceProvider.CreateScope();
         var handlers = scope.ServiceProvider.GetServices<ITaskHandler>();
         var allowed = KnownTasks ?? Array.Empty<string>();
-        var allowedSet = new HashSet<string>(allowed.Select(s => s.ToLowerInvariant()));
+        var allowedSet = new HashSet<string>(
+            allowed.Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.ToLowerInvariant()));
 
-        var handler = handlers
-            .Where(h => allowedSet.Count == 0 || allowedSet.Contains(h.Name.ToLowerInvariant()))
-            .FirstOrDefault(h => string.Equals(h.Name, key, StringComparison.OrdinalIgnoreCase));
+        var handler = handlers.FirstOrDefault(h =>
+        {
+            var name = h.Name ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(name)) return false;
+            var lowered = name.ToLowerInvariant();
+            if (allowedSet.Count > 0 && !allowedSet.Contains(lowered)) return false;
+            return string.Equals(lowered, key, StringComparison.OrdinalIgnoreCase);
+        });
         if (handler == null) return (false, null);
 
         var resp = await handler.HandleAsync(input);
