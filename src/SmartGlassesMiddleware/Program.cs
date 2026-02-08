@@ -109,7 +109,7 @@ builder.Services.AddSingleton<Kernel>(sp =>
     var chatHandler = new SmartGlassesMiddleware.Services.HttpLoggingHandler(_preLoggerFactory.CreateLogger("OllamaHttp")) { InnerHandler = new HttpClientHandler() };
     var httpClient = new HttpClient(chatHandler)
     {
-        Timeout = TimeSpan.FromSeconds(builder.Configuration.GetValue<int?>("AI:OllamaTimeoutSeconds") ?? 30)
+        Timeout = TimeSpan.FromSeconds(builder.Configuration.GetValue<int?>("AI:OllamaTimeoutSeconds") ?? 120)
     };
 
     kernelBuilder.AddOpenAIChatCompletion(
@@ -122,7 +122,7 @@ builder.Services.AddSingleton<Kernel>(sp =>
     var embedHandler = new SmartGlassesMiddleware.Services.HttpLoggingHandler(_preLoggerFactory.CreateLogger("OllamaEmbedHttp")) { InnerHandler = new HttpClientHandler() };
     var embeddingHttpClient = new HttpClient(embedHandler)
     {
-        Timeout = TimeSpan.FromSeconds(builder.Configuration.GetValue<int?>("AI:OllamaEmbeddingTimeoutSeconds") ?? 30)
+        Timeout = TimeSpan.FromSeconds(builder.Configuration.GetValue<int?>("AI:OllamaEmbeddingTimeoutSeconds") ?? 120)
     };
 
     kernelBuilder.AddOpenAITextEmbeddingGeneration(
@@ -150,6 +150,14 @@ builder.Services.AddScoped<ICacheService, RedisCacheService>();
 builder.Services.AddSingleton<IMetricsService, MetricsService>();
 builder.Services.AddSingleton<IRequestMonitoringService, RequestMonitoringService>();
 builder.Services.AddScoped<IRagService, RagService>();
+// Register Ollama embedding client (typed HttpClient)
+builder.Services.AddHttpClient<IOllamaEmbeddingClient, OllamaEmbeddingClient>((sp, http) =>
+{
+    var cfg = sp.GetRequiredService<IConfiguration>();
+    var baseUrl = cfg["AI:OllamaEndpoint"] ?? "http://ollama:11434";
+    http.BaseAddress = new Uri(baseUrl);
+    http.Timeout = TimeSpan.FromSeconds(cfg.GetValue<int?>("AI:OllamaEmbeddingTimeoutSeconds") ?? 120);
+});
 // Document processing and RAG services
 builder.Services.AddScoped<IDocumentProcessingService, DocumentProcessingService>();
 builder.Services.AddScoped<IRAGService, RAGService>();

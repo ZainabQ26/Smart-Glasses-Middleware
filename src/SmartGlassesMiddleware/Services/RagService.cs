@@ -22,6 +22,7 @@ public interface IRAGService
     Task<int> ReprocessFailedDocumentsAsync();
     Task<List<DocumentMetadata>> GetUnprocessedDocumentsAsync();
     Task<(string embeddingJson, int dimension)> GenerateTextEmbeddingJsonAsync(string text);
+    Task<int> ReindexAllDocumentsAsync(bool force = false);
     Task<QueryResult> QueryRemindersAsync(string query, int topK = 10);
     Task<QueryResult> QueryDocumentsAndRemindersAsync(string query, int topK = 5, List<Guid>? groupIds = null);
 }
@@ -622,6 +623,62 @@ Answer:";
         return reprocessedCount;
     }
 
+    public async Task<int> ReindexAllDocumentsAsync(bool force = false)
+    {
+        var docsQuery = _context.DocumentMetadatas.AsQueryable();
+        // Ensure DB vector column matches expected embedding dimension (attempt to set to 768)
+        try
+        {
+            await _context.Database.ExecuteSqlRawAsync("ALTER TABLE \"DocumentChunks\" ALTER COLUMN \"EmbeddingVector\" TYPE vector(768);");
+            _logger.LogInformation("Ensured EmbeddingVector column type is vector(768)");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Initial attempt to alter EmbeddingVector column failed. Attempting fallback ALTER using NULL to change dimension without converting existing vectors.");
+            try
+            {
+                await _context.Database.ExecuteSqlRawAsync("ALTER TABLE \"DocumentChunks\" ALTER COLUMN \"EmbeddingVector\" TYPE vector(768) USING NULL;");
+                _logger.LogInformation("Fallback ALTER succeeded: EmbeddingVector set to vector(768) with NULLed values");
+            }
+            catch (Exception ex2)
+            {
+                _logger.LogWarning(ex2, "Fallback ALTER also failed. pgvector column dimension remains unchanged; reindexing may fail.");
+        
+        }
+        }
+        if (!force)
+        {
+            // Only reindex documents that are not processed or have errors
+            docsQuery = docsQuery.Where(d => !d.IsProcessed || d.ProcessingError != null);
+        }
+
+        var docs = await docsQuery.ToListAsync();
+        var reindexed = 0;
+
+        foreach (var doc in docs)
+        {
+            try
+            {
+                _logger.LogInformation("Reindexing document {DocumentId} ({FileName})", doc.Id, doc.FileName);
+                await GenerateEmbeddingsAsync(doc.Id);
+                doc.IsProcessed = true;
+                doc.ProcessedAt = DateTime.UtcNow;
+                doc.ProcessingError = null;
+                reindexed++;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to reindex document {DocumentId}", doc.Id);
+                doc.ProcessingError = ex.Message;
+            }
+            // persist progress after each document
+            await _context.SaveChangesAsync();
+        }
+
+        _logger.LogInformation("Reindexing complete. Reindexed {Count} documents (force={Force})", reindexed, force);
+        return reindexed;
+    }
+
     public async Task<List<DocumentMetadata>> GetUnprocessedDocumentsAsync()
     {
         return await _context.DocumentMetadatas
@@ -638,12 +695,22 @@ Answer:";
             {
                 var embedding = await GenerateTextEmbeddingAsync(chunk.ChunkText);
 
-                // Store in both formats for backward compatibility and pgvector
+                // Store as JSON embedding and record dimension
                 chunk.Embedding = SerializeEmbedding(embedding);
                 chunk.EmbeddingDimension = embedding.Length;
 
-                // Store as pgvector Vector for efficient database queries
-                chunk.EmbeddingVector = new Vector(embedding);
+                // Try to store as pgvector Vector for efficient DB queries only when dimension matches DB expectation
+                // Many deployments use 384-dim vectors; avoid writing mismatched vectors which cause pgvector errors
+                const int expectedDbVectorDim = 384;
+                if (embedding.Length == expectedDbVectorDim)
+                {
+                    chunk.EmbeddingVector = new Vector(embedding);
+                }
+                else
+                {
+                    chunk.EmbeddingVector = null; // leave pgvector column untouched to avoid dimension mismatch
+                    _logger.LogWarning("Skipping pgvector storage for chunk {ChunkId}: embedding dim {Dim} != expected DB dim {Expected}", chunk.Id, embedding.Length, expectedDbVectorDim);
+                }
 
                 return true;
             }
@@ -669,23 +736,44 @@ Answer:";
             _logger.LogInformation("Attempting to generate embedding for text (length: {Length})", text.Length);
             
             // Try to use Semantic Kernel's embedding service
+            // Prefer local Ollama embedding client if registered in DI
+            try
+            {
+                var client = _serviceProvider.GetService(typeof(IOllamaEmbeddingClient)) as IOllamaEmbeddingClient;
+                if (client != null)
+                {
+                    _logger.LogInformation("Using IOllamaEmbeddingClient for embeddings");
+                    var sw = Stopwatch.StartNew();
+                    var cfg = _serviceProvider.GetService(typeof(IConfiguration)) as IConfiguration;
+                    var model = cfg?.GetValue<string>("AI:OllamaEmbeddingModel") ?? "nomic-embed-text:latest";
+                    var embedding = await client.GenerateEmbeddingAsync(model, text);
+                    sw.Stop();
+                    _logger.LogInformation("Successfully generated embedding from Ollama client (dimension: {Dimension}) in {Ms}ms", embedding.Length, sw.ElapsedMilliseconds);
+                    return embedding;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "IOllamaEmbeddingClient failed, will fallback to kernel/service-based embedding");
+            }
+
             var embeddingService = _kernel.Services.GetService(typeof(ITextEmbeddingGenerationService)) as ITextEmbeddingGenerationService;
 
             if (embeddingService != null)
             {
-                _logger.LogInformation("Embedding service found, calling Ollama for embedding generation...");
+                _logger.LogInformation("Embedding service found in kernel, calling it for embedding generation...");
                 try
                 {
                     var sw = Stopwatch.StartNew();
                     var embedding = await embeddingService.GenerateEmbeddingAsync(text);
                     sw.Stop();
                     var result = embedding.ToArray();
-                    _logger.LogInformation("Successfully generated embedding from Ollama (dimension: {Dimension}) in {Ms}ms", result.Length, sw.ElapsedMilliseconds);
+                    _logger.LogInformation("Successfully generated embedding from kernel service (dimension: {Dimension}) in {Ms}ms", result.Length, sw.ElapsedMilliseconds);
                     return result;
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Embedding service call threw an exception after {Ms}ms", ex.Message);
+                    _logger.LogError(ex, "Embedding service call threw an exception: {Message}", ex.Message);
                     throw;
                 }
             }
