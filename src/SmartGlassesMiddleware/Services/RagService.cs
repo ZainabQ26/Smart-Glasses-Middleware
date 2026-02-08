@@ -1,5 +1,5 @@
 using Microsoft.SemanticKernel;
-using Microsoft.SemanticKernel.Embeddings;
+using Microsoft.Extensions.AI;
 using Microsoft.SemanticKernel.ChatCompletion;
 using SmartGlassesMiddleware.Models;
 using SmartGlassesMiddleware.Data;
@@ -22,6 +22,7 @@ public interface IRAGService
     Task<int> ReprocessFailedDocumentsAsync();
     Task<List<DocumentMetadata>> GetUnprocessedDocumentsAsync();
     Task<(string embeddingJson, int dimension)> GenerateTextEmbeddingJsonAsync(string text);
+    Task<int> ReindexAllDocumentsAsync(bool force = false);
     Task<QueryResult> QueryRemindersAsync(string query, int topK = 10);
     Task<QueryResult> QueryDocumentsAndRemindersAsync(string query, int topK = 5, List<Guid>? groupIds = null);
 }
@@ -42,6 +43,7 @@ public class RAGService : IRAGService
     private readonly int _embeddingMaxConcurrency;
     private readonly bool _useVectorDB;
     private readonly double _vectorSimilarityThreshold;
+    private readonly int _queryTimeoutSeconds;
 
     public RAGService(
         ApplicationDbContext context,
@@ -65,10 +67,12 @@ public class RAGService : IRAGService
         _embeddingMaxConcurrency = configuration.GetValue<int?>("RAG:EmbeddingMaxConcurrency") ?? 5;
         _useVectorDB = configuration.GetValue<bool?>("RAG:UseVectorDB") ?? true;
         _vectorSimilarityThreshold = configuration.GetValue<double?>("RAG:VectorSimilarityThreshold") ?? 0.7;
+        _queryTimeoutSeconds = configuration.GetValue<int?>("RAG:QueryTimeoutSeconds") ?? 120;
     }
 
     public async Task<QueryResult> QueryDocumentsAsync(string query, int topK = 5, List<Guid>? groupIds = null)
     {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(_queryTimeoutSeconds));
         try
         {
             var stopwatch = Stopwatch.StartNew();
@@ -131,7 +135,7 @@ Answer:";
                 else
                 {
                     _logger.LogWarning("Advanced task handler not available, falling back to local model");
-                    response = await GenerateResponseWithLocalModel(promptTemplate);
+                    response = await GenerateResponseWithLocalModel(promptTemplate, cts.Token) ?? "I couldn't generate a response.";
                 }
 
                 usedAdvancedModel = true;
@@ -149,8 +153,8 @@ Answer:";
             }
             else
             {
-                var (_, aiResponse, wasAdvanced) = await _aiService.ProcessRequestAsync(promptTemplate);
-                response = aiResponse;
+                var (_, aiResponse, wasAdvanced) = await _aiService.ProcessRequestAsync(promptTemplate, cts.Token);
+                response = aiResponse ?? "I couldn't generate a response.";
                 usedAdvancedModel = wasAdvanced;
                 modelUsed = wasAdvanced ? "advanced" : "local";
 
@@ -191,6 +195,11 @@ Answer:";
                 DelegationReason = delegationReason
             };
         }
+        catch (OperationCanceledException ex)
+        {
+            _logger.LogWarning(ex, "Query timed out after {Timeout}s for query: {Query}", _queryTimeoutSeconds, query);
+            throw new TimeoutException($"Query operation timed out after {_queryTimeoutSeconds} seconds. Please try a simpler query or increase the timeout.", ex);
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error querying documents with query: {Query}", query);
@@ -204,6 +213,11 @@ Answer:";
     private List<DocumentSource> IdentifyReferencedSources(string response, List<DocumentSource> allSources)
     {
         var referenced = new List<DocumentSource>();
+
+        if (string.IsNullOrEmpty(response))
+        {
+            return referenced;
+        }
 
         foreach (var source in allSources)
         {
@@ -609,6 +623,62 @@ Answer:";
         return reprocessedCount;
     }
 
+    public async Task<int> ReindexAllDocumentsAsync(bool force = false)
+    {
+        var docsQuery = _context.DocumentMetadatas.AsQueryable();
+        // Ensure DB vector column matches expected embedding dimension (attempt to set to 768)
+        try
+        {
+            await _context.Database.ExecuteSqlRawAsync("ALTER TABLE \"DocumentChunks\" ALTER COLUMN \"EmbeddingVector\" TYPE vector(768);");
+            _logger.LogInformation("Ensured EmbeddingVector column type is vector(768)");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Initial attempt to alter EmbeddingVector column failed. Attempting fallback ALTER using NULL to change dimension without converting existing vectors.");
+            try
+            {
+                await _context.Database.ExecuteSqlRawAsync("ALTER TABLE \"DocumentChunks\" ALTER COLUMN \"EmbeddingVector\" TYPE vector(768) USING NULL;");
+                _logger.LogInformation("Fallback ALTER succeeded: EmbeddingVector set to vector(768) with NULLed values");
+            }
+            catch (Exception ex2)
+            {
+                _logger.LogWarning(ex2, "Fallback ALTER also failed. pgvector column dimension remains unchanged; reindexing may fail.");
+        
+        }
+        }
+        if (!force)
+        {
+            // Only reindex documents that are not processed or have errors
+            docsQuery = docsQuery.Where(d => !d.IsProcessed || d.ProcessingError != null);
+        }
+
+        var docs = await docsQuery.ToListAsync();
+        var reindexed = 0;
+
+        foreach (var doc in docs)
+        {
+            try
+            {
+                _logger.LogInformation("Reindexing document {DocumentId} ({FileName})", doc.Id, doc.FileName);
+                await GenerateEmbeddingsAsync(doc.Id);
+                doc.IsProcessed = true;
+                doc.ProcessedAt = DateTime.UtcNow;
+                doc.ProcessingError = null;
+                reindexed++;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to reindex document {DocumentId}", doc.Id);
+                doc.ProcessingError = ex.Message;
+            }
+            // persist progress after each document
+            await _context.SaveChangesAsync();
+        }
+
+        _logger.LogInformation("Reindexing complete. Reindexed {Count} documents (force={Force})", reindexed, force);
+        return reindexed;
+    }
+
     public async Task<List<DocumentMetadata>> GetUnprocessedDocumentsAsync()
     {
         return await _context.DocumentMetadatas
@@ -625,12 +695,22 @@ Answer:";
             {
                 var embedding = await GenerateTextEmbeddingAsync(chunk.ChunkText);
 
-                // Store in both formats for backward compatibility and pgvector
+                // Store as JSON embedding and record dimension
                 chunk.Embedding = SerializeEmbedding(embedding);
                 chunk.EmbeddingDimension = embedding.Length;
 
-                // Store as pgvector Vector for efficient database queries
-                chunk.EmbeddingVector = new Vector(embedding);
+                // Try to store as pgvector Vector for efficient DB queries only when dimension matches DB expectation
+                // Many deployments use 384-dim vectors; avoid writing mismatched vectors which cause pgvector errors
+                const int expectedDbVectorDim = 384;
+                if (embedding.Length == expectedDbVectorDim)
+                {
+                    chunk.EmbeddingVector = new Vector(embedding);
+                }
+                else
+                {
+                    chunk.EmbeddingVector = null; // leave pgvector column untouched to avoid dimension mismatch
+                    _logger.LogWarning("Skipping pgvector storage for chunk {ChunkId}: embedding dim {Dim} != expected DB dim {Expected}", chunk.Id, embedding.Length, expectedDbVectorDim);
+                }
 
                 return true;
             }
@@ -653,22 +733,64 @@ Answer:";
     {
         try
         {
+            _logger.LogInformation("Attempting to generate embedding for text (length: {Length})", text.Length);
+            
             // Try to use Semantic Kernel's embedding service
-            var embeddingService = _kernel.Services.GetService(typeof(ITextEmbeddingGenerationService)) as ITextEmbeddingGenerationService;
+            // Prefer local Ollama embedding client if registered in DI
+            try
+            {
+                var client = _serviceProvider.GetService(typeof(IOllamaEmbeddingClient)) as IOllamaEmbeddingClient;
+                if (client != null)
+                {
+                    _logger.LogInformation("Using IOllamaEmbeddingClient for embeddings");
+                    var sw = Stopwatch.StartNew();
+                    var cfg = _serviceProvider.GetService(typeof(IConfiguration)) as IConfiguration;
+                    var model = cfg?.GetValue<string>("AI:OllamaEmbeddingModel") ?? "nomic-embed-text:latest";
+                    var embedding = await client.GenerateEmbeddingAsync(model, text);
+                    sw.Stop();
+                    _logger.LogInformation("Successfully generated embedding from Ollama client (dimension: {Dimension}) in {Ms}ms", embedding.Length, sw.ElapsedMilliseconds);
+                    return embedding;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "IOllamaEmbeddingClient failed, will fallback to kernel/service-based embedding");
+            }
+
+            var embeddingService = _kernel.Services.GetService(typeof(IEmbeddingGenerator<string, Embedding<float>>))
+                as IEmbeddingGenerator<string, Embedding<float>>;
 
             if (embeddingService != null)
             {
-                var embedding = await embeddingService.GenerateEmbeddingAsync(text);
-                return embedding.ToArray();
+                _logger.LogInformation("Embedding service found in kernel, calling it for embedding generation...");
+                try
+                {
+                    var sw = Stopwatch.StartNew();
+                    var embedding = await embeddingService.GenerateAsync(text);
+                    sw.Stop();
+                    var result = embedding.Vector.Span.ToArray();
+                    _logger.LogInformation("Successfully generated embedding from kernel service (dimension: {Dimension}) in {Ms}ms", result.Length, sw.ElapsedMilliseconds);
+                    return result;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Embedding service call threw an exception: {Message}", ex.Message);
+                    throw;
+                }
+            }
+            else
+            {
+                _logger.LogWarning("No embedding service registered in Kernel, falling back to simple embedding");
             }
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Embedding service not available");
+            _logger.LogError(ex, "Embedding service failed: {Message}. Falling back to simple embedding", ex.Message);
         }
 
         // Fallback: simple hash-based embedding (for demonstration)
         // In production, use a proper embedding model
+        _logger.LogInformation("Using simple hash-based embedding fallback");
         return GenerateSimpleEmbedding(text);
     }
 
@@ -915,17 +1037,32 @@ Answer:";
         return (int)(text.Length * _tokensPerChar);
     }
 
-    private async Task<string> GenerateResponseWithLocalModel(string prompt)
+    private async Task<string> GenerateResponseWithLocalModel(string prompt, CancellationToken cancellationToken = default)
     {
-        try
-        {
+            try
+            {
+            _logger.LogInformation("Generating response with local Ollama model...");
             var chatService = _kernel.GetRequiredService<IChatCompletionService>();
-            var result = await chatService.GetChatMessageContentAsync(prompt);
+            _logger.LogInformation("Chat service obtained, sending request to Ollama...");
+            var sw = Stopwatch.StartNew();
+            var result = await chatService.GetChatMessageContentAsync(prompt, cancellationToken: cancellationToken);
+            sw.Stop();
+            _logger.LogInformation("Successfully received response from Ollama (length: {Length}) in {Ms}ms", result.Content?.Length ?? 0, sw.ElapsedMilliseconds);
             return result.Content ?? "No response from local model.";
+            }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning("Local model generation was cancelled/timed out");
+            throw;
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogError(ex, "HTTP error connecting to Ollama: {Message}", ex.Message);
+            return $"Error: Cannot connect to Ollama. Please ensure Ollama is running. Details: {ex.Message}";
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error generating response with local model");
+            _logger.LogError(ex, "Error generating response with local model: {Message}", ex.Message);
             return $"Error: {ex.Message}";
         }
     }
@@ -947,6 +1084,7 @@ Answer:";
 
     public async Task<QueryResult> QueryRemindersAsync(string query, int topK = 10)
     {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(_queryTimeoutSeconds));
         try
         {
             _logger.LogInformation("Querying reminders with query: {Query}", query);
@@ -1022,7 +1160,7 @@ User Question: {query}
 
 Answer:";
 
-            var answer = await GenerateResponseWithLocalModel(prompt);
+            var answer = await GenerateResponseWithLocalModel(prompt, cts.Token);
 
             return new QueryResult
             {
@@ -1031,6 +1169,18 @@ Answer:";
                 UsedAdvancedModel = false,
                 ModelUsed = "local-ollama",
                 TokenCount = EstimateTokens(prompt + answer)
+            };
+        }
+        catch (OperationCanceledException ex)
+        {
+            _logger.LogWarning(ex, "Reminder query timed out after {Timeout}s", _queryTimeoutSeconds);
+            return new QueryResult
+            {
+                Answer = $"Query timed out after {_queryTimeoutSeconds} seconds. Please try a simpler query.",
+                Sources = new List<DocumentSource>(),
+                UsedAdvancedModel = false,
+                ModelUsed = "none",
+                TokenCount = 0
             };
         }
         catch (Exception ex)
@@ -1049,6 +1199,7 @@ Answer:";
 
     public async Task<QueryResult> QueryDocumentsAndRemindersAsync(string query, int topK = 5, List<Guid>? groupIds = null)
     {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(_queryTimeoutSeconds));
         try
         {
             _logger.LogInformation("Querying documents and reminders with query: {Query}", query);
@@ -1111,7 +1262,7 @@ Question: {query}
 
 Answer:";
 
-                var answer = await GenerateResponseWithLocalModel(combinedPrompt);
+                var answer = await GenerateResponseWithLocalModel(combinedPrompt, cts.Token);
 
                 return new QueryResult
                 {
@@ -1130,6 +1281,18 @@ Answer:";
             }
 
             return reminderResult;
+        }
+        catch (OperationCanceledException ex)
+        {
+            _logger.LogWarning(ex, "Combined query timed out after {Timeout}s", _queryTimeoutSeconds);
+            return new QueryResult
+            {
+                Answer = $"Query timed out after {_queryTimeoutSeconds} seconds. Please try a simpler query.",
+                Sources = new List<DocumentSource>(),
+                UsedAdvancedModel = false,
+                ModelUsed = "none",
+                TokenCount = 0
+            };
         }
         catch (Exception ex)
         {

@@ -34,13 +34,15 @@ public class DocumentsControllerTests
         Mock<IDocumentProcessingService>? processingService = null,
         Mock<IRAGService>? ragService = null,
         Mock<IDocumentHighlightService>? highlightService = null,
-        IConfiguration? configuration = null)
+        IConfiguration? configuration = null,
+        Mock<IRequestMonitoringService>? monitoringService = null)
     {
         var ctx = context ?? GetInMemoryContext();
         var mockProcessing = processingService ?? new Mock<IDocumentProcessingService>();
         var mockRag = ragService ?? new Mock<IRAGService>();
         var mockHighlight = highlightService ?? new Mock<IDocumentHighlightService>();
         var mockLogger = new Mock<ILogger<DocumentsController>>();
+        var mockMonitoring = monitoringService ?? new Mock<IRequestMonitoringService>();
 
         var config = configuration ?? new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -55,7 +57,8 @@ public class DocumentsControllerTests
             mockRag.Object,
             mockHighlight.Object,
             ctx,
-            config);
+            config,
+            mockMonitoring.Object);
 
         controller.ControllerContext = new ControllerContext
         {

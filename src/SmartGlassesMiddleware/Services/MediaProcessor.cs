@@ -9,13 +9,15 @@ public class MediaProcessor : IMediaProcessor
     private readonly IAIService _aiService;
     private readonly IHistoryService _historyService;
     private readonly ILogger<MediaProcessor> _logger;
+    private readonly IRagService _mediaRagService;
 
-    public MediaProcessor(IMediaStorageService mediaStorageService, ITranscriptionService transcriptionService, IAIService aiService, IHistoryService historyService, ILogger<MediaProcessor> logger)
+    public MediaProcessor(IMediaStorageService mediaStorageService, ITranscriptionService transcriptionService, IAIService aiService, IHistoryService historyService, IRagService mediaRagService, ILogger<MediaProcessor> logger)
     {
         _mediaStorageService = mediaStorageService;
         _transcriptionService = transcriptionService;
         _aiService = aiService;
         _historyService = historyService;
+        _mediaRagService = mediaRagService;
         _logger = logger;
     }
 
@@ -53,6 +55,29 @@ public class MediaProcessor : IMediaProcessor
 
         var promptText = entry.PromptText ?? string.Empty;
         var textToProcess = promptText + "\n\n" + string.Join("\n\n", partsForAi);
+
+        // Retrieval-first: ask the media RAG for context quickly and include it only when relevant
+        try
+        {
+            var retrievalQuery = !string.IsNullOrWhiteSpace(promptText)
+                ? promptText
+                : entry.MediaItems.Select(i => i.Transcription).FirstOrDefault(s => !string.IsNullOrWhiteSpace(s)) ?? textToProcess;
+
+            var ragContext = await _mediaRagService.GetRagContextAsync(retrievalQuery, maxResults: 3);
+            if (!string.IsNullOrWhiteSpace(ragContext))
+            {
+                _logger.LogInformation("Including media RAG context in AI prompt (len={Len})", ragContext.Length);
+                textToProcess = promptText + "\n\nContext:\n" + ragContext + "\n\n" + string.Join("\n\n", partsForAi);
+            }
+            else
+            {
+                _logger.LogInformation("No media RAG context found for query, proceeding without it");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Media RAG lookup failed; proceeding without context");
+        }
 
         var (task, response, usedAdvancedModel) = await _aiService.ProcessRequestAsync(textToProcess);
 
