@@ -120,7 +120,7 @@ public class DocumentsController : ControllerBase
     {
         _logger.LogInformation("=== DOCUMENT QUERY REQUEST RECEIVED ===");
         _logger.LogInformation("Query: {Query}", request.Query);
-        _logger.LogInformation("TopK: {TopK}, GroupIds: {GroupIds}", request.TopK, request.GroupIds?.Count ?? 0);
+        _logger.LogInformation("TopK: {TopK}, GroupIds: {GroupIds}, DocumentIds: {DocumentIds}", request.TopK, request.GroupIds?.Count ?? 0, request.DocumentIds?.Count ?? 0);
         
         if (string.IsNullOrWhiteSpace(request.Query))
         {
@@ -143,7 +143,8 @@ public class DocumentsController : ControllerBase
             var result = await _ragService.QueryDocumentsAsync(
                 request.Query,
                 request.TopK ?? 5,
-                request.GroupIds);
+                request.GroupIds,
+                request.DocumentIds);
             _logger.LogInformation("RAG service returned result. Answer length: {Length}", result.Answer?.Length ?? 0);
 
             await _monitoringService.CompleteRequest(requestId, true, 
@@ -413,6 +414,7 @@ public class QueryRequest
     public string Query { get; set; } = string.Empty;
     public int? TopK { get; set; }
     public List<Guid>? GroupIds { get; set; }
+    public List<Guid>? DocumentIds { get; set; }
 }
 
 public class MoveDocumentRequest

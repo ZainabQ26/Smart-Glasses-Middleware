@@ -15,9 +15,9 @@ namespace SmartGlassesMiddleware.Services;
 
 public interface IRAGService
 {
-    Task<QueryResult> QueryDocumentsAsync(string query, int topK = 5, List<Guid>? groupIds = null);
-    Task<QueryResult> QueryDocumentsWithConversationAsync(string query, Guid conversationId, int topK = 5, List<Guid>? groupIds = null);
-    Task<List<DocumentChunk>> SearchChunksAsync(string query, int topK = 5, List<Guid>? groupIds = null);
+    Task<QueryResult> QueryDocumentsAsync(string query, int topK = 5, List<Guid>? groupIds = null, List<Guid>? documentIds = null);
+    Task<QueryResult> QueryDocumentsWithConversationAsync(string query, Guid conversationId, int topK = 5, List<Guid>? groupIds = null, List<Guid>? documentIds = null);
+    Task<List<DocumentChunk>> SearchChunksAsync(string query, int topK = 5, List<Guid>? groupIds = null, List<Guid>? documentIds = null);
     Task GenerateEmbeddingsAsync(Guid documentId);
     Task<int> ReprocessFailedDocumentsAsync();
     Task<List<DocumentMetadata>> GetUnprocessedDocumentsAsync();
@@ -70,7 +70,7 @@ public class RAGService : IRAGService
         _queryTimeoutSeconds = configuration.GetValue<int?>("RAG:QueryTimeoutSeconds") ?? 120;
     }
 
-    public async Task<QueryResult> QueryDocumentsAsync(string query, int topK = 5, List<Guid>? groupIds = null)
+    public async Task<QueryResult> QueryDocumentsAsync(string query, int topK = 5, List<Guid>? groupIds = null, List<Guid>? documentIds = null)
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(_queryTimeoutSeconds));
         try
@@ -78,7 +78,7 @@ public class RAGService : IRAGService
             var stopwatch = Stopwatch.StartNew();
 
             // Search for relevant chunks
-            var relevantChunks = await SearchChunksAsync(query, topK, groupIds);
+            var relevantChunks = await SearchChunksAsync(query, topK, groupIds, documentIds);
 
             if (!relevantChunks.Any())
             {
@@ -281,7 +281,8 @@ Answer:";
         string query,
         Guid conversationId,
         int topK = 5,
-        List<Guid>? groupIds = null)
+        List<Guid>? groupIds = null,
+        List<Guid>? documentIds = null)
     {
         try
         {
@@ -294,7 +295,7 @@ Answer:";
                 .ToListAsync();
 
             // Search for relevant chunks
-            var relevantChunks = await SearchChunksAsync(query, topK, groupIds);
+            var relevantChunks = await SearchChunksAsync(query, topK, groupIds, documentIds);
 
             // Build context from chunks (with token budgeting)
             var contextBuilder = new StringBuilder();
@@ -376,7 +377,7 @@ Answer:";
         }
     }
 
-    public async Task<List<DocumentChunk>> SearchChunksAsync(string query, int topK = 5, List<Guid>? groupIds = null)
+    public async Task<List<DocumentChunk>> SearchChunksAsync(string query, int topK = 5, List<Guid>? groupIds = null, List<Guid>? documentIds = null)
     {
         try
         {
@@ -388,18 +389,17 @@ Answer:";
             if (_useVectorDB)
             {
                 // Use pgvector for efficient similarity search with per-group indexing
-                results = await SearchChunksWithVectorDBAsync(queryEmbedding, topK, groupIds);
+                results = await SearchChunksWithVectorDBAsync(queryEmbedding, topK, groupIds, documentIds);
             }
             else
             {
-                // Fallback to in-memory search
-                results = await SearchChunksInMemoryAsync(queryEmbedding, topK, groupIds);
+                results = await SearchChunksInMemoryAsync(queryEmbedding, topK, groupIds, documentIds);
             }
 
             // If no embedding-based results, fallback to keyword search
             if (results.Count == 0)
             {
-                return await KeywordSearchAsync(query, topK, groupIds);
+                return await KeywordSearchAsync(query, topK, groupIds, documentIds);
             }
 
             return results;
@@ -409,7 +409,7 @@ Answer:";
             _logger.LogError(ex, "Error searching chunks");
 
             // Fallback to keyword search
-            return await KeywordSearchAsync(query, topK, groupIds);
+            return await KeywordSearchAsync(query, topK, groupIds, documentIds);
         }
     }
 
@@ -420,7 +420,8 @@ Answer:";
     private async Task<List<DocumentChunk>> SearchChunksWithVectorDBAsync(
         float[] queryEmbedding,
         int topK,
-        List<Guid>? groupIds)
+        List<Guid>? groupIds,
+        List<Guid>? documentIds)
     {
         try
         {
@@ -438,6 +439,13 @@ Answer:";
                 _logger.LogInformation("Filtering chunks by {Count} groups for vector search", groupIds.Count);
                 query = query.Where(c =>
                     c.DocumentMetadata.DocumentGroups.Any(dg => groupIds.Contains(dg.ResourceGroupId)));
+            }
+
+            // Filter by document IDs if specified
+            if (documentIds != null && documentIds.Any())
+            {
+                _logger.LogInformation("Filtering chunks by {Count} documents for vector search", documentIds.Count);
+                query = query.Where(c => documentIds.Contains(c.DocumentMetadataId));
             }
 
             // Use pgvector for similarity search
@@ -472,7 +480,7 @@ Answer:";
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error in vector DB search, falling back to in-memory");
-            return await SearchChunksInMemoryAsync(queryEmbedding, topK, groupIds);
+            return await SearchChunksInMemoryAsync(queryEmbedding, topK, groupIds, documentIds);
         }
     }
 
@@ -482,7 +490,8 @@ Answer:";
     private async Task<List<DocumentChunk>> SearchChunksInMemoryAsync(
         float[] queryEmbedding,
         int topK,
-        List<Guid>? groupIds)
+        List<Guid>? groupIds,
+        List<Guid>? documentIds)
     {
         // Build query for chunks, optionally filtered by groups
         var chunksQuery = _context.DocumentChunks
@@ -495,6 +504,12 @@ Answer:";
         {
             chunksQuery = chunksQuery.Where(c =>
                 c.DocumentMetadata.DocumentGroups.Any(dg => groupIds.Contains(dg.ResourceGroupId)));
+        }
+
+        // Filter by document IDs if specified
+        if (documentIds != null && documentIds.Any())
+        {
+            chunksQuery = chunksQuery.Where(c => documentIds.Contains(c.DocumentMetadataId));
         }
 
         var allChunks = await chunksQuery.ToListAsync();
@@ -887,7 +902,7 @@ Answer:";
         return dotProduct / (magnitudeA * magnitudeB);
     }
 
-    private async Task<List<DocumentChunk>> KeywordSearchAsync(string query, int topK, List<Guid>? groupIds = null)
+    private async Task<List<DocumentChunk>> KeywordSearchAsync(string query, int topK, List<Guid>? groupIds = null, List<Guid>? documentIds = null)
     {
         var keywords = query.ToLower().Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
 
@@ -922,6 +937,12 @@ Answer:";
         {
             chunksQuery = chunksQuery.Where(c =>
                 c.DocumentMetadata.DocumentGroups.Any(dg => groupIds.Contains(dg.ResourceGroupId)));
+        }
+
+        // Filter by document IDs if specified
+        if (documentIds != null && documentIds.Any())
+        {
+            chunksQuery = chunksQuery.Where(c => documentIds.Contains(c.DocumentMetadataId));
         }
 
         var chunks = await chunksQuery
