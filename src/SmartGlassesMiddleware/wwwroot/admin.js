@@ -565,6 +565,9 @@ function createNewPrompt() {
 let promptPreviewFile = null;
 let promptSelectedFiles = [];
 let currentConversationHistory = []; // Track conversation messages
+let activePromptGroupId = null;
+// conversation mapping is now server-side; frontend will not persist ConversationId
+let activeConversationId = null;
 window.promptSelectedFiles = promptSelectedFiles;
 let lastAutoSavedSnapshot = null;
 let autoSaveInFlight = false;
@@ -794,6 +797,66 @@ function updatePromptFilesList() {
     }
 }
 
+function updateActiveGroupStyles() {
+    document.querySelectorAll('[data-group-card="true"]').forEach(card => {
+        const groupId = card.dataset.groupId;
+        const isActive = !!activePromptGroupId && groupId === String(activePromptGroupId);
+        const badge = card.querySelector('[data-group-active-badge="true"]');
+        const input = card.querySelector('input[data-group-id]');
+
+        card.style.background = isActive ? '#eaf4ff' : '#f5f5f5';
+        card.style.border = isActive ? '2px solid #3498db' : '2px solid transparent';
+        if (input) {
+            input.style.background = isActive ? '#ffffff' : 'white';
+            input.style.borderColor = isActive ? '#3498db' : '#ddd';
+        }
+        if (badge) {
+            badge.style.display = isActive ? 'inline-flex' : 'none';
+        }
+    });
+}
+
+function getConversationGroupKey() {
+    return activePromptGroupId ? String(activePromptGroupId) : 'ungrouped';
+}
+
+function setActivePromptGroup(groupId, groupName) {
+    activePromptGroupId = groupId || null;
+    updateActiveGroupStyles();
+    if (groupName) {
+        showMessage(`Active group set to: ${groupName}`);
+    }
+}
+
+async function syncActiveGroupFromConversation(conversationId) {
+    if (!conversationId) return;
+    try {
+        const res = await fetchWithRetry(`/api/conversations/${conversationId}`);
+        if (!res.ok) return;
+        const conversation = await res.json().catch(() => null);
+        if (!conversation) return;
+
+        const groupId = getProp(conversation, 'resourceGroupId')
+            || getProp(conversation, 'ResourceGroupId')
+            || getProp(getProp(conversation, 'resourceGroup'), 'id')
+            || getProp(getProp(conversation, 'ResourceGroup'), 'id');
+        const groupName = getProp(getProp(conversation, 'resourceGroup'), 'name')
+            || getProp(getProp(conversation, 'ResourceGroup'), 'name');
+
+        if (groupId) {
+            activePromptGroupId = groupId;
+            updateActiveGroupStyles();
+            if (groupName) {
+                showMessage(`Auto-grouped into: ${groupName}`);
+            }
+            await loadGroups(true);
+            await loadAllGroups(true);
+        }
+    } catch (error) {
+        console.warn('[AUTO GROUP] Failed to sync active group:', error);
+    }
+}
+
 async function restoreDraftConversation() {
     try {
         // Fetch recent prompts from server and try to find the most recent prompt
@@ -1007,20 +1070,31 @@ async function loadGroups(reset = false) {
 
 function createGroupCard(group) {
     const div = document.createElement('div');
-    div.style.cssText = 'background: #f5f5f5; padding: 12px; border-radius: 4px; margin-bottom: 10px; position: relative;';
-    
     const id = getProp(group, 'id');
     const name = getProp(group, 'name') || 'Untitled';
+    const isActive = !!activePromptGroupId && String(activePromptGroupId) === String(id);
+
+    div.dataset.groupCard = 'true';
+    div.dataset.groupId = id;
+    div.style.cssText = `background: ${isActive ? '#eaf4ff' : '#f5f5f5'}; padding: 12px; border-radius: 6px; margin-bottom: 10px; position: relative; border: 2px solid ${isActive ? '#3498db' : 'transparent'};`;
     
     div.innerHTML = `
         <div style="display: flex; gap: 10px; align-items: center;">
             <div style="position: relative; flex: 1;">
-                <input type="text" value="${escapeHtml(name)}" readonly data-group-id="${id}" style="width: 100%; padding: 12px 50px 12px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; background: white; cursor: default;">
+                <input type="text" value="${escapeHtml(name)}" readonly data-group-id="${id}" style="width: 100%; padding: 12px 90px 12px 12px; border: 1px solid ${isActive ? '#3498db' : '#ddd'}; border-radius: 4px; font-size: 14px; background: ${isActive ? '#ffffff' : 'white'}; cursor: pointer;">
+                <span data-group-active-badge="true" style="position: absolute; right: 50px; top: 50%; transform: translateY(-50%); font-size: 11px; color: #ffffff; background: #3498db; padding: 2px 6px; border-radius: 10px; display: ${isActive ? 'inline-flex' : 'none'}; align-items: center;">Active</span>
                 <span class="group-item-paperclip" data-group-id="${id}" data-group-name="${escapeHtml(name)}" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 24px; color: #95a5a6; cursor: pointer;">📎</span>
             </div>
             <button type="button" class="group-item-delete" data-group-id="${id}" style="padding: 8px 16px; background: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-size: 14px;">Delete</button>
         </div>
     `;
+
+    // Click group name to set active prompt group and show contents
+    const input = div.querySelector('input[data-group-id]');
+    input?.addEventListener('click', () => {
+        setActivePromptGroup(id, name);
+        manageGroupResources(id, name);
+    });
     
     // Attach event listener to paperclip
     div.querySelector('.group-item-paperclip').addEventListener('click', (e) => {
@@ -1200,6 +1274,9 @@ async function deleteGroup(id) {
         const response = await fetch(`${API_BASE}/groups/${id}`, { method: 'DELETE' });
         if (response.ok || response.status === 204) {
             showMessage('Group and its conversations deleted successfully');
+            if (activePromptGroupId === id) {
+                activePromptGroupId = null;
+            }
             await loadGroups(true);
             await loadAllGroups(true); // Force refresh groups cache
         } else {
@@ -1208,6 +1285,38 @@ async function deleteGroup(id) {
         }
     } catch (error) {
         showMessage('Error deleting group: ' + (error?.message || error), 'error');
+    }
+}
+
+async function loadPromptById(promptId, promptName) {
+    if (!promptId) return;
+    try {
+        let prompt = null;
+        const directRes = await fetchWithRetry(`${API_BASE}/prompts/${promptId}`);
+        if (directRes.ok) {
+            const directJson = await directRes.json().catch(() => null);
+            prompt = (directJson && (directJson.data || directJson)) || directJson || null;
+        }
+
+        if (!prompt) {
+            const listRes = await fetchWithRetry(`${API_BASE}/prompts?page=1&pageSize=1000`);
+            if (listRes.ok) {
+                const listJson = await listRes.json().catch(() => null);
+                const prompts = (listJson && (listJson.data || listJson.Data)) || listJson || [];
+                prompt = prompts.find(p => String(getProp(p, 'id')) === String(promptId)) || null;
+            }
+        }
+
+        if (!prompt) {
+            showMessage('Unable to load prompt details', 'error');
+            return;
+        }
+
+        const promptText = getProp(prompt, 'promptText') || '';
+        loadPromptIntoForm(promptId, promptName || getProp(prompt, 'name') || 'Prompt', promptText);
+        showMessage('Prompt loaded from group', 'success');
+    } catch (error) {
+        showMessage('Error loading prompt: ' + error.message, 'error');
     }
 }
 
@@ -1302,7 +1411,7 @@ async function manageGroupResources(groupId, groupName) {
         console.log('[MANAGE] Group files:', groupFiles);
         
         const modalBody = document.getElementById('modal-content-body');
-        
+
         // Build files list HTML
         let filesListHTML = '';
         if (groupFiles.length === 0) {
@@ -1324,18 +1433,153 @@ async function manageGroupResources(groupId, groupName) {
                 `;
             }).join('');
         }
+
+        // Build prompts list HTML
+        let promptsListHTML = '';
+        if (groupPrompts.length === 0) {
+            promptsListHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No prompts attached yet</div>';
+        } else {
+            promptsListHTML = groupPrompts.map(prompt => {
+                const promptId = getProp(prompt, 'id');
+                const promptName = getProp(prompt, 'name') || 'Untitled';
+                return `
+                    <div style="padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0;">
+                        <span style="font-size: 14px; color: #333; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                            ${escapeHtml(promptName)}
+                        </span>
+                        <button type="button" onclick="loadPromptById('${promptId}', '${escapeHtml(promptName).replace(/'/g, "\\'")}')"
+                            style="padding: 4px 12px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">
+                            Open
+                        </button>
+                    </div>
+                `;
+            }).join('');
+        }
         
+        // Attempt to fetch existing mapping for this group and include mapping UI
+        let existingMapping = null;
+        try {
+            const mapRes = await fetchWithRetry(`/api/conversations/mapping?groupId=${groupId}`);
+            if (mapRes.ok) {
+                const mapJson = await mapRes.json().catch(() => null);
+                existingMapping = mapJson?.conversationId || mapJson?.ConversationId || null;
+            }
+        } catch (mapErr) {
+            console.warn('[MANAGE] Failed to fetch group->conversation mapping:', mapErr);
+        }
+
         modalBody.innerHTML = `
-            <div style="border: 2px solid #3498db; border-radius: 8px; padding: 15px; display: flex; flex-direction: column; position: relative;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                    <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Files</h3>
+            <div style="display: flex; flex-direction: column; gap: 12px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Group Contents</h3>
                     <button type="button" onclick="closeManageGroupModal()" style="background: none; border: none; font-size: 20px; color: #95a5a6; cursor: pointer; padding: 0; line-height: 1;">×</button>
                 </div>
-                <div id="modal-files-list" style="flex: 1; overflow-y: scroll; border: 1px solid #e0e0e0; border-radius: 4px; background: white; max-height: 400px; min-height: 200px;">
-                    ${filesListHTML}
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
+                    <div style="border: 2px solid #3498db; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; position: relative;">
+                        <div style="font-weight: 600; color: #2c3e50; margin-bottom: 8px; font-size: 14px;">Files</div>
+                        <div id="modal-files-list" style="flex: 1; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; background: white; max-height: 360px; min-height: 160px;">
+                            ${filesListHTML}
+                        </div>
+                    </div>
+                    <div style="border: 2px solid #16a085; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; position: relative;">
+                        <div style="font-weight: 600; color: #2c3e50; margin-bottom: 8px; font-size: 14px;">Prompts</div>
+                        <div id="modal-prompts-list" style="flex: 1; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; background: white; max-height: 360px; min-height: 160px;">
+                            ${promptsListHTML}
+                        </div>
+                    </div>
+                </div>
+                <div style="border-top: 1px dashed #e0e0e0; padding-top: 12px; margin-top: 8px;">
+                    <div style="font-weight: 600; color: #2c3e50; margin-bottom: 8px; font-size: 14px;">Group Conversation Mapping</div>
+                        <div style="font-size: 13px; color: #666; margin-bottom: 8px;">This is a global server-side mapping from this group to an active conversation. Use it to force which conversation continues when queries target this group.</div>
+                        <div id="mapping-prompt-area" style="display:flex; flex-direction:column; gap:8px;">
+                            <div style="display:flex; gap:8px; align-items:center;">
+                                <select id="mapping-conversation-select" style="flex:1; padding:8px; border:1px solid #ddd; border-radius:4px;"></select>
+                                <button id="mapping-bind-btn" class="btn-gradient">Bind</button>
+                                <button id="mapping-clear-btn" class="secondary">Clear</button>
+                            </div>
+                            <div style="display:flex; gap:8px; align-items:center;">
+                                <input id="mapping-conversation-id" type="text" placeholder="Or paste ConversationId (GUID)" value="${existingMapping || ''}" style="flex:1; padding:8px; border:1px solid #ddd; border-radius:4px;" />
+                                <button id="mapping-paste-save-btn" class="btn-gradient">Save Paste</button>
+                            </div>
+                            <div style="margin-top:6px; font-size:12px; color:#95a5a6;">Tip: pick a recent conversation or paste a ConversationId, then click Bind/Save. Clear removes the server-side mapping.</div>
+                        </div>
                 </div>
             </div>
         `;
+
+        // Populate conversation picker
+        try {
+            const convSel = document.getElementById('mapping-conversation-select');
+            if (convSel) {
+                convSel.innerHTML = '<option value="">Loading...</option>';
+                const convRes = await fetchWithRetry(`/api/conversations?groupId=${groupId}`);
+                if (convRes.ok) {
+                    const convJson = await convRes.json().catch(() => null);
+                    const convs = convJson?.data || convJson?.Data || convJson || [];
+                    if (convs && convs.length > 0) {
+                        convSel.innerHTML = '';
+                        convs.forEach(c => {
+                            const id = getProp(c, 'id') || getProp(c, 'Id');
+                            const title = getProp(c, 'title') || getProp(c, 'Title') || (getProp(c, 'messages') && getProp(c, 'messages')[0]?.content?.slice(0,50)) || id;
+                            const updated = getProp(c, 'updatedAt') || getProp(c, 'UpdatedAt') || '';
+                            const label = `${title}${updated ? ' — ' + new Date(updated).toLocaleString() : ''}`;
+                            const opt = document.createElement('option');
+                            opt.value = id;
+                            opt.textContent = label;
+                            convSel.appendChild(opt);
+                        });
+                        if (existingMapping) convSel.value = existingMapping;
+                    } else {
+                        convSel.innerHTML = '<option value="">No recent conversations</option>';
+                    }
+                } else {
+                    convSel.innerHTML = '<option value="">Failed to load</option>';
+                }
+            }
+        } catch (err) {
+            console.warn('[MANAGE] Failed to load conversations for picker', err);
+        }
+
+        // Bind button
+        const bindBtn = document.getElementById('mapping-bind-btn');
+        bindBtn?.addEventListener('click', async () => {
+            const convSel = document.getElementById('mapping-conversation-select');
+            const selected = convSel?.value;
+            if (!selected) { showMessage('Please choose a conversation to bind', 'error'); return; }
+            try {
+                const payload = { ResourceGroupId: groupId, ConversationId: selected };
+                const res = await fetch('/api/conversations/mapping', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                if (res.ok || res.status === 204) showMessage('Mapping bound successfully', 'success'); else showMessage('Failed to bind mapping', 'error');
+            } catch (err) { console.error(err); showMessage('Failed to bind mapping', 'error'); }
+        });
+
+        // Paste-save button (manual GUID)
+        const pasteSaveBtn = document.getElementById('mapping-paste-save-btn');
+        pasteSaveBtn?.addEventListener('click', async () => {
+            const input = document.getElementById('mapping-conversation-id');
+            const val = input?.value.trim();
+            if (!val) { showMessage('Please paste a ConversationId to save', 'error'); return; }
+            try {
+                const payload = { ResourceGroupId: groupId, ConversationId: val };
+                const res = await fetch('/api/conversations/mapping', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                if (res.ok || res.status === 204) showMessage('Mapping saved successfully', 'success'); else showMessage('Failed to save mapping', 'error');
+            } catch (err) { console.error(err); showMessage('Failed to save mapping', 'error'); }
+        });
+
+        // Clear mapping button
+        const clearBtn = document.getElementById('mapping-clear-btn');
+        clearBtn?.addEventListener('click', async () => {
+            try {
+                const res = await fetch(`/api/conversations/mapping?groupId=${groupId}`, { method: 'DELETE' });
+                if (res.ok || res.status === 204) {
+                    showMessage('Mapping cleared', 'success');
+                    const convSel = document.getElementById('mapping-conversation-select'); if (convSel) convSel.value = '';
+                    const input = document.getElementById('mapping-conversation-id'); if (input) input.value = '';
+                } else {
+                    showMessage('Failed to clear mapping', 'error');
+                }
+            } catch (err) { console.error(err); showMessage('Failed to clear mapping', 'error'); }
+        });
         
         document.getElementById('manage-group-modal').classList.add('active');
     } catch (error) {
@@ -1777,6 +2021,7 @@ async function init() {
             const nextTheme = document.body.classList.contains('dark') ? 'light' : 'dark';
             applyTheme(nextTheme);
         });
+
         // Setup preview modal event listeners
         document.getElementById('close-preview').addEventListener('click', () => {
             document.getElementById('file-preview').style.display = 'none';
@@ -1998,10 +2243,13 @@ async function init() {
                 const documentIds = selectedFiles
                     .map(f => f.documentId || f.id)
                     .filter(Boolean);
-
+                const includeAllGroups = document.getElementById('prompt-include-all')?.checked;
                 const payload = { Query: promptText, TopK: 5 };
                 if (documentIds.length > 0) {
                     payload.DocumentIds = documentIds;
+                }
+                if (activePromptGroupId && !includeAllGroups) {
+                    payload.GroupIds = [activePromptGroupId];
                 }
                 console.log('[SEND PROMPT] Sending documents query to', documentsUrl, 'payload:', payload);
 
@@ -2033,6 +2281,15 @@ async function init() {
                 if (!queryResponse.ok) {
                     const errorMsg = result?.error || result?.details || result?.message || `Server error: ${queryResponse.status}`;
                     throw new Error(errorMsg);
+                }
+
+                const responseConversationId = result.conversationId || result.ConversationId;
+                if (responseConversationId) {
+                    // Server will persist group->conversation mapping. If we don't have an active group,
+                    // ask the server for the conversation to determine the associated group and activate it.
+                    if (!activePromptGroupId) {
+                        await syncActiveGroupFromConversation(responseConversationId);
+                    }
                 }
 
                 const answer = result.answer || result.Answer || result.AnswerText || result?.AnswerHtml || result?.answerText || 'No response received';
