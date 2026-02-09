@@ -1,4 +1,5 @@
 const API_BASE = '/api/admin';
+const themeStorageKey = 'uiTheme';
 
 // Helper function to get property with case-insensitive fallback
 function getProp(obj, propName) {
@@ -94,6 +95,19 @@ function showMessage(message, type = 'success') {
     div.textContent = message;
     container.appendChild(div);
     setTimeout(() => div.remove(), 5000);
+}
+
+function applyTheme(theme) {
+    if (theme === 'dark') {
+        document.body.classList.add('dark');
+    } else {
+        document.body.classList.remove('dark');
+    }
+    try {
+        localStorage.setItem(themeStorageKey, theme);
+    } catch {
+        // ignore storage errors
+    }
 }
 
 // Loading indicator
@@ -441,6 +455,26 @@ function loadPromptIntoForm(id, name, text) {
         const filesTitle = msgFiles.length > 0
             ? `${msgFiles.length} file(s) attached: ${msgFiles.map(f => (typeof f === 'string' ? f : f.name || f.fileName || 'Document')).join(', ')}`
             : '';
+        const msgSources = Array.isArray(msg.sources) ? msg.sources : [];
+        const msgSourcesHtml = msgSources.length > 0 ? `
+            <div style="margin-top: 8px; padding: 8px; background: #fff; border: 1px solid #dee2e6; border-radius: 4px;">
+                <div style="font-weight: 600; color: #2c3e50; margin-bottom: 6px; font-size: 0.8rem;">Sources Used:</div>
+                ${msgSources.map(source => {
+                    const documentId = source.documentId || source.DocumentId;
+                    const fileName = source.fileName || source.FileName || 'Document';
+                    const page = source.pageNumber || source.PageNumber;
+                    const label = page ? `${fileName} (p.${page})` : fileName;
+                    const href = documentId ? `/api/documents/${documentId}/download` : '#';
+                    const linkStyle = documentId ? 'color: #3498db; text-decoration: underline;' : 'color: #95a5a6; text-decoration: none;';
+                    return `
+                        <div style="display: flex; align-items: center; gap: 8px; font-size: 12px;">
+                            <a href="${href}" target="_blank" style="${linkStyle}" onclick="${documentId ? '' : 'return false;'}">${escapeHtml(label)}</a>
+                            ${documentId ? `<button type=\"button\" onclick=\"previewDocumentFile('${documentId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')\" style=\"padding: 2px 6px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 11px;\">Preview</button>` : ''}
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        ` : '';
 
         return `
             <div style="margin-bottom: 12px;">
@@ -449,6 +483,7 @@ function loadPromptIntoForm(id, name, text) {
                     ${msgFiles.length > 0 ? `<button type="button" onclick="showAttachedFilesModal('${filesData}')" style="background: none; border: none; font-size: 16px; color: #3498db; cursor: pointer; padding: 0;" title="${escapeHtml(filesTitle)}">📎</button>` : ''}
                 </div>
                 <div style="color: #555; padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
+                ${msg.role === 'bot' ? msgSourcesHtml : ''}
             </div>
         `;
     }).join('');
@@ -631,6 +666,26 @@ function restoreDraftConversation() {
                 const filesTitle = msgFiles.length > 0
                     ? `${msgFiles.length} file(s) attached: ${msgFiles.map(f => (typeof f === 'string' ? f : f.name || f.fileName || 'Document')).join(', ')}`
                     : '';
+                const msgSources = Array.isArray(msg.sources) ? msg.sources : [];
+                const msgSourcesHtml = msgSources.length > 0 ? `
+                    <div style="margin-top: 8px; padding: 8px; background: #fff; border: 1px solid #dee2e6; border-radius: 4px;">
+                        <div style="font-weight: 600; color: #2c3e50; margin-bottom: 6px; font-size: 0.8rem;">Sources Used:</div>
+                        ${msgSources.map(source => {
+                            const documentId = source.documentId || source.DocumentId;
+                            const fileName = source.fileName || source.FileName || 'Document';
+                            const page = source.pageNumber || source.PageNumber;
+                            const label = page ? `${fileName} (p.${page})` : fileName;
+                            const href = documentId ? `/api/documents/${documentId}/download` : '#';
+                            const linkStyle = documentId ? 'color: #3498db; text-decoration: underline;' : 'color: #95a5a6; text-decoration: none;';
+                            return `
+                                <div style="display: flex; align-items: center; gap: 8px; font-size: 12px;">
+                                    <a href="${href}" target="_blank" style="${linkStyle}" onclick="${documentId ? '' : 'return false;'}">${escapeHtml(label)}</a>
+                                    ${documentId ? `<button type=\"button\" onclick=\"previewDocumentFile('${documentId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')\" style=\"padding: 2px 6px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 11px;\">Preview</button>` : ''}
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                ` : '';
 
                 return `
                     <div style="margin-bottom: 12px;">
@@ -639,6 +694,7 @@ function restoreDraftConversation() {
                             ${msgFiles.length > 0 ? `<button type=\"button\" onclick=\"showAttachedFilesModal('${filesData}')\" style=\"background: none; border: none; font-size: 16px; color: #3498db; cursor: pointer; padding: 0;\" title=\"${escapeHtml(filesTitle)}\">📎</button>` : ''}
                         </div>
                         <div style="color: #555; padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
+                        ${msg.role === 'bot' ? msgSourcesHtml : ''}
                     </div>
                 `;
             }).join('');
@@ -1628,6 +1684,13 @@ async function init() {
     }
     
     try {
+        // Apply saved theme
+        const savedTheme = localStorage.getItem(themeStorageKey) || 'light';
+        applyTheme(savedTheme);
+        document.getElementById('theme-toggle')?.addEventListener('click', () => {
+            const nextTheme = document.body.classList.contains('dark') ? 'light' : 'dark';
+            applyTheme(nextTheme);
+        });
         // Setup preview modal event listeners
         document.getElementById('close-preview').addEventListener('click', () => {
             document.getElementById('file-preview').style.display = 'none';
@@ -1793,9 +1856,39 @@ async function init() {
         });
         
         // Send button function - sends prompt to API
+        const buildSourcesHtml = (sources) => {
+            if (!sources || sources.length === 0) return '';
+            return `
+                <div style="margin-top: 15px; padding: 10px; background: white; border: 1px solid #dee2e6; border-radius: 4px;">
+                    <div style="font-weight: 600; color: #2c3e50; margin-bottom: 8px; font-size: 0.9rem;">Sources Used:</div>
+                    <div style="display: flex; flex-direction: column; gap: 6px;">
+                        ${sources.map(source => {
+                            const documentId = source.documentId || source.DocumentId;
+                            const fileName = source.fileName || source.FileName || 'Document';
+                            const page = source.pageNumber || source.PageNumber;
+                            const chunkText = source.chunkText || source.ChunkText || '';
+                            const label = page ? `${fileName} (p.${page})` : fileName;
+                            const href = documentId ? `/api/documents/${documentId}/download` : '#';
+                            const linkStyle = documentId ? 'color: #3498db; text-decoration: underline;' : 'color: #95a5a6; text-decoration: none;';
+                            return `
+                                <div style="display: flex; flex-direction: column; gap: 4px;">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <a href="${href}" target="_blank" style="${linkStyle}" onclick="${documentId ? '' : 'return false;'}">${escapeHtml(label)}</a>
+                                        ${documentId ? `<button type=\"button\" onclick=\"previewDocumentFile('${documentId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')\" style=\"padding: 2px 8px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;\">Preview</button>` : ''}
+                                    </div>
+                                    ${chunkText ? `<div style=\"font-size: 12px; color: #666; padding-left: 4px;\">${escapeHtml(chunkText)}</div>` : ''}
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
+            `;
+        };
+
         const sendPrompt = async () => {
             const promptText = document.getElementById('prompt-name')?.value;
             const responseContent = document.getElementById('response-content');
+            let lastQueryResult = null;
             
             if (!promptText || !promptText.trim()) {
                 showMessage('Please enter a prompt text', 'error');
@@ -1843,6 +1936,7 @@ async function init() {
                 try {
                     // Try to parse JSON body (may throw)
                     result = await queryResponse.json();
+                    lastQueryResult = result;
                     console.log('[SEND PROMPT] documents query response JSON:', result);
                 } catch (parseErr) {
                     const text = await queryResponse.text().catch(() => '');
@@ -1856,16 +1950,17 @@ async function init() {
                 }
 
                 const answer = result.answer || result.Answer || result.AnswerText || result?.AnswerHtml || result?.answerText || 'No response received';
-                
+                const sources = result.referencedSources || result.ReferencedSources || result.sources || result.Sources || [];
+
                 // Get current attached files
                 const attachedFiles = promptSelectedFiles.map(f => ({
                     name: f.file?.name || f.name,
-                    id: f.id
+                    id: f.documentId || f.id
                 }));
                 
-                // Add to conversation history with files
+                // Add to conversation history with files and sources
                 currentConversationHistory.push({role: 'user', content: promptText, files: attachedFiles});
-                currentConversationHistory.push({role: 'bot', content: answer});
+                currentConversationHistory.push({role: 'bot', content: answer, sources});
                 
                 // Display the full conversation history
                 const conversationHTML = currentConversationHistory.map(msg => {
@@ -1875,6 +1970,10 @@ async function init() {
                     const filesTitle = msg.files && msg.files.length > 0
                         ? `${msg.files.length} file(s) attached: ${msg.files.map(f => f.name).join(', ')}`
                         : '';
+                    const msgSources = Array.isArray(msg.sources) ? msg.sources : [];
+                    const msgSourcesHtml = msg.role === 'bot' && msgSources.length > 0
+                        ? buildSourcesHtml(msgSources)
+                        : '';
 
                     return `
                         <div style="margin-bottom: 12px;">
@@ -1883,44 +1982,30 @@ async function init() {
                                 ${msg.files && msg.files.length > 0 ? `<button type="button" onclick="showAttachedFilesModal('${filesData}')" style="background: none; border: none; font-size: 16px; color: #3498db; cursor: pointer; padding: 0;" title="${escapeHtml(filesTitle)}">📎</button>` : ''}
                             </div>
                             <div style="color: #555; padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
+                            ${msgSourcesHtml}
                         </div>
                     `;
                 }).join('');
-                
-                const sources = result.referencedSources || result.ReferencedSources || result.sources || result.Sources || [];
-                const sourcesHtml = sources.length > 0 ? `
-                    <div style="margin-top: 15px; padding: 10px; background: white; border: 1px solid #dee2e6; border-radius: 4px;">
-                        <div style="font-weight: 600; color: #2c3e50; margin-bottom: 8px; font-size: 0.9rem;">Sources Used:</div>
-                        <div style="display: flex; flex-direction: column; gap: 6px;">
-                            ${sources.map(source => {
-                                const documentId = source.documentId || source.DocumentId;
-                                const fileName = source.fileName || source.FileName || 'Document';
-                                const page = source.pageNumber || source.PageNumber;
-                                const label = page ? `${fileName} (p.${page})` : fileName;
-                                const href = documentId ? `/api/documents/${documentId}/download` : '#';
-                                const linkStyle = documentId ? 'color: #3498db; text-decoration: underline;' : 'color: #95a5a6; text-decoration: none;';
-                                return `
-                                    <div style="display: flex; align-items: center; gap: 8px;">
-                                        <a href="${href}" target="_blank" style="${linkStyle}" onclick="${documentId ? '' : 'return false;'}">${escapeHtml(label)}</a>
-                                        ${documentId ? `<button type=\"button\" onclick=\"previewDocumentFile('${documentId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')\" style=\"padding: 2px 8px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;\">Preview</button>` : ''}
-                                    </div>
-                                `;
-                            }).join('')}
-                        </div>
-                    </div>
-                ` : '';
-
                 responseContent.innerHTML = `
                     <div style="max-height: 500px; overflow-y: auto; padding: 15px; background: #f8f9fa; border-radius: 8px;">
                         ${conversationHTML}
                     </div>
-                    ${sourcesHtml}
                 `;
                 
                 // Clear input for next message
                 document.getElementById('prompt-name').value = '';
                 
                 showMessage('Response received successfully', 'success');
+
+                // Clear attached files after sending
+                promptSelectedFiles = [];
+                window.promptSelectedFiles = promptSelectedFiles;
+                updatePromptFilesList();
+                try {
+                    localStorage.removeItem(draftStorageKey);
+                } catch {
+                    // ignore
+                }
                 
             } catch (error) {
                 console.error('Error sending prompt:', error);
@@ -1934,11 +2019,14 @@ async function init() {
                     showMessage('Request timed out after 60 seconds', 'error');
                     return;
                 }
+                const fallbackSources = lastQueryResult?.referencedSources || lastQueryResult?.ReferencedSources || lastQueryResult?.sources || lastQueryResult?.Sources || [];
+                const fallbackSourcesHtml = buildSourcesHtml(fallbackSources);
                 responseContent.innerHTML = `
                     <div style="text-align: center; padding: 20px; color: #e74c3c;">
                         <div style="font-size: 1.2rem; margin-bottom: 10px;">❌ Error</div>
                         <div style="font-size: 0.9rem;">${escapeHtml(error.message)}</div>
                     </div>
+                    ${fallbackSourcesHtml}
                 `;
                 showMessage(`Error: ${error.message}`, 'error');
             }
@@ -1953,6 +2041,10 @@ async function init() {
                 e.preventDefault();
                 sendPrompt();
             }
+        });
+
+        document.getElementById('prompt-name')?.addEventListener('input', () => {
+            autoSaveCurrentConversation('input');
         });
         
         // New Chat button - saves current conversation to Auto Groups
@@ -2295,6 +2387,8 @@ async function init() {
             promptsCount: state.prompts.data.length,
             groupsCount: state.groups.data.length
         }));
+
+        restoreDraftConversation();
 
         window.addEventListener('beforeunload', () => {
             autoSaveCurrentConversation('unload');
