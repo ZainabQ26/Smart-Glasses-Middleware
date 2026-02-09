@@ -150,7 +150,8 @@ public class DocumentsController : ControllerBase
                 request.Query,
                 request.TopK ?? 5,
                 request.GroupIds,
-                request.DocumentIds);
+                request.DocumentIds,
+                requestId);
             _logger.LogInformation("RAG service returned result. Answer length: {Length}", result.Answer?.Length ?? 0);
 
             await _monitoringService.CompleteRequest(requestId, true, 
