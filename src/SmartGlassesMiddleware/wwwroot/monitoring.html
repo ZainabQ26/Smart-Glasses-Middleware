@@ -6,12 +6,15 @@
     <title>Request Monitoring - Smart Glasses Middleware</title>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>📊</text></svg>">
     <script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@latest/dist/browser/signalr.min.js"></script>
+    <!-- MONITORING_HTML_UPDATED -->
     <style>
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
+
+        
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
@@ -220,6 +223,18 @@
             font-size: 0.9rem;
         }
 
+        .history-entry {
+            padding: 8px;
+            margin-top: 8px;
+            border-radius: 6px;
+            background: #f7f9fa;
+            border: 1px solid #e6eef2;
+        }
+
+        .history-entry.documentquery { border-left: 4px solid #3498db; }
+        .history-entry.media { border-left: 4px solid #27ae60; }
+        .history-entry.audio { border-left: 4px solid #9b59b6; }
+
         .no-requests {
             text-align: center;
             padding: 40px 20px;
@@ -230,6 +245,21 @@
         .duration {
             font-weight: 600;
             color: #3498db;
+        }
+
+        .progress-track {
+            background: #ecf0f1;
+            height: 10px;
+            border-radius: 6px;
+            overflow: hidden;
+            margin-top: 8px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg,#4caf50,#27ae60);
+            width: 0%;
+            transition: width 300ms ease;
         }
 
         @keyframes pulse {
@@ -298,6 +328,23 @@
         const API_BASE = '/api';
         let connection = null;
         let requests = [];
+        let historyMap = {}; // correlationId -> [history entries]
+
+        function renderHistoryForRequest(requestId) {
+            const entries = historyMap[requestId];
+            if (!entries || entries.length === 0) return '';
+
+            const items = entries.map(h => {
+                const typeClass = (h.requestType || '').toLowerCase();
+                return `<div class="history-entry ${escapeHtml(typeClass)}">
+                    <div style="font-weight:600">${escapeHtml(h.requestType)}${h.detectedTask ? ' — ' + escapeHtml(h.detectedTask) : ''}</div>
+                    <div style="color:#555;margin-top:6px">${escapeHtml(h.inputText || '')}</div>
+                    ${h.response ? `<div style="margin-top:6px;color:#2c3e50;margin-top:6px"><strong>Response:</strong> ${escapeHtml(h.response)}</div>` : ''}
+                </div>`;
+            }).join('');
+
+            return `<div style="margin-top:10px"><details><summary style="cursor:pointer">View related history (${entries.length})</summary>${items}</details></div>`;
+        }
 
         // Initialize SignalR connection
         async function initializeSignalR() {
@@ -390,6 +437,11 @@
                         </div>
                         ${request.error ? `<div class="request-error"><strong>Error:</strong> ${escapeHtml(request.error)}</div>` : ''}
                         ${request.result ? `<div class="request-result"><strong>Result:</strong> ${escapeHtml(request.result)}</div>` : ''}
+                        ${typeof request.progress !== 'undefined' && request.progress !== null ? `
+                            <div class="progress-track"><div class="progress-fill" style="width:${Math.max(0, Math.min(100, request.progress))}%"></div></div>
+                            <div style="font-size:0.85rem;color:#7f8c8d;margin-top:6px">Progress: ${request.progress}%</div>
+                        ` : ''}
+                        ${renderHistoryForRequest(request.requestId)}
                     </div>
                 `;
             }).join('');
@@ -429,9 +481,25 @@
 
         async function loadRecentRequests() {
             try {
-                const response = await fetch(`${API_BASE}/monitoring/requests?count=50`);
-                if (response.ok) {
-                    const data = await response.json();
+                const [monRes, histRes] = await Promise.all([
+                    fetch(`${API_BASE}/monitoring/requests?count=50`),
+                    fetch(`${API_BASE}/history?count=100`)
+                ]);
+
+                if (histRes.ok) {
+                    const histData = await histRes.json();
+                    // Build map by CorrelationId
+                    historyMap = {};
+                    histData.forEach(h => {
+                        if (h.correlationId) {
+                            if (!historyMap[h.correlationId]) historyMap[h.correlationId] = [];
+                            historyMap[h.correlationId].push(h);
+                        }
+                    });
+                }
+
+                if (monRes.ok) {
+                    const data = await monRes.json();
                     requests = data;
                     renderRequests();
                     updateStats();

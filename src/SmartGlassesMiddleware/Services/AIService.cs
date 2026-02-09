@@ -28,9 +28,25 @@ public class OllamaAIService : IAIService
         _kernel = kernel;
         _httpClient = httpClient;
         _logger = logger;
-        _advancedModelEndpoint = configuration["AI:AdvancedModelEndpoint"] ?? "http://localhost:5000/api/chat";
-        _advancedModelName = configuration["AI:AdvancedModelName"] ?? "gpt-4";
-        _useAdvancedModel = configuration.GetValue<bool?>("AI:UseAdvancedModel") ?? true;
+        if (configuration == null)
+        {
+            _advancedModelEndpoint = "http://localhost:5000/api/chat";
+            _advancedModelName = "gpt-4";
+            _useAdvancedModel = true;
+        }
+        else
+        {
+            _advancedModelEndpoint = configuration["AI:AdvancedModelEndpoint"] ?? "http://localhost:5000/api/chat";
+            _advancedModelName = configuration["AI:AdvancedModelName"] ?? "gpt-4";
+            try
+            {
+                _useAdvancedModel = configuration.GetValue<bool?>("AI:UseAdvancedModel") ?? true;
+            }
+            catch
+            {
+                _useAdvancedModel = true;
+            }
+        }
         _dispatcher = dispatcher;
         // Do not eagerly enumerate all task handlers during construction (those handlers
         // may require heavy services like DB/minio/redis). Resolve known tasks lazily

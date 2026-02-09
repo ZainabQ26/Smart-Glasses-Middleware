@@ -17,6 +17,7 @@ public class DocumentsController : ControllerBase
     private readonly ApplicationDbContext _context;
     private readonly IConfiguration _configuration;
     private readonly IRequestMonitoringService _monitoringService;
+    private readonly IHistoryService _historyService;
     private readonly IMediaStorageService _mediaStorageService;
     private readonly long _maxFileSize;
 
@@ -28,6 +29,7 @@ public class DocumentsController : ControllerBase
         ApplicationDbContext context,
         IConfiguration configuration,
         IRequestMonitoringService monitoringService,
+        IHistoryService historyService,
         IMediaStorageService mediaStorageService)
     {
         _logger = logger;
@@ -37,6 +39,7 @@ public class DocumentsController : ControllerBase
         _context = context;
         _configuration = configuration;
         _monitoringService = monitoringService;
+        _historyService = historyService;
         _mediaStorageService = mediaStorageService;
         var maxFileSizeMB = configuration.GetValue<int?>("RAG:MaxFileSizeMB") ?? 50;
         _maxFileSize = maxFileSizeMB * 1024 * 1024;
@@ -153,6 +156,25 @@ public class DocumentsController : ControllerBase
             await _monitoringService.CompleteRequest(requestId, true, 
                 $"Found {result.Sources?.Count ?? 0} sources");
             _logger.LogInformation("=== DOCUMENT QUERY COMPLETED SUCCESSFULLY ===");
+
+            // Persist a DocumentQuery history entry and attach the monitoring request id so UI can group
+            try
+            {
+                var hist = new RequestHistory
+                {
+                    RequestType = "DocumentQuery",
+                    InputText = request.Query,
+                    Response = $"Found {result.Sources?.Count ?? 0} sources",
+                    DetectedTask = "document_query",
+                    CorrelationId = requestId
+                };
+
+                await _historyService.SaveRequestAsync(hist);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to save document query history");
+            }
 
             return Ok(result);
         }
