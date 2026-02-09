@@ -82,6 +82,9 @@ public class RequestMonitoringService : IRequestMonitoringService
             request.EndTime = DateTime.UtcNow;
             request.DurationMs = (long)(request.EndTime.Value - request.StartTime).TotalMilliseconds;
 
+            // Ensure UI progress reaches 100% on completion
+            try { request.Progress = 100; } catch { }
+
             await BroadcastUpdate(request);
             _logger.LogInformation("Completed request {RequestId}: Success={Success}, Duration={Duration}ms", 
                 requestId, success, request.DurationMs);
