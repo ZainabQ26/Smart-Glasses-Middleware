@@ -15,6 +15,8 @@ public interface IConversationService
     Task<string> SummarizeConversationAsync(Guid conversationId);
     Task ArchiveConversationAsync(Guid conversationId);
     Task<List<ChatMessage>> SearchRelevantMessagesAsync(Guid conversationId, string query, int maxResults = 5);
+    Task<(bool topicChanged, Conversation? newConversation)> DetectTopicChangeAsync(Guid conversationId, string newMessage);
+    Task<Conversation> SplitConversationAsync(Guid originalConversationId, string newTopic, List<ChatMessage> messagesToMove);
 }
 
 public class ConversationService : IConversationService
@@ -24,6 +26,8 @@ public class ConversationService : IConversationService
     private readonly IConfiguration _configuration;
     private readonly IServiceProvider _serviceProvider;
     private readonly double _tokensPerChar;
+    private const int MaxTopicLength = 50;
+    private const int MaxFallbackTitleLength = 50;
 
     public ConversationService(
         ApplicationDbContext context,
@@ -177,10 +181,13 @@ public class ConversationService : IConversationService
                 var topic = (detectedLabel ?? string.Empty).Trim();
                 if (!string.IsNullOrWhiteSpace(topic))
                 {
-                    // Normalize the topic string
-                    if (topic.Length > 100) topic = topic.Substring(0, 100);
-                    // Try to find or create a ResourceGroup with this topic name
-                    var existingGroup = await _context.ResourceGroups.FirstOrDefaultAsync(r => r.Name == topic);
+                    // Normalize the topic string (case-insensitive, length limit)
+                    topic = topic.Length > MaxTopicLength ? topic.Substring(0, MaxTopicLength) : topic;
+                    
+                    // Try to find or create a ResourceGroup with this topic name (case-insensitive)
+                    var existingGroup = await _context.ResourceGroups
+                        .FirstOrDefaultAsync(r => r.Name.ToLower() == topic.ToLower());
+                    
                     if (existingGroup == null)
                     {
                         existingGroup = new ResourceGroup { Id = Guid.NewGuid(), Name = topic, CreatedAt = DateTime.UtcNow };
@@ -202,7 +209,7 @@ public class ConversationService : IConversationService
                     }
 
                     // Create a new conversation with the topic-based title and attach the group
-                    var title = topic.Length > 50 ? topic.Substring(0, 50) + "..." : topic;
+                    var title = topic.Length > MaxFallbackTitleLength ? topic.Substring(0, MaxFallbackTitleLength) + "..." : topic;
                     _logger.LogInformation("Creating new conversation with topic '{Topic}'", topic);
                     return await CreateConversationAsync(title, existingGroup.Id);
                 }
@@ -214,8 +221,8 @@ public class ConversationService : IConversationService
         }
 
         // Fallback: no topic detected or AI unavailable — create new conversation from message excerpt
-        var fallbackTitle = userMessage.Length > 50
-            ? userMessage.Substring(0, 50) + "..."
+        var fallbackTitle = userMessage.Length > MaxFallbackTitleLength
+            ? userMessage.Substring(0, MaxFallbackTitleLength) + "..."
             : userMessage;
 
         Guid? effectiveGroupId = groupId;
@@ -367,5 +374,122 @@ Summary:";
     private int EstimateTokens(string text)
     {
         return (int)(text.Length * _tokensPerChar);
+    }
+
+    public async Task<(bool topicChanged, Conversation? newConversation)> DetectTopicChangeAsync(Guid conversationId, string newMessage)
+    {
+        var conversation = await GetConversationAsync(conversationId);
+        if (conversation == null)
+        {
+            throw new ArgumentException($"Conversation {conversationId} not found");
+        }
+
+        // Need at least a few messages to detect topic change
+        var recentMessages = conversation.Messages
+            .OrderByDescending(m => m.Timestamp)
+            .Take(5)
+            .OrderBy(m => m.Timestamp)
+            .ToList();
+
+        if (recentMessages.Count < 2)
+        {
+            return (false, null);
+        }
+
+        try
+        {
+            var ai = _serviceProvider.GetService(typeof(IAIService)) as IAIService;
+            if (ai != null)
+            {
+                // Build context from recent messages
+                var recentContext = string.Join("\n", recentMessages.Select(m => $"{m.Role}: {m.Content}"));
+                
+                // Ask AI to detect topic change
+                var prompt = $@"Analyze if the new message represents a significant topic change from the recent conversation.
+Recent conversation:
+{recentContext}
+
+New message: {newMessage}
+
+Does this new message change the topic significantly? Respond with 'YES' or 'NO', followed by a brief topic label (max 3 words) if YES.
+Format: YES|topic label OR NO";
+
+                var (_, aiResponse, _) = await ai.ProcessRequestAsync(prompt);
+                if (!string.IsNullOrWhiteSpace(aiResponse))
+                {
+                    var response = aiResponse.Trim();
+                    if (response.StartsWith("YES", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Extract topic label
+                        var parts = response.Split('|');
+                        var newTopic = parts.Length > 1 ? parts[1].Trim() : newMessage.Substring(0, Math.Min(MaxFallbackTitleLength, newMessage.Length));
+                        
+                        // Normalize topic length
+                        newTopic = newTopic.Length > MaxTopicLength ? newTopic.Substring(0, MaxTopicLength) : newTopic;
+                        
+                        _logger.LogInformation("Topic change detected in conversation {ConversationId}. New topic: {Topic}", conversationId, newTopic);
+
+                        // Find or create a ResourceGroup for the new topic (case-insensitive)
+                        var existingGroup = await _context.ResourceGroups
+                            .FirstOrDefaultAsync(r => r.Name.ToLower() == newTopic.ToLower());
+                        
+                        if (existingGroup == null)
+                        {
+                            existingGroup = new ResourceGroup 
+                            { 
+                                Id = Guid.NewGuid(), 
+                                Name = newTopic, 
+                                CreatedAt = DateTime.UtcNow 
+                            };
+                            _context.ResourceGroups.Add(existingGroup);
+                            await _context.SaveChangesAsync();
+                        }
+
+                        // Create new conversation in the new topic group
+                        var newConversation = await CreateConversationAsync(newTopic, existingGroup.Id);
+                        
+                        return (true, newConversation);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Topic change detection failed for conversation {ConversationId}", conversationId);
+        }
+
+        return (false, null);
+    }
+
+    public async Task<Conversation> SplitConversationAsync(Guid originalConversationId, string newTopic, List<ChatMessage> messagesToMove)
+    {
+        var originalConversation = await GetConversationAsync(originalConversationId);
+        if (originalConversation == null)
+        {
+            throw new ArgumentException($"Original conversation {originalConversationId} not found");
+        }
+
+        // Create new conversation for the split
+        var newConversation = await CreateConversationAsync(newTopic);
+
+        // Move messages to new conversation
+        foreach (var message in messagesToMove)
+        {
+            var existingMessage = await _context.ChatMessages.FindAsync(message.Id);
+            if (existingMessage != null)
+            {
+                existingMessage.ConversationId = newConversation.Id;
+            }
+        }
+
+        // Update original conversation timestamp
+        originalConversation.UpdatedAt = DateTime.UtcNow;
+        
+        await _context.SaveChangesAsync();
+
+        _logger.LogInformation("Split conversation {OriginalId} into {NewId} with topic '{Topic}'", 
+            originalConversationId, newConversation.Id, newTopic);
+
+        return newConversation;
     }
 }
