@@ -31,6 +31,7 @@ public class ApplicationDbContext : DbContext
     public DbSet<Conversation> Conversations { get; set; }
     public DbSet<ChatMessage> ChatMessages { get; set; }
     public DbSet<AIInteractionLog> AIInteractionLogs { get; set; }
+    public DbSet<GroupConversationMapping> GroupConversationMappings { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

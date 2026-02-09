@@ -8,6 +8,11 @@ public class QueryResult
     public string Answer { get; set; } = string.Empty;
 
     /// <summary>
+    /// Conversation id used for this query (if any)
+    /// </summary>
+    public Guid? ConversationId { get; set; }
+
+    /// <summary>
     /// All sources that were provided to the AI as context
     /// </summary>
     public List<DocumentSource> Sources { get; set; } = new();

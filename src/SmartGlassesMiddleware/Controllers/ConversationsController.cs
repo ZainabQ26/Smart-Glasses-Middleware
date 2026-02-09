@@ -136,6 +136,7 @@ public class ConversationsController : ControllerBase
                 result.Answer,
                 request.Model ?? "default");
 
+            result.ConversationId = id;
             return Ok(result);
         }
         catch (Exception ex)
