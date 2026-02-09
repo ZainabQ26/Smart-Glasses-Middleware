@@ -19,6 +19,7 @@ public class DocumentsController : ControllerBase
     private readonly IRequestMonitoringService _monitoringService;
     private readonly IHistoryService _historyService;
     private readonly IMediaStorageService _mediaStorageService;
+    private readonly IConversationService _conversationService;
     private readonly long _maxFileSize;
 
     public DocumentsController(
@@ -30,7 +31,8 @@ public class DocumentsController : ControllerBase
         IConfiguration configuration,
         IRequestMonitoringService monitoringService,
         IHistoryService historyService,
-        IMediaStorageService mediaStorageService)
+        IMediaStorageService mediaStorageService,
+        IConversationService conversationService)
     {
         _logger = logger;
         _processingService = processingService;
@@ -41,6 +43,7 @@ public class DocumentsController : ControllerBase
         _monitoringService = monitoringService;
         _historyService = historyService;
         _mediaStorageService = mediaStorageService;
+        _conversationService = conversationService;
         var maxFileSizeMB = configuration.GetValue<int?>("RAG:MaxFileSizeMB") ?? 50;
         _maxFileSize = maxFileSizeMB * 1024 * 1024;
     }
@@ -145,14 +148,25 @@ public class DocumentsController : ControllerBase
             _logger.LogInformation("Updating request status to 'Searching documents'...");
             await _monitoringService.UpdateRequestStatus(requestId, "Searching documents...");
 
-            _logger.LogInformation("Calling RAG service QueryDocumentsAsync...");
-            var result = await _ragService.QueryDocumentsAsync(
+            // Detect or create a conversation to maintain context within groups
+            var groupId = request.GroupIds?.FirstOrDefault();
+            var conversation = await _conversationService.DetectOrCreateConversationAsync(request.Query, groupId);
+            _logger.LogInformation("Using conversation {ConversationId} for query", conversation.Id);
+
+            // Add user message to conversation
+            await _conversationService.AddMessageAsync(conversation.Id, "user", request.Query);
+
+            _logger.LogInformation("Calling RAG service QueryDocumentsWithConversationAsync...");
+            var result = await _ragService.QueryDocumentsWithConversationAsync(
                 request.Query,
+                conversation.Id,
                 request.TopK ?? 5,
                 request.GroupIds,
-                request.DocumentIds,
-                requestId);
+                request.DocumentIds);
             _logger.LogInformation("RAG service returned result. Answer length: {Length}", result.Answer?.Length ?? 0);
+
+            // Add assistant response to conversation
+            await _conversationService.AddMessageAsync(conversation.Id, "assistant", result.Answer ?? string.Empty);
 
             await _monitoringService.CompleteRequest(requestId, true, 
                 $"Found {result.Sources?.Count ?? 0} sources");
