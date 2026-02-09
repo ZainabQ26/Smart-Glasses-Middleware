@@ -1121,6 +1121,30 @@ function trackPrompt() {
 // Make functions globally available
 window.trackPrompt = trackPrompt;
 window.createNewPrompt = createNewPrompt;
+window.viewConversation = async function(conversationId, title) {
+    try {
+        // Close the modal
+        const modal = document.getElementById('manage-group-modal');
+        if (modal) modal.classList.remove('active');
+        
+        // Switch to the prompts tab if not already there
+        const promptsTab = document.querySelector('.tab[data-tab="prompts"]');
+        if (promptsTab) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            promptsTab.classList.add('active');
+            document.getElementById('prompts').classList.add('active');
+        }
+        
+        // Load the conversation into view
+        activeConversationId = conversationId;
+        await loadConversationIntoView(conversationId, title);
+        showMessage(`Loaded conversation: ${title}`, 'success');
+    } catch (error) {
+        console.error('[VIEW CONVERSATION] Error:', error);
+        showMessage('Failed to load conversation: ' + error.message, 'error');
+    }
+};
 
 // Groups with lazy loading
 async function loadGroups(reset = false) {
@@ -1516,10 +1540,12 @@ async function manageGroupResources(groupId, groupName) {
         // Use getProp to access files and prompts arrays with case-insensitive fallback
         const groupFiles = getProp(currentGroup, 'files') || [];
         const groupPrompts = getProp(currentGroup, 'prompts') || [];
+        const groupConversations = getProp(currentGroup, 'conversations') || [];
         const groupFileIds = new Set(groupFiles.map(f => getProp(f, 'id')));
         const groupPromptIds = new Set(groupPrompts.map(p => getProp(p, 'id')));
         
         console.log('[MANAGE] Group files:', groupFiles);
+        console.log('[MANAGE] Group conversations:', groupConversations);
         
         const modalBody = document.getElementById('modal-content-body');
 
@@ -1567,6 +1593,37 @@ async function manageGroupResources(groupId, groupName) {
             }).join('');
         }
         
+        // Build conversations list HTML
+        let conversationsListHTML = '';
+        if (groupConversations.length === 0) {
+            conversationsListHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No conversations yet</div>';
+        } else {
+            conversationsListHTML = groupConversations.map(convo => {
+                const convoId = getProp(convo, 'id');
+                const convoTitle = getProp(convo, 'title') || 'Untitled';
+                const messageCount = getProp(convo, 'messageCount') || 0;
+                const isActive = getProp(convo, 'isActive') || false;
+                const statusColor = isActive ? '#27ae60' : '#95a5a6';
+                const statusText = isActive ? 'Active' : 'Archived';
+                return `
+                    <div style="padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0;">
+                        <div style="flex: 1; overflow: hidden;">
+                            <div style="font-size: 14px; color: #333; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                ${escapeHtml(convoTitle)}
+                            </div>
+                            <div style="font-size: 11px; color: #666; margin-top: 2px;">
+                                <span style="color: ${statusColor};">● ${statusText}</span> · ${messageCount} message${messageCount !== 1 ? 's' : ''}
+                            </div>
+                        </div>
+                        <button type="button" onclick="viewConversation('${convoId}', '${escapeHtml(convoTitle).replace(/'/g, "\\'")}')"
+                            style="padding: 4px 12px; background: #9b59b6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">
+                            View
+                        </button>
+                    </div>
+                `;
+            }).join('');
+        }
+        
         // Attempt to fetch existing mapping for this group and include mapping UI
         let existingMapping = null;
         try {
@@ -1596,6 +1653,12 @@ async function manageGroupResources(groupId, groupName) {
                         <div style="font-weight: 600; color: #2c3e50; margin-bottom: 8px; font-size: 14px;">Prompts</div>
                         <div id="modal-prompts-list" style="flex: 1; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; background: white; max-height: 360px; min-height: 160px;">
                             ${promptsListHTML}
+                        </div>
+                    </div>
+                    <div style="border: 2px solid #9b59b6; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; position: relative;">
+                        <div style="font-weight: 600; color: #2c3e50; margin-bottom: 8px; font-size: 14px;">Conversations</div>
+                        <div id="modal-conversations-list" style="flex: 1; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; background: white; max-height: 360px; min-height: 160px;">
+                            ${conversationsListHTML}
                         </div>
                     </div>
                 </div>
