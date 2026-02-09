@@ -19,7 +19,7 @@ public interface IRagService
     /// <summary>
     /// Get context from media RAG system for a given query
     /// </summary>
-    Task<string> GetRagContextAsync(string query, int maxResults = 5);
+    Task<string> GetRagContextAsync(string query, int maxResults = 5, string? monitoringRequestId = null);
 }
 
 /// <summary>
@@ -31,15 +31,18 @@ public class RagService : IRagService
     private readonly ApplicationDbContext _context;
     private readonly IMediaStorageService _mediaStorageService;
     private readonly ILogger<RagService> _logger;
+    private readonly IRequestMonitoringService? _monitoringService;
 
     public RagService(
         ApplicationDbContext context,
         IMediaStorageService mediaStorageService,
-        ILogger<RagService> logger)
+        ILogger<RagService> logger,
+        IRequestMonitoringService? monitoringService = null)
     {
         _context = context;
         _mediaStorageService = mediaStorageService;
         _logger = logger;
+        _monitoringService = monitoringService;
     }
 
     public async Task ProcessFileForRagAsync(Guid fileId, string fileName, string contentType, string storageKey, string? transcription = null)
@@ -90,11 +93,20 @@ public class RagService : IRagService
         }
     }
 
-    public async Task<string> GetRagContextAsync(string query, int maxResults = 5)
+    public async Task<string> GetRagContextAsync(string query, int maxResults = 5, string? monitoringRequestId = null)
     {
         try
         {
             _logger.LogInformation("Retrieving media RAG context for query: {Query}", query);
+
+            try
+            {
+                if (!string.IsNullOrEmpty(monitoringRequestId))
+                {
+                    _monitoringService?.UpdateRequestStatus(monitoringRequestId, "Retrieval", "Searching RAG index", 40);
+                }
+            }
+            catch { }
 
             var keywords = ExtractKeywords(query);
 
@@ -131,6 +143,14 @@ public class RagService : IRagService
             }
 
             _logger.LogInformation("Retrieved {Count} media RAG entries for context", entries.Count);
+            try
+            {
+                if (!string.IsNullOrEmpty(monitoringRequestId))
+                {
+                    _monitoringService?.UpdateRequestStatus(monitoringRequestId, "Retrieval", "Assembling context", 50);
+                }
+            }
+            catch { }
             return context.ToString();
         }
         catch (Exception ex)

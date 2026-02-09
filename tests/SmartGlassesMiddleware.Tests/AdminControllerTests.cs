@@ -34,7 +34,8 @@ public class AdminControllerTests
         Mock<ICacheService>? cacheService = null,
         Mock<IRagService>? ragService = null,
         Mock<IRAGService>? documentRagService = null,
-        Mock<ILogger<AdminController>>? logger = null)
+        Mock<ILogger<AdminController>>? logger = null,
+        Mock<IRequestMonitoringService>? monitoringService = null)
     {
         var ctx = context ?? GetInMemoryContext();
         var mockMediaStorage = mediaStorageService ?? new Mock<IMediaStorageService>();
@@ -42,6 +43,15 @@ public class AdminControllerTests
         var mockRag = ragService ?? new Mock<IRagService>();
         var mockDocRag = documentRagService ?? new Mock<IRAGService>();
         var mockLogger = logger ?? new Mock<ILogger<AdminController>>();
+        var mockMonitoring = monitoringService ?? new Mock<IRequestMonitoringService>();
+        
+        // Setup default monitoring service behavior to return a GUID
+        mockMonitoring.Setup(m => m.StartRequest(It.IsAny<string>(), It.IsAny<string>()))
+            .ReturnsAsync(Guid.NewGuid().ToString());
+        mockMonitoring.Setup(m => m.UpdateRequestStatus(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(Task.CompletedTask);
+        mockMonitoring.Setup(m => m.CompleteRequest(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(Task.CompletedTask);
 
         var controller = new AdminController(
             ctx,
@@ -49,7 +59,8 @@ public class AdminControllerTests
             mockCache.Object,
             mockRag.Object,
             mockDocRag.Object,
-            mockLogger.Object);
+            mockLogger.Object,
+            mockMonitoring.Object);
 
         controller.ControllerContext = new ControllerContext
         {

@@ -19,6 +19,7 @@ public class AdminController : ControllerBase
     private readonly IRagService _ragService;
     private readonly IRAGService _documentRagService;
     private readonly ILogger<AdminController> _logger;
+    private readonly IRequestMonitoringService _monitoringService;
     private const int DefaultPageSize = 20;
     private const int MaxPageSize = 100;
 
@@ -28,7 +29,8 @@ public class AdminController : ControllerBase
         ICacheService cacheService,
         IRagService ragService,
         IRAGService documentRagService,
-        ILogger<AdminController> logger)
+        ILogger<AdminController> logger,
+        IRequestMonitoringService monitoringService)
     {
         _context = context;
         _mediaStorageService = mediaStorageService;
@@ -36,6 +38,7 @@ public class AdminController : ControllerBase
         _ragService = ragService;
         _documentRagService = documentRagService;
         _logger = logger;
+        _monitoringService = monitoringService;
     }
 
     #region Files
@@ -127,8 +130,13 @@ public class AdminController : ControllerBase
             });
         }
 
+        string? requestId = null;
         try
         {
+            requestId = await _monitoringService.StartRequest("FileUpload", 
+                $"Uploading: {request.File.FileName} (Label: {request.Label})");
+            await _monitoringService.UpdateRequestStatus(requestId, "Uploading file...");
+
             // Compute content hash for deduplication
             using var hashStream = request.File.OpenReadStream();
             var contentHash = _mediaStorageService.ComputeContentHash(hashStream);
@@ -140,6 +148,7 @@ public class AdminController : ControllerBase
             if (existingFile != null)
             {
                 _logger.LogInformation("File with hash {Hash} already exists as {FileId}, returning existing file", contentHash, existingFile.Id);
+                await _monitoringService.CompleteRequest(requestId, true, "File already exists (deduplicated)");
                 return Ok(new
                 {
                     existingFile.Id,
@@ -154,6 +163,7 @@ public class AdminController : ControllerBase
                 });
             }
 
+            await _monitoringService.UpdateRequestStatus(requestId, "Storing file...");
             // Upload to MinIO
             using var stream = request.File.OpenReadStream();
             var contentType = request.File.ContentType ?? "application/octet-stream";
@@ -175,6 +185,7 @@ public class AdminController : ControllerBase
             _context.ManagedFiles.Add(managedFile);
             await _context.SaveChangesAsync();
 
+            await _monitoringService.UpdateRequestStatus(requestId, "Processing for RAG...");
             // Process file for RAG indexing
             try
             {
@@ -193,6 +204,9 @@ public class AdminController : ControllerBase
             // Invalidate cache
             await InvalidateFilesCache();
 
+            await _monitoringService.CompleteRequest(requestId, true, 
+                $"File uploaded successfully: {managedFile.FileName}");
+
             return CreatedAtAction(nameof(GetFiles), new { id = managedFile.Id }, new
             {
                 managedFile.Id,
@@ -209,6 +223,8 @@ public class AdminController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error uploading file");
+            if (requestId != null)
+                await _monitoringService.CompleteRequest(requestId, false, error: ex.Message);
             return StatusCode(500, new ProblemDetails
             {
                 Title = "Internal Server Error",
@@ -235,8 +251,12 @@ public class AdminController : ControllerBase
             });
         }
 
+        string? requestId = null;
         try
         {
+            requestId = await _monitoringService.StartRequest("FileDelete", 
+                $"Deleting file: {file.FileName}");
+            
             // Delete from MinIO
             await _mediaStorageService.DeleteMediaAsync(file.StorageKey);
 
@@ -247,11 +267,15 @@ public class AdminController : ControllerBase
             // Invalidate cache
             await InvalidateFilesCache();
 
+            await _monitoringService.CompleteRequest(requestId, true, 
+                $"File deleted: {file.FileName}");
             return NoContent();
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error deleting file {FileId}", id);
+            if (requestId != null)
+                await _monitoringService.CompleteRequest(requestId, false, error: ex.Message);
             return StatusCode(500, new ProblemDetails
             {
                 Title = "Internal Server Error",
@@ -321,16 +345,27 @@ public class AdminController : ControllerBase
     [HttpPost("reindex")]
     public async Task<ActionResult> ReindexAll([FromQuery] bool force = false)
     {
+        string? requestId = null;
         try
         {
+            requestId = await _monitoringService.StartRequest("DocumentReindex", 
+                $"Reindexing all documents (force: {force})");
+            await _monitoringService.UpdateRequestStatus(requestId, "Reindexing documents...");
+            
             var reindexed = await _documentRagService.ReindexAllDocumentsAsync(force);
+            
             // Invalidate relevant caches
             await InvalidateFilesCache();
+            
+            await _monitoringService.CompleteRequest(requestId, true, 
+                $"Reindexed {reindexed} documents");
             return Ok(new { reindexed });
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to reindex documents");
+            if (requestId != null)
+                await _monitoringService.CompleteRequest(requestId, false, error: ex.Message);
             return StatusCode(500, new ProblemDetails
             {
                 Title = "Reindex Failed",
@@ -429,8 +464,12 @@ public class AdminController : ControllerBase
             });
         }
 
+        string? requestId = null;
         try
         {
+            requestId = await _monitoringService.StartRequest("PromptCreate", 
+                $"Creating prompt: {request.Name}");
+            
             var prompt = new ManagedPrompt
             {
                 Id = Guid.NewGuid(),
@@ -445,6 +484,9 @@ public class AdminController : ControllerBase
             // Invalidate cache
             await InvalidatePromptsCache();
 
+            await _monitoringService.CompleteRequest(requestId, true, 
+                $"Prompt created: {prompt.Name}");
+
             return CreatedAtAction(nameof(GetPrompts), new { id = prompt.Id }, new
             {
                 prompt.Id,
@@ -457,6 +499,8 @@ public class AdminController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error creating prompt");
+            if (requestId != null)
+                await _monitoringService.CompleteRequest(requestId, false, error: ex.Message);
             return StatusCode(500, new ProblemDetails
             {
                 Title = "Internal Server Error",
@@ -503,8 +547,12 @@ public class AdminController : ControllerBase
             });
         }
 
+        string? requestId = null;
         try
         {
+            requestId = await _monitoringService.StartRequest("PromptUpdate", 
+                $"Updating prompt: {request.Name}");
+            
             prompt.Name = request.Name;
             prompt.PromptText = request.PromptText;
             prompt.UpdatedAt = DateTime.UtcNow;
@@ -513,6 +561,9 @@ public class AdminController : ControllerBase
 
             // Invalidate cache
             await InvalidatePromptsCache();
+
+            await _monitoringService.CompleteRequest(requestId, true, 
+                $"Prompt updated: {prompt.Name}");
 
             return Ok(new
             {
@@ -526,6 +577,8 @@ public class AdminController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error updating prompt {PromptId}", id);
+            if (requestId != null)
+                await _monitoringService.CompleteRequest(requestId, false, error: ex.Message);
             return StatusCode(500, new ProblemDetails
             {
                 Title = "Internal Server Error",
@@ -552,19 +605,27 @@ public class AdminController : ControllerBase
             });
         }
 
+        string? requestId = null;
         try
         {
+            requestId = await _monitoringService.StartRequest("PromptDelete", 
+                $"Deleting prompt: {prompt.Name}");
+            
             _context.ManagedPrompts.Remove(prompt);
             await _context.SaveChangesAsync();
 
             // Invalidate cache
             await InvalidatePromptsCache();
 
+            await _monitoringService.CompleteRequest(requestId, true, 
+                $"Prompt deleted: {prompt.Name}");
             return NoContent();
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error deleting prompt {PromptId}", id);
+            if (requestId != null)
+                await _monitoringService.CompleteRequest(requestId, false, error: ex.Message);
             return StatusCode(500, new ProblemDetails
             {
                 Title = "Internal Server Error",
@@ -664,8 +725,12 @@ public class AdminController : ControllerBase
             });
         }
 
+        string? requestId = null;
         try
         {
+            requestId = await _monitoringService.StartRequest("GroupCreate", 
+                $"Creating group: {request.Name}");
+            
             var group = new ResourceGroup
             {
                 Id = Guid.NewGuid(),
@@ -680,6 +745,9 @@ public class AdminController : ControllerBase
             // Invalidate cache
             await InvalidateGroupsCache();
 
+            await _monitoringService.CompleteRequest(requestId, true, 
+                $"Group created: {group.Name}");
+
             return CreatedAtAction(nameof(GetGroups), new { id = group.Id }, new
             {
                 group.Id,
@@ -691,6 +759,8 @@ public class AdminController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error creating group");
+            if (requestId != null)
+                await _monitoringService.CompleteRequest(requestId, false, error: ex.Message);
             return StatusCode(500, new ProblemDetails
             {
                 Title = "Internal Server Error",
@@ -727,8 +797,12 @@ public class AdminController : ControllerBase
             });
         }
 
+        string? requestId = null;
         try
         {
+            requestId = await _monitoringService.StartRequest("GroupUpdate", 
+                $"Updating group: {request.Name}");
+            
             group.Name = request.Name;
             group.Description = request.Description;
 
@@ -736,6 +810,9 @@ public class AdminController : ControllerBase
 
             // Invalidate cache
             await InvalidateGroupsCache();
+
+            await _monitoringService.CompleteRequest(requestId, true, 
+                $"Group updated: {group.Name}");
 
             return Ok(new
             {
@@ -748,6 +825,8 @@ public class AdminController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error updating group {GroupId}", id);
+            if (requestId != null)
+                await _monitoringService.CompleteRequest(requestId, false, error: ex.Message);
             return StatusCode(500, new ProblemDetails
             {
                 Title = "Internal Server Error",
@@ -774,19 +853,27 @@ public class AdminController : ControllerBase
             });
         }
 
+        string? requestId = null;
         try
         {
+            requestId = await _monitoringService.StartRequest("GroupDelete", 
+                $"Deleting group: {group.Name}");
+            
             _context.ResourceGroups.Remove(group);
             await _context.SaveChangesAsync();
 
             // Invalidate cache
             await InvalidateGroupsCache();
 
+            await _monitoringService.CompleteRequest(requestId, true, 
+                $"Group deleted: {group.Name}");
             return NoContent();
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error deleting group {GroupId}", id);
+            if (requestId != null)
+                await _monitoringService.CompleteRequest(requestId, false, error: ex.Message);
             return StatusCode(500, new ProblemDetails
             {
                 Title = "Internal Server Error",
