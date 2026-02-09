@@ -1605,6 +1605,14 @@ async function manageGroupResources(groupId, groupName) {
                 const isActive = getProp(convo, 'isActive') || false;
                 const statusColor = isActive ? '#27ae60' : '#95a5a6';
                 const statusText = isActive ? 'Active' : 'Archived';
+                
+                // Validate conversation ID is a valid GUID format for security
+                const guidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+                if (!guidRegex.test(convoId)) {
+                    console.warn('[MANAGE] Invalid conversation ID format:', convoId);
+                    return '';
+                }
+                
                 return `
                     <div style="padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0;">
                         <div style="flex: 1; overflow: hidden;">
