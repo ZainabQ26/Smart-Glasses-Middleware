@@ -453,7 +453,8 @@
             }).length;
             const active = groups.filter(g => {
                 const p = (g.requests && g.requests[0]) ? g.requests[0] : synthesizeRequestFromHistory(g.histories, g.id);
-                return !p.endTime;
+                const status = (p && p.status) ? String(p.status).toLowerCase() : '';
+                return status !== 'completed' && status !== 'failed';
             }).length;
 
             const completedGroups = groups.map(g => {
@@ -535,8 +536,10 @@
             listEl.innerHTML = groupList.map(group => {
                 // Choose primary request if available, otherwise synthesize from histories
                 const primary = (group.requests && group.requests.length > 0) ? group.requests[0] : synthesizeRequestFromHistory(group.histories, group.id);
-                const isActive = primary && !primary.endTime;
-                const duration = primary?.durationMs || (isActive ? Date.now() - new Date(primary.startTime).getTime() : 0);
+                const status = primary && primary.status ? String(primary.status).toLowerCase() : '';
+                // Consider a group active only when its status is not completed/failed AND it has no endTime
+                const isActive = primary && (status !== 'completed' && status !== 'failed') && !primary?.endTime;
+                const duration = primary?.durationMs || (isActive && primary?.startTime ? Date.now() - new Date(primary.startTime).getTime() : 0);
 
                 // Aggregate progress: prefer primary.progress, otherwise max of histories
                 let progress = primary?.progress ?? null;
