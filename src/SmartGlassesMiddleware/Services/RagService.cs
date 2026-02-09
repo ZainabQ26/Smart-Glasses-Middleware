@@ -1231,7 +1231,7 @@ Answer:";
                                  query.Contains("what did i", StringComparison.OrdinalIgnoreCase);
 
             // Query both documents and reminders
-            var documentTask = QueryDocumentsAsync(query, topK, groupIds);
+            var documentTask = QueryDocumentsAsync(query, topK, groupIds, null);
             var reminderTask = QueryRemindersAsync(query, topK);
 
             await Task.WhenAll(documentTask, reminderTask);
