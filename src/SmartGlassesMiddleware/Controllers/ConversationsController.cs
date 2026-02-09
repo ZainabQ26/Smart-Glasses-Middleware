@@ -3,6 +3,7 @@ using SmartGlassesMiddleware.Services;
 using SmartGlassesMiddleware.Models;
 using SmartGlassesMiddleware.Data;
 using Microsoft.EntityFrameworkCore;
+using System.Linq;
 
 namespace SmartGlassesMiddleware.Controllers;
 
@@ -191,6 +192,29 @@ public class ConversationsController : ControllerBase
     public async Task<IActionResult> ArchiveConversation(Guid id)
     {
         await _conversationService.ArchiveConversationAsync(id);
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Permanently delete a conversation and its messages from the database.
+    /// </summary>
+    [HttpDelete("{id}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeleteConversation(Guid id)
+    {
+        var conversation = await _context.Conversations.FindAsync(id);
+        if (conversation == null)
+            return NotFound();
+
+        // Remove associated messages then the conversation row
+        var messages = _context.ChatMessages.Where(m => m.ConversationId == id);
+        _context.ChatMessages.RemoveRange(messages);
+        _context.Conversations.Remove(conversation);
+
+        await _context.SaveChangesAsync();
+
+        _logger.LogInformation("Permanently deleted conversation {ConversationId}", id);
         return NoContent();
     }
 }
