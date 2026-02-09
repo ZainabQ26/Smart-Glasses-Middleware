@@ -445,11 +445,13 @@
             const total = groups.length;
             const completed = groups.filter(g => {
                 const p = (g.requests && g.requests[0]) ? g.requests[0] : synthesizeRequestFromHistory(g.histories, g.id);
-                return p.status === 'Completed' && p.success;
+                const status = p && p.status ? String(p.status).toLowerCase() : '';
+                return status === 'completed' && Boolean(p.success);
             }).length;
             const failed = groups.filter(g => {
                 const p = (g.requests && g.requests[0]) ? g.requests[0] : synthesizeRequestFromHistory(g.histories, g.id);
-                return p.status === 'Failed' || (p.status === 'Completed' && !p.success);
+                const status = p && p.status ? String(p.status).toLowerCase() : '';
+                return status === 'failed' || (status === 'completed' && !Boolean(p.success));
             }).length;
             const active = groups.filter(g => {
                 const p = (g.requests && g.requests[0]) ? g.requests[0] : synthesizeRequestFromHistory(g.histories, g.id);
@@ -606,7 +608,9 @@
                 startTime: first.startTime,
                 endTime: last.endTime || null,
                 durationMs: last.endTime ? (new Date(last.endTime).getTime() - new Date(first.startTime).getTime()) : 0,
-                progress: null
+                progress: null,
+                // Mark success when the last history entry indicates a response or explicit success flag
+                success: typeof last.success !== 'undefined' ? Boolean(last.success) : Boolean(last.response)
             };
         }
         
