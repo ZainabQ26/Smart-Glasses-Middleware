@@ -22,18 +22,18 @@ public class RequestMonitoringService : IRequestMonitoringService
     private readonly IHubContext<TaskHub> _hubContext;
     private readonly ILogger<RequestMonitoringService> _logger;
     private readonly int _maxRecentRequests;
-    private readonly ApplicationDbContext _context;
+    private readonly IServiceScopeFactory _scopeFactory;
     private bool _initialized = false;
 
     public RequestMonitoringService(
         IHubContext<TaskHub> hubContext, 
         ILogger<RequestMonitoringService> logger, 
         IConfiguration configuration,
-        ApplicationDbContext context)
+        IServiceScopeFactory scopeFactory)
     {
         _hubContext = hubContext;
         _logger = logger;
-        _context = context;
+        _scopeFactory = scopeFactory;
         _maxRecentRequests = configuration.GetValue<int?>("Monitoring:MaxRecentRequests") ?? 100;
     }
 
@@ -101,11 +101,13 @@ public class RequestMonitoringService : IRequestMonitoringService
 
             await BroadcastUpdate(request);
             
-            // Persist to database
+            // Persist to database using a scoped DbContext
             try
             {
-                _context.RequestStatuses.Add(request);
-                await _context.SaveChangesAsync();
+                using var scope = _scopeFactory.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+                db.RequestStatuses.Add(request);
+                await db.SaveChangesAsync();
             }
             catch (Exception ex)
             {
@@ -134,19 +136,23 @@ public class RequestMonitoringService : IRequestMonitoringService
         
         try
         {
-            // Load recent completed requests from database
-            var dbRequests = await _context.RequestStatuses
-                .OrderByDescending(r => r.StartTime)
-                .Take(_maxRecentRequests)
-                .ToListAsync();
-            
-            foreach (var request in dbRequests.OrderBy(r => r.StartTime))
+            // Load recent completed requests from database using a scoped DbContext
+            using (var scope = _scopeFactory.CreateScope())
             {
-                _recentRequests.Enqueue(request);
+                var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+                var dbRequests = await db.RequestStatuses
+                    .OrderByDescending(r => r.StartTime)
+                    .Take(_maxRecentRequests)
+                    .ToListAsync();
+
+                foreach (var request in dbRequests.OrderBy(r => r.StartTime))
+                {
+                    _recentRequests.Enqueue(request);
+                }
+
+                _logger.LogInformation("Loaded {Count} historical request statuses from database", dbRequests.Count);
+                _initialized = true;
             }
-            
-            _logger.LogInformation("Loaded {Count} historical request statuses from database", dbRequests.Count);
-            _initialized = true;
         }
         catch (Exception ex)
         {
