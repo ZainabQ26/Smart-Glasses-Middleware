@@ -226,7 +226,9 @@ public class MediaController : ControllerBase
                             DetectedTask = tTask,
                             Response = tResponse,
                             UsedAdvancedModel = tUsedAdvancedModel
+                            // CorrelationId set below if monitoringRequestId exists
                         };
+                        if (!string.IsNullOrWhiteSpace(monitoringRequestId)) history.CorrelationId = monitoringRequestId;
                         history = await _historyService.SaveRequestAsync(history);
 
                         if (!string.IsNullOrWhiteSpace(monitoringRequestId) && _monitoringService != null)
