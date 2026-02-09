@@ -37,7 +37,12 @@ var _startupLogger = _preLoggerFactory.CreateLogger("Startup");
 // No need for Docker secrets file loading since all settings are in .env
 
 // Add services to the container.
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        // Use camelCase for JSON property names to match JavaScript conventions
+        options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+    });
 // Use RFC7807 Problem Details for model validation responses
 builder.Services.Configure<ApiBehaviorOptions>(options =>
 {

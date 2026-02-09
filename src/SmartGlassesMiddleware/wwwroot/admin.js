@@ -1,18 +1,5 @@
 const API_BASE = '/api/admin';
 
-// Helper function to get property with case-insensitive fallback
-function getProp(obj, propName) {
-    if (!obj) return undefined;
-    // Try lowercase first
-    if (obj[propName] !== undefined) return obj[propName];
-    // Try uppercase first letter
-    const upperProp = propName.charAt(0).toUpperCase() + propName.slice(1);
-    if (obj[upperProp] !== undefined) return obj[upperProp];
-    // Try all uppercase
-    if (obj[propName.toUpperCase()] !== undefined) return obj[propName.toUpperCase()];
-    return undefined;
-}
-
 // Enhanced fetch with retry logic and cache busting
 async function fetchWithRetry(url, options = {}, retries = 3) {
     // Add cache busting parameter and no-cache headers
@@ -135,9 +122,8 @@ async function loadFiles(reset = false) {
         
         const result = await response.json();
         console.log('Files API response:', result);
-        // Handle both lowercase and uppercase from API
-        const filesData = result.data || result.Data || [];
-        const pagination = result.pagination || result.Pagination || {};
+        const filesData = result.data || [];
+        const pagination = result.pagination || {};
         console.log('Files data length:', filesData.length);
         console.log('Files pagination:', pagination);
         
@@ -155,7 +141,7 @@ async function loadFiles(reset = false) {
             });
             list.appendChild(fragment);
             
-            state.files.hasMore = pagination.hasNext || pagination.HasNext;
+            state.files.hasMore = pagination.hasNext;
             state.files.page++;
         } else if (reset) {
             list.innerHTML = '<div class="empty-state"><p>No files uploaded yet</p></div>';
@@ -173,12 +159,12 @@ function createFileCard(file) {
     const div = document.createElement('div');
     div.className = 'card';
     
-    const id = getProp(file, 'id');
-    const label = getProp(file, 'label') || 'Untitled';
-    const fileName = getProp(file, 'fileName') || 'unknown';
-    const fileSize = getProp(file, 'fileSize') || 0;
-    const uploadedAt = getProp(file, 'uploadedAt');
-    const groups = getProp(file, 'groups') || [];
+    const id = file.id;
+    const label = file.label || 'Untitled';
+    const fileName = file.fileName || 'unknown';
+    const fileSize = file.fileSize || 0;
+    const uploadedAt = file.uploadedAt;
+    const groups = file.groups || [];
     
     div.innerHTML = `
         <div class="card-header">
@@ -191,7 +177,7 @@ function createFileCard(file) {
         </div>
         ${groups && groups.length > 0 ? `
             <div style="margin-top: 8px;">
-                ${groups.map(g => `<span class="badge">${escapeHtml(getProp(g, 'name') || '')}</span>`).join('')}
+                ${groups.map(g => `<span class="badge">${escapeHtml(g.name || '')}</span>`).join('')}
             </div>
         ` : ''}
         <div class="card-actions">
@@ -316,9 +302,8 @@ async function loadPrompts(reset = false) {
         
         const result = await response.json();
         console.log('Prompts API response:', result);
-        // Handle both lowercase and uppercase from API
-        const promptsData = result.data || result.Data || [];
-        const pagination = result.pagination || result.Pagination || {};
+        const promptsData = result.data || [];
+        const pagination = result.pagination || {};
         console.log('Prompts data length:', promptsData.length);
         
         const list = document.getElementById('prompts-list');
@@ -335,7 +320,7 @@ async function loadPrompts(reset = false) {
             });
             list.appendChild(fragment);
             
-            state.prompts.hasMore = pagination.hasNext || pagination.HasNext;
+            state.prompts.hasMore = pagination.hasNext;
             state.prompts.page++;
         } else if (reset) {
             list.innerHTML = '<div class="empty-state"><p>No prompts created yet</p></div>';
@@ -353,12 +338,12 @@ function createPromptCard(prompt) {
     const div = document.createElement('div');
     div.className = 'card';
     
-    const id = getProp(prompt, 'id');
-    const name = getProp(prompt, 'name') || 'Untitled';
-    const promptText = getProp(prompt, 'promptText') || '';
-    const createdAt = getProp(prompt, 'createdAt');
-    const updatedAt = getProp(prompt, 'updatedAt');
-    const groups = getProp(prompt, 'groups') || [];
+    const id = prompt.id;
+    const name = prompt.name || 'Untitled';
+    const promptText = prompt.promptText || '';
+    const createdAt = prompt.createdAt;
+    const updatedAt = prompt.updatedAt;
+    const groups = prompt.groups || [];
     
     div.innerHTML = `
         <div class="card-header">
@@ -371,7 +356,7 @@ function createPromptCard(prompt) {
         <div style="margin-top: 10px; padding: 10px; background-color: #f8f9fa; border-radius: 4px; white-space: pre-wrap;">${escapeHtml(promptText)}</div>
         ${groups && groups.length > 0 ? `
             <div style="margin-top: 8px;">
-                ${groups.map(g => `<span class="badge">${escapeHtml(getProp(g, 'name') || '')}</span>`).join('')}
+                ${groups.map(g => `<span class="badge">${escapeHtml(g.name || '')}</span>`).join('')}
             </div>
         ` : ''}
         <div class="card-actions">
@@ -494,9 +479,8 @@ async function loadGroups(reset = false) {
         
         const result = await response.json();
         console.log('Groups API response:', result);
-        // Handle both lowercase and uppercase from API
-        const groupsData = result.data || result.Data || [];
-        const pagination = result.pagination || result.Pagination || {};
+        const groupsData = result.data || [];
+        const pagination = result.pagination || {};
         console.log('Groups data length:', groupsData.length);
         
         const list = document.getElementById('groups-list');
@@ -513,7 +497,7 @@ async function loadGroups(reset = false) {
             });
             list.appendChild(fragment);
             
-            state.groups.hasMore = pagination.hasNext || pagination.HasNext;
+            state.groups.hasMore = pagination.hasNext;
             state.groups.page++;
         } else if (reset) {
             list.innerHTML = '<div class="empty-state"><p>No groups created yet</p></div>';
@@ -531,12 +515,12 @@ function createGroupCard(group) {
     const div = document.createElement('div');
     div.className = 'card';
     
-    const id = getProp(group, 'id');
-    const name = getProp(group, 'name') || 'Untitled';
-    const description = getProp(group, 'description') || '';
-    const createdAt = getProp(group, 'createdAt');
-    const files = getProp(group, 'files') || [];
-    const prompts = getProp(group, 'prompts') || [];
+    const id = group.id;
+    const name = group.name || 'Untitled';
+    const description = group.description || '';
+    const createdAt = group.createdAt;
+    const files = group.files || [];
+    const prompts = group.prompts || [];
     
     div.innerHTML = `
         <div class="card-header">
@@ -546,11 +530,11 @@ function createGroupCard(group) {
         <div class="card-meta">Created: ${createdAt ? new Date(createdAt).toLocaleString() : 'Unknown'}</div>
         <div class="group-resources">
             <div class="group-resources-title">Files (${files.length}):</div>
-            ${files && files.length > 0 ? files.map(f => `<span class="badge">${escapeHtml(getProp(f, 'label') || '')}</span>`).join('') : '<span style="color: #95a5a6; font-size: 0.85rem;">No files</span>'}
+            ${files && files.length > 0 ? files.map(f => `<span class="badge">${escapeHtml(f.label || '')}</span>`).join('') : '<span style="color: #95a5a6; font-size: 0.85rem;">No files</span>'}
         </div>
         <div class="group-resources">
             <div class="group-resources-title">Prompts (${prompts.length}):</div>
-            ${prompts && prompts.length > 0 ? prompts.map(p => `<span class="badge">${escapeHtml(getProp(p, 'name') || '')}</span>`).join('') : '<span style="color: #95a5a6; font-size: 0.85rem;">No prompts</span>'}
+            ${prompts && prompts.length > 0 ? prompts.map(p => `<span class="badge">${escapeHtml(p.name || '')}</span>`).join('') : '<span style="color: #95a5a6; font-size: 0.85rem;">No prompts</span>'}
         </div>
         <div class="card-actions">
             <button data-action="manage-group" data-group-id="${id}" data-group-name="${escapeHtml(name)}">Manage Resources</button>
@@ -664,12 +648,12 @@ async function manageGroupResources(groupId, groupName) {
         const groups = groupsResult.data || groupsResult.Data || [];
         console.log('[MANAGE] Groups fetched:', groups.length);
         
-        // Find group using case-insensitive property access
-        const currentGroup = groups.find(g => getProp(g, 'id') === groupId);
+        // Find group
+        const currentGroup = groups.find(g => g.id === groupId);
         
         if (!currentGroup) {
             console.error('[MANAGE] Group not found. Looking for:', groupId);
-            console.error('[MANAGE] Available groups:', groups.map(g => getProp(g, 'id')));
+            console.error('[MANAGE] Available groups:', groups.map(g => g.id));
             throw new Error('Group not found');
         }
         
@@ -695,8 +679,7 @@ async function manageGroupResources(groupId, groupName) {
             if (filesRes.ok) {
                 const filesResult = await filesRes.json();
                 console.log('[MANAGE] Files response:', filesResult);
-                // Handle both lowercase 'data' and uppercase 'Data' from API
-                allFiles = filesResult.data || filesResult.Data || [];
+                allFiles = filesResult.data || [];
                 console.log('[MANAGE] Fetched files count:', allFiles.length);
                 if (allFiles.length > 0) {
                     console.log('[MANAGE] First file:', allFiles[0]);
@@ -709,8 +692,7 @@ async function manageGroupResources(groupId, groupName) {
             if (promptsRes.ok) {
                 const promptsResult = await promptsRes.json();
                 console.log('[MANAGE] Prompts response:', promptsResult);
-                // Handle both lowercase 'data' and uppercase 'Data' from API
-                allPrompts = promptsResult.data || promptsResult.Data || [];
+                allPrompts = promptsResult.data || [];
                 console.log('[MANAGE] Fetched prompts count:', allPrompts.length);
                 if (allPrompts.length > 0) {
                     console.log('[MANAGE] First prompt:', allPrompts[0]);
@@ -730,11 +712,11 @@ async function manageGroupResources(groupId, groupName) {
             console.warn('[MANAGE] WARNING: No files or prompts returned from API');
         }
         
-        // Use getProp to access files and prompts arrays with case-insensitive fallback
-        const groupFiles = getProp(currentGroup, 'files') || [];
-        const groupPrompts = getProp(currentGroup, 'prompts') || [];
-        const groupFileIds = new Set(groupFiles.map(f => getProp(f, 'id')));
-        const groupPromptIds = new Set(groupPrompts.map(p => getProp(p, 'id')));
+        // Get group files and prompts
+        const groupFiles = currentGroup.files || [];
+        const groupPrompts = currentGroup.prompts || [];
+        const groupFileIds = new Set(groupFiles.map(f => f.id));
+        const groupPromptIds = new Set(groupPrompts.map(p => p.id));
         
         const modalBody = document.getElementById('modal-content-body');
         modalBody.innerHTML = `
@@ -744,9 +726,9 @@ async function manageGroupResources(groupId, groupName) {
                 <h5 style="margin-bottom: 10px;">Files</h5>
                 <div class="checkbox-group">
                     ${allFiles.map(file => {
-                        const fileId = getProp(file, 'id');
-                        const fileName = getProp(file, 'fileName') || 'unknown';
-                        const label = getProp(file, 'label') || fileName;
+                        const fileId = file.id;
+                        const fileName = file.fileName || 'unknown';
+                        const label = file.label || fileName;
                         return `
                         <div class="checkbox-item">
                             <label>
@@ -768,8 +750,8 @@ async function manageGroupResources(groupId, groupName) {
                 <h5 style="margin-bottom: 10px;">Prompts</h5>
                 <div class="checkbox-group">
                     ${allPrompts.map(prompt => {
-                        const promptId = getProp(prompt, 'id');
-                        const promptName = getProp(prompt, 'name') || 'Untitled';
+                        const promptId = prompt.id;
+                        const promptName = prompt.name || 'Untitled';
                         return `
                         <div class="checkbox-item">
                             <label>
@@ -817,8 +799,7 @@ async function loadAllGroups(force = false) {
         }
         
         const result = await response.json();
-        // Handle both lowercase and uppercase from API
-        state.allGroups = result.data || result.Data || [];
+        state.allGroups = result.data || [];
         console.log('[LOAD ALL GROUPS] Loaded', state.allGroups.length, 'groups');
     } catch (error) {
         console.error('Error loading all groups:', error);
