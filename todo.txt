@@ -1,0 +1,6 @@
+Potential enhancements (not in scope):
+1. Make conversation message limit configurable
+2. Add conversation history percentage to config
+3. Consider same fix for regular document queries (line 198)
+4. Add semantic search for finding relevant past conversation turns
+5. Implement conversation summarization for longer histories
