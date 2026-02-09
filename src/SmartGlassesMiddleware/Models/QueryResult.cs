@@ -8,6 +8,11 @@ public class QueryResult
     public string Answer { get; set; } = string.Empty;
 
     /// <summary>
+    /// Conversation id used for this query (if any)
+    /// </summary>
+    public Guid? ConversationId { get; set; }
+
+    /// <summary>
     /// All sources that were provided to the AI as context
     /// </summary>
     public List<DocumentSource> Sources { get; set; } = new();
@@ -16,6 +21,11 @@ public class QueryResult
     /// Sources that the AI explicitly referenced in its answer
     /// </summary>
     public List<DocumentSource> ReferencedSources { get; set; } = new();
+
+    /// <summary>
+    /// Conversation messages that were used as context
+    /// </summary>
+    public List<ConversationSource> ConversationSources { get; set; } = new();
 
     /// <summary>
     /// Whether the advanced model was used for this query
@@ -48,4 +58,16 @@ public class DocumentSource
     public int PageNumber { get; set; }
     public Guid ChunkId { get; set; }
     public string ChunkText { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Conversation message source information for a query result
+/// </summary>
+public class ConversationSource
+{
+    public Guid ConversationId { get; set; }
+    public Guid MessageId { get; set; }
+    public string Role { get; set; } = string.Empty;
+    public string Content { get; set; } = string.Empty;
+    public DateTime Timestamp { get; set; }
 }

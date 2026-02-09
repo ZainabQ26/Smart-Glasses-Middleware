@@ -21,7 +21,7 @@ services:
 
   postgres:
     image: pgvector/pgvector:pg17
-    container_name: smartglasses-postgres
+    container_name: postgres
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-smartglasses}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
@@ -38,7 +38,7 @@ services:
 
   redis:
     image: redis:latest
-    container_name: smartglasses-redis
+    container_name: redis
     expose:
       - "6379"
     volumes:
@@ -51,7 +51,7 @@ services:
 
   minio:
     image: quay.io/minio/minio:latest
-    container_name: smartglasses-minio
+    container_name: minio
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
@@ -69,7 +69,7 @@ services:
 
   ollama:
     image: ollama/ollama:latest
-    container_name: smartglasses-ollama
+    container_name: ollama
     expose:
       - "11434"
     volumes:
@@ -83,7 +83,7 @@ services:
     build:
       context: .
       dockerfile: src/SmartGlassesMiddleware/Dockerfile
-    container_name: smartglasses-app
+    container_name: middleware-main
     environment:
       - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Development}
       - ConnectionStrings__DefaultConnection=Host=${POSTGRES_HOST:-postgres};Port=${POSTGRES_PORT:-5432};Database=${POSTGRES_DB:-smartglasses};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-postgres}

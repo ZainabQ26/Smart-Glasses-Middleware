@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using SmartGlassesMiddleware.Services;
+using SmartGlassesMiddleware.Models;
 
 namespace SmartGlassesMiddleware.Controllers;
 

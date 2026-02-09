@@ -45,6 +45,8 @@ public class RAGService : IRAGService
     private readonly bool _useVectorDB;
     private readonly double _vectorSimilarityThreshold;
     private readonly int _queryTimeoutSeconds;
+    private readonly int _conversationMessageLimit;
+    private readonly int _conversationHistoryPercentage;
 
     public RAGService(
         ApplicationDbContext context,
@@ -71,6 +73,8 @@ public class RAGService : IRAGService
         _useVectorDB = configuration.GetValue<bool?>("RAG:UseVectorDB") ?? true;
         _vectorSimilarityThreshold = configuration.GetValue<double?>("RAG:VectorSimilarityThreshold") ?? 0.7;
         _queryTimeoutSeconds = configuration.GetValue<int?>("RAG:QueryTimeoutSeconds") ?? 120;
+        _conversationMessageLimit = configuration.GetValue<int?>("RAG:ConversationMessageLimit") ?? 5;
+        _conversationHistoryPercentage = configuration.GetValue<int?>("RAG:ConversationHistoryPercentage") ?? 25;
     }
 
     public async Task<QueryResult> QueryDocumentsAsync(string query, int topK = 5, List<Guid>? groupIds = null, List<Guid>? documentIds = null, string? monitoringRequestId = null)
@@ -333,7 +337,7 @@ Answer:";
             var recentMessages = await _context.ChatMessages
                 .Where(m => m.ConversationId == conversationId)
                 .OrderByDescending(m => m.Timestamp)
-                .Take(5) // Last 5 messages for context
+                .Take(_conversationMessageLimit)
                 .OrderBy(m => m.Timestamp)
                 .ToListAsync();
 
@@ -353,7 +357,7 @@ Answer:";
                     var msgText = $"{msg.Role}: {msg.Content}";
                     var msgTokens = EstimateTokens(msgText);
 
-                    if (historyTokens + msgTokens > _maxContextTokens / 4) // Reserve 25% for history
+                    if (historyTokens + msgTokens > _maxContextTokens * _conversationHistoryPercentage / 100)
                         break;
 
                     contextBuilder.AppendLine(msgText);
@@ -408,10 +412,21 @@ Answer:";
                 ChunkText = c.ChunkText.Length > 200 ? c.ChunkText.Substring(0, 200) + "..." : c.ChunkText
             }).ToList();
 
+            // Build conversation sources list
+            var conversationSources = recentMessages.Select(m => new ConversationSource
+            {
+                ConversationId = m.ConversationId,
+                MessageId = m.Id,
+                Role = m.Role,
+                Content = m.Content.Length > 200 ? m.Content.Substring(0, 200) + "..." : m.Content,
+                Timestamp = m.Timestamp
+            }).ToList();
+
             return new QueryResult
             {
                 Answer = response,
-                Sources = sources
+                Sources = sources,
+                ConversationSources = conversationSources
             };
         }
         catch (Exception ex)
