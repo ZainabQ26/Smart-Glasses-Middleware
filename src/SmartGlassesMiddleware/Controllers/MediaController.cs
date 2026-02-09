@@ -21,6 +21,7 @@ public class MediaController : ControllerBase
     private readonly IBackgroundTaskQueue _backgroundQueue;
     private readonly IMediaProcessor _mediaProcessor;
     private readonly IRagService _ragService;
+    private readonly IRequestMonitoringService? _monitoringService;
     private readonly ApplicationDbContext _context;
 
     public MediaController(
@@ -32,7 +33,8 @@ public class MediaController : ControllerBase
         IMediaProcessor mediaProcessor,
         IRagService ragService,
         ApplicationDbContext context,
-        ILogger<MediaController> logger)
+        ILogger<MediaController> logger,
+        IRequestMonitoringService? monitoringService = null)
     {
         _mediaStorageService = mediaStorageService;
         _transcriptionService = transcriptionService;
@@ -43,6 +45,7 @@ public class MediaController : ControllerBase
         _ragService = ragService;
         _context = context;
         _logger = logger;
+        _monitoringService = monitoringService;
     }
 
     /// <summary>
@@ -202,26 +205,55 @@ public class MediaController : ControllerBase
                     ? inputText
                     : transPrompt + "\n\nTranscription: " + inputText;
 
-                var (tTask, tResponse, tUsedAdvancedModel) = await _aiService.ProcessRequestAsync(transText);
-
-                // Save history (no media key)
+                string? monitoringRequestId = null;
                 try
                 {
-                    var history = new RequestHistory
+                    if (_monitoringService != null)
                     {
-                        RequestType = "Audio",
-                        InputText = inputText,
-                        DetectedTask = tTask,
-                        Response = tResponse,
-                        UsedAdvancedModel = tUsedAdvancedModel
-                    };
-                    history = await _historyService.SaveRequestAsync(history);
-                    return Ok(new { task = tTask, response = tResponse, usedAdvancedModel = tUsedAdvancedModel, requestId = history.Id, transcription = inputText });
+                        monitoringRequestId = await _monitoringService.StartRequest("Audio", inputText ?? "transcription-only request");
+                        await _monitoringService.UpdateRequestStatus(monitoringRequestId, "Processing");
+                    }
+
+                    var (tTask, tResponse, tUsedAdvancedModel) = await _aiService.ProcessRequestAsync(transText);
+
+                    // Save history (no media key)
+                    try
+                    {
+                        var history = new RequestHistory
+                        {
+                            RequestType = "Audio",
+                            InputText = inputText,
+                            DetectedTask = tTask,
+                            Response = tResponse,
+                            UsedAdvancedModel = tUsedAdvancedModel
+                        };
+                        history = await _historyService.SaveRequestAsync(history);
+
+                        if (!string.IsNullOrWhiteSpace(monitoringRequestId) && _monitoringService != null)
+                        {
+                            await _monitoringService.CompleteRequest(monitoringRequestId, true, result: history.Id.ToString());
+                        }
+
+                        return Ok(new { task = tTask, response = tResponse, usedAdvancedModel = tUsedAdvancedModel, requestId = history.Id, transcription = inputText });
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to save history for transcription-only ask");
+                        if (!string.IsNullOrWhiteSpace(monitoringRequestId) && _monitoringService != null)
+                        {
+                            await _monitoringService.CompleteRequest(monitoringRequestId, true, result: tResponse);
+                        }
+                        return Ok(new { task = tTask, response = tResponse, usedAdvancedModel = tUsedAdvancedModel, transcription = inputText });
+                    }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Failed to save history for transcription-only ask");
-                    return Ok(new { task = tTask, response = tResponse, usedAdvancedModel = tUsedAdvancedModel, transcription = inputText });
+                    _logger.LogError(ex, "Error during transcription-only processing");
+                    if (!string.IsNullOrWhiteSpace(monitoringRequestId) && _monitoringService != null)
+                    {
+                        await _monitoringService.CompleteRequest(monitoringRequestId, false, error: ex.Message);
+                    }
+                    return Problem("An error occurred while processing the request.");
                 }
             }
             // Allowed extensions
