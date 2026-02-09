@@ -1,4 +1,5 @@
 const API_BASE = '/api/admin';
+const themeStorageKey = 'uiTheme';
 
 // Helper function to get property with case-insensitive fallback
 function getProp(obj, propName) {
@@ -94,6 +95,19 @@ function showMessage(message, type = 'success') {
     div.textContent = message;
     container.appendChild(div);
     setTimeout(() => div.remove(), 5000);
+}
+
+function applyTheme(theme) {
+    if (theme === 'dark') {
+        document.body.classList.add('dark');
+    } else {
+        document.body.classList.remove('dark');
+    }
+    try {
+        localStorage.setItem(themeStorageKey, theme);
+    } catch {
+        // ignore storage errors
+    }
 }
 
 // Loading indicator
@@ -196,7 +210,6 @@ function createFileCard(file) {
         ` : ''}
         <div class="card-actions">
             <button data-action="preview-file" data-file-id="${id}" data-file-name="${escapeHtml(fileName)}" class="secondary">Preview</button>
-            <button data-action="add-to-group-file" data-file-id="${id}" data-file-label="${escapeHtml(label)}">Add to Group</button>
             <button class="delete" data-file-id="${id}" data-action="delete-file">Delete</button>
         </div>
     `;
@@ -207,9 +220,6 @@ function createFileCard(file) {
     });
     div.querySelector('[data-action="delete-file"]').addEventListener('click', (e) => {
         deleteFile(e.target.dataset.fileId);
-    });
-    div.querySelector('[data-action="add-to-group-file"]').addEventListener('click', (e) => {
-        showQuickAddToGroup(e.target.dataset.fileId, 'file', e.target.dataset.fileLabel);
     });
     
     return div;
@@ -245,6 +255,17 @@ document.getElementById('upload-form').addEventListener('submit', async (e) => {
     }
 });
 
+// Enter key handler for file label input
+document.getElementById('file-label')?.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        const uploadForm = document.getElementById('upload-form');
+        if (uploadForm) {
+            uploadForm.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+        }
+    }
+});
+
 async function deleteFile(id) {
     if (!confirm('Are you sure you want to delete this file?')) return;
     
@@ -266,9 +287,15 @@ async function deleteFile(id) {
     }
 }
 
+// Store current preview file info
+let currentPreviewFile = { id: null, fileName: null };
+
 async function previewFile(id, fileName) {
     const previewContainer = document.getElementById('file-preview');
     const previewContent = document.getElementById('preview-content');
+    
+    // Store file info for download button
+    currentPreviewFile = { id, fileName };
     
     previewContent.innerHTML = '<p style="color: #95a5a6;">Loading preview...</p>';
     previewContainer.style.display = 'block';
@@ -276,21 +303,25 @@ async function previewFile(id, fileName) {
     // Scroll to preview
     previewContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     
-    const fileUrl = `/api/media/file/${id}`;
+    const cacheBuster = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    const previewUrl = `${API_BASE}/files/${id}/preview?v=${cacheBuster}`;
     const ext = fileName.split('.').pop().toLowerCase();
     
     if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) {
-        previewContent.innerHTML = `<img src="${fileUrl}" alt="${escapeHtml(fileName)}" style="max-width: 100%; max-height: 500px; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">`;
+        const img = new Image();
+        img.onload = function() {
+            previewContent.innerHTML = `<img src="${previewUrl}" alt="${escapeHtml(fileName)}" style="max-width: 100%; max-height: 500px; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">`;
+        };
+        img.onerror = function() {
+            previewContent.innerHTML = '<p style="color: #e74c3c;">Failed to load image. The file may not exist or there was an error.</p>';
+        };
+        img.src = previewUrl;
     } else if (ext === 'pdf') {
-        previewContent.innerHTML = `<embed src="${fileUrl}" type="application/pdf" width="100%" height="600px" style="border-radius: 4px;">`;
+        previewContent.innerHTML = `<embed src="${previewUrl}" type="application/pdf" width="100%" height="600px" style="border-radius: 4px;">`;
     } else {
         previewContent.innerHTML = `<p style="color: #e74c3c;">Preview not available for this file type.</p>`;
     }
 }
-
-document.getElementById('close-preview').addEventListener('click', () => {
-    document.getElementById('file-preview').style.display = 'none';
-});
 
 // Prompts with lazy loading
 async function loadPrompts(reset = false) {
@@ -330,15 +361,22 @@ async function loadPrompts(reset = false) {
             
             const fragment = document.createDocumentFragment();
             promptsData.forEach(prompt => {
-                const div = createPromptCard(prompt);
-                fragment.appendChild(div);
+                console.log('[CREATE PROMPT CARD] Creating card for prompt:', prompt);
+                try {
+                    const div = createPromptCard(prompt);
+                    fragment.appendChild(div);
+                    console.log('[CREATE PROMPT CARD] Card created and appended');
+                } catch (err) {
+                    console.error('[CREATE PROMPT CARD] Error creating card:', err);
+                }
             });
             list.appendChild(fragment);
+            console.log('[PROMPTS] Fragment appended to list, children count:', list.children.length);
             
             state.prompts.hasMore = pagination.hasNext || pagination.HasNext;
             state.prompts.page++;
         } else if (reset) {
-            list.innerHTML = '<div class="empty-state"><p>No prompts created yet</p></div>';
+            list.innerHTML = '<div class="empty-sidebar">No prompts yet</div>';
         }
         
         state.prompts.loading = false;
@@ -351,103 +389,435 @@ async function loadPrompts(reset = false) {
 
 function createPromptCard(prompt) {
     const div = document.createElement('div');
-    div.className = 'card';
+    div.className = 'sidebar-prompt-item';
     
     const id = getProp(prompt, 'id');
     const name = getProp(prompt, 'name') || 'Untitled';
     const promptText = getProp(prompt, 'promptText') || '';
-    const createdAt = getProp(prompt, 'createdAt');
-    const updatedAt = getProp(prompt, 'updatedAt');
-    const groups = getProp(prompt, 'groups') || [];
+    
+    // Truncate name for sidebar
+    const displayName = name.length > 25 ? name.substring(0, 25) + '...' : name;
+
+    div.dataset.promptId = id;
+    div.dataset.promptName = name;
+    div.dataset.promptText = promptText;
     
     div.innerHTML = `
-        <div class="card-header">
-            <div class="card-title">${escapeHtml(name)}</div>
-        </div>
-        <div class="card-meta">
-            Created: ${createdAt ? new Date(createdAt).toLocaleString() : 'Unknown'}
-            ${updatedAt ? ` | Updated: ${new Date(updatedAt).toLocaleString()}` : ''}
-        </div>
-        <div style="margin-top: 10px; padding: 10px; background-color: #f8f9fa; border-radius: 4px; white-space: pre-wrap;">${escapeHtml(promptText)}</div>
-        ${groups && groups.length > 0 ? `
-            <div style="margin-top: 8px;">
-                ${groups.map(g => `<span class="badge">${escapeHtml(getProp(g, 'name') || '')}</span>`).join('')}
-            </div>
-        ` : ''}
-        <div class="card-actions">
-            <button data-action="add-to-group-prompt" data-prompt-id="${id}" data-prompt-name="${escapeHtml(name)}">Add to Group</button>
-            <button data-action="edit-prompt" data-prompt-id="${id}" data-prompt-name="${escapeHtml(name)}" data-prompt-text="${escapeHtml(promptText)}">Edit</button>
-            <button class="delete" data-action="delete-prompt" data-prompt-id="${id}">Delete</button>
-        </div>
+        <span class="prompt-name">${escapeHtml(displayName)}</span>
+        <button type="button" class="prompt-delete-btn" title="Delete" aria-label="Delete">×</button>
     `;
     
-    // Attach event listeners
-    div.querySelector('[data-action="add-to-group-prompt"]').addEventListener('click', (e) => {
-        showQuickAddToGroup(e.target.dataset.promptId, 'prompt', e.target.dataset.promptName);
+    // Click to load prompt
+    div.addEventListener('click', () => {
+        autoSaveCurrentConversation('switch');
+        document.querySelectorAll('.sidebar-prompt-item').forEach(item => item.classList.remove('active'));
+        div.classList.add('active');
+        loadPromptIntoForm(id, name, promptText);
     });
-    div.querySelector('[data-action="edit-prompt"]').addEventListener('click', (e) => {
-        editPrompt(e.target.dataset.promptId, e.target.dataset.promptName, e.target.dataset.promptText);
-    });
-    div.querySelector('[data-action="delete-prompt"]').addEventListener('click', (e) => {
-        deletePrompt(e.target.dataset.promptId);
+
+    // Delete prompt button
+    div.querySelector('.prompt-delete-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        deletePrompt(id);
     });
     
     return div;
 }
 
-let isEditingPrompt = false;
+// Auto Groups are view-only - no form submission needed
+// Removed form submission handler as Auto Groups display conversation history and files
 
-document.getElementById('prompt-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const id = document.getElementById('prompt-id').value;
-    const name = document.getElementById('prompt-name').value;
-    const text = document.getElementById('prompt-text').value;
+function loadPromptIntoForm(id, name, text) {
+    document.getElementById('prompt-form-title').textContent = 'Prompt';
     
-    const data = { name, promptText: text };
-    
+    // Parse conversation history and files from the prompt text
+    // Assuming text is stored as JSON string with {messages: [], files: []}
+    let messages = [];
+    let files = [];
     try {
-        const url = isEditingPrompt ? `${API_BASE}/prompts/${id}` : `${API_BASE}/prompts`;
-        const method = isEditingPrompt ? 'PUT' : 'POST';
-        
+        const data = JSON.parse(text);
+        messages = data.messages || [];
+        files = data.files || [];
+    } catch {
+        // Fallback to old format
+        messages = [
+            {role: 'user', content: name},
+            {role: 'bot', content: text}
+        ];
+    }
+    
+    // Show the conversation history in a scrollable box
+    const conversationHTML = messages.map(msg => {
+        const msgFiles = Array.isArray(msg.files) ? msg.files : [];
+        const filesData = msgFiles.length > 0
+            ? encodeURIComponent(JSON.stringify(msgFiles.map(f => (typeof f === 'string' ? { name: f } : { name: f.name || f.fileName || 'Document', id: f.id || f.documentId }))))
+            : '';
+        const filesTitle = msgFiles.length > 0
+            ? `${msgFiles.length} file(s) attached: ${msgFiles.map(f => (typeof f === 'string' ? f : f.name || f.fileName || 'Document')).join(', ')}`
+            : '';
+        const msgSources = Array.isArray(msg.sources) ? msg.sources : [];
+        const msgSourcesHtml = msgSources.length > 0 ? `
+            <div style="margin-top: 8px; padding: 8px; background: #fff; border: 1px solid #dee2e6; border-radius: 4px;">
+                <div style="font-weight: 600; color: #2c3e50; margin-bottom: 6px; font-size: 0.8rem;">Sources Used:</div>
+                ${msgSources.map(source => {
+                    const documentId = source.documentId || source.DocumentId;
+                    const fileName = source.fileName || source.FileName || 'Document';
+                    const page = source.pageNumber || source.PageNumber;
+                    const label = page ? `${fileName} (p.${page})` : fileName;
+                    const href = documentId ? `/api/documents/${documentId}/download` : '#';
+                    const linkStyle = documentId ? 'color: #3498db; text-decoration: underline;' : 'color: #95a5a6; text-decoration: none;';
+                    return `
+                        <div style="display: flex; align-items: center; gap: 8px; font-size: 12px;">
+                            <a href="${href}" target="_blank" style="${linkStyle}" onclick="${documentId ? '' : 'return false;'}">${escapeHtml(label)}</a>
+                            ${documentId ? `<button type=\"button\" onclick=\"previewDocumentFile('${documentId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')\" style=\"padding: 2px 6px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 11px;\">Preview</button>` : ''}
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        ` : '';
+
+        return `
+            <div style="margin-bottom: 12px;">
+                <div style="color: ${msg.role === 'user' ? '#3498db' : '#27ae60'}; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
+                    <span>${msg.role === 'user' ? 'User' : 'Bot'}:</span>
+                    ${msgFiles.length > 0 ? `<button type="button" onclick="showAttachedFilesModal('${filesData}')" style="background: none; border: none; font-size: 16px; color: #3498db; cursor: pointer; padding: 0;" title="${escapeHtml(filesTitle)}">📎</button>` : ''}
+                </div>
+                <div style="color: #555; padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
+                ${msg.role === 'bot' ? msgSourcesHtml : ''}
+            </div>
+        `;
+    }).join('');
+    
+    // Show attached files in a scrollable box
+    const normalizedFiles = files.map(f => {
+        if (typeof f === 'string') {
+            return { name: f };
+        }
+        return { name: f.name || f.fileName || 'Document', id: f.id || f.documentId };
+    });
+
+    const filesFromMessages = messages.flatMap(msg => {
+        if (!Array.isArray(msg.files)) return [];
+        return msg.files.map(f => {
+            if (typeof f === 'string') {
+                return { name: f };
+            }
+            return { name: f.name || f.fileName || 'Document', id: f.id || f.documentId };
+        });
+    });
+
+    const mergedFiles = [...normalizedFiles, ...filesFromMessages].reduce((acc, file) => {
+        const key = `${(file.name || '').toLowerCase()}::${file.id || ''}`;
+        if (!acc.seen.has(key)) {
+            acc.seen.add(key);
+            acc.items.push(file);
+        }
+        return acc;
+    }, { seen: new Set(), items: [] }).items;
+
+    const filesHTML = mergedFiles.length > 0 ? `
+        <div style="margin-top: 15px; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+            <div style="font-weight: 600; color: #2c3e50; margin-bottom: 10px;">Attached Files</div>
+            <div style="max-height: 150px; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; padding: 10px; background: white;">
+                ${mergedFiles.map(f => {
+                    const fileId = f.id || '';
+                    const fileName = f.name || 'Document';
+                    return `
+                        <div style="padding: 4px 0; color: #555; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                            <span>📎 ${escapeHtml(fileName)}</span>
+                            <button type="button" onclick="previewDocumentFile('${fileId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')" style="padding: 2px 8px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">Preview</button>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        </div>
+    ` : '';
+    
+    const responseContent = document.getElementById('response-content');
+    responseContent.innerHTML = `
+        <div style="margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #e0e0e0; display: flex; align-items: center; justify-content: space-between;">
+            <div style="color: #2c3e50; font-weight: 600;">Auto Group: ${escapeHtml(name)}</div>
+            <button type="button" onclick="closeAutoGroupView()" style="background: none; border: none; font-size: 20px; color: #95a5a6; cursor: pointer; padding: 0; line-height: 1;">×</button>
+        </div>
+        <div style="max-height: 400px; overflow-y: auto; padding: 10px; border: 1px solid #e0e0e0; border-radius: 4px; background: #fafafa;">
+            ${conversationHTML}
+        </div>
+        ${filesHTML}
+    `;
+}
+
+function createNewPrompt() {
+    document.querySelectorAll('.sidebar-prompt-item').forEach(item => item.classList.remove('active'));
+    document.getElementById('prompt-form-title').textContent = 'Prompt';
+    
+    // Reset conversation history
+    currentConversationHistory = [];
+    
+    // Reset response section
+    const responseContent = document.getElementById('response-content');
+    if (responseContent) {
+        responseContent.innerHTML = '<span style="color: #999;">Enter a prompt and click Send to get a response</span>';
+    }
+    
+    // Clear input
+    const promptInput = document.getElementById('prompt-name');
+    if (promptInput) {
+        promptInput.value = '';
+    }
+}
+
+// Handle file attachments for prompts
+let promptPreviewFile = null;
+let promptSelectedFiles = [];
+let currentConversationHistory = []; // Track conversation messages
+window.promptSelectedFiles = promptSelectedFiles;
+let lastAutoSavedSnapshot = null;
+let autoSaveInFlight = false;
+const draftStorageKey = 'adminPromptDraft';
+
+function buildConversationSnapshot() {
+    const files = promptSelectedFiles.map(f => ({
+        name: f.name || f.file?.name || 'Document',
+        id: f.documentId || f.id
+    }));
+
+    return {
+        messages: currentConversationHistory,
+        files: files
+    };
+}
+
+function hasConversationContent() {
+    return currentConversationHistory.length > 0 || promptSelectedFiles.length > 0;
+}
+
+async function autoSaveCurrentConversation(reason) {
+    if (autoSaveInFlight || !hasConversationContent()) return;
+
+    const snapshot = buildConversationSnapshot();
+    const snapshotText = JSON.stringify(snapshot);
+    if (snapshotText === lastAutoSavedSnapshot) return;
+
+    try {
+        localStorage.setItem(draftStorageKey, snapshotText);
+    } catch (error) {
+        console.warn('[AUTO SAVE] Failed to write draft to storage:', error);
+    }
+
+    autoSaveInFlight = true;
+    try {
+        const firstMessage = snapshot.messages.find(m => m.role === 'user');
+        const chatName = firstMessage ? firstMessage.content.substring(0, 50) : 'Untitled Chat';
+        const payload = { name: chatName, promptText: snapshotText };
+
+        const existingId = document.getElementById('prompt-id')?.value;
+        const url = existingId ? `${API_BASE}/prompts/${existingId}` : `${API_BASE}/prompts`;
+        const method = existingId ? 'PUT' : 'POST';
+
         const response = await fetch(url, {
             method,
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data)
+            body: JSON.stringify(payload)
         });
-        
+
         if (response.ok) {
-            showMessage(isEditingPrompt ? 'Prompt updated successfully' : 'Prompt created successfully');
-            cancelEditPrompt();
-            await loadPrompts(true);
-            await loadAllGroups(true);
+            const result = await response.json().catch(() => null);
+            const savedId = result?.id || result?.Id;
+            if (savedId) {
+                const promptIdInput = document.getElementById('prompt-id');
+                if (promptIdInput) {
+                    promptIdInput.value = savedId;
+                }
+            }
+            lastAutoSavedSnapshot = snapshotText;
+            console.log(`[AUTO SAVE] Conversation saved (${reason})`);
         } else {
-            const error = await response.json();
-            showMessage(error.detail || 'Error saving prompt', 'error');
+            console.warn('[AUTO SAVE] Failed to save conversation:', response.status);
         }
     } catch (error) {
-        showMessage('Error saving prompt: ' + error.message, 'error');
+        console.warn('[AUTO SAVE] Error saving conversation:', error);
+    } finally {
+        autoSaveInFlight = false;
     }
-});
-
-function editPrompt(id, name, text) {
-    isEditingPrompt = true;
-    document.getElementById('prompt-id').value = id;
-    document.getElementById('prompt-name').value = name;
-    document.getElementById('prompt-text').value = text;
-    document.getElementById('prompt-submit-btn').textContent = 'Update Prompt';
-    document.getElementById('prompt-cancel-btn').style.display = 'inline-block';
-    window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-function cancelEditPrompt() {
-    isEditingPrompt = false;
-    document.getElementById('prompt-form').reset();
-    document.getElementById('prompt-id').value = '';
-    document.getElementById('prompt-submit-btn').textContent = 'Add Prompt';
-    document.getElementById('prompt-cancel-btn').style.display = 'none';
+function restoreDraftConversation() {
+    try {
+        const raw = localStorage.getItem(draftStorageKey);
+        if (!raw) return false;
+        const draft = JSON.parse(raw);
+        if (!draft || (!Array.isArray(draft.messages) && !Array.isArray(draft.files))) return false;
+
+        currentConversationHistory = Array.isArray(draft.messages) ? draft.messages : [];
+        promptSelectedFiles = Array.isArray(draft.files) ? draft.files.map(f => ({
+            name: f.name || 'Document',
+            documentId: f.id || f.documentId,
+            selected: false
+        })) : [];
+        window.promptSelectedFiles = promptSelectedFiles;
+        updatePromptFilesList();
+
+        if (currentConversationHistory.length > 0) {
+            const conversationHTML = currentConversationHistory.map(msg => {
+                const msgFiles = Array.isArray(msg.files) ? msg.files : [];
+                const filesData = msgFiles.length > 0
+                    ? encodeURIComponent(JSON.stringify(msgFiles.map(f => (typeof f === 'string' ? { name: f } : { name: f.name || f.fileName || 'Document', id: f.id || f.documentId }))))
+                    : '';
+                const filesTitle = msgFiles.length > 0
+                    ? `${msgFiles.length} file(s) attached: ${msgFiles.map(f => (typeof f === 'string' ? f : f.name || f.fileName || 'Document')).join(', ')}`
+                    : '';
+                const msgSources = Array.isArray(msg.sources) ? msg.sources : [];
+                const msgSourcesHtml = msgSources.length > 0 ? `
+                    <div style="margin-top: 8px; padding: 8px; background: #fff; border: 1px solid #dee2e6; border-radius: 4px;">
+                        <div style="font-weight: 600; color: #2c3e50; margin-bottom: 6px; font-size: 0.8rem;">Sources Used:</div>
+                        ${msgSources.map(source => {
+                            const documentId = source.documentId || source.DocumentId;
+                            const fileName = source.fileName || source.FileName || 'Document';
+                            const page = source.pageNumber || source.PageNumber;
+                            const label = page ? `${fileName} (p.${page})` : fileName;
+                            const href = documentId ? `/api/documents/${documentId}/download` : '#';
+                            const linkStyle = documentId ? 'color: #3498db; text-decoration: underline;' : 'color: #95a5a6; text-decoration: none;';
+                            return `
+                                <div style="display: flex; align-items: center; gap: 8px; font-size: 12px;">
+                                    <a href="${href}" target="_blank" style="${linkStyle}" onclick="${documentId ? '' : 'return false;'}">${escapeHtml(label)}</a>
+                                    ${documentId ? `<button type=\"button\" onclick=\"previewDocumentFile('${documentId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')\" style=\"padding: 2px 6px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 11px;\">Preview</button>` : ''}
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                ` : '';
+
+                return `
+                    <div style="margin-bottom: 12px;">
+                        <div style="color: ${msg.role === 'user' ? '#3498db' : '#27ae60'}; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
+                            <span>${msg.role === 'user' ? 'User' : 'Bot'}:</span>
+                            ${msgFiles.length > 0 ? `<button type=\"button\" onclick=\"showAttachedFilesModal('${filesData}')\" style=\"background: none; border: none; font-size: 16px; color: #3498db; cursor: pointer; padding: 0;\" title=\"${escapeHtml(filesTitle)}\">📎</button>` : ''}
+                        </div>
+                        <div style="color: #555; padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
+                        ${msg.role === 'bot' ? msgSourcesHtml : ''}
+                    </div>
+                `;
+            }).join('');
+
+            const responseContent = document.getElementById('response-content');
+            if (responseContent) {
+                responseContent.innerHTML = `
+                    <div style="max-height: 500px; overflow-y: auto; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+                        ${conversationHTML}
+                    </div>
+                `;
+            }
+        }
+
+        return true;
+    } catch (error) {
+        console.warn('[AUTO SAVE] Failed to restore draft:', error);
+        return false;
+    }
 }
 
-document.getElementById('prompt-cancel-btn').addEventListener('click', cancelEditPrompt);
+function closeAutoGroupView() {
+    document.querySelectorAll('.sidebar-prompt-item').forEach(item => item.classList.remove('active'));
+    const promptIdInput = document.getElementById('prompt-id');
+    if (promptIdInput) promptIdInput.value = '';
+    const responseContent = document.getElementById('response-content');
+    if (responseContent) {
+        responseContent.innerHTML = '<span style="color: #999;">Enter a prompt and click Send to get a response</span>';
+    }
+}
+
+function updatePromptFilesList() {
+    const filesList = document.getElementById('prompt-files-list');
+    const promptFilesIcon = document.getElementById('prompt-files-icon');
+    
+    if (!filesList) return;
+    
+    // Update paperclip icon color
+    if (promptFilesIcon) {
+        if (promptSelectedFiles.length === 0) {
+            promptFilesIcon.style.color = '#95a5a6'; // Gray when no files
+        } else {
+            promptFilesIcon.style.color = '#3498db'; // Blue when files present
+        }
+    }
+    
+    if (promptSelectedFiles.length === 0) {
+        filesList.innerHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No files to show</div>';
+    } else {
+        filesList.innerHTML = promptSelectedFiles.map((fileObj, index) => {
+            const fileName = fileObj.file?.name || fileObj.name || 'Document';
+            const fileId = fileObj.documentId || fileObj.id || '';
+            return `
+                <div style="padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0; ${fileObj.selected ? 'background: #f0f0f0;' : ''}">
+                    <input type="checkbox" ${fileObj.selected ? 'checked' : ''} style="width: 16px; height: 16px; cursor: pointer; margin: 0;" onclick="togglePromptFileSelection(${index})">
+                    <span onclick="togglePromptFileSelection(${index})" style="font-size: 14px; color: #333; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; user-select: none;">
+                        ${escapeHtml(fileName)}
+                    </span>
+                    <button type="button" onclick="event.stopPropagation(); previewDocumentFile('${fileId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')" style="padding: 4px 10px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                        Preview
+                    </button>
+                </div>
+            `;
+        }).join('');
+    }
+}
+
+function togglePromptFileSelection(index) {
+    if (promptSelectedFiles[index]) {
+        promptSelectedFiles[index].selected = !promptSelectedFiles[index].selected;
+        updatePromptFilesList();
+    }
+}
+
+function removePromptFile(index) {
+    promptSelectedFiles.splice(index, 1);
+    updatePromptFilesList();
+    showMessage('File removed', 'success');
+}
+
+async function deleteSelectedPromptFiles() {
+    const selected = promptSelectedFiles.filter(f => f.selected);
+    if (selected.length === 0) {
+        showMessage('No files selected', 'error');
+        return;
+    }
+    
+    if (!confirm(`Delete ${selected.length} file(s)?`)) {
+        return;
+    }
+    
+    // Delete uploaded documents from server if they have IDs
+    for (const fileObj of selected) {
+        const documentId = fileObj.documentId || fileObj.id;
+        if (documentId) {
+            try {
+                const deleteRes = await fetch(`/api/documents/${documentId}`, {
+                    method: 'DELETE'
+                });
+                if (!deleteRes.ok) {
+                    console.error(`Failed to delete document ${fileObj.name} from server`);
+                }
+            } catch (error) {
+                console.error('Error deleting document from server:', error);
+            }
+        }
+    }
+    
+    // Remove from local list
+    promptSelectedFiles = promptSelectedFiles.filter(f => !f.selected);
+    updatePromptFilesList();
+    showMessage(`${selected.length} file(s) deleted`, 'success');
+    
+    // Reload files list to reflect deletion
+    if (typeof loadFiles === 'function') {
+        loadFiles(true);
+    }
+}
+
+window.updatePromptFilesList = updatePromptFilesList;
+window.togglePromptFileSelection = togglePromptFileSelection;
+window.removePromptFile = removePromptFile;
+window.deleteSelectedPromptFiles = deleteSelectedPromptFiles;
 
 async function deletePrompt(id) {
     if (!confirm('Are you sure you want to delete this prompt?')) return;
@@ -469,6 +839,54 @@ async function deletePrompt(id) {
         showMessage('Error deleting prompt: ' + error.message, 'error');
     }
 }
+
+// Prompt response tracking functions
+function showPromptResponse(promptName, promptText) {
+    const responseContent = document.getElementById('response-content');
+    
+    responseContent.innerHTML = `
+        <div style="margin-bottom: 10px; color: #666;">
+            <strong>Selected:</strong> ${escapeHtml(promptName)}
+        </div>
+        <div style="padding: 10px; background: #f8f9fa; border-radius: 4px; font-size: 0.9rem; color: #555;">
+            ${escapeHtml(promptText.substring(0, 200))}${promptText.length > 200 ? '...' : ''}
+        </div>
+        <div style="margin-top: 10px; color: #999; font-size: 0.85rem;">
+            Click "Track" to monitor this prompt's usage
+        </div>
+    `;
+}
+
+function hidePromptResponse() {
+    const responseContent = document.getElementById('response-content');
+    responseContent.innerHTML = '<span style="color: #999;">Click Track to monitor prompt responses</span>';
+}
+
+function trackPrompt() {
+    const responseContent = document.getElementById('response-content');
+    const selectedItem = document.querySelector('.sidebar-prompt-item.active');
+    
+    if (!selectedItem) {
+        showMessage('Please select a prompt first', 'error');
+        return;
+    }
+    
+    responseContent.innerHTML = `
+        <div style="text-align: center; padding: 20px;">
+            <div style="color: #3498db; font-size: 1.2rem; margin-bottom: 10px;">📊 Tracking Active</div>
+            <div style="color: #666; font-size: 0.9rem;">Monitoring prompt usage and responses...</div>
+            <div style="margin-top: 15px; padding: 10px; background: #e8f5e9; border-radius: 4px; color: #2e7d32;">
+                ✓ Ready to track interactions
+            </div>
+        </div>
+    `;
+    
+    showMessage('Tracking enabled for selected prompt');
+}
+
+// Make functions globally available
+window.trackPrompt = trackPrompt;
+window.createNewPrompt = createNewPrompt;
 
 // Groups with lazy loading
 async function loadGroups(reset = false) {
@@ -529,44 +947,28 @@ async function loadGroups(reset = false) {
 
 function createGroupCard(group) {
     const div = document.createElement('div');
-    div.className = 'card';
+    div.style.cssText = 'background: #f5f5f5; padding: 12px; border-radius: 4px; margin-bottom: 10px; position: relative;';
     
     const id = getProp(group, 'id');
     const name = getProp(group, 'name') || 'Untitled';
-    const description = getProp(group, 'description') || '';
-    const createdAt = getProp(group, 'createdAt');
-    const files = getProp(group, 'files') || [];
-    const prompts = getProp(group, 'prompts') || [];
     
     div.innerHTML = `
-        <div class="card-header">
-            <div class="card-title">${escapeHtml(name)}</div>
-        </div>
-        ${description ? `<div style="margin-bottom: 10px; color: #555;">${escapeHtml(description)}</div>` : ''}
-        <div class="card-meta">Created: ${createdAt ? new Date(createdAt).toLocaleString() : 'Unknown'}</div>
-        <div class="group-resources">
-            <div class="group-resources-title">Files (${files.length}):</div>
-            ${files && files.length > 0 ? files.map(f => `<span class="badge">${escapeHtml(getProp(f, 'label') || '')}</span>`).join('') : '<span style="color: #95a5a6; font-size: 0.85rem;">No files</span>'}
-        </div>
-        <div class="group-resources">
-            <div class="group-resources-title">Prompts (${prompts.length}):</div>
-            ${prompts && prompts.length > 0 ? prompts.map(p => `<span class="badge">${escapeHtml(getProp(p, 'name') || '')}</span>`).join('') : '<span style="color: #95a5a6; font-size: 0.85rem;">No prompts</span>'}
-        </div>
-        <div class="card-actions">
-            <button data-action="manage-group" data-group-id="${id}" data-group-name="${escapeHtml(name)}">Manage Resources</button>
-            <button data-action="edit-group" data-group-id="${id}" data-group-name="${escapeHtml(name)}" data-group-description="${escapeHtml(description)}">Edit</button>
-            <button class="delete" data-action="delete-group" data-group-id="${id}">Delete</button>
+        <div style="display: flex; gap: 10px; align-items: center;">
+            <div style="position: relative; flex: 1;">
+                <input type="text" value="${escapeHtml(name)}" readonly data-group-id="${id}" style="width: 100%; padding: 12px 50px 12px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; background: white; cursor: default;">
+                <span class="group-item-paperclip" data-group-id="${id}" data-group-name="${escapeHtml(name)}" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 24px; color: #95a5a6; cursor: pointer;">📎</span>
+            </div>
+            <button type="button" class="group-item-delete" data-group-id="${id}" style="padding: 8px 16px; background: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-size: 14px;">Delete</button>
         </div>
     `;
     
-    // Attach event listeners
-    div.querySelector('[data-action="manage-group"]').addEventListener('click', (e) => {
+    // Attach event listener to paperclip
+    div.querySelector('.group-item-paperclip').addEventListener('click', (e) => {
         manageGroupResources(e.target.dataset.groupId, e.target.dataset.groupName);
     });
-    div.querySelector('[data-action="edit-group"]').addEventListener('click', (e) => {
-        editGroup(e.target.dataset.groupId, e.target.dataset.groupName, e.target.dataset.groupDescription);
-    });
-    div.querySelector('[data-action="delete-group"]').addEventListener('click', (e) => {
+    
+    // Attach event listener to delete button
+    div.querySelector('.group-item-delete').addEventListener('click', (e) => {
         deleteGroup(e.target.dataset.groupId);
     });
     
@@ -594,16 +996,91 @@ document.getElementById('group-form').addEventListener('submit', async (e) => {
         });
         
         if (response.ok) {
-            showMessage(isEditingGroup ? 'Group updated successfully' : 'Group created successfully');
+            const result = await response.json();
+            const groupId = result.id || result.Id;
+            
+            console.log('[CREATE GROUP] Group created with ID:', groupId);
+            console.log('[CREATE GROUP] Files to upload:', window.groupSelectedFiles);
+            
+            // Upload files if any are selected
+            if (window.groupSelectedFiles && window.groupSelectedFiles.length > 0) {
+                console.log('[CREATE GROUP] Uploading', window.groupSelectedFiles.length, 'files...');
+                
+                for (const fileObj of window.groupSelectedFiles) {
+                    const formData = new FormData();
+                    formData.append('file', fileObj.file);
+                    formData.append('label', fileObj.name); // Add required label
+                    
+                    try {
+                        console.log('[CREATE GROUP] Uploading file:', fileObj.name);
+                        const uploadRes = await fetch(`${API_BASE}/files`, {
+                            method: 'POST',
+                            body: formData
+                        });
+                        
+                        console.log('[CREATE GROUP] Upload response status:', uploadRes.status);
+                        
+                        if (uploadRes.ok) {
+                            const fileData = await uploadRes.json();
+                            const fileId = fileData.id || fileData.Id;
+                            console.log('[CREATE GROUP] File uploaded with ID:', fileId);
+                            
+                            // Add file to group
+                            const attachRes = await fetch(`${API_BASE}/groups/${groupId}/files/${fileId}`, {
+                                method: 'POST'
+                            });
+                            console.log('[CREATE GROUP] Attach file response status:', attachRes.status);
+                            
+                            if (attachRes.ok) {
+                                console.log('[CREATE GROUP] File successfully attached to group');
+                            } else {
+                                console.error('[CREATE GROUP] Failed to attach file to group');
+                            }
+                        } else {
+                            const errorText = await uploadRes.text();
+                            console.error('[CREATE GROUP] Failed to upload file:', errorText);
+                        }
+                    } catch (uploadError) {
+                        console.error('[CREATE GROUP] Error uploading file:', uploadError);
+                    }
+                }
+                
+                console.log('[CREATE GROUP] All files processed, clearing local list');
+                // Clear files after successful upload - need to use splice to modify the actual array
+                groupSelectedFiles.length = 0; // Clear the array in place
+                window.groupSelectedFiles = groupSelectedFiles;
+                if (typeof window.updateGroupFilesList === 'function') {
+                    window.updateGroupFilesList();
+                }
+                const groupFileSection = document.getElementById('group-file-section');
+                if (groupFileSection) {
+                    groupFileSection.style.display = 'none';
+                }
+            } else {
+                console.log('[CREATE GROUP] No files to upload');
+            }
+            
+            showMessage(isEditingGroup ? 'Reminder updated successfully' : 'Reminder created successfully');
             cancelEditGroup();
             await loadGroups(true);
             await loadAllGroups(true); // Force refresh groups cache
         } else {
             const error = await response.json();
-            showMessage(error.detail || 'Error saving group', 'error');
+            showMessage(error.detail || 'Error saving reminder', 'error');
         }
     } catch (error) {
-        showMessage('Error saving group: ' + error.message, 'error');
+        showMessage('Error saving reminder: ' + error.message, 'error');
+    }
+});
+
+// Enter key handler for reminder/group name input
+document.getElementById('group-name')?.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        const groupForm = document.getElementById('group-form');
+        if (groupForm) {
+            groupForm.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+        }
     }
 });
 
@@ -628,7 +1105,7 @@ function cancelEditGroup() {
 document.getElementById('group-cancel-btn').addEventListener('click', cancelEditGroup);
 
 async function deleteGroup(id) {
-    if (!confirm('Are you sure you want to delete this group?')) return;
+    if (!confirm('Are you sure you want to delete this reminder?')) return;
     
     try {
         const response = await fetch(`${API_BASE}/groups/${id}`, {
@@ -636,15 +1113,15 @@ async function deleteGroup(id) {
         });
         
         if (response.ok || response.status === 204) {
-            showMessage('Group deleted successfully');
+            showMessage('Reminder deleted successfully');
             await loadGroups(true);
             await loadAllGroups(true); // Force refresh groups cache
         } else {
             const error = await response.json();
-            showMessage(error.detail || 'Error deleting group', 'error');
+            showMessage(error.detail || 'Error deleting reminder', 'error');
         }
     } catch (error) {
-        showMessage('Error deleting group: ' + error.message, 'error');
+        showMessage('Error deleting reminder: ' + error.message, 'error');
     }
 }
 
@@ -736,69 +1213,43 @@ async function manageGroupResources(groupId, groupName) {
         const groupFileIds = new Set(groupFiles.map(f => getProp(f, 'id')));
         const groupPromptIds = new Set(groupPrompts.map(p => getProp(p, 'id')));
         
+        console.log('[MANAGE] Group files:', groupFiles);
+        
         const modalBody = document.getElementById('modal-content-body');
+        
+        // Build files list HTML
+        let filesListHTML = '';
+        if (groupFiles.length === 0) {
+            filesListHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No files attached yet</div>';
+        } else {
+            filesListHTML = groupFiles.map(file => {
+                const fileName = getProp(file, 'originalFileName') || getProp(file, 'fileName') || 'Unknown';
+                const fileId = getProp(file, 'id');
+                return `
+                    <div style="padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0;">
+                        <span style="font-size: 14px; color: #333; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                            ${escapeHtml(fileName)}
+                        </span>
+                        <button type="button" onclick="previewReminderFile('${fileId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')"
+                            style="padding: 4px 12px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">
+                            Preview
+                        </button>
+                    </div>
+                `;
+            }).join('');
+        }
+        
         modalBody.innerHTML = `
-            <h4 style="margin-bottom: 15px;">Group: ${escapeHtml(groupName)}</h4>
-            
-            <div class="section" style="margin-bottom: 20px;">
-                <h5 style="margin-bottom: 10px;">Files</h5>
-                <div class="checkbox-group">
-                    ${allFiles.map(file => {
-                        const fileId = getProp(file, 'id');
-                        const fileName = getProp(file, 'fileName') || 'unknown';
-                        const label = getProp(file, 'label') || fileName;
-                        return `
-                        <div class="checkbox-item">
-                            <label>
-                                <input type="checkbox" 
-                                    value="${fileId}" 
-                                    ${groupFileIds.has(fileId) ? 'checked' : ''}
-                                    data-action="toggle-file"
-                                    data-group-id="${groupId}"
-                                    data-file-id="${fileId}">
-                                ${escapeHtml(label)} (${escapeHtml(fileName)})
-                            </label>
-                        </div>
-                    `}).join('')}
-                    ${allFiles.length === 0 ? '<p style="color: #95a5a6;">No files available</p>' : ''}
+            <div style="border: 2px solid #3498db; border-radius: 8px; padding: 15px; display: flex; flex-direction: column; position: relative;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Files</h3>
+                    <button type="button" onclick="closeManageGroupModal()" style="background: none; border: none; font-size: 20px; color: #95a5a6; cursor: pointer; padding: 0; line-height: 1;">×</button>
                 </div>
-            </div>
-            
-            <div class="section">
-                <h5 style="margin-bottom: 10px;">Prompts</h5>
-                <div class="checkbox-group">
-                    ${allPrompts.map(prompt => {
-                        const promptId = getProp(prompt, 'id');
-                        const promptName = getProp(prompt, 'name') || 'Untitled';
-                        return `
-                        <div class="checkbox-item">
-                            <label>
-                                <input type="checkbox" 
-                                    value="${promptId}" 
-                                    ${groupPromptIds.has(promptId) ? 'checked' : ''}
-                                    data-action="toggle-prompt"
-                                    data-group-id="${groupId}"
-                                    data-prompt-id="${promptId}">
-                                ${escapeHtml(promptName)}
-                            </label>
-                        </div>
-                    `}).join('')}
-                    ${allPrompts.length === 0 ? '<p style="color: #95a5a6;">No prompts available</p>' : ''}
+                <div id="modal-files-list" style="flex: 1; overflow-y: scroll; border: 1px solid #e0e0e0; border-radius: 4px; background: white; max-height: 400px; min-height: 200px;">
+                    ${filesListHTML}
                 </div>
             </div>
         `;
-        
-        // Attach event listeners for checkboxes
-        modalBody.querySelectorAll('[data-action="toggle-file"]').forEach(checkbox => {
-            checkbox.addEventListener('change', (e) => {
-                toggleFileInGroup(e.target.dataset.groupId, e.target.dataset.fileId, e.target.checked);
-            });
-        });
-        modalBody.querySelectorAll('[data-action="toggle-prompt"]').forEach(checkbox => {
-            checkbox.addEventListener('change', (e) => {
-                togglePromptInGroup(e.target.dataset.groupId, e.target.dataset.promptId, e.target.checked);
-            });
-        });
         
         document.getElementById('manage-group-modal').classList.add('active');
     } catch (error) {
@@ -973,6 +1424,180 @@ function closeManageGroupModal() {
     document.getElementById('manage-group-modal').classList.remove('active');
 }
 
+// Preview file from reminder modal
+async function previewReminderFile(fileId, fileName) {
+    const modal = document.getElementById('reminder-file-preview-modal');
+    const modalContent = document.getElementById('reminder-file-preview-content');
+    const modalTitle = document.getElementById('reminder-file-preview-title');
+    
+    modalTitle.textContent = fileName;
+    modalContent.innerHTML = '<p style="color: #95a5a6; text-align: center; padding: 20px;">Loading preview...</p>';
+    modal.style.display = 'flex';
+    
+    const cacheBuster = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    const previewUrl = `${API_BASE}/files/${fileId}/preview?v=${cacheBuster}`;
+    const ext = fileName.split('.').pop().toLowerCase();
+    
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) {
+        const img = new Image();
+        img.onload = function() {
+            modalContent.innerHTML = `<img src="${previewUrl}" alt="${escapeHtml(fileName)}" style="max-width: 100%; max-height: 55vh; width: auto; height: auto; border-radius: 4px; object-fit: contain; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">`;
+        };
+        img.onerror = function() {
+            modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load image. The file may not exist or there was an error.</p>';
+        };
+        img.src = previewUrl;
+    } else if (ext === 'pdf') {
+        modalContent.innerHTML = `<embed src="${previewUrl}" type="application/pdf" width="100%" height="55vh" style="border-radius: 4px; min-height: 400px;">`;
+    } else if (['txt', 'json', 'xml', 'csv', 'md'].includes(ext)) {
+        try {
+            const response = await fetch(previewUrl);
+            if (response.ok) {
+                const text = await response.text();
+                modalContent.innerHTML = `<pre style="text-align: left; max-height: 55vh; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(text)}</pre>`;
+            } else {
+                modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load file.</p>';
+            }
+        } catch (error) {
+            modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load file.</p>';
+        }
+    } else {
+        modalContent.innerHTML = `
+            <div style="text-align: center; padding: 40px;">
+                <div style="font-size: 64px; margin-bottom: 20px;">📄</div>
+                <p style="color: #7f8c8d; font-size: 14px;">Preview not available for this file type.</p>
+                <p style="color: #95a5a6; font-size: 12px; margin-top: 10px;">File: ${escapeHtml(fileName)}</p>
+            </div>
+        `;
+    }
+}
+
+let documentsCache = null;
+
+async function resolveDocumentIdByName(fileName) {
+    if (!fileName) return null;
+    if (!documentsCache) {
+        try {
+            const response = await fetch('/api/documents?page=1&pageSize=1000');
+            if (!response.ok) return null;
+            const data = await response.json();
+            const docs = data.documents || data.Documents || [];
+            documentsCache = docs.reduce((acc, doc) => {
+                if (doc.fileName) {
+                    acc[doc.fileName.toLowerCase()] = doc.id || doc.Id;
+                }
+                return acc;
+            }, {});
+        } catch {
+            return null;
+        }
+    }
+
+    return documentsCache[fileName.toLowerCase()] || null;
+}
+
+// Preview a document stored in /api/documents
+async function previewDocumentFile(documentId, fileName) {
+    let resolvedId = documentId;
+    if (!resolvedId && fileName) {
+        resolvedId = await resolveDocumentIdByName(fileName);
+    }
+
+    if (!resolvedId) {
+        showMessage('Unable to locate document for preview', 'error');
+        return;
+    }
+
+    const modal = document.getElementById('reminder-file-preview-modal');
+    const modalContent = document.getElementById('reminder-file-preview-content');
+    const modalTitle = document.getElementById('reminder-file-preview-title');
+    const safeName = fileName || 'Document';
+
+    modalTitle.textContent = safeName;
+    modalContent.innerHTML = '<p style="color: #95a5a6; text-align: center; padding: 20px;">Loading preview...</p>';
+    modal.style.display = 'flex';
+
+    const cacheBuster = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    const previewUrl = `/api/documents/${resolvedId}/download?v=${cacheBuster}`;
+    const ext = (safeName.split('.').pop() || '').toLowerCase();
+
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) {
+        const img = new Image();
+        img.onload = function() {
+            modalContent.innerHTML = `<img src="${previewUrl}" alt="${escapeHtml(safeName)}" style="max-width: 100%; max-height: 55vh; width: auto; height: auto; border-radius: 4px; object-fit: contain; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">`;
+        };
+        img.onerror = function() {
+            modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load image.</p>';
+        };
+        img.src = previewUrl;
+    } else if (ext === 'pdf') {
+        modalContent.innerHTML = `<embed src="${previewUrl}" type="application/pdf" width="100%" height="55vh" style="border-radius: 4px; min-height: 400px;">`;
+    } else if (['txt', 'json', 'xml', 'csv', 'md'].includes(ext)) {
+        try {
+            const response = await fetch(previewUrl);
+            if (response.ok) {
+                const text = await response.text();
+                modalContent.innerHTML = `<pre style="text-align: left; max-height: 55vh; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(text)}</pre>`;
+            } else {
+                modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load file.</p>';
+            }
+        } catch (error) {
+            modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load file.</p>';
+        }
+    } else {
+        modalContent.innerHTML = `
+            <div style="text-align: center; padding: 40px;">
+                <div style="font-size: 64px; margin-bottom: 20px;">📄</div>
+                <p style="color: #7f8c8d; font-size: 14px;">Preview not available for this file type.</p>
+                <p style="color: #95a5a6; font-size: 12px; margin-top: 10px;">File: ${escapeHtml(safeName)}</p>
+            </div>
+        `;
+    }
+}
+
+function showAttachedFilesModal(encodedFiles) {
+    let files = [];
+    try {
+        files = JSON.parse(decodeURIComponent(encodedFiles));
+    } catch (error) {
+        showMessage('Unable to read attached files', 'error');
+        return;
+    }
+
+    if (!Array.isArray(files) || files.length === 0) {
+        showMessage('No attached files to preview', 'error');
+        return;
+    }
+
+    const modalBody = document.getElementById('modal-content-body');
+    modalBody.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Attached Files</h3>
+            <button type="button" onclick="closeManageGroupModal()" style="background: none; border: none; font-size: 20px; color: #95a5a6; cursor: pointer; padding: 0; line-height: 1;">×</button>
+        </div>
+        <div style="border: 1px solid #e0e0e0; border-radius: 6px; background: #fff; max-height: 320px; overflow-y: auto;">
+            ${files.map(file => {
+                const fileId = file.id || file.documentId || '';
+                const fileName = file.name || 'Document';
+                return `
+                    <div style="padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #f0f0f0; gap: 10px;">
+                        <span style="font-size: 14px; color: #333; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(fileName)}</span>
+                        <button type="button" onclick="previewDocumentFile('${fileId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')" style="padding: 4px 10px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                            Preview
+                        </button>
+                    </div>
+                `;
+            }).join('')}
+        </div>
+    `;
+
+    document.getElementById('manage-group-modal').classList.add('active');
+}
+
+function closeReminderFilePreviewModal() {
+    document.getElementById('reminder-file-preview-modal').style.display = 'none';
+}
+
 // Utility functions
 function escapeHtml(text) {
     if (!text) return '';
@@ -1059,6 +1684,684 @@ async function init() {
     }
     
     try {
+        // Apply saved theme
+        const savedTheme = localStorage.getItem(themeStorageKey) || 'light';
+        applyTheme(savedTheme);
+        document.getElementById('theme-toggle')?.addEventListener('click', () => {
+            const nextTheme = document.body.classList.contains('dark') ? 'light' : 'dark';
+            applyTheme(nextTheme);
+        });
+        // Setup preview modal event listeners
+        document.getElementById('close-preview').addEventListener('click', () => {
+            document.getElementById('file-preview').style.display = 'none';
+        });
+        document.getElementById('download-file').addEventListener('click', () => {
+            if (currentPreviewFile.id) {
+                const downloadUrl = `${API_BASE}/files/${currentPreviewFile.id}/download`;
+                window.location.href = downloadUrl;
+            } else {
+                showMessage('No file selected for download', 'error');
+            }
+        });
+        
+        // Setup prompts file management
+        const promptFileInput = document.getElementById('prompt-file-input');
+        const promptFilesList = document.getElementById('prompt-files-list');
+        const promptFilesIcon = document.getElementById('prompt-files-icon');
+        const promptFileSection = document.getElementById('prompt-file-section');
+        const promptPreviewContent = document.getElementById('prompt-preview-content');
+        const promptPreviewFilename = document.getElementById('prompt-preview-filename');
+        const promptUploadProgress = document.getElementById('prompt-upload-progress');
+        const promptUploadBtn = document.getElementById('prompt-upload-btn');
+        const promptFileInputElement = document.getElementById('prompt-file-input');
+
+        const setPromptUploadLoading = (isLoading) => {
+            if (promptUploadProgress) {
+                promptUploadProgress.style.display = isLoading ? 'block' : 'none';
+            }
+            if (promptUploadBtn) {
+                promptUploadBtn.disabled = isLoading;
+                promptUploadBtn.style.opacity = isLoading ? '0.7' : '1';
+                promptUploadBtn.textContent = isLoading ? 'Uploading...' : 'Upload';
+            }
+            if (promptFileInputElement) {
+                promptFileInputElement.disabled = isLoading;
+            }
+        };
+        
+        updatePromptFilesList();
+        
+        // Show file section when clicking "add file+" button
+        document.getElementById('prompt-show-file-btn')?.addEventListener('click', () => {
+            const isCurrentlyHidden = promptFileSection.style.display === 'none' || !promptFileSection.style.display;
+            if (isCurrentlyHidden) {
+                promptFileSection.style.display = 'block';
+                document.getElementById('prompt-preview-panel').style.display = 'block';
+                document.getElementById('prompt-files-panel').style.display = 'flex';
+            } else {
+                promptFileSection.style.display = 'none';
+            }
+        });
+        
+        // Show only Files panel when clicking paperclip in Prompts
+        promptFilesIcon?.addEventListener('click', () => {
+            const filesPanel = document.getElementById('prompt-files-panel');
+            
+            // Hide preview panel, show only files panel
+            document.getElementById('prompt-preview-panel').style.display = 'none';
+            filesPanel.style.display = 'flex';
+            filesPanel.setAttribute('data-context', 'prompts');
+            
+            promptFileSection.style.display = 'block';
+            
+            // Update files list after showing the panel
+            updatePromptFilesList();
+        });
+        
+        // Handle file selection - show preview
+        if (promptFileInput) {
+            promptFileInput.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    promptPreviewFile = file;
+                    if (promptPreviewFilename) {
+                        promptPreviewFilename.textContent = file.name;
+                    }
+                    
+                    // Show actual preview based on file type (like reminders)
+                    const ext = file.name.split('.').pop().toLowerCase();
+                    if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) {
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            promptPreviewContent.innerHTML = `<img src="${e.target.result}" style="max-width: 100%; max-height: 200px; border-radius: 4px; object-fit: contain;">`;
+                        };
+                        reader.readAsDataURL(file);
+                    } else if (ext === 'pdf') {
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            promptPreviewContent.innerHTML = `<embed src="${e.target.result}" type="application/pdf" width="100%" height="200px" style="border-radius: 4px;">`;
+                        };
+                        reader.readAsDataURL(file);
+                    } else {
+                        promptPreviewContent.innerHTML = `
+                            <div style="text-align: center;">
+                                <div style="font-size: 64px; margin-bottom: 10px;">📄</div>
+                                <div style="color: #7f8c8d; font-size: 12px;">Preview not available</div>
+                            </div>
+                        `;
+                    }
+                }
+            });
+        }
+        
+        // Upload button - uploads file to server and adds to list
+        document.getElementById('prompt-upload-btn')?.addEventListener('click', async () => {
+            if (!promptPreviewFile) {
+                showMessage('Please select a file first', 'error');
+                return;
+            }
+            
+            // Check if file already exists in list
+            if (promptSelectedFiles.find(f => f.name === promptPreviewFile.name)) {
+                showMessage('File already uploaded', 'error');
+                return;
+            }
+            
+            try {
+                setPromptUploadLoading(true);
+                // Upload file to server
+                const formData = new FormData();
+                formData.append('file', promptPreviewFile);
+                
+                const uploadRes = await fetch('/api/documents/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!uploadRes.ok) {
+                    const errorText = await uploadRes.text();
+                    throw new Error(`Upload failed: ${errorText}`);
+                }
+                
+                const fileData = await uploadRes.json();
+                const documentId = fileData.id || fileData.Id;
+                
+                // Add uploaded file to list with server ID
+                promptSelectedFiles.push({
+                    file: promptPreviewFile, 
+                    name: promptPreviewFile.name, 
+                    selected: false,
+                    documentId: documentId
+                });
+                window.promptSelectedFiles = promptSelectedFiles;
+                updatePromptFilesList();
+                showMessage(`File "${promptPreviewFile.name}" uploaded successfully`, 'success');
+                
+                // Clear preview
+                promptPreviewFile = null;
+                if (promptPreviewFilename) promptPreviewFilename.textContent = '';
+                if (promptPreviewContent) promptPreviewContent.innerHTML = `<div style="font-size: 48px; color: #95a5a6;">📄</div>`;
+                if (promptFileInput) promptFileInput.value = '';
+                
+                // Reload files list to show the new file
+                if (typeof loadFiles === 'function') {
+                    loadFiles(true);
+                }
+            } catch (error) {
+                console.error('Error uploading file:', error);
+                showMessage(`Failed to upload file: ${error.message}`, 'error');
+            } finally {
+                setPromptUploadLoading(false);
+            }
+        });
+        
+        // Send button function - sends prompt to API
+        const buildSourcesHtml = (sources) => {
+            if (!sources || sources.length === 0) return '';
+            return `
+                <div style="margin-top: 15px; padding: 10px; background: white; border: 1px solid #dee2e6; border-radius: 4px;">
+                    <div style="font-weight: 600; color: #2c3e50; margin-bottom: 8px; font-size: 0.9rem;">Sources Used:</div>
+                    <div style="display: flex; flex-direction: column; gap: 6px;">
+                        ${sources.map(source => {
+                            const documentId = source.documentId || source.DocumentId;
+                            const fileName = source.fileName || source.FileName || 'Document';
+                            const page = source.pageNumber || source.PageNumber;
+                            const chunkText = source.chunkText || source.ChunkText || '';
+                            const label = page ? `${fileName} (p.${page})` : fileName;
+                            const href = documentId ? `/api/documents/${documentId}/download` : '#';
+                            const linkStyle = documentId ? 'color: #3498db; text-decoration: underline;' : 'color: #95a5a6; text-decoration: none;';
+                            return `
+                                <div style="display: flex; flex-direction: column; gap: 4px;">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <a href="${href}" target="_blank" style="${linkStyle}" onclick="${documentId ? '' : 'return false;'}">${escapeHtml(label)}</a>
+                                        ${documentId ? `<button type=\"button\" onclick=\"previewDocumentFile('${documentId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')\" style=\"padding: 2px 8px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;\">Preview</button>` : ''}
+                                    </div>
+                                    ${chunkText ? `<div style=\"font-size: 12px; color: #666; padding-left: 4px;\">${escapeHtml(chunkText)}</div>` : ''}
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
+            `;
+        };
+
+        const sendPrompt = async () => {
+            const promptText = document.getElementById('prompt-name')?.value;
+            const responseContent = document.getElementById('response-content');
+            let lastQueryResult = null;
+            
+            if (!promptText || !promptText.trim()) {
+                showMessage('Please enter a prompt text', 'error');
+                return;
+            }
+            
+            try {
+                // Show loading state
+                responseContent.innerHTML = `
+                    <div style="text-align: center; padding: 20px; color: #3498db;">
+                        <div style="font-size: 1.2rem; margin-bottom: 10px;">⏳ Sending...</div>
+                        <div style="font-size: 0.9rem; color: #666;">Processing your request...</div>
+                    </div>
+                `;
+                
+                // Send query to documents endpoint. Use server-expected property names (Query/TopK)
+                const documentsUrl = '/api/documents/query';
+                const selectedFiles = promptSelectedFiles.some(f => f.selected)
+                    ? promptSelectedFiles.filter(f => f.selected)
+                    : promptSelectedFiles;
+                const documentIds = selectedFiles
+                    .map(f => f.documentId || f.id)
+                    .filter(Boolean);
+
+                const payload = { Query: promptText, TopK: 5 };
+                if (documentIds.length > 0) {
+                    payload.DocumentIds = documentIds;
+                }
+                console.log('[SEND PROMPT] Sending documents query to', documentsUrl, 'payload:', payload);
+
+                const controller = new AbortController();
+                const timeoutMs = 150000; // 150 seconds - longer than server timeout
+                const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+                const queryResponse = await fetch(documentsUrl, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+                    body: JSON.stringify(payload),
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+
+                console.log('[SEND PROMPT] documents query status:', queryResponse.status, queryResponse.statusText);
+                let result;
+                try {
+                    // Try to parse JSON body (may throw)
+                    result = await queryResponse.json();
+                    lastQueryResult = result;
+                    console.log('[SEND PROMPT] documents query response JSON:', result);
+                } catch (parseErr) {
+                    const text = await queryResponse.text().catch(() => '');
+                    console.error('[SEND PROMPT] Failed to parse JSON response. Raw response:', text);
+                    throw new Error('Invalid JSON response from server');
+                }
+
+                if (!queryResponse.ok) {
+                    const errorMsg = result?.error || result?.details || result?.message || `Server error: ${queryResponse.status}`;
+                    throw new Error(errorMsg);
+                }
+
+                const answer = result.answer || result.Answer || result.AnswerText || result?.AnswerHtml || result?.answerText || 'No response received';
+                const sources = result.referencedSources || result.ReferencedSources || result.sources || result.Sources || [];
+
+                // Get current attached files
+                const attachedFiles = promptSelectedFiles.map(f => ({
+                    name: f.file?.name || f.name,
+                    id: f.documentId || f.id
+                }));
+                
+                // Add to conversation history with files and sources
+                currentConversationHistory.push({role: 'user', content: promptText, files: attachedFiles});
+                currentConversationHistory.push({role: 'bot', content: answer, sources});
+                
+                // Display the full conversation history
+                const conversationHTML = currentConversationHistory.map(msg => {
+                    const filesData = msg.files && msg.files.length > 0
+                        ? encodeURIComponent(JSON.stringify(msg.files))
+                        : '';
+                    const filesTitle = msg.files && msg.files.length > 0
+                        ? `${msg.files.length} file(s) attached: ${msg.files.map(f => f.name).join(', ')}`
+                        : '';
+                    const msgSources = Array.isArray(msg.sources) ? msg.sources : [];
+                    const msgSourcesHtml = msg.role === 'bot' && msgSources.length > 0
+                        ? buildSourcesHtml(msgSources)
+                        : '';
+
+                    return `
+                        <div style="margin-bottom: 12px;">
+                            <div style="color: ${msg.role === 'user' ? '#3498db' : '#27ae60'}; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
+                                <span>${msg.role === 'user' ? 'User' : 'Bot'}:</span>
+                                ${msg.files && msg.files.length > 0 ? `<button type="button" onclick="showAttachedFilesModal('${filesData}')" style="background: none; border: none; font-size: 16px; color: #3498db; cursor: pointer; padding: 0;" title="${escapeHtml(filesTitle)}">📎</button>` : ''}
+                            </div>
+                            <div style="color: #555; padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
+                            ${msgSourcesHtml}
+                        </div>
+                    `;
+                }).join('');
+                responseContent.innerHTML = `
+                    <div style="max-height: 500px; overflow-y: auto; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+                        ${conversationHTML}
+                    </div>
+                `;
+                
+                // Clear input for next message
+                document.getElementById('prompt-name').value = '';
+                
+                showMessage('Response received successfully', 'success');
+
+                // Clear attached files after sending
+                promptSelectedFiles = [];
+                window.promptSelectedFiles = promptSelectedFiles;
+                updatePromptFilesList();
+                try {
+                    localStorage.removeItem(draftStorageKey);
+                } catch {
+                    // ignore
+                }
+                
+            } catch (error) {
+                console.error('Error sending prompt:', error);
+                if (error.name === 'AbortError') {
+                    responseContent.innerHTML = `
+                        <div style="text-align: center; padding: 20px; color: #e67e22;">
+                            <div style="font-size: 1.2rem; margin-bottom: 10px;">⏱️ Timeout</div>
+                            <div style="font-size: 0.9rem;">The server took too long to respond. Try again.</div>
+                        </div>
+                    `;
+                    showMessage('Request timed out after 60 seconds', 'error');
+                    return;
+                }
+                const fallbackSources = lastQueryResult?.referencedSources || lastQueryResult?.ReferencedSources || lastQueryResult?.sources || lastQueryResult?.Sources || [];
+                const fallbackSourcesHtml = buildSourcesHtml(fallbackSources);
+                responseContent.innerHTML = `
+                    <div style="text-align: center; padding: 20px; color: #e74c3c;">
+                        <div style="font-size: 1.2rem; margin-bottom: 10px;">❌ Error</div>
+                        <div style="font-size: 0.9rem;">${escapeHtml(error.message)}</div>
+                    </div>
+                    ${fallbackSourcesHtml}
+                `;
+                showMessage(`Error: ${error.message}`, 'error');
+            }
+        };
+        
+        // Send button click handler
+        document.getElementById('prompt-send-btn')?.addEventListener('click', sendPrompt);
+        
+        // Enter key handler for prompt text input
+        document.getElementById('prompt-name')?.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                sendPrompt();
+            }
+        });
+
+        document.getElementById('prompt-name')?.addEventListener('input', () => {
+            autoSaveCurrentConversation('input');
+        });
+        
+        // New Chat button - saves current conversation to Auto Groups
+        document.getElementById('new-chat-btn')?.addEventListener('click', async () => {
+            if (currentConversationHistory.length === 0) {
+                showMessage('No conversation to save', 'error');
+                return;
+            }
+            
+            // Get the first user message as the name
+            const firstMessage = currentConversationHistory.find(m => m.role === 'user');
+            const chatName = firstMessage ? firstMessage.content.substring(0, 50) : 'Untitled Chat';
+            
+            // Get file details from uploaded files
+            const fileDetails = promptSelectedFiles.map(f => ({
+                name: f.name,
+                id: f.documentId || f.id
+            }));
+            
+            // Create JSON string with conversation and files
+            const conversationData = JSON.stringify({
+                messages: currentConversationHistory,
+                files: fileDetails
+            });
+            
+            try {
+                await autoSaveCurrentConversation('new_chat');
+                showMessage('Conversation saved to Auto Groups', 'success');
+                
+                // Reset for new chat
+                currentConversationHistory = [];
+                promptSelectedFiles = [];
+                window.promptSelectedFiles = promptSelectedFiles;
+                updatePromptFilesList();
+                
+                const promptIdInput = document.getElementById('prompt-id');
+                if (promptIdInput) promptIdInput.value = '';
+                document.getElementById('prompt-name').value = '';
+                document.getElementById('response-content').innerHTML = '<span style="color: #999;">Enter a prompt and click Send to get a response</span>';
+                
+                // Reload prompts list to show new Auto Group
+                loadPrompts(true);
+                
+            } catch (error) {
+                console.error('Error saving conversation:', error);
+                showMessage('Failed to save conversation', 'error');
+            }
+        });
+        
+        // Setup reminders file management
+        let groupSelectedFiles = [];
+        window.groupSelectedFiles = groupSelectedFiles; // Expose to global scope
+        let groupPreviewFile = null;
+        const groupFileInput = document.getElementById('group-file-input');
+        const groupFilesList = document.getElementById('group-files-list');
+        const groupFilesIcon = document.getElementById('group-files-icon');
+        const groupFileSection = document.getElementById('group-file-section');
+        const groupFilesDropdown = document.getElementById('group-files-dropdown');
+        const groupFilesListDropdown = document.getElementById('group-files-list-dropdown');
+        const groupPreviewContent = document.getElementById('group-preview-content');
+        const groupPreviewFilename = document.getElementById('group-preview-filename');
+        
+        // Initialize updateGroupFilesList function first
+        function updateGroupFilesList() {
+            // Update paperclip icon color
+            if (groupFilesIcon) {
+                if (groupSelectedFiles.length === 0) {
+                    groupFilesIcon.style.color = '#95a5a6'; // Gray when no files
+                } else {
+                    groupFilesIcon.style.color = '#3498db'; // Blue when files present
+                }
+            }
+            
+            // Update files list in Files section with checkboxes (only show if files exist)
+            if (groupFilesList) {
+                if (groupSelectedFiles.length === 0) {
+                    groupFilesList.innerHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No files attached yet</div>';
+                } else {
+                    groupFilesList.innerHTML = groupSelectedFiles.map((fileObj, index) => `
+                        <div style="padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0; ${fileObj.selected ? 'background: #f0f0f0;' : ''}">
+                            <input type="checkbox" ${fileObj.selected ? 'checked' : ''} style="width: 16px; height: 16px; cursor: pointer; margin: 0;" onclick="toggleGroupFileSelection(${index})">
+                            <span onclick="toggleGroupFileSelection(${index})" style="font-size: 14px; color: #333; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; user-select: none;">
+                                ${escapeHtml(fileObj.name)}
+                            </span>
+                            <button type="button" onclick="event.stopPropagation(); previewGroupFile(${index})" style="padding: 4px 12px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">Preview</button>
+                        </div>
+                    `).join('');
+                }
+            }
+            
+            // Sync window.groupSelectedFiles
+            window.groupSelectedFiles = groupSelectedFiles;
+            
+            // Update dropdown list
+            if (groupFilesListDropdown) {
+                if (groupSelectedFiles.length === 0) {
+                    groupFilesListDropdown.innerHTML = '<div style="color: #95a5a6; text-align: center; padding: 10px;">No files attached</div>';
+                } else {
+                    groupFilesListDropdown.innerHTML = groupSelectedFiles.map((fileObj, index) => `
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            <span style="font-size: 12px; color: #2c3e50;">${escapeHtml(fileObj.name)}</span>
+                            <button type="button" onclick="removeGroupFile(${index})" style="padding: 2px 8px; background: #e74c3c; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 11px;">Delete</button>
+                        </div>
+                    `).join('');
+                }
+            }
+        }
+        window.updateGroupFilesList = updateGroupFilesList;
+        
+        // Initialize files list display (after elements are defined)
+        updateGroupFilesList();
+        
+        // Show file section when clicking "add file+" button
+        document.getElementById('group-show-file-btn')?.addEventListener('click', () => {
+            const isCurrentlyHidden = groupFileSection.style.display === 'none' || !groupFileSection.style.display;
+            if (isCurrentlyHidden) {
+                groupFileSection.style.display = 'block';
+                document.getElementById('group-preview-panel').style.display = 'block';
+                document.getElementById('group-files-panel').style.display = 'flex';
+            } else {
+                groupFileSection.style.display = 'none';
+            }
+        });
+        
+        // Show only Files panel when clicking paperclip in Reminders
+        groupFilesIcon?.addEventListener('click', () => {
+            const filesPanel = document.getElementById('group-files-panel');
+            const deleteBtn = document.getElementById('group-delete-selected-btn');
+            
+            // Hide preview panel, show only files panel
+            document.getElementById('group-preview-panel').style.display = 'none';
+            filesPanel.style.display = 'flex';
+            filesPanel.setAttribute('data-context', 'reminders');
+            
+            // Show delete button when opened from Reminders
+            if (deleteBtn) {
+                deleteBtn.style.display = 'block';
+            }
+            
+            groupFileSection.style.display = 'block';
+            
+            // Update files list after showing the panel
+            updateGroupFilesList();
+        });
+        
+        // Handle file selection - show preview
+        if (groupFileInput) {
+            groupFileInput.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    groupPreviewFile = file;
+                    groupPreviewFilename.textContent = file.name;
+                    
+                    // Show actual preview
+                    const ext = file.name.split('.').pop().toLowerCase();
+                    if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) {
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            groupPreviewContent.innerHTML = `<img src="${e.target.result}" style="max-width: 100%; max-height: 200px; border-radius: 4px; object-fit: contain;">`;
+                        };
+                        reader.readAsDataURL(file);
+                    } else if (ext === 'pdf') {
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            groupPreviewContent.innerHTML = `<embed src="${e.target.result}" type="application/pdf" width="100%" height="200px" style="border-radius: 4px;">`;
+                        };
+                        reader.readAsDataURL(file);
+                    } else {
+                        groupPreviewContent.innerHTML = `
+                            <div style="text-align: center;">
+                                <div style="font-size: 64px; margin-bottom: 10px;">📄</div>
+                                <div style="color: #7f8c8d; font-size: 12px;">Preview not available</div>
+                            </div>
+                        `;
+                    }
+                }
+            });
+        }
+        
+        // Upload button - adds file to list
+        document.getElementById('group-upload-btn')?.addEventListener('click', () => {
+            if (groupPreviewFile) {
+                if (!groupSelectedFiles.find(f => f.name === groupPreviewFile.name)) {
+                    groupSelectedFiles.push({file: groupPreviewFile, name: groupPreviewFile.name, selected: false});
+                    window.groupSelectedFiles = groupSelectedFiles;
+                    updateGroupFilesList();
+                }
+                // Clear preview
+                groupPreviewFile = null;
+                if (groupPreviewFilename) groupPreviewFilename.textContent = '';
+                if (groupPreviewContent) groupPreviewContent.innerHTML = `<div style="font-size: 48px; color: #95a5a6;">📄</div>`;
+                if (groupFileInput) groupFileInput.value = '';
+            }
+        });
+        
+        // Delete selected files
+        document.getElementById('group-delete-selected-btn')?.addEventListener('click', () => {
+            groupSelectedFiles = groupSelectedFiles.filter(f => !f.selected);
+            window.groupSelectedFiles = groupSelectedFiles;
+            updateGroupFilesList();
+        });
+        
+        function getFileIcon(filename) {
+            const ext = filename.split('.').pop().toLowerCase();
+            if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) return '🖼️';
+            if (ext === 'pdf') return '📕';
+            if (['doc', 'docx'].includes(ext)) return '📘';
+            if (ext === 'txt') return '📄';
+            return '📄';
+        }
+        
+        function getFileIconLarge(filename) {
+            const ext = filename.split('.').pop().toLowerCase();
+            if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) return '🖼️';
+            if (ext === 'pdf') return '📕';
+            if (['doc', 'docx'].includes(ext)) return '📘';
+            if (ext === 'txt') return '📄';
+            return '📄';
+        }
+        
+        // Toggle file selection
+        window.toggleGroupFileSelection = function(index) {
+            groupSelectedFiles[index].selected = !groupSelectedFiles[index].selected;
+            window.groupSelectedFiles = groupSelectedFiles;
+            updateGroupFilesList();
+        };
+        
+        // Preview group file
+        window.previewGroupFile = function(index) {
+            const fileObj = groupSelectedFiles[index];
+            if (!fileObj || !fileObj.file) {
+                showMessage('File not available for preview', 'error');
+                return;
+            }
+            
+            const file = fileObj.file;
+            const modal = document.getElementById('group-file-preview-modal');
+            const modalContent = document.getElementById('group-file-preview-content');
+            const modalTitle = document.getElementById('group-file-preview-title');
+            
+            modalTitle.textContent = file.name;
+            modalContent.innerHTML = '<p style="color: #95a5a6; text-align: center; padding: 20px;">Loading preview...</p>';
+            modal.style.display = 'flex';
+            
+            const ext = file.name.split('.').pop().toLowerCase();
+            
+            if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    modalContent.innerHTML = `<img src="${e.target.result}" style="max-width: 100%; max-height: 55vh; width: auto; height: auto; border-radius: 4px; object-fit: contain;">`;
+                };
+                reader.onerror = function() {
+                    modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load image.</p>';
+                };
+                reader.readAsDataURL(file);
+            } else if (ext === 'pdf') {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    modalContent.innerHTML = `<embed src="${e.target.result}" type="application/pdf" width="100%" height="55vh" style="border-radius: 4px; min-height: 400px;">`;
+                };
+                reader.onerror = function() {
+                    modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load PDF.</p>';
+                };
+                reader.readAsDataURL(file);
+            } else if (['txt', 'json', 'xml', 'csv', 'md'].includes(ext)) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const text = e.target.result;
+                    modalContent.innerHTML = `<pre style="text-align: left; max-height: 55vh; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(text)}</pre>`;
+                };
+                reader.onerror = function() {
+                    modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load text file.</p>';
+                };
+                reader.readAsText(file);
+            } else {
+                modalContent.innerHTML = `
+                    <div style="text-align: center; padding: 40px;">
+                        <div style="font-size: 64px; margin-bottom: 20px;">📄</div>
+                        <p style="color: #7f8c8d; font-size: 14px;">Preview not available for this file type.</p>
+                        <p style="color: #95a5a6; font-size: 12px; margin-top: 10px;">File: ${escapeHtml(file.name)}</p>
+                        <p style="color: #95a5a6; font-size: 12px;">Size: ${formatFileSize(file.size)}</p>
+                    </div>
+                `;
+            }
+        };
+        
+        // Close modal when clicking outside
+        document.getElementById('group-file-preview-modal')?.addEventListener('click', function(e) {
+            if (e.target === this) {
+                this.style.display = 'none';
+            }
+        });
+        
+        // Close reminder file preview modal when clicking outside
+        document.getElementById('reminder-file-preview-modal')?.addEventListener('click', function(e) {
+            if (e.target === this) {
+                this.style.display = 'none';
+            }
+        });
+        
+        // Remove file from dropdown
+        window.removeGroupFile = function(index) {
+            groupSelectedFiles.splice(index, 1);
+            window.groupSelectedFiles = groupSelectedFiles;
+            updateGroupFilesList();
+        };
+        
+        // Delete selected files from Files panel
+        window.deleteSelectedGroupFiles = function() {
+            const selectedCount = groupSelectedFiles.filter(f => f.selected).length;
+            if (selectedCount === 0) {
+                return; // Nothing to delete
+            }
+            groupSelectedFiles = groupSelectedFiles.filter(fileObj => !fileObj.selected);
+            updateGroupFilesList();
+        };
+        
         // Load initial data with reset=true to ensure fresh load
         console.log('[INIT] Loading initial data...');
         const results = await Promise.allSettled([
@@ -1084,6 +2387,18 @@ async function init() {
             promptsCount: state.prompts.data.length,
             groupsCount: state.groups.data.length
         }));
+
+        restoreDraftConversation();
+
+        window.addEventListener('beforeunload', () => {
+            autoSaveCurrentConversation('unload');
+        });
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                autoSaveCurrentConversation('hidden');
+            }
+        });
     } catch (error) {
         console.error('[INIT] Error during initialization:', error);
         showMessage('Error loading initial data: ' + error.message, 'error');
