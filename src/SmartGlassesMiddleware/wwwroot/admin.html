@@ -851,7 +851,7 @@
 
         <div class="tabs">
             <button class="tab active" data-tab="files">Files</button>
-            <button class="tab" data-tab="prompts">Prompts</button>
+            <button class="tab" data-tab="prompts">Conversations</button>
             <button class="tab" data-tab="groups">Reminders</button>
             <button id="theme-toggle" class="theme-toggle" type="button" title="Toggle dark mode">🌙</button>
         </div>
@@ -897,25 +897,31 @@
         <div id="prompts" class="tab-content">
             <div class="prompts-container">
                 <div class="prompt-sidebar">
-                    <h3>Auto Groups</h3>
+                    <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+                        <h3 style="margin:0;">Conversations</h3>
+                        <select id="conversation-view-select" style="font-size:13px; padding:6px 8px;">
+                            <option value="conversations">Conversations</option>
+                            <option value="groups">Groups</option>
+                        </select>
+                    </div>
                     <div id="prompts-list"></div>
                 </div>
                 
                 <div class="prompt-form-card">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                        <h2 id="prompt-form-title" style="margin: 0;">Prompt</h2>
-                        <button type="button" id="new-chat-btn" style="padding: 8px 16px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">New Chat</button>
+                        <h2 id="prompt-form-title" style="margin: 0;">Conversation</h2>
+                        <button type="button" id="new-chat-btn" style="padding: 8px 16px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">New Conversation</button>
                     </div>
                     <form id="prompt-form">
                         <input type="hidden" id="prompt-id">
                         <div class="form-group">
-                            <label for="prompt-name">Prompt Text</label>
+                            <label for="prompt-name">Message</label>
                             <div style="display: flex; gap: 10px;">
                                 <div style="position: relative; flex: 1;">
-                                    <input type="text" id="prompt-name" placeholder="Enter prompt text" required style="width: 100%; margin: 0; padding-right: 40px;">
+                                    <input type="text" id="prompt-name" placeholder="Enter a message" required style="width: 100%; margin: 0; padding-right: 40px;">
                                     <span id="prompt-files-icon" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 20px; color: #95a5a6; cursor: pointer;">📎</span>
                                 </div>
-                                <button type="button" id="prompt-show-file-btn" style="padding: 8px 16px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">add file+</button>
+                                <button type="button" id="prompt-show-file-btn" style="padding: 8px 16px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Attach file</button>
                                 <button type="button" id="prompt-send-btn" style="padding: 8px 16px; background: #27ae60; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Send</button>
                             </div>
                             <div style="margin-top: 8px; display: flex; align-items: center; gap: 8px; font-size: 13px; color: #555;">
