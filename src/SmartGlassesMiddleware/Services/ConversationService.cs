@@ -14,6 +14,7 @@ public interface IConversationService
     Task<Conversation> DetectOrCreateConversationAsync(string userMessage, Guid? groupId = null);
     Task<string> SummarizeConversationAsync(Guid conversationId);
     Task ArchiveConversationAsync(Guid conversationId);
+    Task<List<ChatMessage>> SearchRelevantMessagesAsync(Guid conversationId, string query, int maxResults = 5);
 }
 
 public class ConversationService : IConversationService
@@ -201,31 +202,60 @@ public class ConversationService : IConversationService
             throw new ArgumentException($"Conversation {conversationId} not found");
         }
 
-        // Simple summarization: take first and last few messages
         var messages = conversation.Messages.OrderBy(m => m.Timestamp).ToList();
         if (messages.Count <= 5)
         {
             return "Conversation too short to summarize";
         }
 
-        var summary = $"Conversation started: {conversation.CreatedAt}\n";
-        summary += $"Topic: {conversation.Title}\n";
-        summary += $"Messages: {messages.Count}\n";
-        summary += "Key points:\n";
+        try
+        {
+            // Try to use AI for summarization
+            var aiService = _serviceProvider.GetService(typeof(IAIService)) as IAIService;
+            if (aiService != null)
+            {
+                var conversationText = string.Join("\n", messages.Select(m => $"{m.Role}: {m.Content}"));
+                var prompt = $@"Summarize the following conversation into a concise summary (3-5 sentences max) covering the main topics and key points:
+
+{conversationText}
+
+Summary:";
+
+                var (_, aiSummary, _) = await aiService.ProcessRequestAsync(prompt);
+                if (!string.IsNullOrWhiteSpace(aiSummary))
+                {
+                    var summary = $"Conversation Summary ({messages.Count} messages):\n{aiSummary}";
+                    conversation.Summary = summary;
+                    await _context.SaveChangesAsync();
+                    _logger.LogInformation("AI-summarized conversation {ConversationId}", conversationId);
+                    return summary;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to generate AI summary, falling back to basic summary");
+        }
+
+        // Fallback: Simple summarization with first and last few messages
+        var fallbackSummary = $"Conversation started: {conversation.CreatedAt}\n";
+        fallbackSummary += $"Topic: {conversation.Title}\n";
+        fallbackSummary += $"Messages: {messages.Count}\n";
+        fallbackSummary += "Key points:\n";
 
         // Include first 2 and last 2 messages
         var keyMessages = messages.Take(2).Concat(messages.TakeLast(2)).Distinct();
         foreach (var msg in keyMessages)
         {
             var preview = msg.Content.Length > 100 ? msg.Content.Substring(0, 100) + "..." : msg.Content;
-            summary += $"- [{msg.Role}]: {preview}\n";
+            fallbackSummary += $"- [{msg.Role}]: {preview}\n";
         }
 
-        conversation.Summary = summary;
+        conversation.Summary = fallbackSummary;
         await _context.SaveChangesAsync();
 
         _logger.LogInformation("Summarized conversation {ConversationId}", conversationId);
-        return summary;
+        return fallbackSummary;
     }
 
     public async Task ArchiveConversationAsync(Guid conversationId)
@@ -238,6 +268,40 @@ public class ConversationService : IConversationService
             await _context.SaveChangesAsync();
 
             _logger.LogInformation("Archived conversation {ConversationId}", conversationId);
+        }
+    }
+
+    public async Task<List<ChatMessage>> SearchRelevantMessagesAsync(Guid conversationId, string query, int maxResults = 5)
+    {
+        try
+        {
+            // Get recent messages from this conversation
+            // Note: Full semantic search would require storing embeddings for each message
+            // and performing vector similarity search. This is a simplified implementation.
+            const int searchPoolSize = 50; // Limit to recent 50 messages for performance
+            
+            var messages = await _context.ChatMessages
+                .Where(m => m.ConversationId == conversationId)
+                .OrderByDescending(m => m.Timestamp)
+                .Take(searchPoolSize)
+                .ToListAsync();
+
+            // For now, return most recent messages as this is a simplified implementation
+            // A full implementation would:
+            // 1. Generate embeddings for each message during AddMessageAsync
+            // 2. Store embeddings in the ChatMessage model
+            // 3. Use RAG service to find semantically similar messages via vector search
+            _logger.LogDebug("Semantic search for conversation messages is a simplified implementation, returning recent messages");
+            return messages
+                .OrderByDescending(m => m.Timestamp)
+                .Take(maxResults)
+                .OrderBy(m => m.Timestamp)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error searching relevant messages, falling back to recent messages");
+            return await GetRecentMessagesAsync(conversationId, maxResults);
         }
     }
 
