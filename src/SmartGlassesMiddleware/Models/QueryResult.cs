@@ -18,6 +18,11 @@ public class QueryResult
     public List<DocumentSource> ReferencedSources { get; set; } = new();
 
     /// <summary>
+    /// Conversation messages that were used as context
+    /// </summary>
+    public List<ConversationSource> ConversationSources { get; set; } = new();
+
+    /// <summary>
     /// Whether the advanced model was used for this query
     /// </summary>
     public bool UsedAdvancedModel { get; set; }
@@ -48,4 +53,16 @@ public class DocumentSource
     public int PageNumber { get; set; }
     public Guid ChunkId { get; set; }
     public string ChunkText { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Conversation message source information for a query result
+/// </summary>
+public class ConversationSource
+{
+    public Guid ConversationId { get; set; }
+    public Guid MessageId { get; set; }
+    public string Role { get; set; } = string.Empty;
+    public string Content { get; set; } = string.Empty;
+    public DateTime Timestamp { get; set; }
 }

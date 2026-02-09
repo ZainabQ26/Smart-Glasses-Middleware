@@ -18,12 +18,13 @@ public class RequestMonitoringService : IRequestMonitoringService
     private readonly ConcurrentQueue<RequestStatus> _recentRequests = new();
     private readonly IHubContext<TaskHub> _hubContext;
     private readonly ILogger<RequestMonitoringService> _logger;
-    private const int MaxRecentRequests = 100;
+    private readonly int _maxRecentRequests;
 
-    public RequestMonitoringService(IHubContext<TaskHub> hubContext, ILogger<RequestMonitoringService> logger)
+    public RequestMonitoringService(IHubContext<TaskHub> hubContext, ILogger<RequestMonitoringService> logger, IConfiguration configuration)
     {
         _hubContext = hubContext;
         _logger = logger;
+        _maxRecentRequests = configuration.GetValue<int?>("Monitoring:MaxRecentRequests") ?? 100;
     }
 
     public async Task<string> StartRequest(string requestType, string description)
@@ -42,7 +43,7 @@ public class RequestMonitoringService : IRequestMonitoringService
         _recentRequests.Enqueue(request);
 
         // Trim old requests
-        while (_recentRequests.Count > MaxRecentRequests)
+        while (_recentRequests.Count > _maxRecentRequests)
         {
             _recentRequests.TryDequeue(out _);
         }
