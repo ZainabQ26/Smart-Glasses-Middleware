@@ -351,6 +351,9 @@
             border: 1px solid #f5c6cb;
         }
 
+        /* Toast styles moved to toasts.css */
+
+    <link rel="stylesheet" href="toasts.css">
         .modal {
             display: none;
             position: fixed;
@@ -843,7 +846,7 @@
     </header>
 
     <div class="container">
-        <div id="message-container"></div>
+        <!-- Toast container is created by toasts.js and appended to document.body -->
 
         <div class="tabs">
             <button class="tab active" data-tab="files">Files</button>
@@ -1074,6 +1077,11 @@
     <script>
         // Force reload with timestamp
         const timestamp = new Date().getTime();
+        // Load shared toasts first (global showMessage)
+        const toastsScript = document.createElement('script');
+        toastsScript.src = `toasts.js?v=${timestamp}`;
+        document.body.appendChild(toastsScript);
+
         const script = document.createElement('script');
         script.src = `admin.js?v=${timestamp}`;
         document.body.appendChild(script);

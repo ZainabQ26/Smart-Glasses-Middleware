@@ -275,6 +275,7 @@
             animation: pulse 2s ease-in-out infinite;
         }
     </style>
+    <link rel="stylesheet" href="toasts.css">
 </head>
 <body>
     <header>
@@ -684,6 +685,14 @@
                 }
             }, 100);
         }
+    </script>
+    <script>
+        // Load shared toast utilities so monitoring page can call showMessage()
+        (function () {
+            const s = document.createElement('script');
+            s.src = 'toasts.js';
+            document.body.appendChild(s);
+        })();
     </script>
 </body>
 </html>
