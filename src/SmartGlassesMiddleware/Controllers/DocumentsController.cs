@@ -17,6 +17,7 @@ public class DocumentsController : ControllerBase
     private readonly ApplicationDbContext _context;
     private readonly IConfiguration _configuration;
     private readonly IRequestMonitoringService _monitoringService;
+    private readonly IMediaStorageService _mediaStorageService;
     private readonly long _maxFileSize;
 
     public DocumentsController(
@@ -26,7 +27,8 @@ public class DocumentsController : ControllerBase
         IDocumentHighlightService highlightService,
         ApplicationDbContext context,
         IConfiguration configuration,
-        IRequestMonitoringService monitoringService)
+        IRequestMonitoringService monitoringService,
+        IMediaStorageService mediaStorageService)
     {
         _logger = logger;
         _processingService = processingService;
@@ -35,6 +37,7 @@ public class DocumentsController : ControllerBase
         _context = context;
         _configuration = configuration;
         _monitoringService = monitoringService;
+        _mediaStorageService = mediaStorageService;
         var maxFileSizeMB = configuration.GetValue<int?>("RAG:MaxFileSizeMB") ?? 50;
         _maxFileSize = maxFileSizeMB * 1024 * 1024;
     }
@@ -287,6 +290,29 @@ public class DocumentsController : ControllerBase
                 Preview = c.ChunkText.Length > 100 ? c.ChunkText.Substring(0, 100) + "..." : c.ChunkText
             }).ToList()
         });
+    }
+
+    /// <summary>
+    /// Download or preview a document file
+    /// </summary>
+    [HttpGet("{documentId}/download")]
+    [ProducesResponseType(typeof(FileStreamResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DownloadDocument(Guid documentId)
+    {
+        var document = await _context.DocumentMetadatas.FindAsync(documentId);
+        if (document == null)
+        {
+            return NotFound();
+        }
+
+        var stream = await _mediaStorageService.DownloadFileAsync(document.StorageKey);
+        stream.Position = 0;
+        var contentType = string.IsNullOrWhiteSpace(document.ContentType)
+            ? "application/octet-stream"
+            : document.ContentType;
+
+        return File(stream, contentType);
     }
 
     /// <summary>
