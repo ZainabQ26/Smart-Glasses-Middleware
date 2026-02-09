@@ -1,5 +1,8 @@
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
 using SmartGlassesMiddleware.Hubs;
+using SmartGlassesMiddleware.Models;
+using SmartGlassesMiddleware.Data;
 using System.Collections.Concurrent;
 
 namespace SmartGlassesMiddleware.Services;
@@ -19,19 +22,29 @@ public class RequestMonitoringService : IRequestMonitoringService
     private readonly IHubContext<TaskHub> _hubContext;
     private readonly ILogger<RequestMonitoringService> _logger;
     private readonly int _maxRecentRequests;
+    private readonly ApplicationDbContext _context;
+    private bool _initialized = false;
 
-    public RequestMonitoringService(IHubContext<TaskHub> hubContext, ILogger<RequestMonitoringService> logger, IConfiguration configuration)
+    public RequestMonitoringService(
+        IHubContext<TaskHub> hubContext, 
+        ILogger<RequestMonitoringService> logger, 
+        IConfiguration configuration,
+        ApplicationDbContext context)
     {
         _hubContext = hubContext;
         _logger = logger;
+        _context = context;
         _maxRecentRequests = configuration.GetValue<int?>("Monitoring:MaxRecentRequests") ?? 100;
     }
 
     public async Task<string> StartRequest(string requestType, string description)
     {
+        await EnsureInitializedAsync();
+        
         var requestId = Guid.NewGuid().ToString();
         var request = new RequestStatus
         {
+            Id = Guid.NewGuid(),
             RequestId = requestId,
             RequestType = requestType,
             Description = description,
@@ -87,18 +100,59 @@ public class RequestMonitoringService : IRequestMonitoringService
             try { request.Progress = 100; } catch { }
 
             await BroadcastUpdate(request);
+            
+            // Persist to database
+            try
+            {
+                _context.RequestStatuses.Add(request);
+                await _context.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to persist request status to database for {RequestId}", requestId);
+            }
+            
             _logger.LogInformation("Completed request {RequestId}: Success={Success}, Duration={Duration}ms", 
                 requestId, success, request.DurationMs);
         }
     }
 
-    public Task<List<RequestStatus>> GetRecentRequests(int count = 50)
+    public async Task<List<RequestStatus>> GetRecentRequests(int count = 50)
     {
+        await EnsureInitializedAsync();
+        
         var requests = _recentRequests
             .Reverse()
             .Take(count)
             .ToList();
-        return Task.FromResult(requests);
+        return requests;
+    }
+    
+    private async Task EnsureInitializedAsync()
+    {
+        if (_initialized) return;
+        
+        try
+        {
+            // Load recent completed requests from database
+            var dbRequests = await _context.RequestStatuses
+                .OrderByDescending(r => r.StartTime)
+                .Take(_maxRecentRequests)
+                .ToListAsync();
+            
+            foreach (var request in dbRequests.OrderBy(r => r.StartTime))
+            {
+                _recentRequests.Enqueue(request);
+            }
+            
+            _logger.LogInformation("Loaded {Count} historical request statuses from database", dbRequests.Count);
+            _initialized = true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load historical request statuses from database");
+            _initialized = true; // Mark as initialized anyway to prevent repeated attempts
+        }
     }
 
     private async Task BroadcastUpdate(RequestStatus request)
@@ -126,22 +180,4 @@ public class RequestMonitoringService : IRequestMonitoringService
         
         await Task.CompletedTask;
     }
-}
-
-public class RequestStatus
-{
-    public string RequestId { get; set; } = string.Empty;
-    public string RequestType { get; set; } = string.Empty;
-    public string Description { get; set; } = string.Empty;
-    public string Status { get; set; } = string.Empty;
-    public string? Details { get; set; }
-    // Progress percentage (0-100) for UI progress bar
-    public int? Progress { get; set; }
-    public DateTime StartTime { get; set; }
-    public DateTime? LastUpdateTime { get; set; }
-    public DateTime? EndTime { get; set; }
-    public long DurationMs { get; set; }
-    public bool Success { get; set; }
-    public string? Result { get; set; }
-    public string? Error { get; set; }
 }
