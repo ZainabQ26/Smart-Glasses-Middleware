@@ -37,7 +37,8 @@ public class DocumentsControllerTests
         IConfiguration? configuration = null,
         Mock<IRequestMonitoringService>? monitoringService = null,
         Mock<IMediaStorageService>? mediaStorageService = null,
-        Mock<IHistoryService>? historyService = null)
+        Mock<IHistoryService>? historyService = null,
+        Mock<IConversationService>? conversationService = null)
     {
         var ctx = context ?? GetInMemoryContext();
         var mockProcessing = processingService ?? new Mock<IDocumentProcessingService>();
@@ -46,6 +47,7 @@ public class DocumentsControllerTests
         var mockLogger = new Mock<ILogger<DocumentsController>>();
         var mockMonitoring = monitoringService ?? new Mock<IRequestMonitoringService>();
         var mockHistory = historyService ?? new Mock<IHistoryService>();
+        var mockConversation = conversationService ?? new Mock<IConversationService>();
 
         var config = configuration ?? new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -64,7 +66,8 @@ public class DocumentsControllerTests
             config,
             mockMonitoring.Object,
             mockHistory.Object,
-            mockMediaStorage.Object);
+            mockMediaStorage.Object,
+            mockConversation.Object);
 
         controller.ControllerContext = new ControllerContext
         {
@@ -298,6 +301,10 @@ public class DocumentsControllerTests
     {
         // Arrange
         var mockRag = new Mock<IRAGService>();
+        var mockConversation = new Mock<IConversationService>();
+        var conversationId = Guid.NewGuid();
+        var conversation = new Conversation { Id = conversationId };
+        
         var queryResult = new QueryResult
         {
             Answer = "This is the answer",
@@ -307,10 +314,16 @@ public class DocumentsControllerTests
             }
         };
 
-        mockRag.Setup(s => s.QueryDocumentsAsync("test query", 5, null))
+        mockConversation.Setup(s => s.DetectOrCreateConversationAsync("test query", null))
+            .ReturnsAsync(conversation);
+        mockConversation.Setup(s => s.AddMessageAsync(conversationId, "user", "test query", null))
+            .ReturnsAsync(new ChatMessage());
+        mockConversation.Setup(s => s.AddMessageAsync(conversationId, "assistant", "This is the answer", null))
+            .ReturnsAsync(new ChatMessage());
+        mockRag.Setup(s => s.QueryDocumentsWithConversationAsync("test query", conversationId, 5, null, null))
             .ReturnsAsync(queryResult);
 
-        var controller = CreateController(ragService: mockRag);
+        var controller = CreateController(ragService: mockRag, conversationService: mockConversation);
         var request = new QueryRequest { Query = "test query", TopK = 5 };
 
         // Act
@@ -321,6 +334,11 @@ public class DocumentsControllerTests
         var returnedResult = Assert.IsType<QueryResult>(okResult.Value);
         Assert.Equal("This is the answer", returnedResult.Answer);
         Assert.Single(returnedResult.Sources);
+        
+        // Verify conversation methods were called
+        mockConversation.Verify(s => s.DetectOrCreateConversationAsync("test query", null), Times.Once);
+        mockConversation.Verify(s => s.AddMessageAsync(conversationId, "user", "test query", null), Times.Once);
+        mockConversation.Verify(s => s.AddMessageAsync(conversationId, "assistant", "This is the answer", null), Times.Once);
     }
 
     [Fact]
@@ -358,12 +376,19 @@ public class DocumentsControllerTests
     {
         // Arrange
         var mockRag = new Mock<IRAGService>();
+        var mockConversation = new Mock<IConversationService>();
+        var conversationId = Guid.NewGuid();
+        var conversation = new Conversation { Id = conversationId };
         var queryResult = new QueryResult { Answer = "Answer" };
 
-        mockRag.Setup(s => s.QueryDocumentsAsync("test", 5, null))
+        mockConversation.Setup(s => s.DetectOrCreateConversationAsync("test", null))
+            .ReturnsAsync(conversation);
+        mockConversation.Setup(s => s.AddMessageAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), null))
+            .ReturnsAsync(new ChatMessage());
+        mockRag.Setup(s => s.QueryDocumentsWithConversationAsync("test", conversationId, 5, null, null))
             .ReturnsAsync(queryResult);
 
-        var controller = CreateController(ragService: mockRag);
+        var controller = CreateController(ragService: mockRag, conversationService: mockConversation);
         var request = new QueryRequest { Query = "test" };
 
         // Act
@@ -371,7 +396,7 @@ public class DocumentsControllerTests
 
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result);
-        mockRag.Verify(s => s.QueryDocumentsAsync("test", 5, null), Times.Once);
+        mockRag.Verify(s => s.QueryDocumentsWithConversationAsync("test", conversationId, 5, null, null), Times.Once);
     }
 
     [Fact]
@@ -379,13 +404,20 @@ public class DocumentsControllerTests
     {
         // Arrange
         var mockRag = new Mock<IRAGService>();
+        var mockConversation = new Mock<IConversationService>();
+        var conversationId = Guid.NewGuid();
+        var conversation = new Conversation { Id = conversationId };
         var queryResult = new QueryResult { Answer = "Answer" };
         var groupIds = new List<Guid> { Guid.NewGuid(), Guid.NewGuid() };
 
-        mockRag.Setup(s => s.QueryDocumentsAsync("test", 10, It.IsAny<List<Guid>>()))
+        mockConversation.Setup(s => s.DetectOrCreateConversationAsync("test", groupIds.First()))
+            .ReturnsAsync(conversation);
+        mockConversation.Setup(s => s.AddMessageAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), null))
+            .ReturnsAsync(new ChatMessage());
+        mockRag.Setup(s => s.QueryDocumentsWithConversationAsync("test", conversationId, 10, groupIds, null))
             .ReturnsAsync(queryResult);
 
-        var controller = CreateController(ragService: mockRag);
+        var controller = CreateController(ragService: mockRag, conversationService: mockConversation);
         var request = new QueryRequest { Query = "test", TopK = 10, GroupIds = groupIds };
 
         // Act
@@ -393,7 +425,7 @@ public class DocumentsControllerTests
 
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result);
-        mockRag.Verify(s => s.QueryDocumentsAsync("test", 10, groupIds), Times.Once);
+        mockRag.Verify(s => s.QueryDocumentsWithConversationAsync("test", conversationId, 10, groupIds, null), Times.Once);
     }
 
     [Fact]
@@ -401,10 +433,18 @@ public class DocumentsControllerTests
     {
         // Arrange
         var mockRag = new Mock<IRAGService>();
-        mockRag.Setup(s => s.QueryDocumentsAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<List<Guid>?>()))
+        var mockConversation = new Mock<IConversationService>();
+        var conversationId = Guid.NewGuid();
+        var conversation = new Conversation { Id = conversationId };
+        
+        mockConversation.Setup(s => s.DetectOrCreateConversationAsync(It.IsAny<string>(), null))
+            .ReturnsAsync(conversation);
+        mockConversation.Setup(s => s.AddMessageAsync(It.IsAny<Guid>(), "user", It.IsAny<string>(), null))
+            .ReturnsAsync(new ChatMessage());
+        mockRag.Setup(s => s.QueryDocumentsWithConversationAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<int>(), It.IsAny<List<Guid>?>(), It.IsAny<List<Guid>?>()))
             .ThrowsAsync(new Exception("Query error"));
 
-        var controller = CreateController(ragService: mockRag);
+        var controller = CreateController(ragService: mockRag, conversationService: mockConversation);
         var request = new QueryRequest { Query = "test" };
 
         // Act
@@ -413,6 +453,53 @@ public class DocumentsControllerTests
         // Assert
         var statusCodeResult = Assert.IsType<ObjectResult>(result);
         Assert.Equal(500, statusCodeResult.StatusCode);
+    }
+
+    [Fact]
+    public async Task QueryDocuments_ContinuesConversation_WithinSameGroup()
+    {
+        // Arrange
+        var mockRag = new Mock<IRAGService>();
+        var mockConversation = new Mock<IConversationService>();
+        var groupId = Guid.NewGuid();
+        var conversationId = Guid.NewGuid();
+        var conversation = new Conversation { Id = conversationId, ResourceGroupId = groupId };
+        var queryResult = new QueryResult { Answer = "Answer" };
+        var groupIds = new List<Guid> { groupId };
+
+        // Setup conversation service to detect/continue existing conversation
+        mockConversation.Setup(s => s.DetectOrCreateConversationAsync(It.IsAny<string>(), groupId))
+            .ReturnsAsync(conversation);
+        mockConversation.Setup(s => s.AddMessageAsync(conversationId, "user", It.IsAny<string>(), null))
+            .ReturnsAsync(new ChatMessage());
+        mockConversation.Setup(s => s.AddMessageAsync(conversationId, "assistant", It.IsAny<string>(), null))
+            .ReturnsAsync(new ChatMessage());
+        mockRag.Setup(s => s.QueryDocumentsWithConversationAsync(It.IsAny<string>(), conversationId, 5, groupIds, null))
+            .ReturnsAsync(queryResult);
+
+        var controller = CreateController(ragService: mockRag, conversationService: mockConversation);
+        
+        // Act - First query
+        var request1 = new QueryRequest { Query = "What is AI?", GroupIds = groupIds };
+        var result1 = await controller.QueryDocuments(request1);
+        
+        // Act - Second query in same group (should continue conversation)
+        var request2 = new QueryRequest { Query = "Tell me more", GroupIds = groupIds };
+        var result2 = await controller.QueryDocuments(request2);
+
+        // Assert - Both queries should be OK
+        Assert.IsType<OkObjectResult>(result1);
+        Assert.IsType<OkObjectResult>(result2);
+        
+        // Verify conversation service was called twice with same groupId
+        mockConversation.Verify(s => s.DetectOrCreateConversationAsync(It.IsAny<string>(), groupId), Times.Exactly(2));
+        
+        // Verify both queries used conversation-aware RAG method
+        mockRag.Verify(s => s.QueryDocumentsWithConversationAsync(It.IsAny<string>(), conversationId, 5, groupIds, null), Times.Exactly(2));
+        
+        // Verify messages were added to the same conversation (2 user + 2 assistant = 4 messages)
+        mockConversation.Verify(s => s.AddMessageAsync(conversationId, "user", It.IsAny<string>(), null), Times.Exactly(2));
+        mockConversation.Verify(s => s.AddMessageAsync(conversationId, "assistant", It.IsAny<string>(), null), Times.Exactly(2));
     }
 
     #endregion
