@@ -275,28 +275,23 @@ Summary:";
     {
         try
         {
-            // Get the RAG service to generate query embedding
-            var ragService = _serviceProvider.GetService(typeof(IRAGService)) as IRAGService;
-            if (ragService == null)
-            {
-                _logger.LogWarning("RAG service not available, falling back to recent messages");
-                return await GetRecentMessagesAsync(conversationId, maxResults);
-            }
-
-            // Generate embedding for the query
-            var (embeddingJson, dimension) = await ragService.GenerateTextEmbeddingJsonAsync(query);
-
-            // Get all messages from this conversation that might be relevant
+            // Get recent messages from this conversation
+            // Note: Full semantic search would require storing embeddings for each message
+            // and performing vector similarity search. This is a simplified implementation.
+            const int searchPoolSize = 50; // Limit to recent 50 messages for performance
+            
             var messages = await _context.ChatMessages
                 .Where(m => m.ConversationId == conversationId)
                 .OrderByDescending(m => m.Timestamp)
-                .Take(50) // Limit to recent 50 messages for performance
+                .Take(searchPoolSize)
                 .ToListAsync();
 
-            // For now, return most recent messages as a fallback
-            // In a full implementation, we would generate embeddings for each message
-            // and perform similarity search
-            _logger.LogInformation("Semantic search for conversation messages is a simplified implementation");
+            // For now, return most recent messages as this is a simplified implementation
+            // A full implementation would:
+            // 1. Generate embeddings for each message during AddMessageAsync
+            // 2. Store embeddings in the ChatMessage model
+            // 3. Use RAG service to find semantically similar messages via vector search
+            _logger.LogDebug("Semantic search for conversation messages is a simplified implementation, returning recent messages");
             return messages
                 .OrderByDescending(m => m.Timestamp)
                 .Take(maxResults)
