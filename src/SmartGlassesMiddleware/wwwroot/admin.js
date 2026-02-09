@@ -228,8 +228,8 @@ async function loadPrompts(reset = false) {
         if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
 
         const result = await response.json();
-        const items = result.data || result.Data || [];
-        const pagination = result.pagination || result.Pagination || {};
+        const items = Array.isArray(result) ? result : (result.data || result.Data || []);
+        const pagination = Array.isArray(result) ? {} : (result.pagination || result.Pagination || {});
 
         hideLoading('prompts-list');
 
@@ -276,6 +276,7 @@ async function loadPrompts(reset = false) {
                         if (!isGroup && id) {
                             activeConversationId = id;
                             await syncActiveGroupFromConversation(id);
+                            await loadConversationIntoView(id, title);
                             showMessage('Conversation selected');
                         } else if (isGroup) {
                             setActivePromptGroup(id, title);
@@ -290,7 +291,7 @@ async function loadPrompts(reset = false) {
             });
             if (list) list.appendChild(fragment);
 
-            state.prompts.hasMore = pagination.hasNext || pagination.HasNext;
+            state.prompts.hasMore = pagination.hasNext || pagination.HasNext || false;
             state.prompts.page++;
         } else if (reset && list) {
             list.innerHTML = `<div class="empty-sidebar">No ${view} yet</div>`;
@@ -615,6 +616,65 @@ function createNewPrompt() {
     }
 }
 
+async function loadConversationIntoView(conversationId, title) {
+    if (!conversationId) return;
+    try {
+        const responseContent = document.getElementById('response-content');
+        if (responseContent) {
+            responseContent.innerHTML = '<span style="color: #999;">Loading conversation...</span>';
+        }
+
+        const res = await fetchWithRetry(`/api/conversations/${conversationId}`);
+        if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        }
+
+        const conversation = await res.json().catch(() => null);
+        const messages = (conversation && (conversation.messages || conversation.Messages)) || [];
+
+        currentConversationHistory = Array.isArray(messages)
+            ? messages.map(m => ({
+                role: (m.role || m.Role || '').toLowerCase() === 'assistant' ? 'bot' : (m.role || m.Role || 'user').toLowerCase(),
+                content: m.content || m.Content || ''
+            }))
+            : [];
+
+        const promptIdInput = document.getElementById('prompt-id');
+        if (promptIdInput) promptIdInput.value = '';
+        const promptTitle = document.getElementById('prompt-form-title');
+        if (promptTitle) promptTitle.textContent = title || 'Conversation';
+
+        if (currentConversationHistory.length === 0) {
+            if (responseContent) {
+                responseContent.innerHTML = '<span style="color: #999;">No messages yet</span>';
+            }
+            return;
+        }
+
+        const conversationHTML = currentConversationHistory.map(msg => {
+            return `
+                <div style="margin-bottom: 12px;">
+                    <div style="color: ${msg.role === 'user' ? '#3498db' : '#27ae60'}; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
+                        <span>${msg.role === 'user' ? 'User' : 'Bot'}:</span>
+                    </div>
+                    <div style="color: #555; padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
+                </div>
+            `;
+        }).join('');
+
+        if (responseContent) {
+            responseContent.innerHTML = `
+                <div style="max-height: 500px; overflow-y: auto; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+                    ${conversationHTML}
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('[CONVERSATION] Failed to load conversation:', error);
+        showMessage('Failed to load conversation: ' + error.message, 'error');
+    }
+}
+
 // Handle file attachments for prompts
 let promptPreviewFile = null;
 let promptSelectedFiles = [];
@@ -900,9 +960,6 @@ async function syncActiveGroupFromConversation(conversationId) {
         if (groupId) {
             activePromptGroupId = groupId;
             updateActiveGroupStyles();
-            if (groupName) {
-                showMessage(`Auto-grouped into: ${groupName}`);
-            }
             await loadGroups(true);
             await loadAllGroups(true);
         }

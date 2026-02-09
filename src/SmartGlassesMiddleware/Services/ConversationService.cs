@@ -59,16 +59,25 @@ public class ConversationService : IConversationService
 
     public async Task<Conversation?> GetConversationAsync(Guid conversationId)
     {
-        return await _context.Conversations
-            .Include(c => c.Messages.OrderBy(m => m.Timestamp))
+        var conversation = await _context.Conversations
             .Include(c => c.ResourceGroup)
             .FirstOrDefaultAsync(c => c.Id == conversationId);
+
+        if (conversation == null)
+            return null;
+
+        // Load and order messages explicitly to ensure they're populated and sorted
+        conversation.Messages = await _context.ChatMessages
+            .Where(m => m.ConversationId == conversationId)
+            .OrderBy(m => m.Timestamp)
+            .ToListAsync();
+
+        return conversation;
     }
 
     public async Task<List<Conversation>> GetActiveConversationsAsync(Guid? groupId = null)
     {
         var query = _context.Conversations
-            .Include(c => c.Messages)
             .Where(c => c.IsActive);
 
         if (groupId.HasValue)
@@ -76,9 +85,28 @@ public class ConversationService : IConversationService
             query = query.Where(c => c.ResourceGroupId == groupId.Value);
         }
 
-        return await query
+        var conversations = await query
             .OrderByDescending(c => c.UpdatedAt)
             .ToListAsync();
+
+        if (conversations.Count == 0)
+            return conversations;
+
+        // Load messages for all returned conversations in a single query
+        var convoIds = conversations.Select(c => c.Id).ToList();
+        var messages = await _context.ChatMessages
+            .Where(m => convoIds.Contains(m.ConversationId))
+            .OrderBy(m => m.Timestamp)
+            .ToListAsync();
+
+        var grouped = messages.GroupBy(m => m.ConversationId).ToDictionary(g => g.Key, g => g.ToList());
+        foreach (var c in conversations)
+        {
+            grouped.TryGetValue(c.Id, out var list);
+            c.Messages = list ?? new List<ChatMessage>();
+        }
+
+        return conversations;
     }
 
     public async Task<ChatMessage> AddMessageAsync(Guid conversationId, string role, string content, string? model = null)
@@ -190,8 +218,39 @@ public class ConversationService : IConversationService
             ? userMessage.Substring(0, 50) + "..."
             : userMessage;
 
+        Guid? effectiveGroupId = groupId;
+        if (effectiveGroupId.HasValue)
+        {
+            var existingGroup = await _context.ResourceGroups.FindAsync(effectiveGroupId.Value);
+            if (existingGroup == null)
+            {
+                var newGroup = new ResourceGroup
+                {
+                    Id = effectiveGroupId.Value,
+                    Name = fallbackTitle,
+                    CreatedAt = DateTime.UtcNow
+                };
+                _context.ResourceGroups.Add(newGroup);
+                await _context.SaveChangesAsync();
+                _logger.LogInformation("Created ResourceGroup {GroupId} for fallback conversation", newGroup.Id);
+            }
+        }
+        else
+        {
+            var newGroup = new ResourceGroup
+            {
+                Id = Guid.NewGuid(),
+                Name = fallbackTitle,
+                CreatedAt = DateTime.UtcNow
+            };
+            _context.ResourceGroups.Add(newGroup);
+            await _context.SaveChangesAsync();
+            effectiveGroupId = newGroup.Id;
+            _logger.LogInformation("Created ResourceGroup {GroupId} for fallback conversation", newGroup.Id);
+        }
+
         _logger.LogInformation("Creating new conversation based on user message (fallback)");
-        return await CreateConversationAsync(fallbackTitle, groupId);
+        return await CreateConversationAsync(fallbackTitle, effectiveGroupId);
     }
 
     public async Task<string> SummarizeConversationAsync(Guid conversationId)

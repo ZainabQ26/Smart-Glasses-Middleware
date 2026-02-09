@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace SmartGlassesMiddleware.Models;
 
 /// <summary>
@@ -14,6 +16,7 @@ public class ResourceGroup
     public List<ManagedFileGroup> FileGroups { get; set; } = new();
     public List<ManagedPromptGroup> PromptGroups { get; set; } = new();
     public List<DocumentGroup> DocumentGroups { get; set; } = new();
+    [JsonIgnore]
     public List<Conversation> Conversations { get; set; } = new();
 }
 
