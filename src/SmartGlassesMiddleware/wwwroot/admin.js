@@ -69,6 +69,8 @@ document.querySelectorAll('.tab').forEach(tab => {
         } else if (tabName === 'groups') {
             loadGroups(true);
             loadAllGroups();
+        } else if (tabName === 'monitoring') {
+            loadMetrics();
         }
     });
 });
@@ -1060,6 +1062,10 @@ async function init() {
         
         setupInfiniteScroll();
         console.log('[INIT] Infinite scroll setup complete');
+        
+        setupMonitoring();
+        console.log('[INIT] Monitoring setup complete');
+        
         console.log('[INIT] State:', JSON.stringify({
             filesCount: state.files.data.length,
             promptsCount: state.prompts.data.length,
@@ -1068,6 +1074,175 @@ async function init() {
     } catch (error) {
         console.error('[INIT] Error during initialization:', error);
         showMessage('Error loading initial data: ' + error.message, 'error');
+    }
+}
+
+// ============================================================================
+// REQUEST MONITORING
+// ============================================================================
+
+let metricsRefreshInterval = null;
+
+async function loadMetrics() {
+    try {
+        console.log('[METRICS] Fetching metrics...');
+        const response = await fetch('/metrics', {
+            headers: {
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache'
+            },
+            cache: 'no-store'
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        console.log('[METRICS] Received data:', data);
+        
+        displayMetrics(data);
+        updateLastRefreshTime();
+    } catch (error) {
+        console.error('[METRICS] Error loading metrics:', error);
+        const container = document.getElementById('metrics-container');
+        container.innerHTML = `
+            <div class="no-metrics">
+                <p>❌ Failed to load metrics</p>
+                <p style="font-size: 0.9rem; margin-top: 10px;">Error: ${escapeHtml(error.message)}</p>
+            </div>
+        `;
+    }
+}
+
+function displayMetrics(data) {
+    const container = document.getElementById('metrics-container');
+    
+    if (!data.endpoints || Object.keys(data.endpoints).length === 0) {
+        container.innerHTML = `
+            <div class="no-metrics">
+                <p>📊 No request data available yet</p>
+                <p style="font-size: 0.9rem; margin-top: 10px;">Metrics will appear as the API receives requests.</p>
+            </div>
+        `;
+        return;
+    }
+    
+    const metricsHtml = Object.entries(data.endpoints)
+        .sort((a, b) => b[1].totalRequests - a[1].totalRequests) // Sort by request count
+        .map(([endpoint, metrics]) => {
+            const errorRate = metrics.totalRequests > 0 
+                ? ((metrics.totalErrors / metrics.totalRequests) * 100).toFixed(1)
+                : 0;
+            
+            const errorRateClass = errorRate > 10 ? 'error' : errorRate > 5 ? 'warning' : 'success';
+            
+            return `
+                <div class="metric-card">
+                    <div class="metric-endpoint">${escapeHtml(endpoint)}</div>
+                    <div class="metric-row">
+                        <span class="metric-label">Total Requests</span>
+                        <span class="metric-value">${metrics.totalRequests.toLocaleString()}</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">Errors</span>
+                        <span class="metric-value ${metrics.totalErrors > 0 ? 'error' : 'success'}">
+                            ${metrics.totalErrors.toLocaleString()}
+                        </span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">Error Rate</span>
+                        <span class="metric-value ${errorRateClass}">${errorRate}%</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">Avg Response Time</span>
+                        <span class="metric-value">${metrics.averageDurationMs.toFixed(2)} ms</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">Last Request</span>
+                        <span class="metric-value">${formatTimestamp(metrics.lastRequestUtc)}</span>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    
+    container.innerHTML = `<div class="metrics-grid">${metricsHtml}</div>`;
+}
+
+function formatTimestamp(utcString) {
+    try {
+        const date = new Date(utcString);
+        const now = new Date();
+        const diffMs = now - date;
+        const diffSecs = Math.floor(diffMs / 1000);
+        const diffMins = Math.floor(diffSecs / 60);
+        const diffHours = Math.floor(diffMins / 60);
+        
+        if (diffSecs < 60) {
+            return `${diffSecs} seconds ago`;
+        } else if (diffMins < 60) {
+            return `${diffMins} minute${diffMins !== 1 ? 's' : ''} ago`;
+        } else if (diffHours < 24) {
+            return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`;
+        } else {
+            return date.toLocaleString();
+        }
+    } catch (e) {
+        return utcString;
+    }
+}
+
+function updateLastRefreshTime() {
+    const lastUpdated = document.getElementById('last-updated');
+    if (lastUpdated) {
+        const now = new Date();
+        lastUpdated.textContent = `Last updated: ${now.toLocaleTimeString()}`;
+    }
+}
+
+function setupMonitoring() {
+    const refreshBtn = document.getElementById('refresh-metrics');
+    const autoRefreshCheckbox = document.getElementById('auto-refresh');
+    
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', () => {
+            loadMetrics();
+        });
+    }
+    
+    if (autoRefreshCheckbox) {
+        autoRefreshCheckbox.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                startAutoRefresh();
+            } else {
+                stopAutoRefresh();
+            }
+        });
+        
+        // Start auto-refresh if checkbox is checked by default
+        if (autoRefreshCheckbox.checked) {
+            startAutoRefresh();
+        }
+    }
+}
+
+function startAutoRefresh() {
+    console.log('[METRICS] Starting auto-refresh...');
+    stopAutoRefresh(); // Clear any existing interval
+    metricsRefreshInterval = setInterval(() => {
+        // Only refresh if monitoring tab is active
+        const monitoringTab = document.getElementById('monitoring');
+        if (monitoringTab && monitoringTab.classList.contains('active')) {
+            loadMetrics();
+        }
+    }, 5000); // Refresh every 5 seconds
+}
+
+function stopAutoRefresh() {
+    if (metricsRefreshInterval) {
+        console.log('[METRICS] Stopping auto-refresh...');
+        clearInterval(metricsRefreshInterval);
+        metricsRefreshInterval = null;
     }
 }
 
