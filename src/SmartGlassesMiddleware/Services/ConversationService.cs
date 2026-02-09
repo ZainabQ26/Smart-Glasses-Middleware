@@ -26,6 +26,8 @@ public class ConversationService : IConversationService
     private readonly IConfiguration _configuration;
     private readonly IServiceProvider _serviceProvider;
     private readonly double _tokensPerChar;
+    private const int MaxTopicLength = 50;
+    private const int MaxFallbackTitleLength = 50;
 
     public ConversationService(
         ApplicationDbContext context,
@@ -179,10 +181,13 @@ public class ConversationService : IConversationService
                 var topic = (detectedLabel ?? string.Empty).Trim();
                 if (!string.IsNullOrWhiteSpace(topic))
                 {
-                    // Normalize the topic string
-                    if (topic.Length > 100) topic = topic.Substring(0, 100);
-                    // Try to find or create a ResourceGroup with this topic name
-                    var existingGroup = await _context.ResourceGroups.FirstOrDefaultAsync(r => r.Name == topic);
+                    // Normalize the topic string (case-insensitive, length limit)
+                    topic = topic.Length > MaxTopicLength ? topic.Substring(0, MaxTopicLength) : topic;
+                    
+                    // Try to find or create a ResourceGroup with this topic name (case-insensitive)
+                    var existingGroup = await _context.ResourceGroups
+                        .FirstOrDefaultAsync(r => r.Name.ToLower() == topic.ToLower());
+                    
                     if (existingGroup == null)
                     {
                         existingGroup = new ResourceGroup { Id = Guid.NewGuid(), Name = topic, CreatedAt = DateTime.UtcNow };
@@ -204,7 +209,7 @@ public class ConversationService : IConversationService
                     }
 
                     // Create a new conversation with the topic-based title and attach the group
-                    var title = topic.Length > 50 ? topic.Substring(0, 50) + "..." : topic;
+                    var title = topic.Length > MaxFallbackTitleLength ? topic.Substring(0, MaxFallbackTitleLength) + "..." : topic;
                     _logger.LogInformation("Creating new conversation with topic '{Topic}'", topic);
                     return await CreateConversationAsync(title, existingGroup.Id);
                 }
@@ -216,8 +221,8 @@ public class ConversationService : IConversationService
         }
 
         // Fallback: no topic detected or AI unavailable — create new conversation from message excerpt
-        var fallbackTitle = userMessage.Length > 50
-            ? userMessage.Substring(0, 50) + "..."
+        var fallbackTitle = userMessage.Length > MaxFallbackTitleLength
+            ? userMessage.Substring(0, MaxFallbackTitleLength) + "..."
             : userMessage;
 
         Guid? effectiveGroupId = groupId;
@@ -417,12 +422,17 @@ Format: YES|topic label OR NO";
                     {
                         // Extract topic label
                         var parts = response.Split('|');
-                        var newTopic = parts.Length > 1 ? parts[1].Trim() : newMessage.Substring(0, Math.Min(50, newMessage.Length));
+                        var newTopic = parts.Length > 1 ? parts[1].Trim() : newMessage.Substring(0, Math.Min(MaxFallbackTitleLength, newMessage.Length));
+                        
+                        // Normalize topic length
+                        newTopic = newTopic.Length > MaxTopicLength ? newTopic.Substring(0, MaxTopicLength) : newTopic;
                         
                         _logger.LogInformation("Topic change detected in conversation {ConversationId}. New topic: {Topic}", conversationId, newTopic);
 
-                        // Find or create a ResourceGroup for the new topic
-                        var existingGroup = await _context.ResourceGroups.FirstOrDefaultAsync(r => r.Name == newTopic);
+                        // Find or create a ResourceGroup for the new topic (case-insensitive)
+                        var existingGroup = await _context.ResourceGroups
+                            .FirstOrDefaultAsync(r => r.Name.ToLower() == newTopic.ToLower());
+                        
                         if (existingGroup == null)
                         {
                             existingGroup = new ResourceGroup 
