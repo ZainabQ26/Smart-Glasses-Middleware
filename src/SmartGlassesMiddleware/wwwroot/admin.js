@@ -87,15 +87,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     });
 });
 
-// Show message
-function showMessage(message, type = 'success') {
-    const container = document.getElementById('message-container');
-    const div = document.createElement('div');
-    div.className = `message ${type}`;
-    div.textContent = message;
-    container.appendChild(div);
-    setTimeout(() => div.remove(), 5000);
-}
+// Global `showMessage()` provided by `toasts.js` - do not redefine here
 
 function applyTheme(theme) {
     if (theme === 'dark') {
