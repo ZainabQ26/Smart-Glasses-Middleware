@@ -574,6 +574,8 @@ window.promptSelectedFiles = promptSelectedFiles;
 let lastAutoSavedSnapshot = null;
 let autoSaveInFlight = false;
 const draftStorageKey = 'adminPromptDraft';
+// Toggle automatic draft saving/restoring in the browser (false = disabled)
+const AUTO_SAVE_ENABLED = false;
 
 function buildConversationSnapshot() {
     const files = promptSelectedFiles.map(f => ({
@@ -592,7 +594,7 @@ function hasConversationContent() {
 }
 
 async function autoSaveCurrentConversation(reason) {
-    if (autoSaveInFlight || !hasConversationContent()) return;
+    if (!AUTO_SAVE_ENABLED || autoSaveInFlight || !hasConversationContent()) return;
 
     const snapshot = buildConversationSnapshot();
     const snapshotText = JSON.stringify(snapshot);
@@ -1105,23 +1107,49 @@ function cancelEditGroup() {
 document.getElementById('group-cancel-btn').addEventListener('click', cancelEditGroup);
 
 async function deleteGroup(id) {
-    if (!confirm('Are you sure you want to delete this reminder?')) return;
-    
+    if (!confirm('Are you sure you want to permanently delete this group and all its conversations? This cannot be undone.')) return;
+
     try {
-        const response = await fetch(`${API_BASE}/groups/${id}`, {
-            method: 'DELETE'
-        });
-        
+        // 1) Fetch all conversations for this group (includes active conversations)
+        const convRes = await fetch(`${API_BASE}/conversations?groupId=${encodeURIComponent(id)}`);
+        if (!convRes.ok) {
+            showMessage('Failed to load conversations for group', 'error');
+            return;
+        }
+
+        const convJson = await convRes.json();
+        const conversations = convJson || [];
+
+        // 2) Permanently delete each conversation via the permanent delete API
+        if (conversations.length > 0) {
+            showMessage(`Deleting ${conversations.length} conversations...`);
+            const deletePromises = conversations.map(c =>
+                fetch(`${API_BASE}/conversations/${c.id}`, { method: 'DELETE' })
+                    .then(r => ({ ok: r.ok, status: r.status, id: c.id }))
+                    .catch(e => ({ ok: false, error: e.message, id: c.id }))
+            );
+
+            const results = await Promise.all(deletePromises);
+            const failed = results.filter(r => !r.ok);
+            if (failed.length > 0) {
+                console.warn('Failed to delete some conversations', failed);
+                showMessage(`Failed to delete ${failed.length} conversations. Aborting group delete.`, 'error');
+                return;
+            }
+        }
+
+        // 3) Delete the group itself via admin API
+        const response = await fetch(`${API_BASE}/groups/${id}`, { method: 'DELETE' });
         if (response.ok || response.status === 204) {
-            showMessage('Reminder deleted successfully');
+            showMessage('Group and its conversations deleted successfully');
             await loadGroups(true);
             await loadAllGroups(true); // Force refresh groups cache
         } else {
-            const error = await response.json();
-            showMessage(error.detail || 'Error deleting reminder', 'error');
+            const error = await response.json().catch(() => null);
+            showMessage(error?.detail || 'Error deleting group', 'error');
         }
     } catch (error) {
-        showMessage('Error deleting reminder: ' + error.message, 'error');
+        showMessage('Error deleting group: ' + (error?.message || error), 'error');
     }
 }
 
@@ -2388,7 +2416,7 @@ async function init() {
             groupsCount: state.groups.data.length
         }));
 
-        restoreDraftConversation();
+        if (AUTO_SAVE_ENABLED) restoreDraftConversation();
 
         window.addEventListener('beforeunload', () => {
             autoSaveCurrentConversation('unload');
