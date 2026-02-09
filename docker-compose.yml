@@ -97,6 +97,7 @@ services:
       - AI__OllamaEmbeddingModel=${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
       - AI__OllamaTimeoutSeconds=${OLLAMA_TIMEOUT_SECONDS:-30}
       - AI__OllamaEmbeddingTimeoutSeconds=${OLLAMA_EMBEDDING_TIMEOUT_SECONDS:-30}
+      - AI__UseAdvancedModel=false
       - AI__AdvancedModelEndpoint=${AI_ADVANCED_ENDPOINT:-}
       - AI__AdvancedModelName=${AI_ADVANCED_MODEL_NAME:-gpt-4}
       - AI__KnownTasks__0=time

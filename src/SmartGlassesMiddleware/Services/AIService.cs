@@ -19,6 +19,7 @@ public class OllamaAIService : IAIService
     private readonly ILogger<OllamaAIService> _logger;
     private readonly string _advancedModelEndpoint;
     private readonly string _advancedModelName;
+    private readonly bool _useAdvancedModel;
     private readonly List<string> _knownTasks;
     private readonly ITaskDispatcher _dispatcher;
 
@@ -29,6 +30,7 @@ public class OllamaAIService : IAIService
         _logger = logger;
         _advancedModelEndpoint = configuration["AI:AdvancedModelEndpoint"] ?? "http://localhost:5000/api/chat";
         _advancedModelName = configuration["AI:AdvancedModelName"] ?? "gpt-4";
+        _useAdvancedModel = configuration.GetValue<bool?>("AI:UseAdvancedModel") ?? true;
         _dispatcher = dispatcher;
         // Do not eagerly enumerate all task handlers during construction (those handlers
         // may require heavy services like DB/minio/redis). Resolve known tasks lazily
@@ -96,16 +98,23 @@ Task:";
             // When no known tasks are configured (common in dev), prefer local model processing.
             if (_knownTasks.Count > 0 && (detectedTask == "unknown" || !_knownTasks.Contains(detectedTask)))
             {
-                _logger.LogInformation("Task is unknown (with known tasks configured), forwarding to advanced model");
-                try
+                if (_useAdvancedModel)
                 {
-                    var advancedResponse = await CallAdvancedModelAsync(input);
-                    return ("unknown", advancedResponse, true);
+                    _logger.LogInformation("Task is unknown (with known tasks configured), forwarding to advanced model");
+                    try
+                    {
+                        var advancedResponse = await CallAdvancedModelAsync(input);
+                        return ("unknown", advancedResponse, true);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Advanced model failed, falling back to local model");
+                        // Fall through to use local model as fallback
+                    }
                 }
-                catch (Exception ex)
+                else
                 {
-                    _logger.LogError(ex, "Advanced model failed, falling back to local model");
-                    // Fall through to use local model as fallback
+                    _logger.LogInformation("Advanced model is disabled by configuration; skipping advanced model and using local processing");
                 }
             }
 
