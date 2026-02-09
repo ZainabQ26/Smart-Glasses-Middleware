@@ -57,6 +57,19 @@ async function fetchWithRetry(url, options = {}, retries = 3) {
     }
 }
 
+// Helper to safely encode attached files array into a URL-safe JSON string
+function encodeFilesData(msgFiles) {
+    if (!Array.isArray(msgFiles) || msgFiles.length === 0) return '';
+    try {
+        return encodeURIComponent(JSON.stringify(msgFiles.map(f => (
+            typeof f === 'string' ? { name: f } : { name: f.name || f.fileName || 'Document', id: f.id || f.documentId }
+        ))));
+    } catch (e) {
+        console.warn('Failed to encode files data', e);
+        return '';
+    }
+}
+
 // Pagination state
 const state = {
     files: { page: 1, pageSize: 20, hasMore: true, loading: false, data: [] },
@@ -180,6 +193,61 @@ async function loadFiles(reset = false) {
         hideLoading('files-list');
         state.files.loading = false;
         showMessage('Error loading files: ' + error.message, 'error');
+    }
+}
+
+// Prompts with lazy loading
+async function loadPrompts(reset = false) {
+    if (state.prompts.loading) return;
+    if (!reset && !state.prompts.hasMore) return;
+
+    if (reset) {
+        state.prompts.page = 1;
+        state.prompts.hasMore = true;
+        state.prompts.data = [];
+        const listEl = document.getElementById('prompts-list');
+        if (listEl) listEl.innerHTML = '';
+    }
+
+    state.prompts.loading = true;
+    showLoading('prompts-list');
+
+    try {
+        const response = await fetchWithRetry(`${API_BASE}/prompts?page=${state.prompts.page}&pageSize=${state.prompts.pageSize}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+
+        const result = await response.json();
+        const promptsData = result.data || result.Data || [];
+        const pagination = result.pagination || result.Pagination || {};
+
+        hideLoading('prompts-list');
+
+        const list = document.getElementById('prompts-list');
+        if (promptsData && promptsData.length > 0) {
+            state.prompts.data.push(...promptsData);
+            const fragment = document.createDocumentFragment();
+            promptsData.forEach(prompt => {
+                try {
+                    const div = createPromptCard(prompt);
+                    fragment.appendChild(div);
+                } catch (err) {
+                    console.error('Error creating prompt card', err);
+                }
+            });
+            if (list) list.appendChild(fragment);
+
+            state.prompts.hasMore = pagination.hasNext || pagination.HasNext;
+            state.prompts.page++;
+        } else if (reset && list) {
+            list.innerHTML = '<div class="empty-sidebar">No prompts yet</div>';
+        }
+
+        state.prompts.loading = false;
+    } catch (error) {
+        hideLoading('prompts-list');
+        state.prompts.loading = false;
+        console.error('Error loading prompts:', error);
+        showMessage('Error loading prompts: ' + (error.message || error), 'error');
     }
 }
 
@@ -309,78 +377,7 @@ async function previewFile(id, fileName) {
     
     if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) {
         const img = new Image();
-        img.onload = function() {
-            previewContent.innerHTML = `<img src="${previewUrl}" alt="${escapeHtml(fileName)}" style="max-width: 100%; max-height: 500px; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">`;
-        };
-        img.onerror = function() {
-            previewContent.innerHTML = '<p style="color: #e74c3c;">Failed to load image. The file may not exist or there was an error.</p>';
-        };
-        img.src = previewUrl;
-    } else if (ext === 'pdf') {
-        previewContent.innerHTML = `<embed src="${previewUrl}" type="application/pdf" width="100%" height="600px" style="border-radius: 4px;">`;
-    } else {
-        previewContent.innerHTML = `<p style="color: #e74c3c;">Preview not available for this file type.</p>`;
-    }
-}
 
-// Prompts with lazy loading
-async function loadPrompts(reset = false) {
-    if (state.prompts.loading) return;
-    if (!reset && !state.prompts.hasMore) return;
-    
-    if (reset) {
-        state.prompts.page = 1;
-        state.prompts.hasMore = true;
-        state.prompts.data = [];
-        document.getElementById('prompts-list').innerHTML = '';
-    }
-    
-    state.prompts.loading = true;
-    showLoading('prompts-list');
-    
-    try {
-        const response = await fetchWithRetry(`${API_BASE}/prompts?page=${state.prompts.page}&pageSize=${state.prompts.pageSize}`);
-        
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        
-        const result = await response.json();
-        console.log('Prompts API response:', result);
-        // Handle both lowercase and uppercase from API
-        const promptsData = result.data || result.Data || [];
-        const pagination = result.pagination || result.Pagination || {};
-        console.log('Prompts data length:', promptsData.length);
-        
-        const list = document.getElementById('prompts-list');
-        
-        hideLoading('prompts-list');
-        
-        if (promptsData && promptsData.length > 0) {
-            state.prompts.data.push(...promptsData);
-            
-            const fragment = document.createDocumentFragment();
-            promptsData.forEach(prompt => {
-                console.log('[CREATE PROMPT CARD] Creating card for prompt:', prompt);
-                try {
-                    const div = createPromptCard(prompt);
-                    fragment.appendChild(div);
-                    console.log('[CREATE PROMPT CARD] Card created and appended');
-                } catch (err) {
-                    console.error('[CREATE PROMPT CARD] Error creating card:', err);
-                }
-            });
-            list.appendChild(fragment);
-            console.log('[PROMPTS] Fragment appended to list, children count:', list.children.length);
-            
-            state.prompts.hasMore = pagination.hasNext || pagination.HasNext;
-            state.prompts.page++;
-        } else if (reset) {
-            list.innerHTML = '<div class="empty-sidebar">No prompts yet</div>';
-        }
-        
-        state.prompts.loading = false;
-    } catch (error) {
         hideLoading('prompts-list');
         state.prompts.loading = false;
         showMessage('Error loading prompts: ' + error.message, 'error');
@@ -449,9 +446,7 @@ function loadPromptIntoForm(id, name, text) {
     // Show the conversation history in a scrollable box
     const conversationHTML = messages.map(msg => {
         const msgFiles = Array.isArray(msg.files) ? msg.files : [];
-        const filesData = msgFiles.length > 0
-            ? encodeURIComponent(JSON.stringify(msgFiles.map(f => (typeof f === 'string' ? { name: f } : { name: f.name || f.fileName || 'Document', id: f.id || f.documentId }))))
-            : '';
+        const filesData = encodeFilesData(msgFiles);
         const filesTitle = msgFiles.length > 0
             ? `${msgFiles.length} file(s) attached: ${msgFiles.map(f => (typeof f === 'string' ? f : f.name || f.fileName || 'Document')).join(', ')}`
             : '';
@@ -575,7 +570,8 @@ let lastAutoSavedSnapshot = null;
 let autoSaveInFlight = false;
 const draftStorageKey = 'adminPromptDraft';
 // Toggle automatic draft saving/restoring in the browser (false = disabled)
-const AUTO_SAVE_ENABLED = false;
+// NOTE: enable to restore autosave for groups and drafts
+const AUTO_SAVE_ENABLED = true;
 
 function buildConversationSnapshot() {
     const files = promptSelectedFiles.map(f => ({
@@ -594,17 +590,11 @@ function hasConversationContent() {
 }
 
 async function autoSaveCurrentConversation(reason) {
-    if (!AUTO_SAVE_ENABLED || autoSaveInFlight || !hasConversationContent()) return;
+    if (!AUTO_SAVE_ENABLED || autoSaveInFlight || !hasConversationContent()) return null;
 
     const snapshot = buildConversationSnapshot();
     const snapshotText = JSON.stringify(snapshot);
-    if (snapshotText === lastAutoSavedSnapshot) return;
-
-    try {
-        localStorage.setItem(draftStorageKey, snapshotText);
-    } catch (error) {
-        console.warn('[AUTO SAVE] Failed to write draft to storage:', error);
-    }
+    if (snapshotText === lastAutoSavedSnapshot) return null;
 
     autoSaveInFlight = true;
     try {
@@ -622,22 +612,64 @@ async function autoSaveCurrentConversation(reason) {
             body: JSON.stringify(payload)
         });
 
-        if (response.ok) {
-            const result = await response.json().catch(() => null);
-            const savedId = result?.id || result?.Id;
-            if (savedId) {
-                const promptIdInput = document.getElementById('prompt-id');
-                if (promptIdInput) {
-                    promptIdInput.value = savedId;
-                }
-            }
-            lastAutoSavedSnapshot = snapshotText;
-            console.log(`[AUTO SAVE] Conversation saved (${reason})`);
-        } else {
-            console.warn('[AUTO SAVE] Failed to save conversation:', response.status);
+        if (!response.ok) {
+            console.warn('[AUTO SAVE] Failed to save conversation to server:', response.status);
+            return null;
         }
+
+        const result = await response.json().catch(() => null);
+        const savedId = result?.id || result?.Id || null;
+        if (savedId) {
+            const promptIdInput = document.getElementById('prompt-id');
+            if (promptIdInput) promptIdInput.value = savedId;
+
+            // Fetch canonical saved record from server and load into UI
+            try {
+                // Try direct GET by id first (some APIs may not expose GET /prompts/{id})
+                let savedPrompt = null;
+                let savedRes = await fetchWithRetry(`${API_BASE}/prompts/${savedId}`);
+                if (savedRes.ok) {
+                    const savedJson = await savedRes.json().catch(() => null);
+                    savedPrompt = (savedJson && (savedJson.data || savedJson)) || savedJson || null;
+                } else if (savedRes.status === 405 || savedRes.status === 404) {
+                    // Fallback: fetch the prompts list and find the saved item
+                    const listRes = await fetchWithRetry(`${API_BASE}/prompts?page=1&pageSize=1000`);
+                    if (listRes.ok) {
+                        const listJson = await listRes.json().catch(() => null);
+                        const prompts = (listJson && (listJson.data || listJson.Data)) || listJson || [];
+                        savedPrompt = prompts.find(p => (p.id === savedId || p.Id === savedId || p.Id === (savedId + '')) ) || null;
+                    }
+                }
+
+                if (savedPrompt) {
+                    const promptText = savedPrompt.PromptText || savedPrompt.promptText || '';
+                    try {
+                        loadPromptIntoForm(savedId, savedPrompt.name || chatName, promptText);
+                    } catch (e) {
+                        console.warn('[AUTO SAVE] loadPromptIntoForm failed:', e);
+                    }
+
+                    // Refresh sidebar lists so other clients / tabs see the new entry
+                    try {
+                        await loadPrompts(true);
+                        await loadAllGroups(true);
+                    } catch (e) {
+                        console.warn('[AUTO SAVE] Failed to refresh lists:', e);
+                    }
+                } else {
+                    console.warn('[AUTO SAVE] Canonical prompt not found after save');
+                }
+            } catch (fetchErr) {
+                console.warn('[AUTO SAVE] Error fetching canonical prompt:', fetchErr);
+            }
+        }
+
+        lastAutoSavedSnapshot = snapshotText;
+        console.log(`[AUTO SAVE] Conversation saved to server (${reason})`);
+        return savedId;
     } catch (error) {
-        console.warn('[AUTO SAVE] Error saving conversation:', error);
+        console.warn('[AUTO SAVE] Error saving conversation to server:', error);
+        return null;
     } finally {
         autoSaveInFlight = false;
     }
@@ -662,9 +694,7 @@ function restoreDraftConversation() {
         if (currentConversationHistory.length > 0) {
             const conversationHTML = currentConversationHistory.map(msg => {
                 const msgFiles = Array.isArray(msg.files) ? msg.files : [];
-                const filesData = msgFiles.length > 0
-                    ? encodeURIComponent(JSON.stringify(msgFiles.map(f => (typeof f === 'string' ? { name: f } : { name: f.name || f.fileName || 'Document', id: f.id || f.documentId }))))
-                    : '';
+                const filesData = encodeFilesData(msgFiles);
                 const filesTitle = msgFiles.length > 0
                     ? `${msgFiles.length} file(s) attached: ${msgFiles.map(f => (typeof f === 'string' ? f : f.name || f.fileName || 'Document')).join(', ')}`
                     : '';
@@ -764,81 +794,109 @@ function updatePromptFilesList() {
     }
 }
 
-function togglePromptFileSelection(index) {
-    if (promptSelectedFiles[index]) {
-        promptSelectedFiles[index].selected = !promptSelectedFiles[index].selected;
-        updatePromptFilesList();
-    }
-}
+async function restoreDraftConversation() {
+    try {
+        // Fetch recent prompts from server and try to find the most recent prompt
+        // whose PromptText looks like an autosave snapshot (messages/files JSON)
+        const res = await fetchWithRetry(`${API_BASE}/prompts?page=1&pageSize=20`);
+        if (!res.ok) return false;
+        const json = await res.json().catch(() => null);
+        const prompts = (json && (json.data || json.Data)) || [];
 
-function removePromptFile(index) {
-    promptSelectedFiles.splice(index, 1);
-    updatePromptFilesList();
-    showMessage('File removed', 'success');
-}
-
-async function deleteSelectedPromptFiles() {
-    const selected = promptSelectedFiles.filter(f => f.selected);
-    if (selected.length === 0) {
-        showMessage('No files selected', 'error');
-        return;
-    }
-    
-    if (!confirm(`Delete ${selected.length} file(s)?`)) {
-        return;
-    }
-    
-    // Delete uploaded documents from server if they have IDs
-    for (const fileObj of selected) {
-        const documentId = fileObj.documentId || fileObj.id;
-        if (documentId) {
+        let found = null;
+        for (const p of prompts) {
+            const text = p.PromptText || p.promptText || p.Prompttext || p.prompttext;
+            if (!text) continue;
             try {
-                const deleteRes = await fetch(`/api/documents/${documentId}`, {
-                    method: 'DELETE'
-                });
-                if (!deleteRes.ok) {
-                    console.error(`Failed to delete document ${fileObj.name} from server`);
+                const draft = JSON.parse(text);
+                if (draft && (Array.isArray(draft.messages) || Array.isArray(draft.files))) {
+                    found = { draft, id: p.Id || p.id };
+                    break;
                 }
-            } catch (error) {
-                console.error('Error deleting document from server:', error);
-            }
+            } catch { /* not JSON */ }
         }
-    }
-    
-    // Remove from local list
-    promptSelectedFiles = promptSelectedFiles.filter(f => !f.selected);
-    updatePromptFilesList();
-    showMessage(`${selected.length} file(s) deleted`, 'success');
-    
-    // Reload files list to reflect deletion
-    if (typeof loadFiles === 'function') {
-        loadFiles(true);
+
+        if (!found) return false;
+
+        const draft = found.draft;
+        currentConversationHistory = Array.isArray(draft.messages) ? draft.messages : [];
+        promptSelectedFiles = Array.isArray(draft.files) ? draft.files.map(f => ({
+            name: f.name || 'Document',
+            documentId: f.id || f.documentId,
+            selected: false
+        })) : [];
+        window.promptSelectedFiles = promptSelectedFiles;
+        updatePromptFilesList();
+
+        const promptIdInput = document.getElementById('prompt-id');
+        if (promptIdInput && found.id) promptIdInput.value = found.id;
+
+        if (currentConversationHistory.length > 0) {
+            const conversationHTML = currentConversationHistory.map(msg => {
+                const msgFiles = Array.isArray(msg.files) ? msg.files : [];
+                const filesData = encodeFilesData(msgFiles);
+                const filesTitle = msgFiles.length > 0
+                    ? `${msgFiles.length} file(s) attached: ${msgFiles.map(f => (typeof f === 'string' ? f : f.name || f.fileName || 'Document')).join(', ')}`
+                    : '';
+                const msgSources = Array.isArray(msg.sources) ? msg.sources : [];
+                const msgSourcesHtml = msgSources.length > 0 ? `
+                    <div style="margin-top: 8px; padding: 8px; background: #fff; border: 1px solid #dee2e6; border-radius: 4px;">
+                        <div style="font-weight: 600; color: #2c3e50; margin-bottom: 6px; font-size: 0.8rem;">Sources Used:</div>
+                        ${msgSources.map(source => {
+                            const documentId = source.documentId || source.DocumentId;
+                            const fileName = source.fileName || source.FileName || 'Document';
+                            const page = source.pageNumber || source.PageNumber;
+                            const label = page ? `${fileName} (p.${page})` : fileName;
+                            const href = documentId ? `/api/documents/${documentId}/download` : '#';
+                            const linkStyle = documentId ? 'color: #3498db; text-decoration: underline;' : 'color: #95a5a6; text-decoration: none;';
+                            return `
+                                <div style="display: flex; align-items: center; gap: 8px; font-size: 12px;">
+                                    <a href="${href}" target="_blank" style="${linkStyle}" onclick="${documentId ? '' : 'return false;'}">${escapeHtml(label)}</a>
+                                    ${documentId ? `<button type=\"button\" onclick=\"previewDocumentFile('${documentId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')\" style=\"padding: 2px 6px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 11px;\">Preview</button>` : ''}
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                ` : '';
+
+                return `
+                    <div style="margin-bottom: 12px;">
+                        <div style="color: ${msg.role === 'user' ? '#3498db' : '#27ae60'}; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
+                            <span>${msg.role === 'user' ? 'User' : 'Bot'}:</span>
+                            ${msgFiles.length > 0 ? `<button type=\"button\" onclick=\"showAttachedFilesModal('${filesData}')\" style=\"background: none; border: none; font-size: 16px; color: #3498db; cursor: pointer; padding: 0;\" title=\"${escapeHtml(filesTitle)}\">📎</button>` : ''}
+                        </div>
+                        <div style="color: #555; padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
+                        ${msg.role === 'bot' ? msgSourcesHtml : ''}
+                    </div>
+`;
+            }).join('');
+
+            const responseContent = document.getElementById('response-content');
+            if (responseContent) responseContent.innerHTML = conversationHTML;
+        }
+
+        return true;
+    } catch (error) {
+        console.warn('[AUTO SAVE] Failed to restore draft from server:', error);
+        return false;
     }
 }
-
-window.updatePromptFilesList = updatePromptFilesList;
-window.togglePromptFileSelection = togglePromptFileSelection;
-window.removePromptFile = removePromptFile;
-window.deleteSelectedPromptFiles = deleteSelectedPromptFiles;
 
 async function deletePrompt(id) {
     if (!confirm('Are you sure you want to delete this prompt?')) return;
-    
+
     try {
-        const response = await fetch(`${API_BASE}/prompts/${id}`, {
-            method: 'DELETE'
-        });
-        
+        const response = await fetch(`${API_BASE}/prompts/${id}`, { method: 'DELETE' });
         if (response.ok || response.status === 204) {
             showMessage('Prompt deleted successfully');
             await loadPrompts(true);
             await loadAllGroups(true);
         } else {
-            const error = await response.json();
-            showMessage(error.detail || 'Error deleting prompt', 'error');
+            const error = await response.json().catch(() => null);
+            showMessage((error && (error.detail || error.error)) || 'Error deleting prompt', 'error');
         }
     } catch (error) {
-        showMessage('Error deleting prompt: ' + error.message, 'error');
+        showMessage('Error deleting prompt: ' + (error?.message || error), 'error');
     }
 }
 
@@ -2024,6 +2082,13 @@ async function init() {
                 document.getElementById('prompt-name').value = '';
                 
                 showMessage('Response received successfully', 'success');
+
+                // Persist conversation snapshot to server so it survives reloads
+                try {
+                    await autoSaveCurrentConversation('send');
+                } catch (err) {
+                    console.warn('[SEND PROMPT] Auto-save after send failed:', err);
+                }
 
                 // Clear attached files after sending
                 promptSelectedFiles = [];
