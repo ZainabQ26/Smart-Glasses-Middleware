@@ -30,6 +30,13 @@
     animation: toastIn 360ms cubic-bezier(.2,.9,.2,1) !important;
 }
 
+/* Force consistent sizing so icons stay inside the card */
+.toast {
+    box-sizing: border-box !important;
+    width: 360px !important;
+    padding: 14px 16px !important;
+}
+
 .toast-icon {
     width: 40px !important;
     height: 40px !important;
@@ -74,6 +81,22 @@
 .toast.success .toast-icon { background: #16a34a !important; color: #fff !important; }
 .toast.error .toast-icon { background: #dc2626 !important; color: #fff !important; }
 .toast.info .toast-icon { background: #2563eb !important; color: #fff !important; }
+
+/* Progress bar default styling: visible, thin, and on top */
+.toast-progress {
+    position: absolute !important;
+    left: 0 !important;
+    bottom: 0 !important;
+    height: 4px !important;
+    width: 100% !important;
+    transform-origin: left center !important;
+    animation-name: toastProgress !important;
+    animation-timing-function: linear !important;
+    animation-fill-mode: forwards !important;
+}
+
+/* Type-specific progress colors will be set inline by script, but set a sensible fallback */
+.toast-progress { background: linear-gradient(90deg,#3b82f6,#06b6d4) !important; }
 
 .toast-progress {
     position: absolute;
