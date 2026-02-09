@@ -125,7 +125,8 @@ public class ConversationsController : ControllerBase
                 request.Query,
                 id,
                 request.TopK ?? 5,
-                request.GroupIds);
+                request.GroupIds,
+                null);
 
             // Add assistant response to conversation
             await _conversationService.AddMessageAsync(
