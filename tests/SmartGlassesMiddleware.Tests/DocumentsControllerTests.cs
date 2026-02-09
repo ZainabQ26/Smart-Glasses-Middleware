@@ -35,7 +35,8 @@ public class DocumentsControllerTests
         Mock<IRAGService>? ragService = null,
         Mock<IDocumentHighlightService>? highlightService = null,
         IConfiguration? configuration = null,
-        Mock<IRequestMonitoringService>? monitoringService = null)
+        Mock<IRequestMonitoringService>? monitoringService = null,
+        Mock<IMediaStorageService>? mediaStorageService = null)
     {
         var ctx = context ?? GetInMemoryContext();
         var mockProcessing = processingService ?? new Mock<IDocumentProcessingService>();
@@ -51,6 +52,7 @@ public class DocumentsControllerTests
             })
             .Build();
 
+        var mockMediaStorage = mediaStorageService ?? new Mock<IMediaStorageService>();
         var controller = new DocumentsController(
             mockLogger.Object,
             mockProcessing.Object,
@@ -58,7 +60,8 @@ public class DocumentsControllerTests
             mockHighlight.Object,
             ctx,
             config,
-            mockMonitoring.Object);
+            mockMonitoring.Object,
+            mockMediaStorage.Object);
 
         controller.ControllerContext = new ControllerContext
         {

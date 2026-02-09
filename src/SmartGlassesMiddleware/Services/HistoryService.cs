@@ -18,11 +18,13 @@ public class HistoryService : IHistoryService
 {
     private readonly ApplicationDbContext _context;
     private readonly ILogger<HistoryService> _logger;
+    private readonly IRequestMonitoringService? _monitoringService;
 
-    public HistoryService(ApplicationDbContext context, ILogger<HistoryService> logger)
+    public HistoryService(ApplicationDbContext context, ILogger<HistoryService> logger, IRequestMonitoringService? monitoringService = null)
     {
         _context = context;
         _logger = logger;
+        _monitoringService = monitoringService;
     }
 
     public async Task<RequestHistory> SaveRequestAsync(RequestHistory history)
@@ -36,6 +38,23 @@ public class HistoryService : IHistoryService
             await _context.SaveChangesAsync();
 
             _logger.LogInformation("Saved request history with ID: {Id}", history.Id);
+
+            // Notify monitoring service about this saved history so live UI can display it
+            try
+            {
+                if (_monitoringService != null)
+                {
+                    var desc = !string.IsNullOrWhiteSpace(history.InputText) ? history.InputText : (history.DetectedTask ?? history.RequestType ?? "Request");
+                    var monId = await _monitoringService.StartRequest(history.RequestType ?? "History", desc);
+                    await _monitoringService.UpdateRequestStatus(monId, "Completed", details: history.Response);
+                    await _monitoringService.CompleteRequest(monId, true, result: history.Id.ToString());
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to notify monitoring service for history ID: {Id}", history.Id);
+            }
+
             return history;
         }
         catch (Exception ex)
