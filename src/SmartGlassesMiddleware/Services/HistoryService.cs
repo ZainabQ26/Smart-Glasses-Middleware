@@ -44,8 +44,18 @@ public class HistoryService : IHistoryService
             {
                 if (_monitoringService != null)
                 {
+                    // If caller already set a CorrelationId (e.g. document query started earlier), use it
                     var desc = !string.IsNullOrWhiteSpace(history.InputText) ? history.InputText : (history.DetectedTask ?? history.RequestType ?? "Request");
-                    var monId = await _monitoringService.StartRequest(history.RequestType ?? "History", desc);
+                    string monId;
+                    if (!string.IsNullOrWhiteSpace(history.CorrelationId))
+                    {
+                        monId = history.CorrelationId!;
+                    }
+                    else
+                    {
+                        monId = await _monitoringService.StartRequest(history.RequestType ?? "History", desc);
+                    }
+
                     await _monitoringService.UpdateRequestStatus(monId, "Completed", details: history.Response);
                     await _monitoringService.CompleteRequest(monId, true, result: history.Id.ToString());
                 }

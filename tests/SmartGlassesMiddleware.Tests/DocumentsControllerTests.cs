@@ -36,7 +36,8 @@ public class DocumentsControllerTests
         Mock<IDocumentHighlightService>? highlightService = null,
         IConfiguration? configuration = null,
         Mock<IRequestMonitoringService>? monitoringService = null,
-        Mock<IMediaStorageService>? mediaStorageService = null)
+        Mock<IMediaStorageService>? mediaStorageService = null,
+        Mock<IHistoryService>? historyService = null)
     {
         var ctx = context ?? GetInMemoryContext();
         var mockProcessing = processingService ?? new Mock<IDocumentProcessingService>();
@@ -44,6 +45,7 @@ public class DocumentsControllerTests
         var mockHighlight = highlightService ?? new Mock<IDocumentHighlightService>();
         var mockLogger = new Mock<ILogger<DocumentsController>>();
         var mockMonitoring = monitoringService ?? new Mock<IRequestMonitoringService>();
+        var mockHistory = historyService ?? new Mock<IHistoryService>();
 
         var config = configuration ?? new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -61,6 +63,7 @@ public class DocumentsControllerTests
             ctx,
             config,
             mockMonitoring.Object,
+            mockHistory.Object,
             mockMediaStorage.Object);
 
         controller.ControllerContext = new ControllerContext
