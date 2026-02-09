@@ -15,7 +15,7 @@ namespace SmartGlassesMiddleware.Services;
 
 public interface IRAGService
 {
-    Task<QueryResult> QueryDocumentsAsync(string query, int topK = 5, List<Guid>? groupIds = null, List<Guid>? documentIds = null);
+    Task<QueryResult> QueryDocumentsAsync(string query, int topK = 5, List<Guid>? groupIds = null, List<Guid>? documentIds = null, string? monitoringRequestId = null);
     Task<QueryResult> QueryDocumentsWithConversationAsync(string query, Guid conversationId, int topK = 5, List<Guid>? groupIds = null, List<Guid>? documentIds = null);
     Task<List<DocumentChunk>> SearchChunksAsync(string query, int topK = 5, List<Guid>? groupIds = null, List<Guid>? documentIds = null);
     Task GenerateEmbeddingsAsync(Guid documentId);
@@ -34,6 +34,7 @@ public class RAGService : IRAGService
     private readonly IAIService _aiService;
     private readonly Kernel _kernel;
     private readonly IServiceProvider _serviceProvider;
+    private readonly IRequestMonitoringService? _monitoringService;
     private readonly int _maxRetries;
     private readonly int _retryDelayMs;
     private readonly int _maxContextTokens;
@@ -51,13 +52,15 @@ public class RAGService : IRAGService
         IAIService aiService,
         Kernel kernel,
         IServiceProvider serviceProvider,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IRequestMonitoringService? monitoringService = null)
     {
         _context = context;
         _logger = logger;
         _aiService = aiService;
         _kernel = kernel;
         _serviceProvider = serviceProvider;
+        _monitoringService = monitoringService;
         _maxRetries = configuration.GetValue<int?>("RAG:MaxRetries") ?? 3;
         _retryDelayMs = configuration.GetValue<int?>("RAG:RetryDelayMs") ?? 1000;
         _maxContextTokens = configuration.GetValue<int?>("RAG:MaxContextTokens") ?? 4000;
@@ -70,7 +73,7 @@ public class RAGService : IRAGService
         _queryTimeoutSeconds = configuration.GetValue<int?>("RAG:QueryTimeoutSeconds") ?? 120;
     }
 
-    public async Task<QueryResult> QueryDocumentsAsync(string query, int topK = 5, List<Guid>? groupIds = null, List<Guid>? documentIds = null)
+    public async Task<QueryResult> QueryDocumentsAsync(string query, int topK = 5, List<Guid>? groupIds = null, List<Guid>? documentIds = null, string? monitoringRequestId = null)
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(_queryTimeoutSeconds));
         try
@@ -78,7 +81,10 @@ public class RAGService : IRAGService
             var stopwatch = Stopwatch.StartNew();
 
             // Search for relevant chunks
+            try { if (!string.IsNullOrEmpty(monitoringRequestId)) { _monitoringService?.UpdateRequestStatus(monitoringRequestId, "Searching", "Searching document chunks", 20); } } catch {}
             var relevantChunks = await SearchChunksAsync(query, topK, groupIds, documentIds);
+
+            try { if (!string.IsNullOrEmpty(monitoringRequestId)) { _monitoringService?.UpdateRequestStatus(monitoringRequestId, "Searching", "Chunks found", 40); } } catch {}
 
             if (!relevantChunks.Any())
             {
@@ -93,7 +99,10 @@ public class RAGService : IRAGService
             }
 
             // Build context from chunks (with token budgeting)
+            try { if (!string.IsNullOrEmpty(monitoringRequestId)) { _monitoringService?.UpdateRequestStatus(monitoringRequestId, "Retrieval", "Building context", 50); } } catch {}
             var context = await BuildContextFromChunksAsync(relevantChunks, groupIds);
+
+            try { if (!string.IsNullOrEmpty(monitoringRequestId)) { _monitoringService?.UpdateRequestStatus(monitoringRequestId, "Retrieval", "Context built", 60); } } catch {}
 
             // Estimate token count for the complete prompt
             var promptTemplate = $@"Based on the following context from documents, answer the question. 
@@ -150,10 +159,13 @@ Answer:";
                     estimatedTokens,
                     stopwatch.ElapsedMilliseconds,
                     groupIds?.FirstOrDefault());
+                try { if (!string.IsNullOrEmpty(monitoringRequestId)) { _monitoringService?.UpdateRequestStatus(monitoringRequestId, "AI", "Advanced model used", 95); } } catch {}
             }
             else
             {
+                try { if (!string.IsNullOrEmpty(monitoringRequestId)) { _monitoringService?.UpdateRequestStatus(monitoringRequestId, "AI", "Processing with local model", 70); } } catch {}
                 var (_, aiResponse, wasAdvanced) = await _aiService.ProcessRequestAsync(promptTemplate, cts.Token);
+                try { if (!string.IsNullOrEmpty(monitoringRequestId)) { _monitoringService?.UpdateRequestStatus(monitoringRequestId, "AI", "AI response received", 95); } } catch {}
                 response = aiResponse ?? "I couldn't generate a response.";
                 usedAdvancedModel = wasAdvanced;
                 modelUsed = wasAdvanced ? "advanced" : "local";
@@ -1231,7 +1243,7 @@ Answer:";
                                  query.Contains("what did i", StringComparison.OrdinalIgnoreCase);
 
             // Query both documents and reminders
-            var documentTask = QueryDocumentsAsync(query, topK, groupIds, null);
+            var documentTask = QueryDocumentsAsync(query, topK, groupIds, null, null);
             var reminderTask = QueryRemindersAsync(query, topK);
 
             await Task.WhenAll(documentTask, reminderTask);

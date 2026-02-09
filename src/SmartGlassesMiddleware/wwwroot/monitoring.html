@@ -6,12 +6,15 @@
     <title>Request Monitoring - Smart Glasses Middleware</title>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>📊</text></svg>">
     <script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@latest/dist/browser/signalr.min.js"></script>
+    <!-- MONITORING_HTML_UPDATED -->
     <style>
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
+
+        
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
@@ -220,6 +223,18 @@
             font-size: 0.9rem;
         }
 
+        .history-entry {
+            padding: 8px;
+            margin-top: 8px;
+            border-radius: 6px;
+            background: #f7f9fa;
+            border: 1px solid #e6eef2;
+        }
+
+        .history-entry.documentquery { border-left: 4px solid #3498db; }
+        .history-entry.media { border-left: 4px solid #27ae60; }
+        .history-entry.audio { border-left: 4px solid #9b59b6; }
+
         .no-requests {
             text-align: center;
             padding: 40px 20px;
@@ -230,6 +245,21 @@
         .duration {
             font-weight: 600;
             color: #3498db;
+        }
+
+        .progress-track {
+            background: #ecf0f1;
+            height: 10px;
+            border-radius: 6px;
+            overflow: hidden;
+            margin-top: 8px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg,#4caf50,#27ae60);
+            width: 0%;
+            transition: width 300ms ease;
         }
 
         @keyframes pulse {
@@ -298,6 +328,36 @@
         const API_BASE = '/api';
         let connection = null;
         let requests = [];
+        let historyMap = {}; // correlationId -> [history entries]
+        const progressTargets = {}; // id -> target percent
+        const progressCurrent = {}; // id -> current animated percent
+
+        // Simple HTML escaper to avoid runtime errors when rendering user-provided text
+        function escapeHtml(input) {
+            if (input === null || typeof input === 'undefined') return '';
+            return String(input)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        function renderHistoryForRequest(requestId) {
+            const entries = historyMap[requestId];
+            if (!entries || entries.length === 0) return '';
+
+            const items = entries.map(h => {
+                const typeClass = (h.requestType || '').toLowerCase();
+                return `<div class="history-entry ${escapeHtml(typeClass)}">
+                    <div style="font-weight:600">${escapeHtml(h.requestType)}${h.detectedTask ? ' — ' + escapeHtml(h.detectedTask) : ''}</div>
+                    <div style="color:#555;margin-top:6px">${escapeHtml(h.inputText || '')}</div>
+                    ${h.response ? `<div style="margin-top:6px;color:#2c3e50;margin-top:6px"><strong>Response:</strong> ${escapeHtml(h.response)}</div>` : ''}
+                </div>`;
+            }).join('');
+
+            return `<div style="margin-top:10px"><details><summary style="cursor:pointer">View related history (${entries.length})</summary>${items}</details></div>`;
+        }
 
         // Initialize SignalR connection
         async function initializeSignalR() {
@@ -359,40 +419,57 @@
                 requests = requests.slice(0, 100);
             }
 
+            // Update progress target for this request id and its correlation id (if present)
+            try {
+                if (typeof request.progress !== 'undefined' && request.progress !== null) {
+                    const pct = request.progress;
+                    // by requestId
+                    progressTargets[request.requestId] = pct;
+                    if (typeof progressCurrent[request.requestId] === 'undefined') progressCurrent[request.requestId] = pct || 0;
+                    // also mirror to correlation id so grouped UI animates correctly
+                    if (request.correlationId) {
+                        progressTargets[request.correlationId] = pct;
+                        if (typeof progressCurrent[request.correlationId] === 'undefined') progressCurrent[request.correlationId] = pct || 0;
+                    }
+                }
+            } catch (e) { /* ignore */ }
+
             renderRequests();
             updateStats();
         }
 
-        function renderRequests() {
-            const listEl = document.getElementById('requests-list');
+        /* simple renderer removed in favor of grouped renderer below */
 
-            if (requests.length === 0) {
-                listEl.innerHTML = '<div class="no-requests">No requests yet. Monitoring in real-time...</div>';
-                return;
-            }
+        function updateStats() {
+            const groups = buildGroups();
+            const total = groups.length;
+            const completed = groups.filter(g => {
+                const p = (g.requests && g.requests[0]) ? g.requests[0] : synthesizeRequestFromHistory(g.histories, g.id);
+                const status = p && p.status ? String(p.status).toLowerCase() : '';
+                return status === 'completed' && Boolean(p.success);
+            }).length;
+            const failed = groups.filter(g => {
+                const p = (g.requests && g.requests[0]) ? g.requests[0] : synthesizeRequestFromHistory(g.histories, g.id);
+                const status = p && p.status ? String(p.status).toLowerCase() : '';
+                return status === 'failed' || (status === 'completed' && !Boolean(p.success));
+            }).length;
+            const active = groups.filter(g => {
+                const p = (g.requests && g.requests[0]) ? g.requests[0] : synthesizeRequestFromHistory(g.histories, g.id);
+                const status = (p && p.status) ? String(p.status).toLowerCase() : '';
+                return status !== 'completed' && status !== 'failed';
+            }).length;
 
-            listEl.innerHTML = requests.map(request => {
-                const isActive = !request.endTime;
-                const duration = request.durationMs || (isActive ? Date.now() - new Date(request.startTime).getTime() : 0);
-                
-                return `
-                    <div class="request-item ${isActive ? 'active' : ''}" data-request-id="${request.requestId}">
-                        <div class="request-header">
-                            <div class="request-type">${escapeHtml(request.requestType)}</div>
-                            <div class="request-status ${getStatusClass(request.status)}">${escapeHtml(request.status)}</div>
-                        </div>
-                        <div class="request-description">${escapeHtml(request.description)}</div>
-                        ${request.details ? `<div class="request-details">${escapeHtml(request.details)}</div>` : ''}
-                        <div class="request-meta">
-                            <span>Started: ${new Date(request.startTime).toLocaleTimeString()}</span>
-                            ${duration > 0 ? `<span class="duration">Duration: ${duration}ms</span>` : ''}
-                            ${request.endTime ? `<span>Ended: ${new Date(request.endTime).toLocaleTimeString()}</span>` : ''}
-                        </div>
-                        ${request.error ? `<div class="request-error"><strong>Error:</strong> ${escapeHtml(request.error)}</div>` : ''}
-                        ${request.result ? `<div class="request-result"><strong>Result:</strong> ${escapeHtml(request.result)}</div>` : ''}
-                    </div>
-                `;
-            }).join('');
+            const completedGroups = groups.map(g => {
+                const p = (g.requests && g.requests[0]) ? g.requests[0] : synthesizeRequestFromHistory(g.histories, g.id);
+                return p.endTime && p.durationMs > 0 ? p.durationMs : 0;
+            }).filter(d => d > 0);
+            const avgDuration = completedGroups.length > 0 ? Math.round(completedGroups.reduce((s, v) => s + v, 0) / completedGroups.length) : 0;
+
+            document.getElementById('total-requests').textContent = total;
+            document.getElementById('successful-requests').textContent = completed;
+            document.getElementById('failed-requests').textContent = failed;
+            document.getElementById('active-requests').textContent = active;
+            document.getElementById('avg-duration').textContent = avgDuration + 'ms';
         }
 
         function getStatusClass(status) {
@@ -403,35 +480,159 @@
             return 'processing';
         }
 
-        function updateStats() {
-            const total = requests.length;
-            const completed = requests.filter(r => r.status === 'Completed' && r.success).length;
-            const failed = requests.filter(r => r.status === 'Failed' || (r.status === 'Completed' && !r.success)).length;
-            const active = requests.filter(r => !r.endTime).length;
+        function buildGroups() {
+            if ((requests?.length || 0) === 0 && Object.keys(historyMap).length === 0) return [];
 
-            const completedRequests = requests.filter(r => r.endTime && r.durationMs > 0);
-            const avgDuration = completedRequests.length > 0 
-                ? Math.round(completedRequests.reduce((sum, r) => sum + r.durationMs, 0) / completedRequests.length)
-                : 0;
+            // Build grouped view keyed by correlationId when available (historyMap keys).
+            const groups = {}; // key -> { requests: [], histories: [], id }
 
-            document.getElementById('total-requests').textContent = total;
-            document.getElementById('successful-requests').textContent = completed;
-            document.getElementById('failed-requests').textContent = failed;
-            document.getElementById('active-requests').textContent = active;
-            document.getElementById('avg-duration').textContent = avgDuration + 'ms';
+            // First, attach any monitoring request that matches a correlationId key
+            for (const req of requests) {
+                const corr = req.correlationId || req.requestId;
+                if (historyMap[corr]) {
+                    groups[corr] = groups[corr] || { id: corr, requests: [], histories: historyMap[corr] };
+                    groups[corr].requests.push(req);
+                    continue;
+                }
+                // Fallback: if request itself is a correlation key
+                if (historyMap[req.requestId]) {
+                    groups[req.requestId] = groups[req.requestId] || { id: req.requestId, requests: [], histories: historyMap[req.requestId] };
+                    groups[req.requestId].requests.push(req);
+                }
+            }
+
+            // Next, include any history groups that don't have a live monitoring request - create a synthetic group
+            for (const corrId of Object.keys(historyMap)) {
+                if (!groups[corrId]) {
+                    groups[corrId] = { id: corrId, requests: [], histories: historyMap[corrId] };
+                }
+            }
+
+            // Finally, include any remaining monitoring requests that aren't part of a correlation group
+            for (const req of requests) {
+                const corr = req.correlationId || req.requestId;
+                if (!groups[corr]) {
+                    groups[corr] = { id: corr, requests: [req], histories: historyMap[corr] || [] };
+                }
+            }
+
+            // Convert groups to array sorted by most recent activity
+            const groupList = Object.values(groups).sort((a, b) => {
+                const aTime = getGroupLatestTime(a);
+                const bTime = getGroupLatestTime(b);
+                return bTime - aTime;
+            });
+
+            return groupList;
         }
 
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
+        function renderRequests() {
+            const listEl = document.getElementById('requests-list');
+            const groupList = buildGroups();
+
+            if (groupList.length === 0) {
+                listEl.innerHTML = '<div class="no-requests">No requests yet. Monitoring in real-time...</div>';
+                return;
+            }
+
+            listEl.innerHTML = groupList.map(group => {
+                // Choose primary request if available, otherwise synthesize from histories
+                const primary = (group.requests && group.requests.length > 0) ? group.requests[0] : synthesizeRequestFromHistory(group.histories, group.id);
+                const status = primary && primary.status ? String(primary.status).toLowerCase() : '';
+                // Consider a group active only when its status is not completed/failed AND it has no endTime
+                const isActive = primary && (status !== 'completed' && status !== 'failed') && !primary?.endTime;
+                const duration = primary?.durationMs || (isActive && primary?.startTime ? Date.now() - new Date(primary.startTime).getTime() : 0);
+
+                // Aggregate progress: prefer primary.progress, otherwise max of histories
+                let progress = primary?.progress ?? null;
+                if ((progress === null || progress === undefined) && group.histories && group.histories.length > 0) {
+                    const histProgress = group.histories.map(h => h.progress).filter(p => typeof p === 'number');
+                    if (histProgress.length) progress = Math.max(...histProgress);
+                }
+
+                return `
+                    <div class="request-item ${isActive ? 'active' : ''}" data-request-id="${escapeHtml(group.id)}">
+                                <div class="request-header">
+                                    <div style="flex:1">
+                                        <div class="request-type" style="font-size:1.1rem">${escapeHtml(primary?.description || primary?.requestType || 'Request')}</div>
+                                        <div style="font-size:0.9rem;color:#7f8c8d;margin-top:4px">${escapeHtml(primary?.requestType || '')}</div>
+                                    </div>
+                                    <div style="margin-left:12px">
+                                        <div class="request-status ${getStatusClass(primary?.status || '')}">${escapeHtml(primary?.status || '')}</div>
+                                    </div>
+                                </div>
+                        <div class="request-description">${escapeHtml(primary?.description || (group.histories && group.histories[0] ? group.histories[0].inputText : ''))}</div>
+                        ${primary?.details ? `<div class="request-details">${escapeHtml(primary.details)}</div>` : ''}
+                        <div class="request-meta">
+                            <span>Started: ${primary?.startTime ? new Date(primary.startTime).toLocaleTimeString() : ''}</span>
+                            ${duration > 0 ? `<span class="duration">Duration: ${duration}ms</span>` : ''}
+                            ${primary?.endTime ? `<span>Ended: ${new Date(primary.endTime).toLocaleTimeString()}</span>` : ''}
+                        </div>
+                        ${primary?.error ? `<div class="request-error"><strong>Error:</strong> ${escapeHtml(primary.error)}</div>` : ''}
+                        ${primary?.result ? `<div class="request-result"><strong>Result:</strong> ${escapeHtml(primary.result)}</div>` : ''}
+                                ${typeof progress !== 'undefined' && progress !== null ? `
+                                    <div class="progress-track"><div class="progress-fill" style="width:${Math.max(0, Math.min(100, progress))}%" data-progress-id="${escapeHtml(group.id)}"></div></div>
+                                    <div class="progress-percent" data-progress-id="${escapeHtml(group.id)}" style="font-size:0.85rem;color:#7f8c8d;margin-top:6px">Progress: ${progress}%</div>
+                                ` : ''}
+                        ${renderHistoryForRequest(group.id)}
+                    </div>
+                `;
+            }).join('');
         }
 
+        function getGroupLatestTime(group) {
+            // Prefer a request's last update or end time, otherwise histories
+            if (group.requests && group.requests.length > 0) {
+                const r = group.requests[0];
+                if (r.lastUpdateTime) return new Date(r.lastUpdateTime).getTime();
+                if (r.endTime) return new Date(r.endTime).getTime();
+                return new Date(r.startTime).getTime();
+            }
+            if (group.histories && group.histories.length > 0) {
+                const times = group.histories.map(h => new Date(h.startTime).getTime());
+                return Math.max(...times);
+            }
+            return 0;
+        }
+
+        function synthesizeRequestFromHistory(histories, id) {
+            if (!histories || histories.length === 0) return { requestId: id, requestType: 'Request', description: '', status: '', startTime: new Date().toISOString() };
+            const first = histories[0];
+            const last = histories[histories.length - 1];
+            return {
+                requestId: id,
+                requestType: first.requestType || 'Request',
+                description: first.inputText || '',
+                status: last.response ? 'Completed' : 'Processing',
+                details: last.response || null,
+                startTime: first.startTime,
+                endTime: last.endTime || null,
+                durationMs: last.endTime ? (new Date(last.endTime).getTime() - new Date(first.startTime).getTime()) : 0,
+                progress: null,
+                // Mark success when the last history entry indicates a response or explicit success flag
+                success: typeof last.success !== 'undefined' ? Boolean(last.success) : Boolean(last.response)
+            };
+        }
+        
         async function loadRecentRequests() {
             try {
-                const response = await fetch(`${API_BASE}/monitoring/requests?count=50`);
-                if (response.ok) {
-                    const data = await response.json();
+                const histRes = await fetch(`${API_BASE}/history`);
+                const monRes = await fetch(`${API_BASE}/monitoring/requests`);
+
+                if (histRes.ok) {
+                    const histData = await histRes.json();
+                    // Build map by CorrelationId
+                    historyMap = {};
+                    histData.forEach(h => {
+                        if (h.correlationId) {
+                            if (!historyMap[h.correlationId]) historyMap[h.correlationId] = [];
+                            historyMap[h.correlationId].push(h);
+                        }
+                    });
+                }
+
+                if (monRes.ok) {
+                    const data = await monRes.json();
                     requests = data;
                     renderRequests();
                     updateStats();
@@ -446,6 +647,9 @@
             await loadRecentRequests();
             await initializeSignalR();
 
+            // Start progress animation loop
+            startProgressAnimator();
+
             // Refresh every 10 seconds as backup
             setInterval(() => {
                 if (connection?.state !== signalR.HubConnectionState.Connected) {
@@ -453,6 +657,33 @@
                 }
             }, 10000);
         });
+
+        function startProgressAnimator() {
+            setInterval(() => {
+                for (const id in progressTargets) {
+                    const target = progressTargets[id];
+                    if (typeof target === 'undefined' || target === null) continue;
+                    const cur = typeof progressCurrent[id] === 'number' ? progressCurrent[id] : 0;
+                    const delta = (target - cur) * 0.25;
+                    const next = Math.abs(delta) < 0.25 ? target : cur + delta;
+                    progressCurrent[id] = next;
+
+                    // Update DOM if present
+                    try {
+                        const fill = document.querySelector(`.request-item[data-request-id="${id}"] .progress-fill`);
+                        if (fill) {
+                            const pct = Math.max(0, Math.min(100, Math.round(next)));
+                            fill.style.width = pct + '%';
+                        }
+                        const pctEl = document.querySelector(`.request-item[data-request-id="${id}"] .progress-percent`);
+                        if (pctEl) {
+                            const pct = Math.max(0, Math.min(100, Math.round(next)));
+                            pctEl.textContent = `Progress: ${pct}%`;
+                        }
+                    } catch (e) { /* ignore DOM errors during re-render */ }
+                }
+            }, 100);
+        }
     </script>
 </body>
 </html>
