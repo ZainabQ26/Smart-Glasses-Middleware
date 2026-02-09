@@ -100,6 +100,18 @@ document.querySelectorAll('.tab').forEach(tab => {
     });
 });
 
+// When the conversation/group view selector changes, reload the sidebar
+const convViewSelect = document.getElementById('conversation-view-select');
+if (convViewSelect) {
+    convViewSelect.addEventListener('change', () => {
+        state.prompts.page = 1;
+        state.prompts.hasMore = true;
+        state.prompts.data = [];
+        const listEl = document.getElementById('prompts-list'); if (listEl) listEl.innerHTML = '';
+        loadPrompts(true);
+    });
+}
+
 // Global `showMessage()` provided by `toasts.js` - do not redefine here
 
 function applyTheme(theme) {
@@ -205,25 +217,75 @@ async function loadPrompts(reset = false) {
     showLoading('prompts-list');
 
     try {
-        const response = await fetchWithRetry(`${API_BASE}/prompts?page=${state.prompts.page}&pageSize=${state.prompts.pageSize}`);
+        const viewSelect = document.getElementById('conversation-view-select');
+        const view = viewSelect ? viewSelect.value : 'conversations';
+
+        const endpoint = view === 'groups'
+            ? `${API_BASE}/groups?page=${state.prompts.page}&pageSize=${state.prompts.pageSize}`
+            : `/api/conversations?page=${state.prompts.page}&pageSize=${state.prompts.pageSize}`;
+
+        const response = await fetchWithRetry(endpoint);
         if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
 
         const result = await response.json();
-        const promptsData = result.data || result.Data || [];
+        const items = result.data || result.Data || [];
         const pagination = result.pagination || result.Pagination || {};
 
         hideLoading('prompts-list');
 
         const list = document.getElementById('prompts-list');
-        if (promptsData && promptsData.length > 0) {
-            state.prompts.data.push(...promptsData);
+        if (items && items.length > 0) {
+            state.prompts.data.push(...items);
             const fragment = document.createDocumentFragment();
-            promptsData.forEach(prompt => {
+            items.forEach(item => {
                 try {
-                    const div = createPromptCard(prompt);
+                    const div = document.createElement('div');
+                    div.className = 'sidebar-prompt-item';
+
+                    // Determine if this is a group or conversation
+                    const isGroup = view === 'groups' || (!!getProp(item, 'name') && !getProp(item, 'title'));
+
+                    const id = getProp(item, 'id') || getProp(item, 'Id');
+                    const title = getProp(item, 'title') || getProp(item, 'Title') || getProp(item, 'name') || getProp(item, 'Name') || id;
+                    const updated = getProp(item, 'updatedAt') || getProp(item, 'UpdatedAt') || getProp(item, 'lastUpdated') || '';
+                    // derive messages info when present
+                    const messagesArr = getProp(item, 'messages') || getProp(item, 'Messages') || getProp(item, 'MessagesList') || [];
+                    const messageCount = Array.isArray(messagesArr) ? messagesArr.length : (getProp(item, 'messageCount') || getProp(item, 'MessageCount') || 0);
+                    const lastMsg = (Array.isArray(messagesArr) && messagesArr.length > 0)
+                        ? (messagesArr[messagesArr.length - 1].content || messagesArr[messagesArr.length - 1].text || messagesArr[messagesArr.length - 1].message || '')
+                        : (getProp(item, 'lastMessage') || getProp(item, 'snippet') || getProp(item, 'description') || '');
+
+                    div.dataset.conversationId = isGroup ? '' : id;
+                    div.dataset.groupId = isGroup ? id : (getProp(item, 'resourceGroupId') || getProp(item, 'ResourceGroupId') || '');
+
+                    const displayName = escapeHtml(title || 'Untitled');
+                    div.innerHTML = `
+                        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;">
+                            <span class="prompt-name">${displayName}</span>
+                            <div style="display:flex;gap:8px;align-items:center;">
+                                <span style="font-size:11px;color:#95a5a6;">${updated ? new Date(updated).toLocaleString() : ''}</span>
+                                <span class="badge">${messageCount}</span>
+                            </div>
+                        </div>
+                        <div style="padding:0 10px 8px 10px;color:#666;font-size:12px;">${escapeHtml(String(lastMsg || ''))}</div>
+                    `;
+
+                    div.addEventListener('click', async () => {
+                        document.querySelectorAll('.sidebar-prompt-item').forEach(i => i.classList.remove('active'));
+                        div.classList.add('active');
+                        if (!isGroup && id) {
+                            activeConversationId = id;
+                            await syncActiveGroupFromConversation(id);
+                            showMessage('Conversation selected');
+                        } else if (isGroup) {
+                            setActivePromptGroup(id, title);
+                            showMessage('Group selected');
+                        }
+                    });
+
                     fragment.appendChild(div);
                 } catch (err) {
-                    console.error('Error creating prompt card', err);
+                    console.error('Error creating sidebar item', err);
                 }
             });
             if (list) list.appendChild(fragment);
@@ -231,15 +293,15 @@ async function loadPrompts(reset = false) {
             state.prompts.hasMore = pagination.hasNext || pagination.HasNext;
             state.prompts.page++;
         } else if (reset && list) {
-            list.innerHTML = '<div class="empty-sidebar">No prompts yet</div>';
+            list.innerHTML = `<div class="empty-sidebar">No ${view} yet</div>`;
         }
 
         state.prompts.loading = false;
     } catch (error) {
         hideLoading('prompts-list');
         state.prompts.loading = false;
-        console.error('Error loading prompts:', error);
-        showMessage('Error loading prompts: ' + (error.message || error), 'error');
+        console.error('Error loading prompts/conversations:', error);
+        showMessage('Error loading items: ' + (error.message || error), 'error');
     }
 }
 
@@ -417,7 +479,7 @@ function createPromptCard(prompt) {
 // Removed form submission handler as Auto Groups display conversation history and files
 
 function loadPromptIntoForm(id, name, text) {
-    document.getElementById('prompt-form-title').textContent = 'Prompt';
+    document.getElementById('prompt-form-title').textContent = 'Conversation';
     
     // Parse conversation history and files from the prompt text
     // Assuming text is stored as JSON string with {messages: [], files: []}
@@ -535,7 +597,7 @@ function loadPromptIntoForm(id, name, text) {
 
 function createNewPrompt() {
     document.querySelectorAll('.sidebar-prompt-item').forEach(item => item.classList.remove('active'));
-    document.getElementById('prompt-form-title').textContent = 'Prompt';
+    document.getElementById('prompt-form-title').textContent = 'Conversation';
     
     // Reset conversation history
     currentConversationHistory = [];
@@ -543,7 +605,7 @@ function createNewPrompt() {
     // Reset response section
     const responseContent = document.getElementById('response-content');
     if (responseContent) {
-        responseContent.innerHTML = '<span style="color: #999;">Enter a prompt and click Send to get a response</span>';
+        responseContent.innerHTML = '<span style="color: #999;">Enter a message and click Send to get a response</span>';
     }
     
     // Clear input
