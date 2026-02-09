@@ -832,6 +832,7 @@
             background: #d5dbdb;
             color: #3498db;
         }
+
     </style>
 </head>
 <body>
@@ -913,6 +914,11 @@
                                 </div>
                                 <button type="button" id="prompt-show-file-btn" style="padding: 8px 16px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">add file+</button>
                                 <button type="button" id="prompt-send-btn" style="padding: 8px 16px; background: #27ae60; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Send</button>
+                            </div>
+                            <div style="margin-top: 8px; display: flex; align-items: center; gap: 8px; font-size: 13px; color: #555;">
+                                <input type="checkbox" id="prompt-include-all" style="width: 16px; height: 16px; margin: 0;">
+                                <label for="prompt-include-all" style="margin: 0; font-weight: 500;">Include all groups when searching</label>
+                                <span style="color: #95a5a6;">(Group + conversation are the default)</span>
                             </div>
                         </div>
                     </form>
