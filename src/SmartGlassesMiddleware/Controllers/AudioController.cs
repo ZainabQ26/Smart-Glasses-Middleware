@@ -18,14 +18,16 @@ public class AudioController : ControllerBase
     private readonly IRagService _ragService;
     private readonly ApplicationDbContext _context;
     private readonly ILogger<AudioController> _logger;
+    private readonly IRequestMonitoringService? _monitoringService;
 
-    public AudioController(
+        public AudioController(
         IMediaStorageService mediaStorageService,
         ITranscriptionService transcriptionService,
         IHistoryService historyService,
         IRagService ragService,
         ApplicationDbContext context,
-        ILogger<AudioController> logger)
+        ILogger<AudioController> logger,
+        IRequestMonitoringService? monitoringService = null)
     {
         _mediaStorageService = mediaStorageService;
         _transcriptionService = transcriptionService;
@@ -33,6 +35,7 @@ public class AudioController : ControllerBase
         _ragService = ragService;
         _context = context;
         _logger = logger;
+        _monitoringService = monitoringService;
     }
 
     /// <summary>
@@ -118,8 +121,14 @@ public class AudioController : ControllerBase
 
             // Download and transcribe
             string? transcription = null;
+            string? monitoringRequestId = null;
             try
             {
+                if (_monitoringService != null)
+                {
+                    monitoringRequestId = await _monitoringService.StartRequest("Audio", "Audio transcription request");
+                    await _monitoringService.UpdateRequestStatus(monitoringRequestId, "Processing");
+                }
                 using var downloaded = await _mediaStorageService.DownloadMediaAsync(storageKey);
                 transcription = await _transcriptionService.TranscribeAsync(downloaded, fileName, "audio/wav");
             }
@@ -166,7 +175,12 @@ public class AudioController : ControllerBase
                     InputText = transcription ?? string.Empty,
                     MediaStorageKey = storageKey
                 };
+                if (!string.IsNullOrWhiteSpace(monitoringRequestId)) history.CorrelationId = monitoringRequestId;
                 history = await _historyService.SaveRequestAsync(history);
+                if (!string.IsNullOrWhiteSpace(monitoringRequestId) && _monitoringService != null)
+                {
+                    await _monitoringService.CompleteRequest(monitoringRequestId, true, result: history.Id.ToString());
+                }
 
                 return Ok(new { storageKey, transcription, requestId = history.Id });
             }

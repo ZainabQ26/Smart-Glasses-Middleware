@@ -10,4 +10,6 @@ public class RequestHistory
     public string? Response { get; set; }
     public bool UsedAdvancedModel { get; set; }
     public string? MediaStorageKey { get; set; }
+    // CorrelationId links related events (e.g. document query + prompt)
+    public string? CorrelationId { get; set; }
 }
