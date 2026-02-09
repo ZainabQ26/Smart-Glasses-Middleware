@@ -395,7 +395,8 @@ Current Question: {query}
 
 Answer:";
 
-            var (_, response, _) = await _aiService.ProcessRequestAsync(prompt);
+            // Call the model directly without task detection wrapper to preserve conversation context
+            var response = await GenerateResponseWithLocalModel(prompt);
 
             // Build sources list
             var sources = relevantChunks.Select(c => new DocumentSource
