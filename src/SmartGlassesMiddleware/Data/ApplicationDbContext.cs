@@ -11,6 +11,14 @@ public class ApplicationDbContext : DbContext
     {
     }
 
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        base.OnConfiguring(optionsBuilder);
+        // Suppress pending model changes warning to allow migrations to run
+        optionsBuilder.ConfigureWarnings(warnings =>
+            warnings.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
+    }
+
     public DbSet<RequestHistory> RequestHistories { get; set; }
     public DbSet<ManagedFile> ManagedFiles { get; set; }
     public DbSet<ManagedPrompt> ManagedPrompts { get; set; }
@@ -22,13 +30,6 @@ public class ApplicationDbContext : DbContext
     public DbSet<Conversation> Conversations { get; set; }
     public DbSet<ChatMessage> ChatMessages { get; set; }
     public DbSet<AIInteractionLog> AIInteractionLogs { get; set; }
-
-    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
-    {
-        // Suppress pending model changes warning to allow migrations to run
-        optionsBuilder.ConfigureWarnings(warnings =>
-            warnings.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
-    }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

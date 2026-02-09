@@ -16,6 +16,9 @@ public class DocumentsController : ControllerBase
     private readonly IDocumentHighlightService _highlightService;
     private readonly ApplicationDbContext _context;
     private readonly IConfiguration _configuration;
+    private readonly IRequestMonitoringService _monitoringService;
+    private readonly IHistoryService _historyService;
+    private readonly IMediaStorageService _mediaStorageService;
     private readonly long _maxFileSize;
 
     public DocumentsController(
@@ -24,7 +27,10 @@ public class DocumentsController : ControllerBase
         IRAGService ragService,
         IDocumentHighlightService highlightService,
         ApplicationDbContext context,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IRequestMonitoringService monitoringService,
+        IHistoryService historyService,
+        IMediaStorageService mediaStorageService)
     {
         _logger = logger;
         _processingService = processingService;
@@ -32,6 +38,9 @@ public class DocumentsController : ControllerBase
         _highlightService = highlightService;
         _context = context;
         _configuration = configuration;
+        _monitoringService = monitoringService;
+        _historyService = historyService;
+        _mediaStorageService = mediaStorageService;
         var maxFileSizeMB = configuration.GetValue<int?>("RAG:MaxFileSizeMB") ?? 50;
         _maxFileSize = maxFileSizeMB * 1024 * 1024;
     }
@@ -115,21 +124,81 @@ public class DocumentsController : ControllerBase
     [ProducesResponseType(typeof(QueryResult), StatusCodes.Status200OK)]
     public async Task<IActionResult> QueryDocuments([FromBody] QueryRequest request)
     {
+        _logger.LogInformation("=== DOCUMENT QUERY REQUEST RECEIVED ===");
+        _logger.LogInformation("Query: {Query}", request.Query);
+        _logger.LogInformation("TopK: {TopK}, GroupIds: {GroupIds}, DocumentIds: {DocumentIds}", request.TopK, request.GroupIds?.Count ?? 0, request.DocumentIds?.Count ?? 0);
+        
         if (string.IsNullOrWhiteSpace(request.Query))
+        {
+            _logger.LogWarning("Query is empty, returning BadRequest");
             return BadRequest("Query cannot be empty");
+        }
 
+        string? requestId = null;
         try
         {
+            _logger.LogInformation("Starting monitoring request...");
+            requestId = await _monitoringService.StartRequest("DocumentQuery", 
+                $"Query: {request.Query.Substring(0, Math.Min(50, request.Query.Length))}...");
+            _logger.LogInformation("Monitoring request started with ID: {RequestId}", requestId);
+
+            _logger.LogInformation("Updating request status to 'Searching documents'...");
+            await _monitoringService.UpdateRequestStatus(requestId, "Searching documents...");
+
+            _logger.LogInformation("Calling RAG service QueryDocumentsAsync...");
             var result = await _ragService.QueryDocumentsAsync(
                 request.Query,
                 request.TopK ?? 5,
-                request.GroupIds);
+                request.GroupIds,
+                request.DocumentIds,
+                requestId);
+            _logger.LogInformation("RAG service returned result. Answer length: {Length}", result.Answer?.Length ?? 0);
+
+            await _monitoringService.CompleteRequest(requestId, true, 
+                $"Found {result.Sources?.Count ?? 0} sources");
+            _logger.LogInformation("=== DOCUMENT QUERY COMPLETED SUCCESSFULLY ===");
+
+            // Persist a DocumentQuery history entry and attach the monitoring request id so UI can group
+            try
+            {
+                var hist = new RequestHistory
+                {
+                    RequestType = "DocumentQuery",
+                    InputText = request.Query,
+                    Response = $"Found {result.Sources?.Count ?? 0} sources",
+                    DetectedTask = "document_query",
+                    CorrelationId = requestId
+                };
+
+                await _historyService.SaveRequestAsync(hist);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to save document query history");
+            }
 
             return Ok(result);
         }
+        catch (TimeoutException ex)
+        {
+            _logger.LogWarning(ex, "Query timed out for query: {Query}", request.Query);
+            if (requestId != null)
+                await _monitoringService.CompleteRequest(requestId, false, error: "Request timed out");
+            return StatusCode(504, new { error = "Request timed out", details = ex.Message });
+        }
+        catch (OperationCanceledException ex)
+        {
+            _logger.LogWarning(ex, "Query was cancelled (client disconnected) for query: {Query}", request.Query);
+            if (requestId != null)
+                await _monitoringService.CompleteRequest(requestId, false, error: "Request cancelled by client");
+            return StatusCode(499, new { error = "Request cancelled", details = "Client disconnected" });
+        }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error querying documents");
+            _logger.LogError(ex, "=== ERROR QUERYING DOCUMENTS === Message: {Message}, StackTrace: {StackTrace}", 
+                ex.Message, ex.StackTrace);
+            if (requestId != null)
+                await _monitoringService.CompleteRequest(requestId, false, error: ex.Message);
             return StatusCode(500, new { error = "Failed to query documents", details = ex.Message });
         }
     }
@@ -244,6 +313,29 @@ public class DocumentsController : ControllerBase
                 Preview = c.ChunkText.Length > 100 ? c.ChunkText.Substring(0, 100) + "..." : c.ChunkText
             }).ToList()
         });
+    }
+
+    /// <summary>
+    /// Download or preview a document file
+    /// </summary>
+    [HttpGet("{documentId}/download")]
+    [ProducesResponseType(typeof(FileStreamResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DownloadDocument(Guid documentId)
+    {
+        var document = await _context.DocumentMetadatas.FindAsync(documentId);
+        if (document == null)
+        {
+            return NotFound();
+        }
+
+        var stream = await _mediaStorageService.DownloadFileAsync(document.StorageKey);
+        stream.Position = 0;
+        var contentType = string.IsNullOrWhiteSpace(document.ContentType)
+            ? "application/octet-stream"
+            : document.ContentType;
+
+        return File(stream, contentType);
     }
 
     /// <summary>
@@ -371,6 +463,7 @@ public class QueryRequest
     public string Query { get; set; } = string.Empty;
     public int? TopK { get; set; }
     public List<Guid>? GroupIds { get; set; }
+    public List<Guid>? DocumentIds { get; set; }
 }
 
 public class MoveDocumentRequest
