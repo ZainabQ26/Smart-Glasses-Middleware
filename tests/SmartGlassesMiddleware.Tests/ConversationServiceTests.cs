@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Xunit;
 using SmartGlassesMiddleware.Data;
@@ -44,7 +45,9 @@ public class ConversationServiceTests
         var context = GetInMemoryContext();
         var mockLogger = new Mock<ILogger<ConversationService>>();
         var config = GetMockConfiguration();
-        var service = new ConversationService(context, mockLogger.Object, config);
+        var services = new ServiceCollection();
+        var provider = services.BuildServiceProvider();
+        var service = new ConversationService(context, mockLogger.Object, config, provider);
 
         // Act
         var conversation = await service.CreateConversationAsync("Test Conversation");
@@ -64,7 +67,9 @@ public class ConversationServiceTests
         var context = GetInMemoryContext();
         var mockLogger = new Mock<ILogger<ConversationService>>();
         var config = GetMockConfiguration();
-        var service = new ConversationService(context, mockLogger.Object, config);
+        var services = new ServiceCollection();
+        var provider = services.BuildServiceProvider();
+        var service = new ConversationService(context, mockLogger.Object, config, provider);
         var groupId = Guid.NewGuid();
 
         // Act
@@ -81,7 +86,9 @@ public class ConversationServiceTests
         var context = GetInMemoryContext();
         var mockLogger = new Mock<ILogger<ConversationService>>();
         var config = GetMockConfiguration();
-        var service = new ConversationService(context, mockLogger.Object, config);
+        var services = new ServiceCollection();
+        var provider = services.BuildServiceProvider();
+        var service = new ConversationService(context, mockLogger.Object, config, provider);
 
         // Act
         var conversation = await service.CreateConversationAsync();
@@ -98,7 +105,9 @@ public class ConversationServiceTests
         var context = GetInMemoryContext();
         var mockLogger = new Mock<ILogger<ConversationService>>();
         var config = GetMockConfiguration();
-        var service = new ConversationService(context, mockLogger.Object, config);
+        var services = new ServiceCollection();
+        var provider = services.BuildServiceProvider();
+        var service = new ConversationService(context, mockLogger.Object, config, provider);
 
         var conversation = await service.CreateConversationAsync("Test");
         await service.AddMessageAsync(conversation.Id, "user", "Hello");
@@ -119,7 +128,9 @@ public class ConversationServiceTests
         var context = GetInMemoryContext();
         var mockLogger = new Mock<ILogger<ConversationService>>();
         var config = GetMockConfiguration();
-        var service = new ConversationService(context, mockLogger.Object, config);
+        var services = new ServiceCollection();
+        var provider = services.BuildServiceProvider();
+        var service = new ConversationService(context, mockLogger.Object, config, provider);
 
         // Act
         var conversation = await service.GetConversationAsync(Guid.NewGuid());
@@ -135,7 +146,9 @@ public class ConversationServiceTests
         var context = GetInMemoryContext();
         var mockLogger = new Mock<ILogger<ConversationService>>();
         var config = GetMockConfiguration();
-        var service = new ConversationService(context, mockLogger.Object, config);
+        var services = new ServiceCollection();
+        var provider = services.BuildServiceProvider();
+        var service = new ConversationService(context, mockLogger.Object, config, provider);
 
         var active1 = await service.CreateConversationAsync("Active 1");
         var active2 = await service.CreateConversationAsync("Active 2");
@@ -157,7 +170,9 @@ public class ConversationServiceTests
         var context = GetInMemoryContext();
         var mockLogger = new Mock<ILogger<ConversationService>>();
         var config = GetMockConfiguration();
-        var service = new ConversationService(context, mockLogger.Object, config);
+        var services = new ServiceCollection();
+        var provider = services.BuildServiceProvider();
+        var service = new ConversationService(context, mockLogger.Object, config, provider);
 
         var groupId1 = Guid.NewGuid();
         var groupId2 = Guid.NewGuid();
@@ -180,7 +195,9 @@ public class ConversationServiceTests
         var context = GetInMemoryContext();
         var mockLogger = new Mock<ILogger<ConversationService>>();
         var config = GetMockConfiguration();
-        var service = new ConversationService(context, mockLogger.Object, config);
+        var services = new ServiceCollection();
+        var provider = services.BuildServiceProvider();
+        var service = new ConversationService(context, mockLogger.Object, config, provider);
 
         var conversation = await service.CreateConversationAsync("Test");
 
@@ -202,7 +219,9 @@ public class ConversationServiceTests
         var context = GetInMemoryContext();
         var mockLogger = new Mock<ILogger<ConversationService>>();
         var config = GetMockConfiguration();
-        var service = new ConversationService(context, mockLogger.Object, config);
+        var services = new ServiceCollection();
+        var provider = services.BuildServiceProvider();
+        var service = new ConversationService(context, mockLogger.Object, config, provider);
 
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentException>(() =>
@@ -216,7 +235,9 @@ public class ConversationServiceTests
         var context = GetInMemoryContext();
         var mockLogger = new Mock<ILogger<ConversationService>>();
         var config = GetMockConfiguration();
-        var service = new ConversationService(context, mockLogger.Object, config);
+        var services = new ServiceCollection();
+        var provider = services.BuildServiceProvider();
+        var service = new ConversationService(context, mockLogger.Object, config, provider);
 
         var conversation = await service.CreateConversationAsync("Test");
         var originalTimestamp = conversation.UpdatedAt;
@@ -238,7 +259,9 @@ public class ConversationServiceTests
         var context = GetInMemoryContext();
         var mockLogger = new Mock<ILogger<ConversationService>>();
         var config = GetMockConfiguration();
-        var service = new ConversationService(context, mockLogger.Object, config);
+        var services = new ServiceCollection();
+        var provider = services.BuildServiceProvider();
+        var service = new ConversationService(context, mockLogger.Object, config, provider);
 
         var conversation = await service.CreateConversationAsync("Test");
         for (int i = 0; i < 15; i++)
@@ -260,7 +283,9 @@ public class ConversationServiceTests
         var context = GetInMemoryContext();
         var mockLogger = new Mock<ILogger<ConversationService>>();
         var config = GetMockConfiguration();
-        var service = new ConversationService(context, mockLogger.Object, config);
+        var services = new ServiceCollection();
+        var provider = services.BuildServiceProvider();
+        var service = new ConversationService(context, mockLogger.Object, config, provider);
 
         var conversation = await service.CreateConversationAsync("Test");
         await service.AddMessageAsync(conversation.Id, "user", "First");
@@ -285,7 +310,9 @@ public class ConversationServiceTests
         var context = GetInMemoryContext();
         var mockLogger = new Mock<ILogger<ConversationService>>();
         var config = GetMockConfiguration();
-        var service = new ConversationService(context, mockLogger.Object, config);
+        var services = new ServiceCollection();
+        var provider = services.BuildServiceProvider();
+        var service = new ConversationService(context, mockLogger.Object, config, provider);
 
         // Act
         var conversation = await service.DetectOrCreateConversationAsync("Hello world");
@@ -302,7 +329,9 @@ public class ConversationServiceTests
         var context = GetInMemoryContext();
         var mockLogger = new Mock<ILogger<ConversationService>>();
         var config = GetMockConfiguration();
-        var service = new ConversationService(context, mockLogger.Object, config);
+        var services = new ServiceCollection();
+        var provider = services.BuildServiceProvider();
+        var service = new ConversationService(context, mockLogger.Object, config, provider);
 
         var existing = await service.CreateConversationAsync("Existing");
         await service.AddMessageAsync(existing.Id, "user", "Hello");
@@ -321,7 +350,9 @@ public class ConversationServiceTests
         var context = GetInMemoryContext();
         var mockLogger = new Mock<ILogger<ConversationService>>();
         var config = GetMockConfiguration();
-        var service = new ConversationService(context, mockLogger.Object, config);
+        var services = new ServiceCollection();
+        var provider = services.BuildServiceProvider();
+        var service = new ConversationService(context, mockLogger.Object, config, provider);
 
         var longMessage = new string('A', 100);
 
@@ -340,7 +371,9 @@ public class ConversationServiceTests
         var context = GetInMemoryContext();
         var mockLogger = new Mock<ILogger<ConversationService>>();
         var config = GetMockConfiguration();
-        var service = new ConversationService(context, mockLogger.Object, config);
+        var services = new ServiceCollection();
+        var provider = services.BuildServiceProvider();
+        var service = new ConversationService(context, mockLogger.Object, config, provider);
 
         var conversation = await service.CreateConversationAsync("Test");
         for (int i = 0; i < 10; i++)
@@ -364,7 +397,9 @@ public class ConversationServiceTests
         var context = GetInMemoryContext();
         var mockLogger = new Mock<ILogger<ConversationService>>();
         var config = GetMockConfiguration();
-        var service = new ConversationService(context, mockLogger.Object, config);
+        var services = new ServiceCollection();
+        var provider = services.BuildServiceProvider();
+        var service = new ConversationService(context, mockLogger.Object, config, provider);
 
         var conversation = await service.CreateConversationAsync("Test");
         await service.AddMessageAsync(conversation.Id, "user", "Hi");
@@ -383,7 +418,9 @@ public class ConversationServiceTests
         var context = GetInMemoryContext();
         var mockLogger = new Mock<ILogger<ConversationService>>();
         var config = GetMockConfiguration();
-        var service = new ConversationService(context, mockLogger.Object, config);
+        var services = new ServiceCollection();
+        var provider = services.BuildServiceProvider();
+        var service = new ConversationService(context, mockLogger.Object, config, provider);
 
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentException>(() =>
@@ -397,7 +434,9 @@ public class ConversationServiceTests
         var context = GetInMemoryContext();
         var mockLogger = new Mock<ILogger<ConversationService>>();
         var config = GetMockConfiguration();
-        var service = new ConversationService(context, mockLogger.Object, config);
+        var services = new ServiceCollection();
+        var provider = services.BuildServiceProvider();
+        var service = new ConversationService(context, mockLogger.Object, config, provider);
 
         var conversation = await service.CreateConversationAsync("Test");
         Assert.True(conversation.IsActive);
@@ -417,7 +456,9 @@ public class ConversationServiceTests
         var context = GetInMemoryContext();
         var mockLogger = new Mock<ILogger<ConversationService>>();
         var config = GetMockConfiguration();
-        var service = new ConversationService(context, mockLogger.Object, config);
+        var services = new ServiceCollection();
+        var provider = services.BuildServiceProvider();
+        var service = new ConversationService(context, mockLogger.Object, config, provider);
 
         // Act & Assert
         var exception = await Record.ExceptionAsync(() =>

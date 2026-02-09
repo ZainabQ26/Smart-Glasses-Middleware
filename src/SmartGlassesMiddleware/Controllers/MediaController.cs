@@ -21,6 +21,7 @@ public class MediaController : ControllerBase
     private readonly IBackgroundTaskQueue _backgroundQueue;
     private readonly IMediaProcessor _mediaProcessor;
     private readonly IRagService _ragService;
+    private readonly IRequestMonitoringService? _monitoringService;
     private readonly ApplicationDbContext _context;
 
     public MediaController(
@@ -32,7 +33,8 @@ public class MediaController : ControllerBase
         IMediaProcessor mediaProcessor,
         IRagService ragService,
         ApplicationDbContext context,
-        ILogger<MediaController> logger)
+        ILogger<MediaController> logger,
+        IRequestMonitoringService? monitoringService = null)
     {
         _mediaStorageService = mediaStorageService;
         _transcriptionService = transcriptionService;
@@ -43,12 +45,12 @@ public class MediaController : ControllerBase
         _ragService = ragService;
         _context = context;
         _logger = logger;
+        _monitoringService = monitoringService;
     }
 
     /// <summary>
     /// Process media files (images, videos, audio) with optional AI prompt
     /// </summary>
-    /// <param name="request">Media request containing files and optional prompt</param>
     /// <returns>Accepted response with task ID for tracking processing status</returns>
     /// <response code="202">Request accepted for background processing</response>
     /// <response code="400">Invalid request format or unsupported file types</response>
@@ -70,10 +72,52 @@ public class MediaController : ControllerBase
     [ProducesResponseType(StatusCodes.Status202Accepted)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
-    public async Task<ActionResult> ProcessMedia([FromForm] MediaRequest request)
+    public async Task<ActionResult> ProcessMedia()
     {
         try
         {
+            // Manually bind form to avoid potential model-binding hangs in some environments
+            MediaRequest request = new MediaRequest();
+            IFormCollection? form = null;
+            if (Request.HasFormContentType)
+            {
+                form = await Request.ReadFormAsync();
+                request.Prompt = form.TryGetValue("prompt", out var p) ? p.FirstOrDefault() : null;
+                request.Transcription = form.TryGetValue("input", out var iv) ? iv.FirstOrDefault() : null;
+                request.Manifest = form.TryGetValue("manifest", out var m) ? m.FirstOrDefault() : null;
+                request.PerFileTranscriptions = form.TryGetValue("perFileTranscriptions", out var pf) ? pf.FirstOrDefault() : null;
+                if (form.Files != null && form.Files.Count > 0)
+                {
+                    request.Files = form.Files.ToList();
+                }
+            }
+
+            return await ProcessMediaInternalAsync(request, form);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unhandled exception in ProcessMedia");
+            return Problem("An error occurred while processing the request.");
+        }
+    }
+
+    [NonAction]
+    public Task<ActionResult> ProcessMedia(MediaRequest request)
+    {
+        IFormCollection? form = null;
+        if (Request.HasFormContentType)
+        {
+            form = Request.Form;
+        }
+
+        return ProcessMediaInternalAsync(request, form);
+    }
+
+    private async Task<ActionResult> ProcessMediaInternalAsync(MediaRequest request, IFormCollection? form)
+    {
+        try
+        {
+            _logger.LogInformation("ProcessMedia entry: files={FileCount}, promptProvided={HasPrompt}", request.Files?.Count ?? 0, !string.IsNullOrWhiteSpace(request.Prompt));
 
             string? promptAudioTranscription = null;
             // Aggregate files from the strongly-typed model or raw form parts (guard form access)
@@ -82,80 +126,69 @@ public class MediaController : ControllerBase
             {
                 files.AddRange(request.Files!);
             }
-            else if (Request.HasFormContentType)
+            else if (form?.Files != null && form.Files.Count > 0)
             {
-                var formFiles = Request.Form?.Files;
-                if (formFiles != null && formFiles.Count > 0)
-                {
-                    files.AddRange(formFiles.ToList());
-                }
+                files.AddRange(form.Files.ToList());
             }
 
             // If a prompt audio file was uploaded as `promptAudio`, enforce exclusivity with text prompt, transcribe it, and remove it from uploads
-            if (Request.HasFormContentType)
+            var promptAudioFile = form?.Files?.FirstOrDefault(f => string.Equals(f.Name, "promptAudio", StringComparison.OrdinalIgnoreCase));
+            if (promptAudioFile != null)
             {
-                var formFiles = Request.Form?.Files;
-                var promptAudioFile = formFiles?.FirstOrDefault(f => string.Equals(f.Name, "promptAudio", StringComparison.OrdinalIgnoreCase));
-                if (promptAudioFile != null)
+                // If both a text prompt and promptAudio are provided, reject the request
+                if (!string.IsNullOrWhiteSpace(request.Prompt))
                 {
-                    // If both a text prompt and promptAudio are provided, reject the request
-                    if (!string.IsNullOrWhiteSpace(request.Prompt))
+                    var errors = new Dictionary<string, string[]>
                     {
-                        var errors = new Dictionary<string, string[]>
-                        {
-                            ["prompt"] = new[] { "Mutually exclusive with promptAudio" }
-                        };
+                        ["prompt"] = new[] { "Mutually exclusive with promptAudio" }
+                    };
 
-                        var pd = new ValidationProblemDetails(errors)
-                        {
-                            Type = "https://tools.ietf.org/html/rfc7231#section-6.5.1",
-                            Title = "Validation Failed",
-                            Status = StatusCodes.Status400BadRequest,
-                            Detail = "Provide either 'prompt' (text) or 'promptAudio' (file), not both.",
-                            Instance = HttpContext?.Request?.Path
-                        };
-
-                        pd.Extensions["requestId"] = HttpContext?.TraceIdentifier ?? Guid.NewGuid().ToString();
-                        pd.Extensions["timestamp"] = DateTime.UtcNow.ToString("o");
-
-                        return BadRequest(pd);
-                    }
-
-                    try
+                    var pd = new ValidationProblemDetails(errors)
                     {
-                        using var promptStream = promptAudioFile.OpenReadStream();
-                        var contentType = promptAudioFile.ContentType ?? string.Empty;
-                        var transcribedPrompt = await _transcriptionService.TranscribeAsync(promptStream, promptAudioFile.FileName, contentType);
-                        if (!string.IsNullOrWhiteSpace(transcribedPrompt)) promptAudioTranscription = transcribedPrompt;
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to transcribe prompt audio");
-                    }
+                        Type = "https://tools.ietf.org/html/rfc7231#section-6.5.1",
+                        Title = "Validation Failed",
+                        Status = StatusCodes.Status400BadRequest,
+                        Detail = "Provide either 'prompt' (text) or 'promptAudio' (file), not both.",
+                        Instance = HttpContext?.Request?.Path
+                    };
 
-                    // Ensure promptAudio is not treated as a normal media file to upload
-                    files.RemoveAll(f => string.Equals(f.Name, "promptAudio", StringComparison.OrdinalIgnoreCase));
+                    pd.Extensions["requestId"] = HttpContext?.TraceIdentifier ?? Guid.NewGuid().ToString();
+                    pd.Extensions["timestamp"] = DateTime.UtcNow.ToString("o");
+
+                    return BadRequest(pd);
                 }
+
+                try
+                {
+                    using var promptStream = promptAudioFile.OpenReadStream();
+                    var contentType = promptAudioFile.ContentType ?? string.Empty;
+                    var transcribedPrompt = await _transcriptionService.TranscribeAsync(promptStream, promptAudioFile.FileName, contentType);
+                    if (!string.IsNullOrWhiteSpace(transcribedPrompt)) promptAudioTranscription = transcribedPrompt;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to transcribe prompt audio");
+                }
+
+                // Ensure promptAudio is not treated as a normal media file to upload
+                files.RemoveAll(f => string.Equals(f.Name, "promptAudio", StringComparison.OrdinalIgnoreCase));
             }
 
             // Support a single combined `input` form field which may be either a file part or a plain transcription string.
             string? inputText = null;
-            if (Request.HasFormContentType)
+            if (form != null && form.TryGetValue("input", out var iv))
             {
-                var form = Request.Form;
-                if (form != null && form.TryGetValue("input", out var iv))
-                {
-                    inputText = iv.FirstOrDefault();
-                }
+                inputText = iv.FirstOrDefault();
             }
-            IFormFile? inputFile = null;
-            if (Request.HasFormContentType)
+            if (string.IsNullOrWhiteSpace(inputText))
             {
-                var formFiles = Request.Form?.Files;
-                if (formFiles != null && formFiles.Count > 0)
-                {
-                    inputFile = formFiles.FirstOrDefault(f => string.Equals(f?.Name ?? string.Empty, "input", StringComparison.OrdinalIgnoreCase));
-                }
+                inputText = request.Transcription;
+            }
+
+            IFormFile? inputFile = null;
+            if (form?.Files != null && form.Files.Count > 0)
+            {
+                inputFile = form.Files.FirstOrDefault(f => string.Equals(f?.Name ?? string.Empty, "input", StringComparison.OrdinalIgnoreCase));
             }
 
             if (!files.Any() && inputFile != null)
@@ -172,29 +205,59 @@ public class MediaController : ControllerBase
                     ? inputText
                     : transPrompt + "\n\nTranscription: " + inputText;
 
-                var (tTask, tResponse, tUsedAdvancedModel) = await _aiService.ProcessRequestAsync(transText);
-
-                // Save history (no media key)
+                string? monitoringRequestId = null;
                 try
                 {
-                    var history = new RequestHistory
+                    if (_monitoringService != null)
                     {
-                        RequestType = "Audio",
-                        InputText = inputText,
-                        DetectedTask = tTask,
-                        Response = tResponse,
-                        UsedAdvancedModel = tUsedAdvancedModel
-                    };
-                    history = await _historyService.SaveRequestAsync(history);
-                    return Ok(new { task = tTask, response = tResponse, usedAdvancedModel = tUsedAdvancedModel, requestId = history.Id, transcription = inputText });
+                        monitoringRequestId = await _monitoringService.StartRequest("Audio", inputText ?? "transcription-only request");
+                        await _monitoringService.UpdateRequestStatus(monitoringRequestId, "Processing");
+                    }
+
+                    var (tTask, tResponse, tUsedAdvancedModel) = await _aiService.ProcessRequestAsync(transText);
+
+                    // Save history (no media key)
+                    try
+                    {
+                        var history = new RequestHistory
+                        {
+                            RequestType = "Audio",
+                            InputText = inputText,
+                            DetectedTask = tTask,
+                            Response = tResponse,
+                            UsedAdvancedModel = tUsedAdvancedModel
+                            // CorrelationId set below if monitoringRequestId exists
+                        };
+                        if (!string.IsNullOrWhiteSpace(monitoringRequestId)) history.CorrelationId = monitoringRequestId;
+                        history = await _historyService.SaveRequestAsync(history);
+
+                        if (!string.IsNullOrWhiteSpace(monitoringRequestId) && _monitoringService != null)
+                        {
+                            await _monitoringService.CompleteRequest(monitoringRequestId, true, result: history.Id.ToString());
+                        }
+
+                        return Ok(new { task = tTask, response = tResponse, usedAdvancedModel = tUsedAdvancedModel, requestId = history.Id, transcription = inputText });
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to save history for transcription-only ask");
+                        if (!string.IsNullOrWhiteSpace(monitoringRequestId) && _monitoringService != null)
+                        {
+                            await _monitoringService.CompleteRequest(monitoringRequestId, true, result: tResponse);
+                        }
+                        return Ok(new { task = tTask, response = tResponse, usedAdvancedModel = tUsedAdvancedModel, transcription = inputText });
+                    }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Failed to save history for transcription-only ask");
-                    return Ok(new { task = tTask, response = tResponse, usedAdvancedModel = tUsedAdvancedModel, transcription = inputText });
+                    _logger.LogError(ex, "Error during transcription-only processing");
+                    if (!string.IsNullOrWhiteSpace(monitoringRequestId) && _monitoringService != null)
+                    {
+                        await _monitoringService.CompleteRequest(monitoringRequestId, false, error: ex.Message);
+                    }
+                    return Problem("An error occurred while processing the request.");
                 }
             }
-
             // Allowed extensions
             var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".gif", ".mp4", ".avi", ".mov", ".wav", ".mp3", ".m4a", ".flac", ".aac" };
             var audioExtensions = new[] { ".wav", ".mp3", ".m4a", ".flac", ".aac" };

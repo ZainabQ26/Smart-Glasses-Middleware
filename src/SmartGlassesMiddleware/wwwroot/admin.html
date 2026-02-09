@@ -40,6 +40,26 @@
             font-size: 2rem;
         }
 
+        .header-nav {
+            text-align: center;
+            margin-top: 10px;
+        }
+
+        .header-nav a {
+            color: #3498db;
+            text-decoration: none;
+            padding: 8px 16px;
+            margin: 0 5px;
+            background: white;
+            border-radius: 4px;
+            font-weight: 500;
+            display: inline-block;
+        }
+
+        .header-nav a:hover {
+            background: #ecf0f1;
+        }
+
         .tabs {
             display: flex;
             gap: 10px;
@@ -66,6 +86,79 @@
         .tab.active {
             color: #2c3e50;
             border-bottom-color: #3498db;
+        }
+
+        .theme-toggle {
+            margin-left: auto;
+            background: #ecf0f1;
+            border: 1px solid #dcdcdc;
+            color: #2c3e50;
+            padding: 8px 14px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            line-height: 1;
+            transition: background-color 0.2s ease, color 0.2s ease;
+        }
+
+        .theme-toggle:hover {
+            background: #dfe6e9;
+        }
+
+        body.dark {
+            background-color: #0f141b !important;
+            color: #e6e6e6 !important;
+        }
+
+        body.dark header {
+            background-color: #141c25 !important;
+        }
+
+        body.dark .tab-content,
+        body.dark .card,
+        body.dark .prompt-form-card,
+        body.dark .prompt-sidebar,
+        body.dark .response-content,
+        body.dark .modal-content,
+        body.dark #file-preview {
+            background-color: #141c25 !important;
+            color: #e6e6e6 !important;
+            border-color: #223040 !important;
+        }
+
+        body.dark .card-meta,
+        body.dark label,
+        body.dark .empty-state,
+        body.dark .empty-sidebar,
+        body.dark .loading-indicator {
+            color: #b3c0d1 !important;
+        }
+
+        body.dark input[type="text"],
+        body.dark input[type="file"],
+        body.dark textarea,
+        body.dark select,
+        body.dark .response-content,
+        body.dark #prompt-files-list,
+        body.dark #group-files-list {
+            background-color: #0f141b !important;
+            color: #e6e6e6 !important;
+            border-color: #223040 !important;
+        }
+
+        body.dark .tab {
+            color: #9fb0c4 !important;
+        }
+
+        body.dark .tab.active {
+            color: #e6e6e6 !important;
+            border-bottom-color: #4da3ff !important;
+        }
+
+        body.dark .theme-toggle {
+            background: #223040 !important;
+            border-color: #2d3f54 !important;
+            color: #e6e6e6 !important;
         }
 
         .tab-content {
@@ -127,7 +220,7 @@
         }
 
         input[type="file"]::after {
-            content: ' (must be img or pdf)';
+            content: ' (img pdf docx or txt) )';
             color: #7f8c8d;
             font-size: 13px;
         }
@@ -384,6 +477,15 @@
             }
         }
 
+        @keyframes promptUploadMove {
+            0% {
+                transform: translateX(-60%);
+            }
+            100% {
+                transform: translateX(140%);
+            }
+        }
+
         /* Better responsive design */
         @media (max-width: 768px) {
             .container {
@@ -432,11 +534,312 @@
             width: 300px;
             height: 300px;
         }
+
+        /* Modern Prompts Layout */
+        .prompts-container {
+            display: grid;
+            grid-template-columns: 250px 1fr;
+            gap: 20px;
+            align-items: start;
+        }
+
+        @media (max-width: 968px) {
+            .prompts-container {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .prompt-sidebar {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            min-height: 500px;
+            position: sticky;
+            top: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border: 1px solid #e0e0e0;
+        }
+
+        .prompt-sidebar h3 {
+            color: #2c3e50;
+            font-size: 1.1rem;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+
+        .prompt-form-card {
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .prompt-form-card h2 {
+            font-size: 1.5rem;
+            margin-bottom: 25px;
+            color: #2c3e50;
+        }
+
+        .prompt-list-container {
+            min-height: 400px;
+        }
+
+        .prompt-item {
+            background: #f8f9fa;
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 10px;
+            border: 1px solid #e0e0e0;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .prompt-item:hover {
+            background: #e9ecef;
+            transform: translateX(3px);
+            border-color: #3498db;
+        }
+
+        .prompt-item.selected {
+            background: #3498db;
+            border-color: #2980b9;
+            box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
+        }
+
+        .prompt-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .prompt-name {
+            font-size: 0.9rem;
+            font-weight: 500;
+            color: #2c3e50;
+            flex: 1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .prompt-item.selected .prompt-name {
+            color: white;
+        }
+
+        .prompt-meta {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .prompt-level {
+            font-size: 0.7rem;
+            padding: 2px 8px;
+            border-radius: 10px;
+            background: #ecf0f1;
+            color: #7f8c8d;
+            font-weight: 500;
+        }
+
+        .prompt-item.selected .prompt-level {
+            background: rgba(255, 255, 255, 0.3);
+            color: white;
+        }
+
+        .prompt-text-preview {
+            display: none;
+        }
+
+        .prompt-actions {
+            display: none;
+        }
+
+        .new-conversation-btn {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            margin-bottom: 15px;
+            width: 100%;
+            transition: all 0.3s ease;
+        }
+
+        .new-conversation-btn:hover {
+            background: #2980b9;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .btn-gradient {
+            background: #3498db;
+            border: none;
+            color: white;
+            padding: 10px 24px;
+            border-radius: 6px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .btn-gradient:hover {
+            background: #2980b9;
+        }
+
+        .btn-track {
+            background: #3498db;
+            min-width: 100px;
+        }
+
+        .btn-track:hover {
+            background: #2980b9;
+        }
+
+        .response-section {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+        }
+
+        .response-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .response-header h3 {
+            font-size: 1rem;
+            color: #2c3e50;
+            margin: 0;
+        }
+
+        .response-content {
+            min-height: 100px;
+            padding: 15px;
+            background: white;
+            border-radius: 6px;
+            border: 1px solid #ddd;
+            color: #555;
+        }
+
+        .prompt-input-large {
+            min-height: 200px !important;
+        }
+
+        .sidebar-prompt-item {
+            font-size: 0.85rem;
+            color: #555;
+            padding: 8px 0;
+            border-bottom: 1px solid #e0e0e0;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+
+        .sidebar-prompt-item:hover {
+            color: #3498db;
+            padding-left: 5px;
+        }
+
+        .sidebar-prompt-item.active {
+            color: #3498db;
+            font-weight: 600;
+        }
+
+        .prompt-delete-btn {
+            border: none;
+            background: transparent;
+            color: #c0392b;
+            font-size: 18px;
+            line-height: 1;
+            cursor: pointer;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+
+        .prompt-delete-btn:hover {
+            background: #f8d7da;
+        }
+
+        .empty-sidebar {
+            color: #95a5a6;
+            text-align: center;
+            font-size: 0.85rem;
+            margin-top: 20px;
+        }
+
+        .prompt-text-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .prompt-text-row input {
+            flex: 1;
+        }
+
+        .add-file-btn {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            white-space: nowrap;
+            transition: all 0.3s ease;
+        }
+
+        .add-file-btn:hover {
+            background: #2980b9;
+        }
+
+        .input-with-icon {
+            position: relative;
+            display: flex;
+            align-items: center;
+            flex: 1;
+        }
+
+        .input-with-icon input {
+            padding-right: 40px;
+        }
+
+        .paperclip-btn {
+            background: #ecf0f1;
+            border: none;
+            color: #7f8c8d;
+            font-size: 1.2rem;
+            cursor: pointer;
+            padding: 10px 15px;
+            border-radius: 6px;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .paperclip-btn:hover {
+            background: #d5dbdb;
+            color: #3498db;
+        }
     </style>
 </head>
 <body>
     <header>
         <h1>Smart Glasses - Admin Panel</h1>
+        <div class="header-nav">
+            <a href="/monitoring.html" target="_blank">📊 Request Monitoring</a>
+        </div>
     </header>
 
     <div class="container">
@@ -445,7 +848,8 @@
         <div class="tabs">
             <button class="tab active" data-tab="files">Files</button>
             <button class="tab" data-tab="prompts">Prompts</button>
-            <button class="tab" data-tab="groups">Groups</button>
+            <button class="tab" data-tab="groups">Reminders</button>
+            <button id="theme-toggle" class="theme-toggle" type="button" title="Toggle dark mode">🌙</button>
         </div>
 
         <!-- Files Tab -->
@@ -465,74 +869,201 @@
                 </form>
             </div>
 
-            <div class="section">
-                <h2>Uploaded Files</h2>
-                <div id="file-preview" style="display: none; margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 6px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                        <strong>Preview:</strong>
-                        <button type="button" id="close-preview" class="secondary" style="padding: 5px 10px; font-size: 12px;">Close</button>
-                    </div>
-                    <div id="preview-content" style="max-width: 100%; text-align: center;"></div>
-                </div>
-                <div id="files-list"></div>
+<div class="section">
+    <h2>Uploaded Files</h2>
+    <div id="file-preview" style="display: none; margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 6px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <strong>Preview:</strong>
+            <div>
+                <button type="button" id="download-file" class="secondary" style="padding: 5px 10px; font-size: 12px; margin-right: 8px;">
+                    Download
+                </button>
+                <button type="button" id="close-preview" class="secondary" style="padding: 5px 10px; font-size: 12px;">
+                    Close
+                </button>
+            </div>
+        </div>
+        <div id="preview-content" style="max-width: 100%; text-align: center;"></div>
+    </div>
+    <div id="files-list"></div>
             </div>
         </div>
 
         <!-- Prompts Tab -->
         <div id="prompts" class="tab-content">
-            <div class="section">
-                <h2>Add Prompt</h2>
-                <form id="prompt-form">
-                    <input type="hidden" id="prompt-id">
-                    <div class="form-group">
-                        <label for="prompt-name">Name</label>
-                        <input type="text" id="prompt-name" placeholder="Enter prompt name" required>
+            <div class="prompts-container">
+                <div class="prompt-sidebar">
+                    <h3>Auto Groups</h3>
+                    <div id="prompts-list"></div>
+                </div>
+                
+                <div class="prompt-form-card">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <h2 id="prompt-form-title" style="margin: 0;">Prompt</h2>
+                        <button type="button" id="new-chat-btn" style="padding: 8px 16px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">New Chat</button>
                     </div>
-                    <div class="form-group">
-                        <label for="prompt-text">Prompt Text</label>
-                        <textarea id="prompt-text" placeholder="Enter prompt text" required></textarea>
-                    </div>
-                    <button type="submit" id="prompt-submit-btn">Add Prompt</button>
-                    <button type="button" id="prompt-cancel-btn" class="secondary" style="display: none;">Cancel</button>
-                </form>
-            </div>
+                    <form id="prompt-form">
+                        <input type="hidden" id="prompt-id">
+                        <div class="form-group">
+                            <label for="prompt-name">Prompt Text</label>
+                            <div style="display: flex; gap: 10px;">
+                                <div style="position: relative; flex: 1;">
+                                    <input type="text" id="prompt-name" placeholder="Enter prompt text" required style="width: 100%; margin: 0; padding-right: 40px;">
+                                    <span id="prompt-files-icon" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 20px; color: #95a5a6; cursor: pointer;">📎</span>
+                                </div>
+                                <button type="button" id="prompt-show-file-btn" style="padding: 8px 16px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">add file+</button>
+                                <button type="button" id="prompt-send-btn" style="padding: 8px 16px; background: #27ae60; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Send</button>
+                            </div>
+                        </div>
+                    </form>
 
-            <div class="section">
-                <h2>Saved Prompts</h2>
-                <div id="prompts-list"></div>
+                    <!-- File Section (hidden by default) -->
+                    <div id="prompt-file-section" style="display: none; margin-bottom: 20px;">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                            <!-- Preview Panel -->
+                            <div id="prompt-preview-panel" style="border: 2px solid #3498db; border-radius: 8px; padding: 15px; position: relative;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                    <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Preview</h3>
+                                    <button type="button" onclick="document.getElementById('prompt-preview-panel').style.display='none'" style="background: none; border: none; font-size: 20px; color: #95a5a6; cursor: pointer; padding: 0; line-height: 1;">×</button>
+                                </div>
+                                <div id="prompt-preview-content" style="min-height: 200px; background: #f8f9fa; border-radius: 4px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; overflow: hidden;">
+                                    <div style="font-size: 48px; color: #95a5a6; margin-bottom: 10px;">📄</div>
+                                </div>
+                                <div id="prompt-preview-filename" style="margin: 10px 0; text-align: center; color: #2c3e50; font-size: 14px; font-weight: 500;"></div>
+                                <div id="prompt-upload-progress" style="display: none; margin: 6px 0 12px 0; height: 6px; background: #e0e0e0; border-radius: 999px; overflow: hidden;">
+                                    <div id="prompt-upload-progress-bar" style="width: 40%; height: 100%; background: linear-gradient(90deg, #3498db, #6bb9f0, #3498db); animation: promptUploadMove 1.2s linear infinite;"></div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="prompt-file-input">Upload File</label>
+                                    <input type="file" id="prompt-file-input" accept=".jpg,.jpeg,.png,.pdf,.docx,.txt">
+                                </div>
+                                <button type="button" id="prompt-upload-btn" style="width: 100%; padding: 10px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Upload</button>
+                            </div>
+                            
+                            <!-- Files Panel -->
+                            <div id="prompt-files-panel" data-context="prompts" style="border: 1px solid #e0e0e0; border-radius: 8px; padding: 15px; display: flex; flex-direction: column; position: relative;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                    <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Files</h3>
+                                    <button type="button" onclick="document.getElementById('prompt-files-panel').style.display='none'" style="background: none; border: none; font-size: 20px; color: #95a5a6; cursor: pointer; padding: 0; line-height: 1;">×</button>
+                                </div>
+                                <div id="prompt-files-list" style="flex: 1; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; background: white; max-height: 300px;">
+                                    <!-- Files will appear here when added -->
+                                </div>
+                                <button type="button" id="prompt-delete-selected-btn" onclick="deleteSelectedPromptFiles()" style="margin-top: 12px; padding: 8px 20px; background: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 500; align-self: flex-end;">Delete</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="prompt-response-section" class="response-section" style="margin-top: 20px;">
+                        <div class="response-header">
+                            <h3>Response</h3>
+                        </div>
+                        <div id="response-content" class="response-content">
+                            <span style="color: #999;">Enter a prompt and click Send to get a response</span>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
+
+        
 
         <!-- Groups Tab -->
         <div id="groups" class="tab-content">
             <div class="section">
-                <h2>Create Group</h2>
+                <h2>Set reminder</h2>
                 <form id="group-form">
                     <input type="hidden" id="group-id">
-                    <div class="form-group">
-                        <label for="group-name">Name</label>
-                        <input type="text" id="group-name" placeholder="Enter group name" required>
+                    <input type="hidden" id="group-description" value="Reminder">
+                    
+                    <!-- Prompt Text Section -->
+                    <div style="margin-bottom: 20px;">
+                        <label style="display: block; margin-bottom: 8px; color: #7f8c8d; font-size: 14px;">Prompt Text</label>
+                        <div style="display: flex; gap: 10px;">
+                            <div style="position: relative; flex: 1;">
+                                <input type="text" id="group-name" placeholder="Enter prompt text..." required style="width: 100%; margin: 0; padding-right: 40px;">
+                                <span id="group-files-icon" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 20px; color: #95a5a6; cursor: pointer;">📎</span>
+                            </div>
+                            <button type="button" id="group-show-file-btn" style="padding: 8px 16px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">add file+</button>
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label for="group-description">Description (optional)</label>
-                        <textarea id="group-description" placeholder="Enter group description"></textarea>
+                    
+                    <!-- PRVW and Files Section (hidden by default) -->
+                    <div id="group-file-section" style="display: none; margin-bottom: 20px;">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                            <!-- Preview Panel -->
+                            <div id="group-preview-panel" style="border: 2px solid #3498db; border-radius: 8px; padding: 15px; position: relative;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                    <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Preview</h3>
+                                    <button type="button" onclick="document.getElementById('group-preview-panel').style.display='none'" style="background: none; border: none; font-size: 20px; color: #95a5a6; cursor: pointer; padding: 0; line-height: 1;">×</button>
+                                </div>
+                                <div id="group-preview-content" style="min-height: 200px; background: #f8f9fa; border-radius: 4px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; overflow: hidden;">
+                                    <div style="font-size: 48px; color: #95a5a6; margin-bottom: 10px;">📄</div>
+                                </div>
+                                <div id="group-preview-filename" style="margin: 10px 0; text-align: center; color: #2c3e50; font-size: 14px; font-weight: 500;"></div>
+                                <div class="form-group">
+                                    <label for="group-file-input">Upload File</label>
+                                    <input type="file" id="group-file-input" accept=".jpg,.jpeg,.png,.pdf,.docx,.txt">
+                                </div>
+                                <button type="button" id="group-upload-btn" style="width: 100%; padding: 10px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Upload</button>
+                            </div>
+                            
+                            <!-- Files Panel -->
+                            <div id="group-files-panel" data-context="reminders" style="border: 1px solid #e0e0e0; border-radius: 8px; padding: 15px; display: flex; flex-direction: column; position: relative;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                    <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Files</h3>
+                                    <button type="button" onclick="document.getElementById('group-files-panel').style.display='none'" style="background: none; border: none; font-size: 20px; color: #95a5a6; cursor: pointer; padding: 0; line-height: 1;">×</button>
+                                </div>
+                                <div id="group-files-list" style="flex: 1; overflow-y: scroll; border: 1px solid #e0e0e0; border-radius: 4px; background: white; max-height: 300px;">
+                                    <!-- Files will appear here when added -->
+                                </div>
+                                <button type="button" id="group-delete-selected-btn" onclick="deleteSelectedGroupFiles()" style="margin-top: 12px; padding: 8px 20px; background: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 500; align-self: flex-end;">Delete</button>
+                            </div>
+                        </div>
                     </div>
-                    <button type="submit" id="group-submit-btn">Create Group</button>
+                    
+                    <button type="submit" id="group-submit-btn">Create Reminder</button>
                     <button type="button" id="group-cancel-btn" class="secondary" style="display: none;">Cancel</button>
                 </form>
             </div>
 
             <div class="section">
-                <h2>Resource Groups</h2>
+                <h2>Reminders Set</h2>
                 <div id="groups-list"></div>
             </div>
         </div>
     </div>
 
     <!-- Manage Group Resources Modal -->
+    <!-- File Preview Modal for Reminders -->
+    <div id="group-file-preview-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.7); z-index: 10000; justify-content: center; align-items: center; padding: 20px;">
+        <div style="background: white; border-radius: 8px; max-width: 700px; width: 90%; max-height: 80vh; display: flex; flex-direction: column; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);">
+            <div style="padding: 15px 20px; border-bottom: 1px solid #e0e0e0; display: flex; justify-content: space-between; align-items: center;">
+                <h3 id="group-file-preview-title" style="margin: 0; font-size: 16px; color: #2c3e50;">File Preview</h3>
+                <button onclick="document.getElementById('group-file-preview-modal').style.display='none'" style="background: none; border: none; font-size: 28px; color: #95a5a6; cursor: pointer; padding: 0; width: 32px; height: 32px; line-height: 28px;">&times;</button>
+            </div>
+            <div id="group-file-preview-content" style="padding: 15px; overflow: auto; flex: 1; text-align: center; display: flex; align-items: center; justify-content: center;">
+                <!-- Preview content will be inserted here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- File Preview Modal for Reminder Files (from server) -->
+    <div id="reminder-file-preview-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.7); z-index: 10001; justify-content: center; align-items: center; padding: 20px;">
+        <div style="background: white; border-radius: 8px; max-width: 700px; width: 90%; max-height: 80vh; display: flex; flex-direction: column; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);">
+            <div style="padding: 15px 20px; border-bottom: 1px solid #e0e0e0; display: flex; justify-content: space-between; align-items: center;">
+                <h3 id="reminder-file-preview-title" style="margin: 0; font-size: 16px; color: #2c3e50;">File Preview</h3>
+                <button onclick="closeReminderFilePreviewModal()" style="background: none; border: none; font-size: 28px; color: #95a5a6; cursor: pointer; padding: 0; width: 32px; height: 32px; line-height: 28px;">&times;</button>
+            </div>
+            <div id="reminder-file-preview-content" style="padding: 15px; overflow: auto; flex: 1; text-align: center; display: flex; align-items: center; justify-content: center;">
+                <!-- Preview content will be inserted here -->
+            </div>
+        </div>
+    </div>
+
     <div id="manage-group-modal" class="modal">
         <div class="modal-content">
-            <div class="modal-header">
+            <div class="modal-header" style="display: none;">
                 <h3>Manage Group Resources</h3>
                 <button class="close-modal" id="close-modal-btn">&times;</button>
             </div>
@@ -547,5 +1078,6 @@
         script.src = `admin.js?v=${timestamp}`;
         document.body.appendChild(script);
     </script>
+    
 </body>
 </html>

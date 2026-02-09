@@ -43,6 +43,7 @@ public class RAGServiceTests
         _mockConfiguration.Setup(c => c.GetSection("RAG:EmbeddingMaxConcurrency").Value).Returns("5");
         _mockConfiguration.Setup(c => c.GetSection("RAG:UseVectorDB").Value).Returns("true");
         _mockConfiguration.Setup(c => c.GetSection("RAG:VectorSimilarityThreshold").Value).Returns("0.7");
+        _mockConfiguration.Setup(c => c.GetSection("RAG:QueryTimeoutSeconds").Value).Returns("120");
 
         var services = new ServiceCollection();
         services.AddSingleton(_mockTaskDispatcher.Object);

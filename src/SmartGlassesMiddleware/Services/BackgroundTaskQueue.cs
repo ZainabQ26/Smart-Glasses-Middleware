@@ -12,18 +12,20 @@ public class BackgroundTaskQueue : IBackgroundTaskQueue
     private readonly IDatabase _db;
     private readonly ILogger<BackgroundTaskQueue> _logger;
     private readonly IHubContext<TaskHub> _hub;
+    private readonly IRequestMonitoringService? _monitoringService;
 
     private const string QueueKey = "background:queue";
     private const string TaskKeyPrefix = "background:task:";
     private const string PubSubChannel = "background:task:completed";
     private readonly int _retentionSeconds;
 
-    public BackgroundTaskQueue(IConnectionMultiplexer redis, ILogger<BackgroundTaskQueue> logger, IHubContext<TaskHub> hub, IConfiguration config)
+    public BackgroundTaskQueue(IConnectionMultiplexer redis, ILogger<BackgroundTaskQueue> logger, IHubContext<TaskHub> hub, IConfiguration config, IRequestMonitoringService? monitoringService = null)
     {
         _redis = redis;
         _db = _redis.GetDatabase();
         _logger = logger;
         _hub = hub;
+        _monitoringService = monitoringService;
         _retentionSeconds = config.GetValue<int?>("BackgroundTasks:RetentionSeconds") ?? 60;
     }
 
@@ -33,6 +35,24 @@ public class BackgroundTaskQueue : IBackgroundTaskQueue
         var json = JsonSerializer.Serialize(entry, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
         await _db.StringSetAsync(key, json);
         await _db.ListRightPushAsync(QueueKey, entry.Id.ToString());
+        // Start a monitoring request for this background task if monitoring is available
+        try
+        {
+            if (_monitoringService != null)
+            {
+                var monId = await _monitoringService.StartRequest("Background", $"Background task queued: {entry.Id}");
+                entry.MonitoringRequestId = monId;
+                await _monitoringService.UpdateRequestStatus(monId, "Queued", details: $"TaskId: {entry.Id}");
+
+                // Persist the monitoring id back to Redis storage for the task
+                var updatedJson = JsonSerializer.Serialize(entry, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+                await _db.StringSetAsync(key, updatedJson);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to start monitoring for background task {Id}", entry.Id);
+        }
     }
 
     public async ValueTask<BackgroundTaskEntry?> DequeueAsync(CancellationToken cancellationToken)
@@ -97,6 +117,19 @@ public class BackgroundTaskQueue : IBackgroundTaskQueue
         var key = TaskKeyPrefix + entry.Id.ToString();
         var json = JsonSerializer.Serialize(entry, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
         await _db.StringSetAsync(key, json);
+
+        // Notify monitoring service about status updates when available
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(entry.MonitoringRequestId) && _monitoringService != null)
+            {
+                await _monitoringService.UpdateRequestStatus(entry.MonitoringRequestId, entry.Status.ToString(), details: entry.Error ?? entry.Result?.ToString());
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to update monitoring status for background task {Id}", entry.Id);
+        }
 
         if (entry.Status == BackgroundTaskStatus.Completed || entry.Status == BackgroundTaskStatus.Failed)
         {

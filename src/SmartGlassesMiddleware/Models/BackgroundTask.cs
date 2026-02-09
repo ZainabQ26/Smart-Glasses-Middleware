@@ -22,6 +22,8 @@ public class BackgroundTaskEntry
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public BackgroundTaskStatus Status { get; set; } = BackgroundTaskStatus.Queued;
+    // Optional monitoring request id tracked by the RequestMonitoringService / SignalR
+    public string? MonitoringRequestId { get; set; }
     public string? PromptText { get; set; }
     public Dictionary<string, string>? PerFileTranscriptions { get; set; }
     public List<BackgroundMediaItem> MediaItems { get; set; } = new List<BackgroundMediaItem>();
