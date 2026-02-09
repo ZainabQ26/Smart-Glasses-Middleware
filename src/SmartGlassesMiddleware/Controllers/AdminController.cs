@@ -666,6 +666,7 @@ public class AdminController : ControllerBase
             .ThenInclude(fg => fg.ManagedFile)
             .Include(g => g.PromptGroups)
             .ThenInclude(pg => pg.ManagedPrompt)
+            .Include(g => g.Conversations)
             .OrderByDescending(g => g.CreatedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
@@ -685,6 +686,15 @@ public class AdminController : ControllerBase
                 {
                     pg.ManagedPrompt.Id,
                     pg.ManagedPrompt.Name
+                }),
+                Conversations = g.Conversations.Select(c => new
+                {
+                    c.Id,
+                    c.Title,
+                    c.CreatedAt,
+                    c.UpdatedAt,
+                    c.IsActive,
+                    MessageCount = c.Messages.Count
                 })
             })
             .ToListAsync();
@@ -881,6 +891,73 @@ public class AdminController : ControllerBase
                 Status = StatusCodes.Status500InternalServerError
             });
         }
+    }
+
+    /// <summary>
+    /// Get detailed information about a specific group including all its contents
+    /// </summary>
+    [HttpGet("groups/{id}")]
+    public async Task<ActionResult<object>> GetGroupDetails(Guid id)
+    {
+        var group = await _context.ResourceGroups
+            .Include(g => g.FileGroups)
+            .ThenInclude(fg => fg.ManagedFile)
+            .Include(g => g.PromptGroups)
+            .ThenInclude(pg => pg.ManagedPrompt)
+            .Include(g => g.Conversations)
+            .ThenInclude(c => c.Messages)
+            .FirstOrDefaultAsync(g => g.Id == id);
+
+        if (group == null)
+        {
+            return NotFound(new ProblemDetails
+            {
+                Title = "Not Found",
+                Detail = $"Group with ID {id} not found",
+                Status = StatusCodes.Status404NotFound
+            });
+        }
+
+        var result = new
+        {
+            group.Id,
+            group.Name,
+            group.Description,
+            group.CreatedAt,
+            Files = group.FileGroups.Select(fg => new
+            {
+                fg.ManagedFile.Id,
+                fg.ManagedFile.FileName,
+                fg.ManagedFile.Label,
+                fg.ManagedFile.ContentType,
+                fg.ManagedFile.FileSize,
+                fg.ManagedFile.UploadedAt
+            }).ToList(),
+            Prompts = group.PromptGroups.Select(pg => new
+            {
+                pg.ManagedPrompt.Id,
+                pg.ManagedPrompt.Name,
+                pg.ManagedPrompt.PromptText
+            }).ToList(),
+            Conversations = group.Conversations.Select(c => new
+            {
+                c.Id,
+                c.Title,
+                c.CreatedAt,
+                c.UpdatedAt,
+                c.IsActive,
+                MessageCount = c.Messages.Count,
+                Messages = c.Messages.OrderBy(m => m.Timestamp).Select(m => new
+                {
+                    m.Id,
+                    m.Role,
+                    Content = m.Content.Length > 100 ? m.Content.Substring(0, 100) + "..." : m.Content,
+                    m.Timestamp
+                }).ToList()
+            }).ToList()
+        };
+
+        return Ok(result);
     }
 
     /// <summary>
