@@ -4,3 +4,5 @@ Potential enhancements (not in scope):
 3. Consider same fix for regular document queries (line 198)
 4. Add semantic search for finding relevant past conversation turns
 5. Implement conversation summarization for longer histories
+6. Make the recent requests only show so many and keep track of start, duration, and end time so it restores when history is loaded
+7. Make it so that the sources shows if it pulled data from old conversations
