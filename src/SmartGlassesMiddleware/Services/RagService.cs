@@ -88,14 +88,45 @@ public class RAGService : IRAGService
 
             if (!relevantChunks.Any())
             {
-                return new QueryResult
+                // No documents found, but still process the query with AI
+                _logger.LogInformation("No relevant documents found for query: {Query}. Processing with AI service.", query);
+                try { if (!string.IsNullOrEmpty(monitoringRequestId)) { _monitoringService?.UpdateRequestStatus(monitoringRequestId, "AI", "No documents found, processing with AI", 50); } } catch {}
+                
+                // Create a prompt without document context
+                var noContextPrompt = $@"Answer the following question to the best of your ability:
+
+Question: {query}
+
+Answer:";
+                
+                var noContextTokens = EstimateTokens(noContextPrompt);
+                
+                try
                 {
-                    Answer = "No relevant information found in the uploaded documents.",
-                    Sources = new List<DocumentSource>(),
-                    UsedAdvancedModel = false,
-                    ModelUsed = "none",
-                    TokenCount = 0
-                };
+                    // Use AI service to answer the question
+                    var (_, aiResponse, wasAdvanced) = await _aiService.ProcessRequestAsync(noContextPrompt, cts.Token);
+                    
+                    return new QueryResult
+                    {
+                        Answer = aiResponse ?? "I couldn't generate a response.",
+                        Sources = new List<DocumentSource>(),
+                        UsedAdvancedModel = wasAdvanced,
+                        ModelUsed = wasAdvanced ? "advanced" : "local",
+                        TokenCount = noContextTokens
+                    };
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error processing query without document context");
+                    return new QueryResult
+                    {
+                        Answer = "I couldn't find any relevant documents, and encountered an error trying to answer your question. Please try rephrasing your query or upload relevant documents.",
+                        Sources = new List<DocumentSource>(),
+                        UsedAdvancedModel = false,
+                        ModelUsed = "none",
+                        TokenCount = 0
+                    };
+                }
             }
 
             // Build context from chunks (with token budgeting)
@@ -364,7 +395,8 @@ Current Question: {query}
 
 Answer:";
 
-            var (_, response, _) = await _aiService.ProcessRequestAsync(prompt);
+            // Call the model directly without task detection wrapper to preserve conversation context
+            var response = await GenerateResponseWithLocalModel(prompt);
 
             // Build sources list
             var sources = relevantChunks.Select(c => new DocumentSource
