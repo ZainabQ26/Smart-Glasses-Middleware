@@ -21,7 +21,6 @@ namespace SmartGlassesMiddleware.Migrations
                 .HasAnnotation("ProductVersion", "10.0.0")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
-            NpgsqlModelBuilderExtensions.HasPostgresExtension(modelBuilder, "vector");
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
             modelBuilder.Entity("SmartGlassesMiddleware.Models.AIInteractionLog", b =>
@@ -287,6 +286,26 @@ namespace SmartGlassesMiddleware.Migrations
                     b.ToTable("DocumentMetadatas");
                 });
 
+            modelBuilder.Entity("SmartGlassesMiddleware.Models.GroupConversationMapping", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ConversationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ResourceGroupId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("GroupConversationMappings");
+                });
+
             modelBuilder.Entity("SmartGlassesMiddleware.Models.ManagedFile", b =>
                 {
                     b.Property<Guid>("Id")
@@ -442,6 +461,9 @@ namespace SmartGlassesMiddleware.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("CorrelationId")
+                        .HasColumnType("text");
+
                     b.Property<string>("DetectedTask")
                         .HasColumnType("text");
 
@@ -460,9 +482,6 @@ namespace SmartGlassesMiddleware.Migrations
                     b.Property<string>("Response")
                         .HasColumnType("text");
 
-                    b.Property<string>("CorrelationId")
-                        .HasColumnType("text");
-
                     b.Property<DateTime>("Timestamp")
                         .HasColumnType("timestamp with time zone");
 
@@ -472,6 +491,68 @@ namespace SmartGlassesMiddleware.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("RequestHistories");
+                });
+
+            modelBuilder.Entity("SmartGlassesMiddleware.Models.RequestStatus", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CorrelationId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Details")
+                        .HasColumnType("text");
+
+                    b.Property<long>("DurationMs")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("EndTime")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Error")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("LastUpdateTime")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("Progress")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("RequestId")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<string>("RequestType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("Result")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("StartTime")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<bool>("Success")
+                        .HasColumnType("boolean");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StartTime");
+
+                    b.ToTable("RequestStatuses");
                 });
 
             modelBuilder.Entity("SmartGlassesMiddleware.Models.ResourceGroup", b =>
