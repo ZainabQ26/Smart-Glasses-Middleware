@@ -460,6 +460,9 @@ namespace SmartGlassesMiddleware.Migrations
                     b.Property<string>("Response")
                         .HasColumnType("text");
 
+                    b.Property<string>("CorrelationId")
+                        .HasColumnType("text");
+
                     b.Property<DateTime>("Timestamp")
                         .HasColumnType("timestamp with time zone");
 

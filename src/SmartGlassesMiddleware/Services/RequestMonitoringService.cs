@@ -7,7 +7,7 @@ namespace SmartGlassesMiddleware.Services;
 public interface IRequestMonitoringService
 {
     Task<string> StartRequest(string requestType, string description);
-    Task UpdateRequestStatus(string requestId, string status, string? details = null);
+    Task UpdateRequestStatus(string requestId, string status, string? details = null, int? progress = null);
     Task CompleteRequest(string requestId, bool success, string? result = null, string? error = null);
     Task<List<RequestStatus>> GetRecentRequests(int count = 50);
 }
@@ -52,7 +52,7 @@ public class RequestMonitoringService : IRequestMonitoringService
         return requestId;
     }
 
-    public async Task UpdateRequestStatus(string requestId, string status, string? details = null)
+    public async Task UpdateRequestStatus(string requestId, string status, string? details = null, int? progress = null)
     {
         if (_activeRequests.TryGetValue(requestId, out var request))
         {
@@ -60,6 +60,10 @@ public class RequestMonitoringService : IRequestMonitoringService
             if (details != null)
             {
                 request.Details = details;
+            }
+            if (progress.HasValue)
+            {
+                request.Progress = progress.Value;
             }
             request.LastUpdateTime = DateTime.UtcNow;
             await BroadcastUpdate(request);
@@ -77,6 +81,9 @@ public class RequestMonitoringService : IRequestMonitoringService
             request.Error = error;
             request.EndTime = DateTime.UtcNow;
             request.DurationMs = (long)(request.EndTime.Value - request.StartTime).TotalMilliseconds;
+
+            // Ensure UI progress reaches 100% on completion
+            try { request.Progress = 100; } catch { }
 
             await BroadcastUpdate(request);
             _logger.LogInformation("Completed request {RequestId}: Success={Success}, Duration={Duration}ms", 
@@ -127,6 +134,8 @@ public class RequestStatus
     public string Description { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
     public string? Details { get; set; }
+    // Progress percentage (0-100) for UI progress bar
+    public int? Progress { get; set; }
     public DateTime StartTime { get; set; }
     public DateTime? LastUpdateTime { get; set; }
     public DateTime? EndTime { get; set; }
