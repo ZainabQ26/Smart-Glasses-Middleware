@@ -75,6 +75,33 @@ document.querySelectorAll('.tab').forEach(tab => {
     });
 });
 
+// Nested tab switching for Request Monitoring
+document.querySelectorAll('.nested-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+        // Get parent section to only affect tabs within that section
+        const parentSection = tab.closest('.section');
+        
+        // Remove active class from all nested tabs in this section
+        parentSection.querySelectorAll('.nested-tab').forEach(t => t.classList.remove('active'));
+        parentSection.querySelectorAll('.nested-tab-content').forEach(c => c.classList.remove('active'));
+        
+        // Add active class to clicked tab and corresponding content
+        tab.classList.add('active');
+        const nestedTabName = tab.dataset.nestedTab;
+        const content = parentSection.querySelector(`#${nestedTabName}`);
+        if (content) {
+            content.classList.add('active');
+        }
+        
+        console.log(`[NESTED TAB SWITCH] Switching to ${nestedTabName}`);
+        
+        // Handle specific nested tab actions
+        if (nestedTabName === 'metrics') {
+            loadMetrics();
+        }
+    });
+});
+
 // Show message
 function showMessage(message, type = 'success') {
     const container = document.getElementById('message-container');
