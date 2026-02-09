@@ -550,10 +550,15 @@
 
                 return `
                     <div class="request-item ${isActive ? 'active' : ''}" data-request-id="${escapeHtml(group.id)}">
-                        <div class="request-header">
-                            <div class="request-type">${escapeHtml(primary?.requestType || 'Request')}</div>
-                            <div class="request-status ${getStatusClass(primary?.status || '')}">${escapeHtml(primary?.status || '')}</div>
-                        </div>
+                                <div class="request-header">
+                                    <div style="flex:1">
+                                        <div class="request-type" style="font-size:1.1rem">${escapeHtml(primary?.description || primary?.requestType || 'Request')}</div>
+                                        <div style="font-size:0.9rem;color:#7f8c8d;margin-top:4px">${escapeHtml(primary?.requestType || '')}</div>
+                                    </div>
+                                    <div style="margin-left:12px">
+                                        <div class="request-status ${getStatusClass(primary?.status || '')}">${escapeHtml(primary?.status || '')}</div>
+                                    </div>
+                                </div>
                         <div class="request-description">${escapeHtml(primary?.description || (group.histories && group.histories[0] ? group.histories[0].inputText : ''))}</div>
                         ${primary?.details ? `<div class="request-details">${escapeHtml(primary.details)}</div>` : ''}
                         <div class="request-meta">
