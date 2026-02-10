@@ -1072,8 +1072,8 @@ public class AdminController : ControllerBase
             _context.Set<ManagedFileGroup>().Remove(fileGroup);
             await _context.SaveChangesAsync();
             
-            // Check if group is now empty and auto-delete
-            await AutoDeleteEmptyGroup(groupId);
+            // Auto-delete disabled to prevent documents from disappearing
+            // await AutoDeleteEmptyGroup(groupId);
 
             // Invalidate cache
             await InvalidateAllCaches();
@@ -1180,8 +1180,8 @@ public class AdminController : ControllerBase
             _context.Set<ManagedPromptGroup>().Remove(promptGroup);
             await _context.SaveChangesAsync();
             
-            // Check if group is now empty and auto-delete
-            await AutoDeleteEmptyGroup(groupId);
+            // Auto-delete disabled to prevent documents from disappearing
+            // await AutoDeleteEmptyGroup(groupId);
 
             // Invalidate cache
             await InvalidateAllCaches();
