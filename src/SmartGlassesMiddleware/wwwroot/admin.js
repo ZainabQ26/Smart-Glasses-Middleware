@@ -248,15 +248,22 @@ async function loadPrompts(reset = false) {
                     // Don't show group badges in conversation list anymore
                     
                     const displayName = escapeHtml(title || 'Untitled');
+                    const timestamp = updated ? new Date(updated).toLocaleString(undefined, {
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    }) : '';
+                    
                     div.innerHTML = `
-                        <div style="display:flex;justify-content:space-between;align-items:flex-start;padding:8px 10px;gap:8px;">
-                            <span class="prompt-name">${displayName}</span>
-                            <div style="display:flex;gap:8px;align-items:center;flex-shrink:0;">
-                                <span style="font-size:11px;color:#95a5a6;white-space:nowrap;">${updated ? new Date(updated).toLocaleString() : ''}</span>
-                                <span class="badge">${messageCount}</span>
+                        <div style="display:block;">
+                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                                <span class="prompt-name" style="font-weight:600;color:#2c3e50;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%;">${displayName}</span>
+                                <span class="badge" style="background:#3498db;color:white;padding:2px 6px;border-radius:10px;font-size:11px;min-width:20px;text-align:center;">${messageCount}</span>
                             </div>
+                            <div style="font-size:11px;color:#95a5a6;margin-bottom:4px;">${timestamp}</div>
+                            <div style="color:#666;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(String(lastMsg || 'No messages yet'))}</div>
                         </div>
-                        <div style="padding:0 10px 8px 10px;color:#666;font-size:12px;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(String(lastMsg || ''))}</div>
                     `;
 
                     div.addEventListener('click', async () => {
@@ -1211,7 +1218,10 @@ async function loadGroups(reset = false) {
             const fragment = document.createDocumentFragment();
             groupsData.forEach(group => {
                 const div = createGroupCard(group);
-                fragment.appendChild(div);
+                // Skip null returns (reminders are filtered out)
+                if (div) {
+                    fragment.appendChild(div);
+                }
             });
             list.appendChild(fragment);
             
@@ -1373,14 +1383,18 @@ function createGroupCard(group) {
     const div = document.createElement('div');
     const id = getProp(group, 'id');
     const name = getProp(group, 'name') || 'Untitled';
+    const description = getProp(group, 'description') || getProp(group, 'Description') || '';
     const isActive = !!activePromptGroupId && String(activePromptGroupId) === String(id);
     
-    // Get counts for files, prompts, and conversations
+    // Skip if this is a reminder (will be shown in Reminders tab)
+    if (description && description.toLowerCase() === 'reminder') {
+        return null;
+    }
+    
+    // Get counts for files and conversations (remove prompts)
     const files = getProp(group, 'files') || [];
-    const prompts = getProp(group, 'prompts') || [];
     const conversations = getProp(group, 'conversations') || [];
     const fileCount = Array.isArray(files) ? files.length : 0;
-    const promptCount = Array.isArray(prompts) ? prompts.length : 0;
     const conversationCount = Array.isArray(conversations) ? conversations.length : 0;
 
     div.dataset.groupCard = 'true';
@@ -1398,7 +1412,6 @@ function createGroupCard(group) {
         </div>
         <div style="display: flex; gap: 8px; padding-left: 12px; font-size: 12px; color: #666;">
             <span title="${fileCount} file(s)"><span aria-hidden="true">📄</span> <span aria-label="${fileCount} files">${fileCount} files</span></span>
-            <span title="${promptCount} prompt(s)"><span aria-hidden="true">💬</span> <span aria-label="${promptCount} prompts">${promptCount} prompts</span></span>
             <span title="${conversationCount} conversation(s)"><span aria-hidden="true">🗨️</span> <span aria-label="${conversationCount} conversations">${conversationCount} conversations</span></span>
         </div>
     `;
