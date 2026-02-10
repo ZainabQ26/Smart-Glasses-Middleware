@@ -106,12 +106,12 @@
         }
 
         body.dark {
-            background-color: #0f141b !important;
-            color: #e6e6e6 !important;
+            background-color: #1a1f2e !important;
+            color: #e8eef5 !important;
         }
 
         body.dark header {
-            background-color: #141c25 !important;
+            background-color: #1e2535 !important;
         }
 
         body.dark .tab-content,
@@ -121,9 +121,9 @@
         body.dark .response-content,
         body.dark .modal-content,
         body.dark #file-preview {
-            background-color: #141c25 !important;
-            color: #e6e6e6 !important;
-            border-color: #223040 !important;
+            background-color: #1e2535 !important;
+            color: #e8eef5 !important;
+            border-color: #2d3750 !important;
         }
 
         body.dark .card-meta,
@@ -131,7 +131,7 @@
         body.dark .empty-state,
         body.dark .empty-sidebar,
         body.dark .loading-indicator {
-            color: #b3c0d1 !important;
+            color: #b8c5d9 !important;
         }
 
         body.dark input[type="text"],
@@ -141,24 +141,24 @@
         body.dark .response-content,
         body.dark #prompt-files-list,
         body.dark #group-files-list {
-            background-color: #0f141b !important;
-            color: #e6e6e6 !important;
-            border-color: #223040 !important;
+            background-color: #161b28 !important;
+            color: #e8eef5 !important;
+            border-color: #2d3750 !important;
         }
 
         body.dark .tab {
-            color: #9fb0c4 !important;
+            color: #a3b3cc !important;
         }
 
         body.dark .tab.active {
-            color: #e6e6e6 !important;
-            border-bottom-color: #4da3ff !important;
+            color: #e8eef5 !important;
+            border-bottom-color: #5ba3ff !important;
         }
 
         body.dark .theme-toggle {
-            background: #223040 !important;
-            border-color: #2d3f54 !important;
-            color: #e6e6e6 !important;
+            background: #2d3750 !important;
+            border-color: #3a4661 !important;
+            color: #e8eef5 !important;
         }
 
         .tab-content {
@@ -577,6 +577,8 @@
             top: 20px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             border: 1px solid #e0e0e0;
+            min-width: 0; /* Allow shrinking on narrow screens */
+            overflow-x: hidden; /* Prevent horizontal overflow */
         }
 
         .prompt-sidebar h3 {
@@ -584,6 +586,7 @@
             font-size: 1.1rem;
             margin-bottom: 15px;
             text-align: center;
+            word-wrap: break-word; /* Wrap long text */
         }
 
         .prompt-form-card {
@@ -760,6 +763,9 @@
             display: block;
             background: #fff;
             margin-bottom: 2px;
+            word-wrap: break-word; /* Wrap long text */
+            overflow-wrap: break-word; /* Better word wrapping */
+            min-width: 0; /* Allow shrinking */
         }
 
         .sidebar-prompt-item:hover {
@@ -937,11 +943,6 @@
                                 </div>
                                 <button type="button" id="prompt-show-file-btn" style="padding: 8px 16px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Attach file</button>
                                 <button type="button" id="prompt-send-btn" style="padding: 8px 16px; background: #27ae60; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Send</button>
-                            </div>
-                            <div style="margin-top: 8px; display: flex; align-items: center; gap: 8px; font-size: 13px; color: #555;">
-                                <input type="checkbox" id="prompt-include-all" style="width: 16px; height: 16px; margin: 0;">
-                                <label for="prompt-include-all" style="margin: 0; font-weight: 500;">Include all groups when searching</label>
-                                <span style="color: #95a5a6;">(Group + conversation are the default)</span>
                             </div>
                         </div>
                     </form>
