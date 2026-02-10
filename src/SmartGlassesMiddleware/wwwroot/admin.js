@@ -1546,6 +1546,17 @@ document.getElementById('group-name')?.addEventListener('keypress', (e) => {
     }
 });
 
+// Enter key handler for reminder name input
+document.getElementById('reminder-name')?.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        const reminderForm = document.getElementById('reminder-form');
+        if (reminderForm) {
+            reminderForm.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+        }
+    }
+});
+
 function editGroup(id, name, description) {
     isEditingGroup = true;
     document.getElementById('group-id').value = id;
