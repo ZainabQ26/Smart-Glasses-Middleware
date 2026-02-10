@@ -3,6 +3,7 @@ using SmartGlassesMiddleware.Services;
 using SmartGlassesMiddleware.Models;
 using SmartGlassesMiddleware.Data;
 using Microsoft.EntityFrameworkCore;
+using System.Linq;
 
 namespace SmartGlassesMiddleware.Controllers;
 
@@ -117,24 +118,43 @@ public class ConversationsController : ControllerBase
 
         try
         {
-            // Add user message to conversation
-            await _conversationService.AddMessageAsync(id, "user", request.Query);
+            // Detect topic change before adding message
+            var (topicChanged, newConversation) = await _conversationService.DetectTopicChangeAsync(id, request.Query);
+            
+            Guid targetConversationId = id;
+            if (topicChanged && newConversation != null)
+            {
+                targetConversationId = newConversation.Id;
+                _logger.LogInformation("Topic changed, switching to new conversation {NewId}", targetConversationId);
+            }
+
+            // Add user message to conversation (original or new)
+            await _conversationService.AddMessageAsync(targetConversationId, "user", request.Query);
 
             // Query with conversation context
             var result = await _ragService.QueryDocumentsWithConversationAsync(
                 request.Query,
-                id,
+                targetConversationId,
                 request.TopK ?? 5,
                 request.GroupIds,
                 null);
 
             // Add assistant response to conversation
             await _conversationService.AddMessageAsync(
-                id,
+                targetConversationId,
                 "assistant",
                 result.Answer,
                 request.Model ?? "default");
 
+            result.ConversationId = targetConversationId;
+            
+            // Include info about topic change in the response
+            if (topicChanged && newConversation != null)
+            {
+                result.TopicChanged = true;
+                result.NewConversationId = newConversation.Id;
+            }
+            
             return Ok(result);
         }
         catch (Exception ex)
@@ -191,6 +211,29 @@ public class ConversationsController : ControllerBase
     public async Task<IActionResult> ArchiveConversation(Guid id)
     {
         await _conversationService.ArchiveConversationAsync(id);
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Permanently delete a conversation and its messages from the database.
+    /// </summary>
+    [HttpDelete("{id}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeleteConversation(Guid id)
+    {
+        var conversation = await _context.Conversations.FindAsync(id);
+        if (conversation == null)
+            return NotFound();
+
+        // Remove associated messages then the conversation row
+        var messages = _context.ChatMessages.Where(m => m.ConversationId == id);
+        _context.ChatMessages.RemoveRange(messages);
+        _context.Conversations.Remove(conversation);
+
+        await _context.SaveChangesAsync();
+
+        _logger.LogInformation("Permanently deleted conversation {ConversationId}", id);
         return NoContent();
     }
 }

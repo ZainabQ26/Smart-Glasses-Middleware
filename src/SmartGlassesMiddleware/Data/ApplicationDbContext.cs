@@ -20,6 +20,7 @@ public class ApplicationDbContext : DbContext
     }
 
     public DbSet<RequestHistory> RequestHistories { get; set; }
+    public DbSet<RequestStatus> RequestStatuses { get; set; }
     public DbSet<ManagedFile> ManagedFiles { get; set; }
     public DbSet<ManagedPrompt> ManagedPrompts { get; set; }
     public DbSet<ResourceGroup> ResourceGroups { get; set; }
@@ -30,6 +31,7 @@ public class ApplicationDbContext : DbContext
     public DbSet<Conversation> Conversations { get; set; }
     public DbSet<ChatMessage> ChatMessages { get; set; }
     public DbSet<AIInteractionLog> AIInteractionLogs { get; set; }
+    public DbSet<GroupConversationMapping> GroupConversationMappings { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -47,6 +49,19 @@ public class ApplicationDbContext : DbContext
             entity.Property(e => e.Timestamp).IsRequired();
             entity.Property(e => e.RequestType).IsRequired().HasMaxLength(50);
             entity.Property(e => e.InputText).IsRequired();
+        });
+
+        modelBuilder.Entity<RequestStatus>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.RequestId).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.RequestType).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.Description).IsRequired();
+            entity.Property(e => e.Status).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.StartTime).IsRequired();
+            
+            // Add index on StartTime for efficient querying of recent requests
+            entity.HasIndex(e => e.StartTime);
         });
 
         modelBuilder.Entity<ManagedFile>(entity =>

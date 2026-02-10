@@ -45,6 +45,8 @@ public class RAGService : IRAGService
     private readonly bool _useVectorDB;
     private readonly double _vectorSimilarityThreshold;
     private readonly int _queryTimeoutSeconds;
+    private readonly int _conversationMessageLimit;
+    private readonly int _conversationHistoryPercentage;
 
     public RAGService(
         ApplicationDbContext context,
@@ -71,6 +73,8 @@ public class RAGService : IRAGService
         _useVectorDB = configuration.GetValue<bool?>("RAG:UseVectorDB") ?? true;
         _vectorSimilarityThreshold = configuration.GetValue<double?>("RAG:VectorSimilarityThreshold") ?? 0.7;
         _queryTimeoutSeconds = configuration.GetValue<int?>("RAG:QueryTimeoutSeconds") ?? 120;
+        _conversationMessageLimit = configuration.GetValue<int?>("RAG:ConversationMessageLimit") ?? 5;
+        _conversationHistoryPercentage = configuration.GetValue<int?>("RAG:ConversationHistoryPercentage") ?? 25;
     }
 
     public async Task<QueryResult> QueryDocumentsAsync(string query, int topK = 5, List<Guid>? groupIds = null, List<Guid>? documentIds = null, string? monitoringRequestId = null)
@@ -88,14 +92,45 @@ public class RAGService : IRAGService
 
             if (!relevantChunks.Any())
             {
-                return new QueryResult
+                // No documents found, but still process the query with AI
+                _logger.LogInformation("No relevant documents found for query: {Query}. Processing with AI service.", query);
+                try { if (!string.IsNullOrEmpty(monitoringRequestId)) { _monitoringService?.UpdateRequestStatus(monitoringRequestId, "AI", "No documents found, processing with AI", 50); } } catch {}
+                
+                // Create a prompt without document context
+                var noContextPrompt = $@"Answer the following question to the best of your ability:
+
+Question: {query}
+
+Answer:";
+                
+                var noContextTokens = EstimateTokens(noContextPrompt);
+                
+                try
                 {
-                    Answer = "No relevant information found in the uploaded documents.",
-                    Sources = new List<DocumentSource>(),
-                    UsedAdvancedModel = false,
-                    ModelUsed = "none",
-                    TokenCount = 0
-                };
+                    // Use AI service to answer the question
+                    var (_, aiResponse, wasAdvanced) = await _aiService.ProcessRequestAsync(noContextPrompt, cts.Token);
+                    
+                    return new QueryResult
+                    {
+                        Answer = aiResponse ?? "I couldn't generate a response.",
+                        Sources = new List<DocumentSource>(),
+                        UsedAdvancedModel = wasAdvanced,
+                        ModelUsed = wasAdvanced ? "advanced" : "local",
+                        TokenCount = noContextTokens
+                    };
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error processing query without document context");
+                    return new QueryResult
+                    {
+                        Answer = "I couldn't find any relevant documents, and encountered an error trying to answer your question. Please try rephrasing your query or upload relevant documents.",
+                        Sources = new List<DocumentSource>(),
+                        UsedAdvancedModel = false,
+                        ModelUsed = "none",
+                        TokenCount = 0
+                    };
+                }
             }
 
             // Build context from chunks (with token budgeting)
@@ -302,7 +337,7 @@ Answer:";
             var recentMessages = await _context.ChatMessages
                 .Where(m => m.ConversationId == conversationId)
                 .OrderByDescending(m => m.Timestamp)
-                .Take(5) // Last 5 messages for context
+                .Take(_conversationMessageLimit)
                 .OrderBy(m => m.Timestamp)
                 .ToListAsync();
 
@@ -311,9 +346,11 @@ Answer:";
 
             // Build context from chunks (with token budgeting)
             var contextBuilder = new StringBuilder();
+            bool hasDocumentContext = relevantChunks.Any();
+            bool hasConversationContext = recentMessages.Any();
 
             // Add conversation history first (if it fits in budget)
-            if (recentMessages.Any())
+            if (hasConversationContext)
             {
                 contextBuilder.AppendLine("--- Recent Conversation ---");
                 int historyTokens = 0;
@@ -322,7 +359,7 @@ Answer:";
                     var msgText = $"{msg.Role}: {msg.Content}";
                     var msgTokens = EstimateTokens(msgText);
 
-                    if (historyTokens + msgTokens > _maxContextTokens / 4) // Reserve 25% for history
+                    if (historyTokens + msgTokens > _maxContextTokens * _conversationHistoryPercentage / 100)
                         break;
 
                     contextBuilder.AppendLine(msgText);
@@ -335,7 +372,7 @@ Answer:";
             var usedTokens = EstimateTokens(contextBuilder.ToString());
             var remainingBudget = _maxContextTokens - usedTokens;
 
-            if (remainingBudget > 500 && relevantChunks.Any())
+            if (remainingBudget > 500 && hasDocumentContext)
             {
                 contextBuilder.AppendLine("--- Document Context ---");
 
@@ -355,16 +392,31 @@ Answer:";
                 }
             }
 
-            // Generate response with full context
-            var prompt = $@"Based on the conversation history and document context, answer the question.
+            // Conditionally format the prompt based on available context
+            string prompt;
+            if (hasConversationContext || hasDocumentContext)
+            {
+                // Include context sections when we have relevant information
+                prompt = $@"Based on the conversation history and document context, answer the question.
 
 {contextBuilder}
 
 Current Question: {query}
 
 Answer:";
+            }
+            else
+            {
+                // Simple prompt without context when no relevant information found
+                prompt = $@"Answer the following question to the best of your ability:
 
-            var (_, response, _) = await _aiService.ProcessRequestAsync(prompt);
+Question: {query}
+
+Answer:";
+            }
+
+            // Call the model directly without task detection wrapper to preserve conversation context
+            var response = await GenerateResponseWithLocalModel(prompt);
 
             // Build sources list
             var sources = relevantChunks.Select(c => new DocumentSource
@@ -376,10 +428,21 @@ Answer:";
                 ChunkText = c.ChunkText.Length > 200 ? c.ChunkText.Substring(0, 200) + "..." : c.ChunkText
             }).ToList();
 
+            // Build conversation sources list
+            var conversationSources = recentMessages.Select(m => new ConversationSource
+            {
+                ConversationId = m.ConversationId,
+                MessageId = m.Id,
+                Role = m.Role,
+                Content = m.Content.Length > 200 ? m.Content.Substring(0, 200) + "..." : m.Content,
+                Timestamp = m.Timestamp
+            }).ToList();
+
             return new QueryResult
             {
                 Answer = response,
-                Sources = sources
+                Sources = sources,
+                ConversationSources = conversationSources
             };
         }
         catch (Exception ex)
