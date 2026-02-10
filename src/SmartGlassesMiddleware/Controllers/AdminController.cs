@@ -670,7 +670,9 @@ public class AdminController : ControllerBase
             .OrderByDescending(g => g.CreatedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .Select(g => new
+            .ToListAsync();
+
+        var groupData = groups.Select(g => new
             {
                 g.Id,
                 g.Name,
@@ -681,12 +683,12 @@ public class AdminController : ControllerBase
                     fg.ManagedFile.Id,
                     fg.ManagedFile.FileName,
                     fg.ManagedFile.Label
-                }),
+                }).ToList(),
                 Prompts = g.PromptGroups.Select(pg => new
                 {
                     pg.ManagedPrompt.Id,
                     pg.ManagedPrompt.Name
-                }),
+                }).ToList(),
                 Conversations = g.Conversations.Select(c => new
                 {
                     c.Id,
@@ -695,13 +697,22 @@ public class AdminController : ControllerBase
                     c.UpdatedAt,
                     c.IsActive,
                     MessageCount = c.Messages.Count
-                })
+                }).ToList(),
+                // Count reminders that reference this group
+                Reminders = _context.ResourceGroups
+                    .Where(rg => rg.Description != null && rg.Description.ToLower() == "reminder")
+                    .Where(rg => rg.Conversations.Any(c => c.ResourceGroupId == g.Id))
+                    .Select(rg => new
+                    {
+                        rg.Id,
+                        rg.Name
+                    }).ToList()
             })
-            .ToListAsync();
+            .ToList();
 
         var result = new
         {
-            Data = groups,
+            Data = groupData,
             Pagination = new
             {
                 CurrentPage = page,
@@ -954,7 +965,20 @@ public class AdminController : ControllerBase
                     Content = m.Content.Length > 100 ? m.Content.Substring(0, 100) + "..." : m.Content,
                     m.Timestamp
                 }).ToList()
-            }).ToList()
+            }).ToList(),
+            // Find reminders (groups with description="Reminder") that have conversations pointing to this group
+            Reminders = _context.ResourceGroups
+                .Where(rg => rg.Description != null && rg.Description.ToLower() == "reminder")
+                .Where(rg => rg.Conversations.Any(c => c.ResourceGroupId == group.Id))
+                .Select(rg => new
+                {
+                    rg.Id,
+                    rg.Name,
+                    rg.Description,
+                    rg.CreatedAt,
+                    FileCount = rg.FileGroups.Count,
+                    ConversationCount = rg.Conversations.Count
+                }).ToList()
         };
 
         return Ok(result);
