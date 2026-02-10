@@ -340,6 +340,8 @@ else
     builder.Services.AddSingleton<IBackgroundTaskQueue, NoOpBackgroundTaskQueue>();
 }
 builder.Services.AddScoped<IMediaProcessor, MediaProcessor>();
+// Processor for queued document queries
+builder.Services.AddScoped<IDocumentTaskProcessor, DocumentQueryProcessor>();
 builder.Services.AddHostedService<BackgroundTaskHostedService>();
 if (!builder.Environment.IsEnvironment("Testing") && !string.IsNullOrWhiteSpace(redisConnection))
 {
