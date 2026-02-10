@@ -1159,6 +1159,41 @@ async function loadGroups(reset = false) {
         const pagination = result.pagination || result.Pagination || {};
         console.log('Groups data length:', groupsData.length);
         
+        // Check for and delete empty groups
+        const emptyGroups = groupsData.filter(group => {
+            const files = getProp(group, 'files') || [];
+            const prompts = getProp(group, 'prompts') || [];
+            const conversations = getProp(group, 'conversations') || [];
+            const fileCount = Array.isArray(files) ? files.length : 0;
+            const promptCount = Array.isArray(prompts) ? prompts.length : 0;
+            const conversationCount = Array.isArray(conversations) ? conversations.length : 0;
+            return fileCount === 0 && promptCount === 0 && conversationCount === 0;
+        });
+        
+        // Auto-delete empty groups
+        if (emptyGroups.length > 0) {
+            console.log(`[AUTO-DELETE] Found ${emptyGroups.length} empty groups, deleting...`);
+            for (const group of emptyGroups) {
+                const id = getProp(group, 'id');
+                const name = getProp(group, 'name') || 'Untitled';
+                console.log(`[AUTO-DELETE] Deleting empty group: ${name} (${id})`);
+                try {
+                    const deleteRes = await fetch(`${API_BASE}/groups/${id}`, { method: 'DELETE' });
+                    if (deleteRes.ok || deleteRes.status === 204) {
+                        console.log(`[AUTO-DELETE] Successfully deleted empty group: ${name}`);
+                    } else {
+                        console.warn(`[AUTO-DELETE] Failed to delete empty group: ${name}`, deleteRes.status);
+                    }
+                } catch (err) {
+                    console.error(`[AUTO-DELETE] Error deleting empty group: ${name}`, err);
+                }
+            }
+            // Filter out deleted groups
+            const validGroups = groupsData.filter(g => !emptyGroups.includes(g));
+            groupsData.length = 0;
+            groupsData.push(...validGroups);
+        }
+        
         const list = document.getElementById('groups-list');
         
         hideLoading('groups-list');
@@ -1213,11 +1248,42 @@ async function loadReminders(reset = false) {
         const groupsData = result.data || result.Data || [];
         const pagination = result.pagination || result.Pagination || {};
         
-        // Filter for reminders (groups with description "Reminder")
+        // Filter for reminders (groups with description "Reminder" - case insensitive)
         const remindersData = groupsData.filter(g => {
             const desc = getProp(g, 'description') || getProp(g, 'Description') || '';
-            return desc === 'Reminder';
+            return desc.toLowerCase() === 'reminder';
         });
+        
+        // Check for and delete empty reminders
+        const emptyReminders = remindersData.filter(reminder => {
+            const files = getProp(reminder, 'files') || [];
+            const fileCount = Array.isArray(files) ? files.length : 0;
+            return fileCount === 0;
+        });
+        
+        // Auto-delete empty reminders
+        if (emptyReminders.length > 0) {
+            console.log(`[AUTO-DELETE] Found ${emptyReminders.length} empty reminders, deleting...`);
+            for (const reminder of emptyReminders) {
+                const id = getProp(reminder, 'id');
+                const name = getProp(reminder, 'name') || 'Untitled';
+                console.log(`[AUTO-DELETE] Deleting empty reminder: ${name} (${id})`);
+                try {
+                    const deleteRes = await fetch(`${API_BASE}/groups/${id}`, { method: 'DELETE' });
+                    if (deleteRes.ok || deleteRes.status === 204) {
+                        console.log(`[AUTO-DELETE] Successfully deleted empty reminder: ${name}`);
+                    } else {
+                        console.warn(`[AUTO-DELETE] Failed to delete empty reminder: ${name}`, deleteRes.status);
+                    }
+                } catch (err) {
+                    console.error(`[AUTO-DELETE] Error deleting empty reminder: ${name}`, err);
+                }
+            }
+            // Filter out deleted reminders
+            const validReminders = remindersData.filter(r => !emptyReminders.includes(r));
+            remindersData.length = 0;
+            remindersData.push(...validReminders);
+        }
         
         const list = document.getElementById('reminders-list');
         hideLoading('reminders-list');
