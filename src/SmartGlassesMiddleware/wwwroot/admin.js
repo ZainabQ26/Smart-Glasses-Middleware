@@ -258,10 +258,20 @@ async function loadPrompts(reset = false) {
                     div.dataset.conversationId = isGroup ? '' : id;
                     div.dataset.groupId = isGroup ? id : (getProp(item, 'resourceGroupId') || getProp(item, 'ResourceGroupId') || '');
 
+                    // Get group name if this conversation is associated with a group
+                    const groupId = div.dataset.groupId;
+                    let groupBadge = '';
+                    if (!isGroup && groupId) {
+                        // Try to find group name from state.allGroups cache
+                        const group = state.allGroups.find(g => String(getProp(g, 'id')) === String(groupId));
+                        const groupName = group ? (getProp(group, 'name') || 'Group') : 'Group';
+                        groupBadge = `<span style="font-size:10px;color:#fff;background:#3498db;padding:2px 6px;border-radius:10px;margin-left:4px;" title="Associated with group: ${escapeHtml(groupName)}">📁 ${escapeHtml(groupName)}</span>`;
+                    }
+
                     const displayName = escapeHtml(title || 'Untitled');
                     div.innerHTML = `
                         <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;">
-                            <span class="prompt-name">${displayName}</span>
+                            <span class="prompt-name">${displayName}${groupBadge}</span>
                             <div style="display:flex;gap:8px;align-items:center;">
                                 <span style="font-size:11px;color:#95a5a6;">${updated ? new Date(updated).toLocaleString() : ''}</span>
                                 <span class="badge">${messageCount}</span>
