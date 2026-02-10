@@ -107,11 +107,28 @@
 
         body.dark {
             background-color: #1a1f2e !important;
-            color: #e8eef5 !important;
+            color: #d7e6f6 !important;
+        }
+
+        /* Force all text in dark mode to the same soft color for consistency */
+        body.dark, body.dark * {
+            color: #d7e6f6 !important;
         }
 
         body.dark header {
             background-color: #1e2535 !important;
+        }
+
+        /* Dark theme for header nav link (Request Monitoring) */
+        body.dark .header-nav a {
+            background: #2d3750 !important;
+            color: #d7e6f6 !important;
+            border: 1px solid rgba(255,255,255,0.04) !important;
+        }
+
+        body.dark .header-nav a:hover {
+            background: #36425b !important;
+            color: #e8eef5 !important;
         }
 
         body.dark .tab-content,
