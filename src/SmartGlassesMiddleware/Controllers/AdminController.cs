@@ -1047,6 +1047,9 @@ public class AdminController : ControllerBase
         {
             _context.Set<ManagedFileGroup>().Remove(fileGroup);
             await _context.SaveChangesAsync();
+            
+            // Check if group is now empty and auto-delete
+            await AutoDeleteEmptyGroup(groupId);
 
             // Invalidate cache
             await InvalidateAllCaches();
@@ -1152,6 +1155,9 @@ public class AdminController : ControllerBase
         {
             _context.Set<ManagedPromptGroup>().Remove(promptGroup);
             await _context.SaveChangesAsync();
+            
+            // Check if group is now empty and auto-delete
+            await AutoDeleteEmptyGroup(groupId);
 
             // Invalidate cache
             await InvalidateAllCaches();
@@ -1173,6 +1179,44 @@ public class AdminController : ControllerBase
     #endregion
 
     #region Helper Methods
+
+    /// <summary>
+    /// Auto-delete a group if it has no files, prompts, or conversations
+    /// </summary>
+    private async Task AutoDeleteEmptyGroup(Guid groupId)
+    {
+        try
+        {
+            var group = await _context.ResourceGroups
+                .Include(g => g.FileGroups)
+                .Include(g => g.PromptGroups)
+                .Include(g => g.Conversations)
+                .FirstOrDefaultAsync(g => g.Id == groupId);
+
+            if (group == null)
+            {
+                return; // Group already deleted
+            }
+
+            // Check if group is empty
+            bool isEmpty = !group.FileGroups.Any() && 
+                          !group.PromptGroups.Any() && 
+                          !group.Conversations.Any();
+
+            if (isEmpty)
+            {
+                _logger.LogInformation("Auto-deleting empty group: {GroupName} (ID: {GroupId})", group.Name, groupId);
+                _context.ResourceGroups.Remove(group);
+                await _context.SaveChangesAsync();
+                await InvalidateGroupsCache();
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error auto-deleting empty group {GroupId}", groupId);
+            // Don't throw - this is a best-effort cleanup
+        }
+    }
 
     /// <summary>
     /// Invalidate files cache for all pages
