@@ -672,6 +672,9 @@ let promptSelectedFiles = [];
 let reminderSelectedFiles = []; // Reminder file attachments (separate from prompts)
 let currentConversationHistory = []; // Track conversation messages
 let activePromptGroupId = null;
+// Abort controller for the inline prompt request and cancel button element
+let promptAbortController = null;
+let promptCancelBtn = null;
 // conversation mapping is now server-side; frontend will not persist ConversationId
 let activeConversationId = null;
 window.promptSelectedFiles = promptSelectedFiles;
@@ -2681,6 +2684,50 @@ async function init() {
                     selected: false,
                     documentId: documentId
                 });
+                // If there's an active prompt group, attach the uploaded document to that group
+                try {
+                    if (activePromptGroupId) {
+                        const attachRes = await fetch(`${API_BASE}/groups/${activePromptGroupId}/files/${documentId}`, { method: 'POST' });
+                        if (attachRes.ok) {
+                            console.log('[PROMPT UPLOAD] File attached to group', activePromptGroupId);
+                        } else {
+                            console.warn('[PROMPT UPLOAD] Failed to attach uploaded file to group', activePromptGroupId, await attachRes.text().catch(() => ''));
+                        }
+
+                        // If there is also an active conversation, ensure group <-> conversation mapping exists
+                        if (activeConversationId) {
+                            try {
+                                // Upsert mapping: ResourceGroupId = activePromptGroupId, ConversationId = activeConversationId
+                                await fetch('/api/conversations/mapping', {
+                                    method: 'PUT',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ ResourceGroupId: activePromptGroupId, ConversationId: activeConversationId })
+                                });
+                                console.log('[PROMPT UPLOAD] Bound group to conversation', activePromptGroupId, activeConversationId);
+                            } catch (mapErr) {
+                                console.warn('[PROMPT UPLOAD] Failed to upsert group->conversation mapping', mapErr);
+                            }
+                        }
+                    }
+                    else if (activeConversationId) {
+                        // If no active group but a conversation is active, try to fetch the conversation's ResourceGroupId and attach
+                        try {
+                            const convRes = await fetch(`${API_BASE}/conversations/${activeConversationId}`);
+                            if (convRes.ok) {
+                                const conv = await convRes.json();
+                                const convGroupId = conv.resourceGroupId || conv.ResourceGroupId || null;
+                                if (convGroupId) {
+                                    const attachRes2 = await fetch(`${API_BASE}/groups/${convGroupId}/files/${documentId}`, { method: 'POST' });
+                                    if (attachRes2.ok) console.log('[PROMPT UPLOAD] File attached to conversation group', convGroupId);
+                                }
+                            }
+                        } catch (ex) {
+                            console.warn('[PROMPT UPLOAD] Failed to attach file to conversation group', ex);
+                        }
+                    }
+                } catch (attachErr) {
+                    console.warn('[PROMPT UPLOAD] Error attaching file to group or mapping:', attachErr);
+                }
                 window.promptSelectedFiles = promptSelectedFiles;
                 updatePromptFilesList();
                 showMessage(`File "${promptPreviewFile.name}" uploaded successfully`, 'success');
@@ -2770,9 +2817,33 @@ async function init() {
                 }
                 console.log('[SEND PROMPT] Sending documents query to', documentsUrl, 'payload:', payload);
 
-                const controller = new AbortController();
+                // create abort controller and expose cancel button; disable send while running
+                const sendBtn = document.getElementById('prompt-send-btn');
+                const originalSendText = sendBtn ? sendBtn.textContent : null;
+                if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = 'Sending...'; }
+
+                promptAbortController = new AbortController();
+                const controller = promptAbortController;
                 const timeoutMs = 150000; // 150 seconds - longer than server timeout
                 const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+                // show cancel button if present and wire up enhanced UX
+                promptCancelBtn = promptCancelBtn || document.getElementById('prompt-cancel-btn');
+                let escHandler = null;
+                if (promptCancelBtn) {
+                    promptCancelBtn.style.display = 'inline-block';
+                    promptCancelBtn.disabled = false;
+                    promptCancelBtn.textContent = 'Cancel';
+                    promptCancelBtn.onclick = () => {
+                        try { controller.abort(); } catch { }
+                        promptCancelBtn.disabled = true;
+                        promptCancelBtn.textContent = 'Cancelling...';
+                    };
+
+                    // allow Escape key to cancel
+                    escHandler = (ev) => { if (ev.key === 'Escape') { try { controller.abort(); } catch {} promptCancelBtn.disabled = true; promptCancelBtn.textContent = 'Cancelling...'; } };
+                    document.addEventListener('keydown', escHandler);
+                }
 
                 const queryResponse = await fetch(documentsUrl, {
                     method: 'POST',
@@ -2781,6 +2852,9 @@ async function init() {
                     signal: controller.signal
                 });
                 clearTimeout(timeoutId);
+                // hide cancel button and restore send button
+                if (promptCancelBtn) { promptCancelBtn.style.display = 'none'; promptCancelBtn.onclick = null; if (escHandler) document.removeEventListener('keydown', escHandler); }
+                if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = originalSendText; }
 
                 console.log('[SEND PROMPT] documents query status:', queryResponse.status, queryResponse.statusText);
                 let result;
@@ -2793,6 +2867,52 @@ async function init() {
                     const text = await queryResponse.text().catch(() => '');
                     console.error('[SEND PROMPT] Failed to parse JSON response. Raw response:', text);
                     throw new Error('Invalid JSON response from server');
+                }
+
+                // If server accepted the request for async processing, it returns 202 with a taskId.
+                if (queryResponse.status === 202 || result?.taskId) {
+                    const taskId = result?.taskId || result?.taskID || null;
+                    // Show a small status area to the user
+                    const statusArea = document.getElementById('prompt-status') || document.createElement('div');
+                    statusArea.id = 'prompt-status';
+                    statusArea.style.marginTop = '8px';
+                    statusArea.style.color = '#555';
+                    statusArea.textContent = `Request queued (task ${taskId}). Waiting for result...`;
+                    responseContent.prepend(statusArea);
+
+                    // Poll for completion
+                    const poll = setInterval(async () => {
+                        try {
+                            const pollRes = await fetch(`/api/tasks/${taskId}`);
+                            if (pollRes.status === 200) {
+                                clearInterval(poll);
+                                const pollJson = await pollRes.json();
+                                const finalResult = pollJson.result || pollJson;
+                                // remove status area
+                                statusArea.textContent = 'Result ready';
+                                // Process finalResult similar to synchronous response
+                                lastQueryResult = finalResult;
+                                // emulate result processing by assigning to result and continuing
+                                result = finalResult;
+                            } else if (pollRes.status >= 500) {
+                                clearInterval(poll);
+                                statusArea.textContent = 'Task failed';
+                            } else {
+                                // still pending
+                                // no-op
+                            }
+                        } catch (err) {
+                            console.error('[POLL] Error polling task:', err);
+                        }
+                    }, 2000);
+
+                    // Allow cancel button to stop polling (client-side only)
+                    if (promptCancelBtn) {
+                        promptCancelBtn.style.display = 'inline-block';
+                        promptCancelBtn.disabled = false;
+                        promptCancelBtn.textContent = 'Stop Waiting';
+                        promptCancelBtn.onclick = () => { clearInterval(poll); statusArea.textContent = 'Stopped polling by user'; promptCancelBtn.disabled = true; };
+                    }
                 }
 
                 if (!queryResponse.ok) {
@@ -2884,6 +3004,9 @@ async function init() {
                         </div>
                     `;
                     showMessage('Request timed out after 60 seconds', 'error');
+                    if (promptCancelBtn) { promptCancelBtn.style.display = 'none'; promptCancelBtn.onclick = null; }
+                    if (escHandler) { document.removeEventListener('keydown', escHandler); }
+                    const sendBtn = document.getElementById('prompt-send-btn'); if (sendBtn) { sendBtn.disabled = false; if (originalSendText) sendBtn.textContent = originalSendText; }
                     return;
                 }
                 const fallbackSources = lastQueryResult?.referencedSources || lastQueryResult?.ReferencedSources || lastQueryResult?.sources || lastQueryResult?.Sources || [];
@@ -2896,6 +3019,9 @@ async function init() {
                     ${fallbackSourcesHtml}
                 `;
                 showMessage(`Error: ${error.message}`, 'error');
+                if (promptCancelBtn) { promptCancelBtn.style.display = 'none'; promptCancelBtn.onclick = null; }
+                if (escHandler) { document.removeEventListener('keydown', escHandler); }
+                const sendBtn2 = document.getElementById('prompt-send-btn'); if (sendBtn2) { sendBtn2.disabled = false; if (originalSendText) sendBtn2.textContent = originalSendText; }
             }
         };
         
