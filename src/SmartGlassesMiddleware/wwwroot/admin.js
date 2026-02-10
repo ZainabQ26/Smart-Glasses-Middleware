@@ -1872,28 +1872,6 @@ async function manageGroupResources(groupId, groupName) {
                 `;
             }).join('');
         }
-
-        // Build prompts list HTML
-        let promptsListHTML = '';
-        if (groupPrompts.length === 0) {
-            promptsListHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No prompts attached yet</div>';
-        } else {
-            promptsListHTML = groupPrompts.map(prompt => {
-                const promptId = getProp(prompt, 'id');
-                const promptName = getProp(prompt, 'name') || 'Untitled';
-                return `
-                    <div style="padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0;">
-                        <span style="font-size: 14px; color: #333; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                            ${escapeHtml(promptName)}
-                        </span>
-                        <button type="button" onclick="loadPromptById('${promptId}', '${escapeHtml(promptName).replace(/'/g, "\\'")}')"
-                            style="padding: 4px 12px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">
-                            Open
-                        </button>
-                    </div>
-                `;
-            }).join('');
-        }
         
         // Build conversations list HTML
         let conversationsListHTML = '';
@@ -1987,12 +1965,6 @@ async function manageGroupResources(groupId, groupName) {
                         <div style="font-weight: 600; color: #2c3e50; margin-bottom: 8px; font-size: 14px;">Files</div>
                         <div id="modal-files-list" style="flex: 1; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; background: white; max-height: 360px; min-height: 160px;">
                             ${filesListHTML}
-                        </div>
-                    </div>
-                    <div style="border: 2px solid #16a085; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; position: relative;">
-                        <div style="font-weight: 600; color: #2c3e50; margin-bottom: 8px; font-size: 14px;">Prompts</div>
-                        <div id="modal-prompts-list" style="flex: 1; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; background: white; max-height: 360px; min-height: 160px;">
-                            ${promptsListHTML}
                         </div>
                     </div>
                     <div style="border: 2px solid #9b59b6; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; position: relative;">
