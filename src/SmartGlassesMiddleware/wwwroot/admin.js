@@ -3035,12 +3035,13 @@ async function init() {
                 
                 showMessage('Response received successfully', 'success');
 
-                // Persist conversation snapshot to server so it survives reloads
-                try {
-                    await autoSaveCurrentConversation('send');
-                } catch (err) {
-                    console.warn('[SEND PROMPT] Auto-save after send failed:', err);
-                }
+                // Conversations are already persisted server-side via ConversationService
+                // No need to auto-save to ManagedPrompts (which are for reusable templates)
+                // try {
+                //     await autoSaveCurrentConversation('send');
+                // } catch (err) {
+                //     console.warn('[SEND PROMPT] Auto-save after send failed:', err);
+                // }
 
                 // Clear attached files after sending
                 promptSelectedFiles = [];
@@ -3094,9 +3095,11 @@ async function init() {
             }
         });
 
-        document.getElementById('prompt-name')?.addEventListener('input', () => {
-            autoSaveCurrentConversation('input');
-        });
+        // Conversations are already persisted server-side
+        // Auto-save to ManagedPrompts is unnecessary
+        // document.getElementById('prompt-name')?.addEventListener('input', () => {
+        //     autoSaveCurrentConversation('input');
+        // });
         
         // New Chat button - saves current conversation to Auto Groups
         document.getElementById('new-chat-btn')?.addEventListener('click', async () => {
@@ -3122,8 +3125,10 @@ async function init() {
             });
             
             try {
-                await autoSaveCurrentConversation('new_chat');
-                showMessage('Conversation saved to Auto Groups', 'success');
+                // Conversations are already persisted server-side
+                // No need to save to ManagedPrompts
+                // await autoSaveCurrentConversation('new_chat');
+                showMessage('Starting new conversation', 'success');
                 
                 // Reset for new chat
                 currentConversationHistory = [];
@@ -3570,15 +3575,17 @@ async function init() {
 
         if (AUTO_SAVE_ENABLED) restoreDraftConversation();
 
-        window.addEventListener('beforeunload', () => {
-            autoSaveCurrentConversation('unload');
-        });
+        // Conversations are already persisted server-side via ConversationService
+        // No need to auto-save to ManagedPrompts on unload/hidden
+        // window.addEventListener('beforeunload', () => {
+        //     autoSaveCurrentConversation('unload');
+        // });
 
-        document.addEventListener('visibilitychange', () => {
-            if (document.hidden) {
-                autoSaveCurrentConversation('hidden');
-            }
-        });
+        // document.addEventListener('visibilitychange', () => {
+        //     if (document.hidden) {
+        //         autoSaveCurrentConversation('hidden');
+        //     }
+        // });
     } catch (error) {
         console.error('[INIT] Error during initialization:', error);
         showMessage('Error loading initial data: ' + error.message, 'error');
