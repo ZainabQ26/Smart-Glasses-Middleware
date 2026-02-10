@@ -265,7 +265,7 @@ async function loadPrompts(reset = false) {
                         // Try to find group name from state.allGroups cache
                         const group = state.allGroups.find(g => String(getProp(g, 'id')) === String(groupId));
                         const groupName = group ? (getProp(group, 'name') || 'Group') : 'Group';
-                        groupBadge = `<span class="group-badge" title="Associated with group: ${escapeHtml(groupName)}">📁 ${escapeHtml(groupName)}</span>`;
+                        groupBadge = `<span class="group-badge" title="Associated with group: ${escapeHtml(groupName)}" aria-label="Group association: ${escapeHtml(groupName)}">📁 ${escapeHtml(groupName)}</span>`;
                     }
 
                     const displayName = escapeHtml(title || 'Untitled');
@@ -1241,9 +1241,9 @@ function createGroupCard(group) {
             <button type="button" class="group-item-delete" data-group-id="${id}" style="padding: 8px 16px; background: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-size: 14px;">Delete</button>
         </div>
         <div style="display: flex; gap: 8px; padding-left: 12px; font-size: 12px; color: #666;">
-            <span title="${fileCount} file(s)" aria-label="${fileCount} files">📄 ${fileCount} files</span>
-            <span title="${promptCount} prompt(s)" aria-label="${promptCount} prompts">💬 ${promptCount} prompts</span>
-            <span title="${conversationCount} conversation(s)" aria-label="${conversationCount} conversations">🗨️ ${conversationCount} conversations</span>
+            <span title="${fileCount} file(s)"><span aria-hidden="true">📄</span> <span aria-label="${fileCount} files">${fileCount} files</span></span>
+            <span title="${promptCount} prompt(s)"><span aria-hidden="true">💬</span> <span aria-label="${promptCount} prompts">${promptCount} prompts</span></span>
+            <span title="${conversationCount} conversation(s)"><span aria-hidden="true">🗨️</span> <span aria-label="${conversationCount} conversations">${conversationCount} conversations</span></span>
         </div>
     `;
 
