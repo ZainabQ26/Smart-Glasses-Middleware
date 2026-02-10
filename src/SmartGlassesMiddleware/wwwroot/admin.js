@@ -669,11 +669,13 @@ async function loadConversationIntoView(conversationId, title) {
 // Handle file attachments for prompts
 let promptPreviewFile = null;
 let promptSelectedFiles = [];
+let reminderSelectedFiles = []; // Reminder file attachments (separate from prompts)
 let currentConversationHistory = []; // Track conversation messages
 let activePromptGroupId = null;
 // conversation mapping is now server-side; frontend will not persist ConversationId
 let activeConversationId = null;
 window.promptSelectedFiles = promptSelectedFiles;
+window.reminderSelectedFiles = reminderSelectedFiles;
 let lastAutoSavedSnapshot = null;
 let autoSaveInFlight = false;
 const draftStorageKey = 'adminPromptDraft';
@@ -1606,7 +1608,6 @@ document.getElementById('reminder-form')?.addEventListener('submit', async (e) =
                 
                 console.log('[CREATE REMINDER] All files processed, clearing local list');
                 reminderSelectedFiles.length = 0;
-                window.reminderSelectedFiles = reminderSelectedFiles;
                 if (typeof window.updateReminderFilesList === 'function') {
                     window.updateReminderFilesList();
                 }
@@ -3206,8 +3207,7 @@ async function init() {
         };
         
         // Setup reminder file management (separate from groups)
-        let reminderSelectedFiles = [];
-        window.reminderSelectedFiles = reminderSelectedFiles;
+        // reminderSelectedFiles is now declared at top level (line 673)
         let reminderPreviewFile = null;
         const reminderFileInput = document.getElementById('reminder-file-input');
         const reminderFilesList = document.getElementById('reminder-files-list');
@@ -3240,7 +3240,6 @@ async function init() {
                     `).join('');
                 }
             }
-            window.reminderSelectedFiles = reminderSelectedFiles;
         }
         window.updateReminderFilesList = updateReminderFilesList;
         
@@ -3306,7 +3305,6 @@ async function init() {
             if (reminderPreviewFile) {
                 if (!reminderSelectedFiles.find(f => f.name === reminderPreviewFile.name)) {
                     reminderSelectedFiles.push({file: reminderPreviewFile, name: reminderPreviewFile.name, selected: false});
-                    window.reminderSelectedFiles = reminderSelectedFiles;
                     updateReminderFilesList();
                 }
                 reminderPreviewFile = null;
