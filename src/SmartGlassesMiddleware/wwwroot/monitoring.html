@@ -571,10 +571,8 @@
                         </div>
                         ${primary?.error ? `<div class="request-error"><strong>Error:</strong> ${escapeHtml(primary.error)}</div>` : ''}
                         ${primary?.result ? `<div class="request-result"><strong>Result:</strong> ${escapeHtml(primary.result)}</div>` : ''}
-                                ${typeof progress !== 'undefined' && progress !== null ? `
-                                    <div class="progress-track"><div class="progress-fill" style="width:${Math.max(0, Math.min(100, progress))}%" data-progress-id="${escapeHtml(group.id)}"></div></div>
-                                    <div class="progress-percent" data-progress-id="${escapeHtml(group.id)}" style="font-size:0.85rem;color:#7f8c8d;margin-top:6px">Progress: ${progress}%</div>
-                                ` : ''}
+                                <div class="progress-track"><div class="progress-fill" style="width:${Math.max(0, Math.min(100, progress || 0))}%" data-progress-id="${escapeHtml(group.id)}"></div></div>
+                                <div class="progress-percent" data-progress-id="${escapeHtml(group.id)}" style="font-size:0.85rem;color:#7f8c8d;margin-top:6px">Progress: ${progress || 0}%</div>
                         ${renderHistoryForRequest(group.id)}
                     </div>
                 `;
