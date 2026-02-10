@@ -1170,10 +1170,10 @@ async function loadGroups(reset = false) {
             return fileCount === 0 && promptCount === 0 && conversationCount === 0;
         });
         
-        // Auto-delete empty groups
+        // Auto-delete empty groups in parallel
         if (emptyGroups.length > 0) {
             console.log(`[AUTO-DELETE] Found ${emptyGroups.length} empty groups, deleting...`);
-            for (const group of emptyGroups) {
+            const deletePromises = emptyGroups.map(async (group) => {
                 const id = getProp(group, 'id');
                 const name = getProp(group, 'name') || 'Untitled';
                 console.log(`[AUTO-DELETE] Deleting empty group: ${name} (${id})`);
@@ -1181,15 +1181,22 @@ async function loadGroups(reset = false) {
                     const deleteRes = await fetch(`${API_BASE}/groups/${id}`, { method: 'DELETE' });
                     if (deleteRes.ok || deleteRes.status === 204) {
                         console.log(`[AUTO-DELETE] Successfully deleted empty group: ${name}`);
+                        return id;
                     } else {
                         console.warn(`[AUTO-DELETE] Failed to delete empty group: ${name}`, deleteRes.status);
+                        return null;
                     }
                 } catch (err) {
                     console.error(`[AUTO-DELETE] Error deleting empty group: ${name}`, err);
+                    return null;
                 }
-            }
-            // Filter out deleted groups
-            const validGroups = groupsData.filter(g => !emptyGroups.includes(g));
+            });
+            
+            const deletedIds = (await Promise.all(deletePromises)).filter(id => id !== null);
+            const deletedIdsSet = new Set(deletedIds);
+            
+            // Filter out deleted groups using Set for O(1) lookup
+            const validGroups = groupsData.filter(g => !deletedIdsSet.has(getProp(g, 'id')));
             groupsData.length = 0;
             groupsData.push(...validGroups);
         }
@@ -1261,10 +1268,10 @@ async function loadReminders(reset = false) {
             return fileCount === 0;
         });
         
-        // Auto-delete empty reminders
+        // Auto-delete empty reminders in parallel
         if (emptyReminders.length > 0) {
             console.log(`[AUTO-DELETE] Found ${emptyReminders.length} empty reminders, deleting...`);
-            for (const reminder of emptyReminders) {
+            const deletePromises = emptyReminders.map(async (reminder) => {
                 const id = getProp(reminder, 'id');
                 const name = getProp(reminder, 'name') || 'Untitled';
                 console.log(`[AUTO-DELETE] Deleting empty reminder: ${name} (${id})`);
@@ -1272,15 +1279,22 @@ async function loadReminders(reset = false) {
                     const deleteRes = await fetch(`${API_BASE}/groups/${id}`, { method: 'DELETE' });
                     if (deleteRes.ok || deleteRes.status === 204) {
                         console.log(`[AUTO-DELETE] Successfully deleted empty reminder: ${name}`);
+                        return id;
                     } else {
                         console.warn(`[AUTO-DELETE] Failed to delete empty reminder: ${name}`, deleteRes.status);
+                        return null;
                     }
                 } catch (err) {
                     console.error(`[AUTO-DELETE] Error deleting empty reminder: ${name}`, err);
+                    return null;
                 }
-            }
-            // Filter out deleted reminders
-            const validReminders = remindersData.filter(r => !emptyReminders.includes(r));
+            });
+            
+            const deletedIds = (await Promise.all(deletePromises)).filter(id => id !== null);
+            const deletedIdsSet = new Set(deletedIds);
+            
+            // Filter out deleted reminders using Set for O(1) lookup
+            const validReminders = remindersData.filter(r => !deletedIdsSet.has(getProp(r, 'id')));
             remindersData.length = 0;
             remindersData.push(...validReminders);
         }
