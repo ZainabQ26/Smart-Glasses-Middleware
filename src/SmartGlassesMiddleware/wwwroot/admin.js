@@ -706,10 +706,22 @@ async function autoSaveCurrentConversation(reason) {
     const snapshotText = JSON.stringify(snapshot);
     if (snapshotText === lastAutoSavedSnapshot) return null;
 
+    // Don't auto-save if there are no messages (only files is not enough to save)
+    if (snapshot.messages.length === 0) {
+        console.log('[AUTO SAVE] Skipping save - no messages in conversation');
+        return null;
+    }
+
     autoSaveInFlight = true;
     try {
         const firstMessage = snapshot.messages.find(m => m.role === 'user');
-        const chatName = firstMessage ? firstMessage.content.substring(0, 50) : 'Untitled Chat';
+        // If no user message exists, skip auto-save to prevent "Untitled Chat"
+        if (!firstMessage) {
+            console.log('[AUTO SAVE] Skipping save - no user message found');
+            autoSaveInFlight = false;
+            return null;
+        }
+        const chatName = firstMessage.content.substring(0, 50);
         const payload = { name: chatName, promptText: snapshotText };
 
         const existingId = document.getElementById('prompt-id')?.value;
@@ -2606,9 +2618,9 @@ async function init() {
             updatePromptFilesList();
         });
         
-        // Handle file selection - show preview
+        // Handle file selection - show preview and auto-upload
         if (promptFileInput) {
-            promptFileInput.addEventListener('change', (e) => {
+            promptFileInput.addEventListener('change', async (e) => {
                 const file = e.target.files[0];
                 if (file) {
                     promptPreviewFile = file;
@@ -2638,70 +2650,102 @@ async function init() {
                             </div>
                         `;
                     }
+                    
+                    // Auto-upload the file
+                    // Check if file already exists in list
+                    if (promptSelectedFiles.find(f => f.name === file.name)) {
+                        showMessage('File already uploaded', 'error');
+                        promptFileInput.value = '';
+                        return;
+                    }
+                    
+                    try {
+                        // Show progress bar
+                        if (promptUploadProgress) {
+                            promptUploadProgress.style.display = 'block';
+                        }
+                        const progressBar = document.getElementById('prompt-upload-progress-bar');
+                        if (progressBar) {
+                            progressBar.style.width = '0%';
+                        }
+                        
+                        // Upload file to server with progress tracking
+                        const formData = new FormData();
+                        formData.append('file', file);
+                        
+                        const xhr = new XMLHttpRequest();
+                        
+                        // Track upload progress
+                        xhr.upload.addEventListener('progress', (e) => {
+                            if (e.lengthComputable && progressBar) {
+                                const percentComplete = (e.loaded / e.total) * 100;
+                                progressBar.style.width = percentComplete + '%';
+                            }
+                        });
+                        
+                        // Handle upload completion
+                        const uploadPromise = new Promise((resolve, reject) => {
+                            xhr.addEventListener('load', () => {
+                                if (xhr.status >= 200 && xhr.status < 300) {
+                                    try {
+                                        const fileData = JSON.parse(xhr.responseText);
+                                        resolve(fileData);
+                                    } catch (e) {
+                                        reject(new Error('Invalid JSON response'));
+                                    }
+                                } else {
+                                    reject(new Error(`Upload failed: ${xhr.responseText}`));
+                                }
+                            });
+                            xhr.addEventListener('error', () => reject(new Error('Network error')));
+                            xhr.addEventListener('abort', () => reject(new Error('Upload cancelled')));
+                        });
+                        
+                        xhr.open('POST', '/api/documents/upload');
+                        xhr.send(formData);
+                        
+                        const fileData = await uploadPromise;
+                        const documentId = fileData.id || fileData.Id;
+                        
+                        // Add uploaded file to list with server ID
+                        promptSelectedFiles.push({
+                            file: file, 
+                            name: file.name, 
+                            selected: false,
+                            documentId: documentId
+                        });
+                        window.promptSelectedFiles = promptSelectedFiles;
+                        updatePromptFilesList();
+                        showMessage(`File "${file.name}" uploaded successfully`, 'success');
+                        
+                        // Clear preview
+                        promptPreviewFile = null;
+                        if (promptPreviewFilename) promptPreviewFilename.textContent = '';
+                        if (promptPreviewContent) promptPreviewContent.innerHTML = `<div style="font-size: 48px; color: #95a5a6;">📄</div>`;
+                        if (promptFileInput) promptFileInput.value = '';
+                        
+                        // Reload files list to show the new file
+                        if (typeof loadFiles === 'function') {
+                            loadFiles(true);
+                        }
+                    } catch (error) {
+                        console.error('Error uploading file:', error);
+                        showMessage(`Failed to upload file: ${error.message}`, 'error');
+                        if (promptFileInput) promptFileInput.value = '';
+                    } finally {
+                        // Hide progress bar after a short delay
+                        setTimeout(() => {
+                            if (promptUploadProgress) {
+                                promptUploadProgress.style.display = 'none';
+                            }
+                        }, 1000);
+                    }
                 }
             });
         }
         
-        // Upload button - uploads file to server and adds to list
-        document.getElementById('prompt-upload-btn')?.addEventListener('click', async () => {
-            if (!promptPreviewFile) {
-                showMessage('Please select a file first', 'error');
-                return;
-            }
-            
-            // Check if file already exists in list
-            if (promptSelectedFiles.find(f => f.name === promptPreviewFile.name)) {
-                showMessage('File already uploaded', 'error');
-                return;
-            }
-            
-            try {
-                setPromptUploadLoading(true);
-                // Upload file to server
-                const formData = new FormData();
-                formData.append('file', promptPreviewFile);
-                
-                const uploadRes = await fetch('/api/documents/upload', {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                if (!uploadRes.ok) {
-                    const errorText = await uploadRes.text();
-                    throw new Error(`Upload failed: ${errorText}`);
-                }
-                
-                const fileData = await uploadRes.json();
-                const documentId = fileData.id || fileData.Id;
-                
-                // Add uploaded file to list with server ID
-                promptSelectedFiles.push({
-                    file: promptPreviewFile, 
-                    name: promptPreviewFile.name, 
-                    selected: false,
-                    documentId: documentId
-                });
-                window.promptSelectedFiles = promptSelectedFiles;
-                updatePromptFilesList();
-                showMessage(`File "${promptPreviewFile.name}" uploaded successfully`, 'success');
-                
-                // Clear preview
-                promptPreviewFile = null;
-                if (promptPreviewFilename) promptPreviewFilename.textContent = '';
-                if (promptPreviewContent) promptPreviewContent.innerHTML = `<div style="font-size: 48px; color: #95a5a6;">📄</div>`;
-                if (promptFileInput) promptFileInput.value = '';
-                
-                // Reload files list to show the new file
-                if (typeof loadFiles === 'function') {
-                    loadFiles(true);
-                }
-            } catch (error) {
-                console.error('Error uploading file:', error);
-                showMessage(`Failed to upload file: ${error.message}`, 'error');
-            } finally {
-                setPromptUploadLoading(false);
-            }
-        });
+        // Global abort controller for cancelling requests
+        let currentRequestController = null;
         
         // Send button function - sends prompt to API
         const buildSourcesHtml = (sources) => {
@@ -2736,6 +2780,8 @@ async function init() {
         const sendPrompt = async () => {
             const promptText = document.getElementById('prompt-name')?.value;
             const responseContent = document.getElementById('response-content');
+            const sendBtn = document.getElementById('prompt-send-btn');
+            const cancelBtn = document.getElementById('prompt-cancel-btn');
             let lastQueryResult = null;
             
             if (!promptText || !promptText.trim()) {
@@ -2744,13 +2790,17 @@ async function init() {
             }
             
             try {
-                // Show loading state
+                // Show loading state and cancel button
                 responseContent.innerHTML = `
                     <div style="text-align: center; padding: 20px; color: #3498db;">
                         <div style="font-size: 1.2rem; margin-bottom: 10px;">⏳ Sending...</div>
                         <div style="font-size: 0.9rem; color: #666;">Processing your request...</div>
                     </div>
                 `;
+                
+                // Show cancel button, hide send button
+                if (sendBtn) sendBtn.style.display = 'none';
+                if (cancelBtn) cancelBtn.style.display = 'block';
                 
                 // Send query to documents endpoint. Use server-expected property names (Query/TopK)
                 const documentsUrl = '/api/documents/query';
@@ -2770,17 +2820,18 @@ async function init() {
                 }
                 console.log('[SEND PROMPT] Sending documents query to', documentsUrl, 'payload:', payload);
 
-                const controller = new AbortController();
-                const timeoutMs = 150000; // 150 seconds - longer than server timeout
-                const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+                currentRequestController = new AbortController();
+                const timeoutMs = 300000; // 300 seconds (5 minutes) - increased timeout
+                const timeoutId = setTimeout(() => currentRequestController.abort(), timeoutMs);
 
                 const queryResponse = await fetch(documentsUrl, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
                     body: JSON.stringify(payload),
-                    signal: controller.signal
+                    signal: currentRequestController.signal
                 });
                 clearTimeout(timeoutId);
+                currentRequestController = null;
 
                 console.log('[SEND PROMPT] documents query status:', queryResponse.status, queryResponse.statusText);
                 let result;
@@ -2879,28 +2930,40 @@ async function init() {
                 if (error.name === 'AbortError') {
                     responseContent.innerHTML = `
                         <div style="text-align: center; padding: 20px; color: #e67e22;">
-                            <div style="font-size: 1.2rem; margin-bottom: 10px;">⏱️ Timeout</div>
-                            <div style="font-size: 0.9rem;">The server took too long to respond. Try again.</div>
+                            <div style="font-size: 1.2rem; margin-bottom: 10px;">🚫 Cancelled</div>
+                            <div style="font-size: 0.9rem;">Request was cancelled.</div>
                         </div>
                     `;
-                    showMessage('Request timed out after 60 seconds', 'error');
-                    return;
-                }
-                const fallbackSources = lastQueryResult?.referencedSources || lastQueryResult?.ReferencedSources || lastQueryResult?.sources || lastQueryResult?.Sources || [];
-                const fallbackSourcesHtml = buildSourcesHtml(fallbackSources);
-                responseContent.innerHTML = `
-                    <div style="text-align: center; padding: 20px; color: #e74c3c;">
-                        <div style="font-size: 1.2rem; margin-bottom: 10px;">❌ Error</div>
-                        <div style="font-size: 0.9rem;">${escapeHtml(error.message)}</div>
-                    </div>
-                    ${fallbackSourcesHtml}
+                    showMessage('Request cancelled', 'info');
+                } else {
+                    const fallbackSources = lastQueryResult?.referencedSources || lastQueryResult?.ReferencedSources || lastQueryResult?.sources || lastQueryResult?.Sources || [];
+                    const fallbackSourcesHtml = buildSourcesHtml(fallbackSources);
+                    responseContent.innerHTML = `
+                        <div style="text-align: center; padding: 20px; color: #e74c3c;">
+                            <div style="font-size: 1.2rem; margin-bottom: 10px;">❌ Error</div>
+                            <div style="font-size: 0.9rem;">${escapeHtml(error.message)}</div>
+                        </div>
+                        ${fallbackSourcesHtml}
                 `;
                 showMessage(`Error: ${error.message}`, 'error');
+            } finally {
+                // Reset buttons regardless of success or error
+                currentRequestController = null;
+                if (sendBtn) sendBtn.style.display = 'block';
+                if (cancelBtn) cancelBtn.style.display = 'none';
             }
         };
         
         // Send button click handler
         document.getElementById('prompt-send-btn')?.addEventListener('click', sendPrompt);
+        
+        // Cancel button click handler
+        document.getElementById('prompt-cancel-btn')?.addEventListener('click', () => {
+            if (currentRequestController) {
+                currentRequestController.abort();
+                showMessage('Cancelling request...', 'info');
+            }
+        });
         
         // Enter key handler for prompt text input
         document.getElementById('prompt-name')?.addEventListener('keypress', (e) => {
@@ -2923,7 +2986,11 @@ async function init() {
             
             // Get the first user message as the name
             const firstMessage = currentConversationHistory.find(m => m.role === 'user');
-            const chatName = firstMessage ? firstMessage.content.substring(0, 50) : 'Untitled Chat';
+            if (!firstMessage) {
+                showMessage('No user messages to save', 'error');
+                return;
+            }
+            const chatName = firstMessage.content.substring(0, 50);
             
             // Get file details from uploaded files
             const fileDetails = promptSelectedFiles.map(f => ({
