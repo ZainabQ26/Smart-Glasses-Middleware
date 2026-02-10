@@ -17,6 +17,7 @@ public interface IRAGService
 {
     Task<QueryResult> QueryDocumentsAsync(string query, int topK = 5, List<Guid>? groupIds = null, List<Guid>? documentIds = null, string? monitoringRequestId = null);
     Task<QueryResult> QueryDocumentsWithConversationAsync(string query, Guid conversationId, int topK = 5, List<Guid>? groupIds = null, List<Guid>? documentIds = null);
+    Task<QueryResult> QueryDocumentsIterativeAsync(string query, int topK = 5, List<Guid>? groupIds = null, List<Guid>? documentIds = null, string? monitoringRequestId = null);
     Task<List<DocumentChunk>> SearchChunksAsync(string query, int topK = 5, List<Guid>? groupIds = null, List<Guid>? documentIds = null);
     Task GenerateEmbeddingsAsync(Guid documentId);
     Task<int> ReprocessFailedDocumentsAsync();
@@ -47,6 +48,8 @@ public class RAGService : IRAGService
     private readonly int _queryTimeoutSeconds;
     private readonly int _conversationMessageLimit;
     private readonly int _conversationHistoryPercentage;
+    private readonly bool _useIterativeRetrieval;
+    private readonly int _maxIterativeQueries;
 
     public RAGService(
         ApplicationDbContext context,
@@ -75,10 +78,20 @@ public class RAGService : IRAGService
         _queryTimeoutSeconds = configuration.GetValue<int?>("RAG:QueryTimeoutSeconds") ?? 120;
         _conversationMessageLimit = configuration.GetValue<int?>("RAG:ConversationMessageLimit") ?? 5;
         _conversationHistoryPercentage = configuration.GetValue<int?>("RAG:ConversationHistoryPercentage") ?? 25;
+        _useIterativeRetrieval = configuration.GetValue<bool?>("RAG:UseIterativeRetrieval") ?? false;
+        _maxIterativeQueries = configuration.GetValue<int?>("RAG:MaxIterativeQueries") ?? 5;
     }
 
     public async Task<QueryResult> QueryDocumentsAsync(string query, int topK = 5, List<Guid>? groupIds = null, List<Guid>? documentIds = null, string? monitoringRequestId = null)
     {
+        // Use iterative retrieval if configured
+        if (_useIterativeRetrieval)
+        {
+            _logger.LogInformation("Using iterative retrieval mode for query: {Query}", query);
+            return await QueryDocumentsIterativeAsync(query, topK, groupIds, documentIds, monitoringRequestId);
+        }
+
+        // Otherwise, use traditional upfront context retrieval
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(_queryTimeoutSeconds));
         try
         {
@@ -449,6 +462,155 @@ Answer:";
         {
             _logger.LogError(ex, "Error querying documents with conversation context");
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Query documents using iterative retrieval where the AI can request information as needed
+    /// </summary>
+    public async Task<QueryResult> QueryDocumentsIterativeAsync(
+        string query,
+        int topK = 5,
+        List<Guid>? groupIds = null,
+        List<Guid>? documentIds = null,
+        string? monitoringRequestId = null)
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(_queryTimeoutSeconds));
+        try
+        {
+            var stopwatch = Stopwatch.StartNew();
+
+            _logger.LogInformation("Starting iterative RAG query: {Query}", query);
+            
+            try { if (!string.IsNullOrEmpty(monitoringRequestId)) { _monitoringService?.UpdateRequestStatus(monitoringRequestId, "Iterative RAG", "Initializing", 10); } } catch {}
+
+            // Create a logger factory for the plugin
+            var loggerFactory = _serviceProvider.GetRequiredService<ILoggerFactory>();
+            var pluginLogger = loggerFactory.CreateLogger<RAGPlugin>();
+
+            // Create the RAG plugin that the AI can use
+            var ragPlugin = new RAGPlugin(this, pluginLogger, groupIds, documentIds, topK);
+
+            // Add the plugin to the kernel
+            _kernel.Plugins.Clear(); // Clear any existing plugins to avoid conflicts
+            _kernel.Plugins.AddFromObject(ragPlugin, "DocumentSearch");
+
+            try { if (!string.IsNullOrEmpty(monitoringRequestId)) { _monitoringService?.UpdateRequestStatus(monitoringRequestId, "Iterative RAG", "Plugin configured", 20); } } catch {}
+
+            // Create a chat history
+            var chatHistory = new Microsoft.SemanticKernel.ChatCompletion.ChatHistory();
+            chatHistory.AddSystemMessage(@"You are a helpful AI assistant. You have access to a document search tool that you can use to find information.
+
+When a user asks a question:
+1. If you need to find information from documents, use the search_documents function to search for relevant information.
+2. You can call search_documents multiple times with different queries if you need to gather more information.
+3. After gathering the information, provide a comprehensive answer based on what you found.
+4. Always cite your sources by mentioning the document name and page number when referencing information.
+
+If no relevant documents are found, answer based on your general knowledge but mention that you couldn't find relevant documents.");
+
+            chatHistory.AddUserMessage(query);
+
+            try { if (!string.IsNullOrEmpty(monitoringRequestId)) { _monitoringService?.UpdateRequestStatus(monitoringRequestId, "Iterative RAG", "Processing with AI", 30); } } catch {}
+
+            // Get the chat completion service
+            var chatService = _kernel.GetRequiredService<Microsoft.SemanticKernel.ChatCompletion.IChatCompletionService>();
+
+            // Configure execution settings to enable automatic function calling
+            var executionSettings = new Microsoft.SemanticKernel.Connectors.OpenAI.OpenAIPromptExecutionSettings
+            {
+                ToolCallBehavior = Microsoft.SemanticKernel.Connectors.OpenAI.ToolCallBehavior.AutoInvokeKernelFunctions,
+                MaxTokens = _maxContextTokens,
+                Temperature = 0.7
+            };
+
+            // Iteratively call the model, allowing it to invoke functions
+            int iterationCount = 0;
+            string? finalResponse = null;
+
+            while (iterationCount < _maxIterativeQueries)
+            {
+                iterationCount++;
+                _logger.LogInformation("Iterative RAG iteration {Iteration}", iterationCount);
+
+                try
+                {
+                    var result = await chatService.GetChatMessageContentAsync(
+                        chatHistory,
+                        executionSettings,
+                        _kernel,
+                        cts.Token);
+
+                    if (result?.Content != null)
+                    {
+                        finalResponse = result.Content;
+                        chatHistory.Add(result);
+                        
+                        // Check if there are more function calls pending
+                        // In Semantic Kernel with AutoInvokeKernelFunctions, this is handled automatically
+                        // The loop will exit when no more function calls are needed
+                        break;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error during iterative RAG iteration {Iteration}", iterationCount);
+                    throw;
+                }
+
+                try { if (!string.IsNullOrEmpty(monitoringRequestId)) { _monitoringService?.UpdateRequestStatus(monitoringRequestId, "Iterative RAG", $"Iteration {iterationCount}", 30 + (iterationCount * 15)); } } catch {}
+            }
+
+            try { if (!string.IsNullOrEmpty(monitoringRequestId)) { _monitoringService?.UpdateRequestStatus(monitoringRequestId, "Iterative RAG", "Finalizing", 95); } } catch {}
+
+            if (string.IsNullOrEmpty(finalResponse))
+            {
+                finalResponse = "I couldn't generate a response. Please try rephrasing your question.";
+            }
+
+            _logger.LogInformation("Iterative RAG completed after {Iterations} iterations, {SourceCount} sources used",
+                iterationCount, ragPlugin.QueriedSources.Count);
+
+            // Identify which sources were actually referenced
+            var referencedSources = IdentifyReferencedSources(finalResponse, ragPlugin.QueriedSources);
+
+            var estimatedTokens = EstimateTokens(query + finalResponse);
+
+            // Log the interaction
+            await LogAIInteractionAsync(
+                query,
+                finalResponse,
+                "iterative-rag",
+                "iterative_retrieval",
+                estimatedTokens,
+                stopwatch.ElapsedMilliseconds,
+                groupIds?.FirstOrDefault());
+
+            return new QueryResult
+            {
+                Answer = finalResponse,
+                Sources = ragPlugin.QueriedSources,
+                ReferencedSources = referencedSources,
+                UsedAdvancedModel = false, // Iterative mode uses local model with tools
+                ModelUsed = "local-iterative",
+                TokenCount = estimatedTokens,
+                DelegationReason = "iterative_retrieval"
+            };
+        }
+        catch (OperationCanceledException ex)
+        {
+            _logger.LogWarning(ex, "Iterative query timed out after {Timeout}s for query: {Query}", _queryTimeoutSeconds, query);
+            throw new TimeoutException($"Query operation timed out after {_queryTimeoutSeconds} seconds. Please try a simpler query or increase the timeout.", ex);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error in iterative RAG query: {Query}", query);
+            throw;
+        }
+        finally
+        {
+            // Clean up plugins to avoid memory leaks
+            _kernel.Plugins.Clear();
         }
     }
 
