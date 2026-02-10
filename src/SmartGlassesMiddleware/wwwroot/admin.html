@@ -247,6 +247,30 @@
             color: #e8eef5 !important;
         }
 
+        /* Make the theme toggle button (moon icon) match header nav style and sizing */
+        #theme-toggle {
+            width: 44px;
+            height: 44px;
+            padding: 0 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+            box-shadow: none;
+        }
+
+        /* Dark mode variant to match header nav link */
+        body.dark #theme-toggle {
+            background: #2d3750 !important;
+            color: #d7e6f6 !important;
+            border: 1px solid rgba(255,255,255,0.04) !important;
+        }
+
+        body.dark #theme-toggle:hover {
+            background: #36425b !important;
+            color: #e8eef5 !important;
+        }
+
         /* Soften harsh white elements that use inline styles and improve legibility */
         body.dark #file-preview,
         body.dark #prompt-preview-panel,
