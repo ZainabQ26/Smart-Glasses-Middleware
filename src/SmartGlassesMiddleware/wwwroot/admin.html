@@ -133,6 +133,32 @@
         body.dark .loading-indicator {
             color: #b8c5d9 !important;
         }
+        
+        /* Fix title visibility in dark mode */
+        body.dark .section h2,
+        body.dark .card-title,
+        body.dark .prompt-form-card h2,
+        body.dark h2,
+        body.dark h3 {
+            color: #e8eef5 !important;
+        }
+        
+        /* Fix harsh white boxes in dark mode - make list items blend better */
+        body.dark .sidebar-prompt-item {
+            background-color: #161b28 !important;
+            border-color: #2d3750 !important;
+            color: #e8eef5 !important;
+        }
+        
+        body.dark .sidebar-prompt-item:hover {
+            background-color: #1e2535 !important;
+            color: #5ba3ff !important;
+        }
+        
+        body.dark .sidebar-prompt-item.active {
+            background-color: #2d3750 !important;
+            color: #5ba3ff !important;
+        }
 
         body.dark input[type="text"],
         body.dark input[type="file"],
@@ -579,6 +605,17 @@
             border: 1px solid #e0e0e0;
             min-width: 0; /* Allow shrinking on narrow screens */
             overflow-x: hidden; /* Prevent horizontal overflow */
+            max-height: calc(100vh - 60px); /* Prevent sidebar from being taller than viewport */
+            overflow-y: auto; /* Allow scrolling within sidebar */
+        }
+        
+        /* Make sidebar non-sticky on narrow screens to prevent overlap */
+        @media (max-width: 968px) {
+            .prompt-sidebar {
+                position: static !important;
+                min-height: auto;
+                max-height: 400px;
+            }
         }
 
         .prompt-sidebar h3 {
