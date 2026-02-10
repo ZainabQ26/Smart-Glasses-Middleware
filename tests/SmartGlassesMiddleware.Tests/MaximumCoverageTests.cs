@@ -50,6 +50,8 @@ public class MaximumCoverageTests
         mockConfig.Setup(c => c.GetSection("RAG:QueryTimeoutSeconds").Value).Returns("120");
         mockConfig.Setup(c => c.GetSection("RAG:ConversationMessageLimit").Value).Returns("5");
         mockConfig.Setup(c => c.GetSection("RAG:ConversationHistoryPercentage").Value).Returns("25");
+        mockConfig.Setup(c => c.GetSection("RAG:UseIterativeRetrieval").Value).Returns("false");
+        mockConfig.Setup(c => c.GetSection("RAG:MaxIterativeQueries").Value).Returns("5");
 
         var service = new RAGService(context, mockLogger.Object, mockAIService.Object, kernel, mockServiceProvider.Object, mockConfig.Object);
 
@@ -86,6 +88,8 @@ public class MaximumCoverageTests
         mockConfig.Setup(c => c.GetSection("RAG:QueryTimeoutSeconds").Value).Returns("120");
         mockConfig.Setup(c => c.GetSection("RAG:ConversationMessageLimit").Value).Returns("5");
         mockConfig.Setup(c => c.GetSection("RAG:ConversationHistoryPercentage").Value).Returns("25");
+        mockConfig.Setup(c => c.GetSection("RAG:UseIterativeRetrieval").Value).Returns("false");
+        mockConfig.Setup(c => c.GetSection("RAG:MaxIterativeQueries").Value).Returns("5");
 
         var service = new RAGService(context, mockLogger.Object, mockAIService.Object, kernel, mockServiceProvider.Object, mockConfig.Object);
 

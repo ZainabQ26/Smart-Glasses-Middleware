@@ -47,6 +47,8 @@ public class RAGServiceTests
         _mockConfiguration.Setup(c => c.GetSection("RAG:QueryTimeoutSeconds").Value).Returns("120");
         _mockConfiguration.Setup(c => c.GetSection("RAG:ConversationMessageLimit").Value).Returns("5");
         _mockConfiguration.Setup(c => c.GetSection("RAG:ConversationHistoryPercentage").Value).Returns("25");
+        _mockConfiguration.Setup(c => c.GetSection("RAG:UseIterativeRetrieval").Value).Returns("false");
+        _mockConfiguration.Setup(c => c.GetSection("RAG:MaxIterativeQueries").Value).Returns("5");
 
         var services = new ServiceCollection();
         services.AddSingleton(_mockTaskDispatcher.Object);
