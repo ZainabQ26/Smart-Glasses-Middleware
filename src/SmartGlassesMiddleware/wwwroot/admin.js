@@ -75,6 +75,7 @@ const state = {
     files: { page: 1, pageSize: 20, hasMore: true, loading: false, data: [] },
     prompts: { page: 1, pageSize: 20, hasMore: true, loading: false, data: [] },
     groups: { page: 1, pageSize: 20, hasMore: true, loading: false, data: [] },
+    reminders: { page: 1, pageSize: 20, hasMore: true, loading: false, data: [] },
     allGroups: [] // Cache of all groups for quick-add
 };
 
@@ -93,6 +94,8 @@ document.querySelectorAll('.tab').forEach(tab => {
             loadFiles(true);
         } else if (tabName === 'prompts') {
             loadPrompts(true);
+        } else if (tabName === 'reminders') {
+            loadReminders(true);
         } else if (tabName === 'groups') {
             loadGroups(true);
             loadAllGroups();
@@ -1184,6 +1187,108 @@ async function loadGroups(reset = false) {
     }
 }
 
+async function loadReminders(reset = false) {
+    if (state.reminders.loading) return;
+    if (!reset && !state.reminders.hasMore) return;
+    
+    if (reset) {
+        state.reminders.page = 1;
+        state.reminders.hasMore = true;
+        state.reminders.data = [];
+        document.getElementById('reminders-list').innerHTML = '';
+    }
+    
+    state.reminders.loading = true;
+    showLoading('reminders-list');
+    
+    try {
+        // Load all groups and filter for those with description "Reminder"
+        const response = await fetchWithRetry(`${API_BASE}/groups?page=${state.reminders.page}&pageSize=${state.reminders.pageSize}`);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const result = await response.json();
+        const groupsData = result.data || result.Data || [];
+        const pagination = result.pagination || result.Pagination || {};
+        
+        // Filter for reminders (groups with description "Reminder")
+        const remindersData = groupsData.filter(g => {
+            const desc = getProp(g, 'description') || getProp(g, 'Description') || '';
+            return desc === 'Reminder';
+        });
+        
+        const list = document.getElementById('reminders-list');
+        hideLoading('reminders-list');
+        
+        if (remindersData && remindersData.length > 0) {
+            state.reminders.data.push(...remindersData);
+            
+            const fragment = document.createDocumentFragment();
+            remindersData.forEach(reminder => {
+                const div = createReminderCard(reminder);
+                fragment.appendChild(div);
+            });
+            list.appendChild(fragment);
+            
+            state.reminders.hasMore = pagination.hasNext || pagination.HasNext;
+            state.reminders.page++;
+        } else if (reset) {
+            list.innerHTML = '<div class="empty-state"><p>No reminders created yet</p></div>';
+        }
+        
+        state.reminders.loading = false;
+    } catch (error) {
+        hideLoading('reminders-list');
+        state.reminders.loading = false;
+        showMessage('Error loading reminders: ' + error.message, 'error');
+    }
+}
+
+function createReminderCard(reminder) {
+    const div = document.createElement('div');
+    const id = getProp(reminder, 'id');
+    const name = getProp(reminder, 'name') || 'Untitled';
+    
+    const files = getProp(reminder, 'files') || [];
+    const fileCount = Array.isArray(files) ? files.length : 0;
+
+    div.dataset.reminderId = id;
+    div.style.cssText = 'background: #f5f5f5; padding: 12px; border-radius: 6px; margin-bottom: 10px; position: relative; border: 2px solid transparent;';
+    
+    div.innerHTML = `
+        <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 8px;">
+            <div style="position: relative; flex: 1;">
+                <input type="text" value="${escapeHtml(name)}" readonly data-reminder-id="${id}" style="width: 100%; padding: 12px 50px 12px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; background: white; cursor: pointer;">
+                <span class="reminder-item-paperclip" data-reminder-id="${id}" data-reminder-name="${escapeHtml(name)}" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 24px; color: #95a5a6; cursor: pointer;">📎</span>
+            </div>
+            <button type="button" class="reminder-item-delete" data-reminder-id="${id}" style="padding: 8px 16px; background: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-size: 14px;">Delete</button>
+        </div>
+        <div style="display: flex; gap: 8px; padding-left: 12px; font-size: 12px; color: #666;">
+            <span title="${fileCount} file(s)"><span aria-hidden="true">📄</span> <span aria-label="${fileCount} files">${fileCount} files</span></span>
+        </div>
+    `;
+
+    // Attach event listener to delete button
+    div.querySelector('.reminder-item-delete').addEventListener('click', async (e) => {
+        if (!confirm('Are you sure you want to delete this reminder?')) return;
+        try {
+            const response = await fetch(`${API_BASE}/groups/${id}`, { method: 'DELETE' });
+            if (response.ok) {
+                showMessage('Reminder deleted successfully');
+                await loadReminders(true);
+            } else {
+                showMessage('Error deleting reminder', 'error');
+            }
+        } catch (error) {
+            showMessage('Error deleting reminder: ' + error.message, 'error');
+        }
+    });
+    
+    return div;
+}
+
 function createGroupCard(group) {
     const div = document.createElement('div');
     const id = getProp(group, 'id');
@@ -1336,7 +1441,101 @@ document.getElementById('group-form').addEventListener('submit', async (e) => {
     }
 });
 
-// Enter key handler for reminder/group name input
+// Reminder form submit handler
+document.getElementById('reminder-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const id = document.getElementById('reminder-id').value;
+    const name = document.getElementById('reminder-name').value;
+    const description = 'Reminder'; // Default description for reminders
+    
+    const data = { name, description };
+    
+    try {
+        // Reminders use the same groups API but we distinguish them by description
+        const url = id ? `${API_BASE}/groups/${id}` : `${API_BASE}/groups`;
+        const method = id ? 'PUT' : 'POST';
+        
+        const response = await fetch(url, {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            const groupId = result.id || result.Id;
+            
+            console.log('[CREATE REMINDER] Reminder created with ID:', groupId);
+            console.log('[CREATE REMINDER] Files to upload:', window.reminderSelectedFiles);
+            
+            // Upload files if any are selected
+            if (window.reminderSelectedFiles && window.reminderSelectedFiles.length > 0) {
+                console.log('[CREATE REMINDER] Uploading', window.reminderSelectedFiles.length, 'files...');
+                
+                for (const fileObj of window.reminderSelectedFiles) {
+                    const formData = new FormData();
+                    formData.append('file', fileObj.file);
+                    formData.append('label', fileObj.name);
+                    
+                    try {
+                        console.log('[CREATE REMINDER] Uploading file:', fileObj.name);
+                        const uploadRes = await fetch(`${API_BASE}/files`, {
+                            method: 'POST',
+                            body: formData
+                        });
+                        
+                        if (uploadRes.ok) {
+                            const fileData = await uploadRes.json();
+                            const fileId = fileData.id || fileData.Id;
+                            console.log('[CREATE REMINDER] File uploaded with ID:', fileId);
+                            
+                            // Add file to reminder/group
+                            const attachRes = await fetch(`${API_BASE}/groups/${groupId}/files/${fileId}`, {
+                                method: 'POST'
+                            });
+                            
+                            if (attachRes.ok) {
+                                console.log('[CREATE REMINDER] File successfully attached to reminder');
+                            } else {
+                                console.error('[CREATE REMINDER] Failed to attach file to reminder');
+                            }
+                        } else {
+                            const errorText = await uploadRes.text();
+                            console.error('[CREATE REMINDER] Failed to upload file:', errorText);
+                        }
+                    } catch (uploadError) {
+                        console.error('[CREATE REMINDER] Error uploading file:', uploadError);
+                    }
+                }
+                
+                console.log('[CREATE REMINDER] All files processed, clearing local list');
+                reminderSelectedFiles.length = 0;
+                window.reminderSelectedFiles = reminderSelectedFiles;
+                if (typeof window.updateReminderFilesList === 'function') {
+                    window.updateReminderFilesList();
+                }
+                const reminderFileSection = document.getElementById('reminder-file-section');
+                if (reminderFileSection) {
+                    reminderFileSection.style.display = 'none';
+                }
+            } else {
+                console.log('[CREATE REMINDER] No files to upload');
+            }
+            
+            showMessage(id ? 'Reminder updated successfully' : 'Reminder created successfully');
+            document.getElementById('reminder-form').reset();
+            document.getElementById('reminder-id').value = '';
+            await loadReminders(true);
+        } else {
+            const error = await response.json();
+            showMessage(error.detail || 'Error saving reminder', 'error');
+        }
+    } catch (error) {
+        showMessage('Error saving reminder: ' + error.message, 'error');
+    }
+});
+
+// Enter key handler for group name input
 document.getElementById('group-name')?.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') {
         e.preventDefault();
@@ -2127,6 +2326,7 @@ function setupInfiniteScroll() {
     const containers = [
         { id: 'files-list', loadFn: loadFiles },
         { id: 'prompts-list', loadFn: loadPrompts },
+        { id: 'reminders-list', loadFn: loadReminders },
         { id: 'groups-list', loadFn: loadGroups }
     ];
     
@@ -2888,11 +3088,142 @@ async function init() {
             updateGroupFilesList();
         };
         
+        // Setup reminder file management (separate from groups)
+        let reminderSelectedFiles = [];
+        window.reminderSelectedFiles = reminderSelectedFiles;
+        let reminderPreviewFile = null;
+        const reminderFileInput = document.getElementById('reminder-file-input');
+        const reminderFilesList = document.getElementById('reminder-files-list');
+        const reminderFilesIcon = document.getElementById('reminder-files-icon');
+        const reminderFileSection = document.getElementById('reminder-file-section');
+        const reminderPreviewContent = document.getElementById('reminder-preview-content');
+        const reminderPreviewFilename = document.getElementById('reminder-preview-filename');
+        
+        // Initialize updateReminderFilesList function
+        function updateReminderFilesList() {
+            if (reminderFilesIcon) {
+                if (reminderSelectedFiles.length === 0) {
+                    reminderFilesIcon.style.color = '#95a5a6';
+                } else {
+                    reminderFilesIcon.style.color = '#3498db';
+                }
+            }
+            
+            if (reminderFilesList) {
+                if (reminderSelectedFiles.length === 0) {
+                    reminderFilesList.innerHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No files attached yet</div>';
+                } else {
+                    reminderFilesList.innerHTML = reminderSelectedFiles.map((fileObj, index) => `
+                        <div style="padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0; ${fileObj.selected ? 'background: #f0f0f0;' : ''}">
+                            <input type="checkbox" ${fileObj.selected ? 'checked' : ''} style="width: 16px; height: 16px; cursor: pointer; margin: 0;" onclick="toggleReminderFileSelection(${index})">
+                            <span onclick="toggleReminderFileSelection(${index})" style="font-size: 14px; color: #333; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; user-select: none;">
+                                ${escapeHtml(fileObj.name)}
+                            </span>
+                        </div>
+                    `).join('');
+                }
+            }
+            window.reminderSelectedFiles = reminderSelectedFiles;
+        }
+        window.updateReminderFilesList = updateReminderFilesList;
+        
+        // Initialize files list display
+        updateReminderFilesList();
+        
+        // Show file section when clicking "add file+" button
+        document.getElementById('reminder-show-file-btn')?.addEventListener('click', () => {
+            const isCurrentlyHidden = reminderFileSection.style.display === 'none' || !reminderFileSection.style.display;
+            if (isCurrentlyHidden) {
+                reminderFileSection.style.display = 'block';
+                document.getElementById('reminder-preview-panel').style.display = 'block';
+                document.getElementById('reminder-files-panel').style.display = 'flex';
+            } else {
+                reminderFileSection.style.display = 'none';
+            }
+        });
+        
+        // Show only Files panel when clicking paperclip
+        reminderFilesIcon?.addEventListener('click', () => {
+            const filesPanel = document.getElementById('reminder-files-panel');
+            document.getElementById('reminder-preview-panel').style.display = 'none';
+            filesPanel.style.display = 'flex';
+            reminderFileSection.style.display = 'block';
+            updateReminderFilesList();
+        });
+        
+        // Handle file selection - show preview
+        if (reminderFileInput) {
+            reminderFileInput.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    reminderPreviewFile = file;
+                    reminderPreviewFilename.textContent = file.name;
+                    
+                    const ext = file.name.split('.').pop().toLowerCase();
+                    if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) {
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            reminderPreviewContent.innerHTML = `<img src="${e.target.result}" style="max-width: 100%; max-height: 200px; border-radius: 4px; object-fit: contain;">`;
+                        };
+                        reader.readAsDataURL(file);
+                    } else if (ext === 'pdf') {
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            reminderPreviewContent.innerHTML = `<embed src="${e.target.result}" type="application/pdf" width="100%" height="200px" style="border-radius: 4px;">`;
+                        };
+                        reader.readAsDataURL(file);
+                    } else {
+                        reminderPreviewContent.innerHTML = `
+                            <div style="text-align: center;">
+                                <div style="font-size: 64px; margin-bottom: 10px;">📄</div>
+                                <div style="color: #7f8c8d; font-size: 12px;">Preview not available</div>
+                            </div>
+                        `;
+                    }
+                }
+            });
+        }
+        
+        // Upload button - adds file to list
+        document.getElementById('reminder-upload-btn')?.addEventListener('click', () => {
+            if (reminderPreviewFile) {
+                if (!reminderSelectedFiles.find(f => f.name === reminderPreviewFile.name)) {
+                    reminderSelectedFiles.push({file: reminderPreviewFile, name: reminderPreviewFile.name, selected: false});
+                    window.reminderSelectedFiles = reminderSelectedFiles;
+                    updateReminderFilesList();
+                }
+                reminderPreviewFile = null;
+                reminderFileInput.value = '';
+                reminderPreviewFilename.textContent = '';
+                reminderPreviewContent.innerHTML = '<div style="font-size: 48px; color: #95a5a6; margin-bottom: 10px;">📄</div>';
+                showMessage('File added to list', 'success');
+            }
+        });
+        
+        // Toggle file selection
+        window.toggleReminderFileSelection = function(index) {
+            if (reminderSelectedFiles[index]) {
+                reminderSelectedFiles[index].selected = !reminderSelectedFiles[index].selected;
+                updateReminderFilesList();
+            }
+        };
+        
+        // Delete selected files
+        window.deleteSelectedReminderFiles = function() {
+            const selectedCount = reminderSelectedFiles.filter(f => f.selected).length;
+            if (selectedCount === 0) {
+                return;
+            }
+            reminderSelectedFiles = reminderSelectedFiles.filter(fileObj => !fileObj.selected);
+            updateReminderFilesList();
+        };
+        
         // Load initial data with reset=true to ensure fresh load
         console.log('[INIT] Loading initial data...');
         const results = await Promise.allSettled([
             loadFiles(true),
             loadPrompts(true),
+            loadReminders(true),
             loadGroups(true),
             loadAllGroups()
         ]);
@@ -2911,6 +3242,7 @@ async function init() {
         console.log('[INIT] State:', JSON.stringify({
             filesCount: state.files.data.length,
             promptsCount: state.prompts.data.length,
+            remindersCount: state.reminders.data.length,
             groupsCount: state.groups.data.length
         }));
 
