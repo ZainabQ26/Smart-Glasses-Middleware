@@ -19,6 +19,8 @@ public class DocumentsController : ControllerBase
     private readonly IRequestMonitoringService _monitoringService;
     private readonly IHistoryService _historyService;
     private readonly IMediaStorageService _mediaStorageService;
+    private readonly IConversationService _conversationService;
+    private readonly IGroupConversationMappingService? _groupConversationMappingService;
     private readonly long _maxFileSize;
 
     public DocumentsController(
@@ -30,7 +32,9 @@ public class DocumentsController : ControllerBase
         IConfiguration configuration,
         IRequestMonitoringService monitoringService,
         IHistoryService historyService,
-        IMediaStorageService mediaStorageService)
+        IMediaStorageService mediaStorageService,
+        IConversationService conversationService,
+        IGroupConversationMappingService? groupConversationMappingService = null)
     {
         _logger = logger;
         _processingService = processingService;
@@ -41,6 +45,8 @@ public class DocumentsController : ControllerBase
         _monitoringService = monitoringService;
         _historyService = historyService;
         _mediaStorageService = mediaStorageService;
+        _conversationService = conversationService;
+        _groupConversationMappingService = groupConversationMappingService;
         var maxFileSizeMB = configuration.GetValue<int?>("RAG:MaxFileSizeMB") ?? 50;
         _maxFileSize = maxFileSizeMB * 1024 * 1024;
     }
@@ -145,14 +151,63 @@ public class DocumentsController : ControllerBase
             _logger.LogInformation("Updating request status to 'Searching documents'...");
             await _monitoringService.UpdateRequestStatus(requestId, "Searching documents...");
 
-            _logger.LogInformation("Calling RAG service QueryDocumentsAsync...");
-            var result = await _ragService.QueryDocumentsAsync(
+            // Detect or create a conversation to maintain context within groups
+            var groupId = request.GroupIds?.FirstOrDefault();
+            Conversation? conversation = null;
+            if (request.ConversationId.HasValue)
+            {
+                conversation = await _conversationService.GetConversationAsync(request.ConversationId.Value);
+                if (conversation == null)
+                {
+                    _logger.LogWarning("Conversation {ConversationId} not found, falling back to detection", request.ConversationId);
+                }
+            }
+
+            // If no conversation explicitly provided, consult global mapping for the selected group
+            if (conversation == null && groupId.HasValue && groupId != Guid.Empty && _groupConversationMappingService != null)
+            {
+                var mapped = await _groupConversationMappingService.GetConversationIdForGroupAsync(groupId.Value);
+                if (mapped.HasValue)
+                {
+                    conversation = await _conversationService.GetConversationAsync(mapped.Value);
+                    if (conversation == null)
+                    {
+                        _logger.LogWarning("Mapped conversation {ConversationId} for group {GroupId} not found", mapped, groupId);
+                    }
+                }
+            }
+
+            conversation ??= await _conversationService.DetectOrCreateConversationAsync(request.Query, groupId);
+            _logger.LogInformation("Using conversation {ConversationId} for query", conversation.Id);
+
+            // Add user message to conversation
+            await _conversationService.AddMessageAsync(conversation.Id, "user", request.Query);
+
+            _logger.LogInformation("Calling RAG service QueryDocumentsWithConversationAsync...");
+            var result = await _ragService.QueryDocumentsWithConversationAsync(
                 request.Query,
+                conversation.Id,
                 request.TopK ?? 5,
                 request.GroupIds,
-                request.DocumentIds,
-                requestId);
+                request.DocumentIds);
             _logger.LogInformation("RAG service returned result. Answer length: {Length}", result.Answer?.Length ?? 0);
+
+            // Add assistant response to conversation
+            await _conversationService.AddMessageAsync(conversation.Id, "assistant", result.Answer ?? string.Empty);
+
+            // Update global Group -> Conversation mapping (global scope)
+            try
+            {
+                var mappingGroupId = conversation.ResourceGroupId ?? groupId;
+                if (_groupConversationMappingService != null && mappingGroupId.HasValue && mappingGroupId != Guid.Empty)
+                {
+                    await _groupConversationMappingService.UpsertMappingAsync(mappingGroupId.Value, conversation.Id);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to upsert group->conversation mapping");
+            }
 
             await _monitoringService.CompleteRequest(requestId, true, 
                 $"Found {result.Sources?.Count ?? 0} sources");
@@ -177,6 +232,7 @@ public class DocumentsController : ControllerBase
                 _logger.LogWarning(ex, "Failed to save document query history");
             }
 
+            result.ConversationId = conversation.Id;
             return Ok(result);
         }
         catch (TimeoutException ex)
@@ -464,6 +520,7 @@ public class QueryRequest
     public int? TopK { get; set; }
     public List<Guid>? GroupIds { get; set; }
     public List<Guid>? DocumentIds { get; set; }
+    public Guid? ConversationId { get; set; }
 }
 
 public class MoveDocumentRequest
