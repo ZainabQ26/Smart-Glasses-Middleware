@@ -230,6 +230,140 @@
             color: #e8eef5 !important;
         }
 
+        /* Soften harsh white elements that use inline styles and improve legibility */
+        body.dark #file-preview,
+        body.dark #prompt-preview-panel,
+        body.dark #prompt-preview-content,
+        body.dark #prompt-files-panel,
+        body.dark #prompt-files-list,
+        body.dark #group-preview-panel,
+        body.dark #group-preview-content,
+        body.dark #group-files-panel,
+        body.dark #group-files-list,
+        body.dark #reminder-preview-panel,
+        body.dark #reminder-preview-content,
+        body.dark #group-file-preview-modal > div,
+        body.dark #reminder-file-preview-modal > div,
+        body.dark .prompt-form-card,
+        body.dark .response-section,
+        body.dark .response-content,
+        body.dark .prompt-item,
+        body.dark .prompt-sidebar,
+        body.dark .card,
+        body.dark .modal-content {
+            background-color: #11131a !important; /* very dark, not pure black */
+            color: #d7e6f6 !important; /* softer white for text */
+            border-color: #222834 !important;
+            box-shadow: none !important;
+        }
+
+        /* Slightly lighter hover/active states for clarity */
+        body.dark .prompt-item:hover,
+        body.dark .sidebar-prompt-item:hover,
+        body.dark .group-card-active,
+        body.dark .prompt-item.selected,
+        body.dark .sidebar-prompt-item.active {
+            background-color: #171a24 !important;
+            color: #cfe6ff !important;
+        }
+
+        /* Make placeholder and muted text easier to read in dark mode */
+        body.dark ::placeholder {
+            color: #92a3bf !important;
+            opacity: 1 !important;
+        }
+
+        body.dark .empty-state,
+        body.dark .empty-sidebar,
+        body.dark .card-meta,
+        body.dark .group-card-meta,
+        body.dark .loading-indicator {
+            color: #8f9fb8 !important;
+        }
+
+        /* Reduce bright accent for response role colors to avoid eye strain */
+        body.dark .conversation-message-user {
+            color: #6aa7ff !important;
+        }
+
+        body.dark .conversation-message-bot {
+            color: #4fc07a !important;
+        }
+
+        /* Ensure conversation history and message boxes are dark in modal */
+        body.dark .conversation-history-container,
+        body.dark .conversation-history-container * {
+            background-color: transparent !important;
+            color: #d7e6f6 !important;
+            border-color: #222834 !important;
+        }
+
+        body.dark .conversation-history-container {
+            background-color: transparent !important;
+            padding: 0 !important;
+        }
+
+        /* Individual message box styling for dark mode */
+        body.dark .conversation-message {
+            background-color: #0f1116 !important;
+            border-radius: 6px !important;
+            padding: 10px !important;
+            margin-bottom: 12px !important;
+            border: 1px solid #222834 !important;
+        }
+
+        body.dark .conversation-message-content {
+            color: #d7e6f6 !important;
+            padding-left: 0 !important;
+            background: transparent !important;
+        }
+
+        /* Catch elements with inline `background: white` inside conversation/modal areas */
+        body.dark .response-content [style*="background:"],
+        body.dark .conversation-history-container [style*="background:"],
+        body.dark .modal-content [style*="background:"],
+        body.dark .prompt-preview-content [style*="background:"],
+        body.dark [style*="background:#fff"],
+        body.dark [style*="background:#ffffff"],
+        body.dark [style*="background:#f8f9fa"],
+        body.dark [style*="background: white"],
+        body.dark [style*="background-color:#fff"],
+        body.dark [style*="background-color:#ffffff"],
+        body.dark [style*="background-color:#f8f9fa"],
+        body.dark [style*="background-color: white"] {
+            background-color: #0f1116 !important;
+            color: #d7e6f6 !important;
+            border-color: #222834 !important;
+            box-shadow: none !important;
+        }
+
+        /* Explicitly darken the group/manage modal list panels (override inline white backgrounds) */
+        body.dark #modal-files-list,
+        body.dark #modal-conversations-list,
+        body.dark #modal-reminders-list {
+            background-color: #0f1116 !important;
+            color: #d7e6f6 !important;
+            border-color: #222834 !important;
+        }
+
+        /* Also ensure any direct children inside the manage modal are dark */
+        body.dark #manage-group-modal .modal-content * {
+            background-color: transparent !important;
+            color: inherit !important;
+        }
+
+        /* Make list item cards inside the modal blend with dark background */
+        body.dark #modal-files-list .card,
+        body.dark #modal-conversations-list .card,
+        body.dark #modal-reminders-list .card,
+        body.dark #modal-files-list > div,
+        body.dark #modal-conversations-list > div,
+        body.dark #modal-reminders-list > div {
+            background-color: #0f1116 !important;
+            border-color: #222834 !important;
+            color: #d7e6f6 !important;
+        }
+
         .tab-content {
             display: none;
             background-color: white;
@@ -412,7 +546,6 @@
         
         .group-card-meta {
             color: #666;
-        }
             padding: 6px 12px;
             font-size: 13px;
         }

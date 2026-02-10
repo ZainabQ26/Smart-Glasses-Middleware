@@ -2441,6 +2441,27 @@ function formatFileSize(bytes) {
 // Close modal event listener
 document.getElementById('close-modal-btn').addEventListener('click', closeManageGroupModal);
 
+// Close modal when clicking outside the modal content (overlay click)
+function attachOverlayClose(modalId, closeFn) {
+    try {
+        const modal = document.getElementById(modalId);
+        if (!modal) return;
+        modal.addEventListener('click', function (ev) {
+            if (ev.target === modal) {
+                try { closeFn(); } catch (e) { modal.classList.remove('active'); modal.style.display = 'none'; }
+            }
+        });
+    } catch (err) {
+        console.warn('attachOverlayClose failed for', modalId, err);
+    }
+}
+
+attachOverlayClose('manage-group-modal', closeManageGroupModal);
+attachOverlayClose('group-file-preview-modal', function() {
+    const m = document.getElementById('group-file-preview-modal'); if (m) m.style.display = 'none';
+});
+attachOverlayClose('reminder-file-preview-modal', closeReminderFilePreviewModal);
+
 // Infinite scroll implementation
 function setupInfiniteScroll() {
     const containers = [
