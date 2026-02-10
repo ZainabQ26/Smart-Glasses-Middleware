@@ -1366,6 +1366,25 @@ function createGroupCard(group) {
     const conversationCount = Array.isArray(conversations) ? conversations.length : 0;
     const reminderCount = Array.isArray(reminders) ? reminders.length : 0;
 
+    // Detect which files from this group are currently included in the active conversation
+    // Compare by document id when available, or by filename as a fallback
+    const groupFiles = Array.isArray(files) ? files : [];
+    const includedFiles = groupFiles.filter(f => {
+        try {
+            const gfId = getProp(f, 'id') || getProp(f, 'Id');
+            const gfName = getProp(f, 'originalFileName') || getProp(f, 'fileName') || '';
+            return Array.isArray(promptSelectedFiles) && promptSelectedFiles.some(p => {
+                const pid = p.documentId || p.id || p.documentId || null;
+                const pname = p.name || (p.file && p.file.name) || '';
+                if (pid && gfId && String(pid) === String(gfId)) return true;
+                if (pname && gfName && String(pname) === String(gfName)) return true;
+                return false;
+            });
+        } catch (e) { return false; }
+    });
+    const includedCount = includedFiles.length;
+    const includedPreview = includedFiles.slice(0,3).map(f => escapeHtml(getProp(f, 'originalFileName') || getProp(f, 'fileName') || 'Document')).join(', ');
+
     div.dataset.groupCard = 'true';
     div.dataset.groupId = id;
     div.className = `group-card ${isActive ? 'group-card-active' : ''}`;
@@ -1384,6 +1403,7 @@ function createGroupCard(group) {
             <span title="${conversationCount} conversation(s)"><span aria-hidden="true">🗨️</span> <span aria-label="${conversationCount} conversations">${conversationCount} conversations</span></span>
             <span title="${reminderCount} reminder(s)"><span aria-hidden="true">⏰</span> <span aria-label="${reminderCount} reminders">${reminderCount} reminders</span></span>
         </div>
+        ${includedCount > 0 ? `<div style="padding-left: 12px; margin-top: 6px; font-size: 12px; color: #444;">Included: ${includedPreview}${includedCount > 3 ? ' +' + (includedCount - 3) + ' more' : ''}</div>` : ''}
     `;
 
     // Click group name to set active prompt group and show contents
