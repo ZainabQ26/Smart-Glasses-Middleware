@@ -30,6 +30,23 @@
     animation: toastIn 360ms cubic-bezier(.2,.9,.2,1) !important;
 }
 
+/* Dark mode toast overrides */
+body.dark .toast {
+    background: #0f1116 !important;
+    color: #d7e6f6 !important;
+    border: 1px solid rgba(255,255,255,0.04) !important;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.6) !important;
+}
+
+body.dark .toast .toast-close { color: #9aa6bf !important; }
+body.dark .toast .toast-message { color: #d7e6f6 !important; }
+body.dark .toast.success { border-left-color: #0f7a43 !important; }
+body.dark .toast.error { border-left-color: #9b2c2c !important; }
+body.dark .toast.info { border-left-color: #2b63b8 !important; }
+body.dark .toast.success .toast-icon { background: #0f7a43 !important; }
+body.dark .toast.error .toast-icon { background: #9b2c2c !important; }
+body.dark .toast.info .toast-icon { background: #214f9f !important; }
+
 /* Force consistent sizing so icons stay inside the card */
 .toast {
     box-sizing: border-box !important;

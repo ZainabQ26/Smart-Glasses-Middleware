@@ -106,12 +106,29 @@
         }
 
         body.dark {
-            background-color: #0f141b !important;
-            color: #e6e6e6 !important;
+            background-color: #1a1f2e !important;
+            color: #d7e6f6 !important;
+        }
+
+        /* Force all text in dark mode to the same soft color for consistency */
+        body.dark, body.dark * {
+            color: #d7e6f6 !important;
         }
 
         body.dark header {
-            background-color: #141c25 !important;
+            background-color: #1e2535 !important;
+        }
+
+        /* Dark theme for header nav link (Request Monitoring) */
+        body.dark .header-nav a {
+            background: #2d3750 !important;
+            color: #d7e6f6 !important;
+            border: 1px solid rgba(255,255,255,0.04) !important;
+        }
+
+        body.dark .header-nav a:hover {
+            background: #36425b !important;
+            color: #e8eef5 !important;
         }
 
         body.dark .tab-content,
@@ -121,9 +138,9 @@
         body.dark .response-content,
         body.dark .modal-content,
         body.dark #file-preview {
-            background-color: #141c25 !important;
-            color: #e6e6e6 !important;
-            border-color: #223040 !important;
+            background-color: #1e2535 !important;
+            color: #e8eef5 !important;
+            border-color: #2d3750 !important;
         }
 
         body.dark .card-meta,
@@ -131,7 +148,76 @@
         body.dark .empty-state,
         body.dark .empty-sidebar,
         body.dark .loading-indicator {
-            color: #b3c0d1 !important;
+            color: #b8c5d9 !important;
+        }
+        
+        /* Fix title visibility in dark mode */
+        body.dark .section h2,
+        body.dark .card-title,
+        body.dark .prompt-form-card h2,
+        body.dark h2,
+        body.dark h3 {
+            color: #e8eef5 !important;
+        }
+        
+        /* Fix harsh white boxes in dark mode - make list items blend better */
+        body.dark .sidebar-prompt-item {
+            background-color: #161b28 !important;
+            border-color: #2d3750 !important;
+            color: #e8eef5 !important;
+        }
+        
+        body.dark .sidebar-prompt-item:hover {
+            background-color: #1e2535 !important;
+            color: #5ba3ff !important;
+        }
+        
+        body.dark .sidebar-prompt-item.active {
+            background-color: #2d3750 !important;
+            color: #5ba3ff !important;
+        }
+        
+        /* Dark mode for group cards */
+        body.dark .group-card {
+            background-color: #1e2535 !important;
+            border-color: #2d3750 !important;
+        }
+        
+        body.dark .group-card-active {
+            background-color: #1e2535 !important;
+            border-color: #5ba3ff !important;
+        }
+        
+        body.dark .group-card-input {
+            background-color: #161b28 !important;
+            color: #e8eef5 !important;
+            border-color: #2d3750 !important;
+        }
+        
+        body.dark .group-card-input-active {
+            background-color: #161b28 !important;
+            border-color: #5ba3ff !important;
+        }
+        
+        body.dark .group-card-meta {
+            color: #b8c5d9 !important;
+        }
+        
+        /* Dark mode for conversation history */
+        body.dark .conversation-history-container {
+            background-color: #1e2535 !important;
+        }
+        
+        body.dark .conversation-message-user {
+            color: #5ba3ff !important;
+        }
+        
+        body.dark .conversation-message-bot {
+            color: #58d68d !important;
+        }
+        
+        body.dark .conversation-message-content {
+            color: #e8eef5 !important;
         }
 
         body.dark input[type="text"],
@@ -141,24 +227,182 @@
         body.dark .response-content,
         body.dark #prompt-files-list,
         body.dark #group-files-list {
-            background-color: #0f141b !important;
-            color: #e6e6e6 !important;
-            border-color: #223040 !important;
+            background-color: #161b28 !important;
+            color: #e8eef5 !important;
+            border-color: #2d3750 !important;
         }
 
         body.dark .tab {
-            color: #9fb0c4 !important;
+            color: #a3b3cc !important;
         }
 
         body.dark .tab.active {
-            color: #e6e6e6 !important;
-            border-bottom-color: #4da3ff !important;
+            color: #e8eef5 !important;
+            border-bottom-color: #5ba3ff !important;
         }
 
         body.dark .theme-toggle {
-            background: #223040 !important;
-            border-color: #2d3f54 !important;
-            color: #e6e6e6 !important;
+            background: #2d3750 !important;
+            border-color: #3a4661 !important;
+            color: #e8eef5 !important;
+        }
+
+        /* Make the theme toggle button (moon icon) match header nav style and sizing */
+        #theme-toggle {
+            width: 44px;
+            height: 44px;
+            padding: 0 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+            box-shadow: none;
+        }
+
+        /* Dark mode variant to match header nav link */
+        body.dark #theme-toggle {
+            background: #2d3750 !important;
+            color: #d7e6f6 !important;
+            border: 1px solid rgba(255,255,255,0.04) !important;
+        }
+
+        body.dark #theme-toggle:hover {
+            background: #36425b !important;
+            color: #e8eef5 !important;
+        }
+
+        /* Soften harsh white elements that use inline styles and improve legibility */
+        body.dark #file-preview,
+        body.dark #prompt-preview-panel,
+        body.dark #prompt-preview-content,
+        body.dark #prompt-files-panel,
+        body.dark #prompt-files-list,
+        body.dark #group-preview-panel,
+        body.dark #group-preview-content,
+        body.dark #group-files-panel,
+        body.dark #group-files-list,
+        body.dark #reminder-preview-panel,
+        body.dark #reminder-preview-content,
+        body.dark #group-file-preview-modal > div,
+        body.dark #reminder-file-preview-modal > div,
+        body.dark .prompt-form-card,
+        body.dark .response-section,
+        body.dark .response-content,
+        body.dark .prompt-item,
+        body.dark .prompt-sidebar,
+        body.dark .card,
+        body.dark .modal-content {
+            background-color: #11131a !important; /* very dark, not pure black */
+            color: #d7e6f6 !important; /* softer white for text */
+            border-color: #222834 !important;
+            box-shadow: none !important;
+        }
+
+        /* Slightly lighter hover/active states for clarity */
+        body.dark .prompt-item:hover,
+        body.dark .sidebar-prompt-item:hover,
+        body.dark .group-card-active,
+        body.dark .prompt-item.selected,
+        body.dark .sidebar-prompt-item.active {
+            background-color: #171a24 !important;
+            color: #cfe6ff !important;
+        }
+
+        /* Make placeholder and muted text easier to read in dark mode */
+        body.dark ::placeholder {
+            color: #92a3bf !important;
+            opacity: 1 !important;
+        }
+
+        body.dark .empty-state,
+        body.dark .empty-sidebar,
+        body.dark .card-meta,
+        body.dark .group-card-meta,
+        body.dark .loading-indicator {
+            color: #8f9fb8 !important;
+        }
+
+        /* Reduce bright accent for response role colors to avoid eye strain */
+        body.dark .conversation-message-user {
+            color: #6aa7ff !important;
+        }
+
+        body.dark .conversation-message-bot {
+            color: #4fc07a !important;
+        }
+
+        /* Ensure conversation history and message boxes are dark in modal */
+        body.dark .conversation-history-container,
+        body.dark .conversation-history-container * {
+            background-color: transparent !important;
+            color: #d7e6f6 !important;
+            border-color: #222834 !important;
+        }
+
+        body.dark .conversation-history-container {
+            background-color: transparent !important;
+            padding: 0 !important;
+        }
+
+        /* Individual message box styling for dark mode */
+        body.dark .conversation-message {
+            background-color: #0f1116 !important;
+            border-radius: 6px !important;
+            padding: 10px !important;
+            margin-bottom: 12px !important;
+            border: 1px solid #222834 !important;
+        }
+
+        body.dark .conversation-message-content {
+            color: #d7e6f6 !important;
+            padding-left: 0 !important;
+            background: transparent !important;
+        }
+
+        /* Catch elements with inline `background: white` inside conversation/modal areas */
+        body.dark .response-content [style*="background:"],
+        body.dark .conversation-history-container [style*="background:"],
+        body.dark .modal-content [style*="background:"],
+        body.dark .prompt-preview-content [style*="background:"],
+        body.dark [style*="background:#fff"],
+        body.dark [style*="background:#ffffff"],
+        body.dark [style*="background:#f8f9fa"],
+        body.dark [style*="background: white"],
+        body.dark [style*="background-color:#fff"],
+        body.dark [style*="background-color:#ffffff"],
+        body.dark [style*="background-color:#f8f9fa"],
+        body.dark [style*="background-color: white"] {
+            background-color: #0f1116 !important;
+            color: #d7e6f6 !important;
+            border-color: #222834 !important;
+            box-shadow: none !important;
+        }
+
+        /* Explicitly darken the group/manage modal list panels (override inline white backgrounds) */
+        body.dark #modal-files-list,
+        body.dark #modal-conversations-list,
+        body.dark #modal-reminders-list {
+            background-color: #0f1116 !important;
+            color: #d7e6f6 !important;
+            border-color: #222834 !important;
+        }
+
+        /* Also ensure any direct children inside the manage modal are dark */
+        body.dark #manage-group-modal .modal-content * {
+            background-color: transparent !important;
+            color: inherit !important;
+        }
+
+        /* Make list item cards inside the modal blend with dark background */
+        body.dark #modal-files-list .card,
+        body.dark #modal-conversations-list .card,
+        body.dark #modal-reminders-list .card,
+        body.dark #modal-files-list > div,
+        body.dark #modal-conversations-list > div,
+        body.dark #modal-reminders-list > div {
+            background-color: #0f1116 !important;
+            border-color: #222834 !important;
+            color: #d7e6f6 !important;
         }
 
         .tab-content {
@@ -308,6 +552,41 @@
         }
 
         .card-actions button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.2s ease;
+        }
+        
+        /* Group card styles */
+        .group-card {
+            background: #f5f5f5;
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 10px;
+            position: relative;
+            border: 2px solid transparent;
+        }
+        
+        .group-card-active {
+            background: #eaf4ff;
+            border-color: #3498db;
+        }
+        
+        .group-card-input {
+            border: 1px solid #ddd;
+            background: white;
+        }
+        
+        .group-card-input-active {
+            border-color: #3498db;
+            background: #ffffff;
+        }
+        
+        .group-card-meta {
+            color: #666;
             padding: 6px 12px;
             font-size: 13px;
         }
@@ -320,6 +599,24 @@
             font-size: 0.75rem;
             margin-right: 5px;
             margin-bottom: 5px;
+        }
+
+        .group-badge {
+            display: inline-flex;
+            align-items: center;
+            font-size: 10px;
+            color: #fff;
+            background: #3498db;
+            padding: 2px 6px;
+            border-radius: 10px;
+            margin-left: 4px;
+        }
+
+        .group-badge-active {
+            position: absolute;
+            right: 50px;
+            top: 50%;
+            transform: translateY(-50%);
         }
 
         .empty-state {
@@ -559,6 +856,19 @@
             top: 20px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             border: 1px solid #e0e0e0;
+            min-width: 0; /* Allow shrinking on narrow screens */
+            overflow-x: hidden; /* Prevent horizontal overflow */
+            max-height: calc(100vh - 60px); /* Prevent sidebar from being taller than viewport */
+            overflow-y: auto; /* Allow scrolling within sidebar */
+        }
+        
+        /* Make sidebar non-sticky on narrow screens to prevent overlap */
+        @media (max-width: 968px) {
+            .prompt-sidebar {
+                position: static !important;
+                min-height: auto;
+                max-height: 400px;
+            }
         }
 
         .prompt-sidebar h3 {
@@ -566,6 +876,7 @@
             font-size: 1.1rem;
             margin-bottom: 15px;
             text-align: center;
+            word-wrap: break-word; /* Wrap long text */
         }
 
         .prompt-form-card {
@@ -619,9 +930,8 @@
             font-weight: 500;
             color: #2c3e50;
             flex: 1;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            word-wrap: break-word;
+            max-width: 100%;
         }
 
         .prompt-item.selected .prompt-name {
@@ -728,6 +1038,27 @@
             border: 1px solid #ddd;
             color: #555;
         }
+        
+        /* Conversation history styles */
+        .conversation-history-container {
+            background: #f8f9fa;
+        }
+        
+        .conversation-message-role {
+            color: #3498db;
+        }
+        
+        .conversation-message-bot {
+            color: #27ae60 !important;
+        }
+        
+        .conversation-message-user {
+            color: #3498db !important;
+        }
+        
+        .conversation-message-content {
+            color: #555;
+        }
 
         .prompt-input-large {
             min-height: 200px !important;
@@ -736,24 +1067,28 @@
         .sidebar-prompt-item {
             font-size: 0.85rem;
             color: #555;
-            padding: 8px 0;
+            padding: 10px 12px;
             border-bottom: 1px solid #e0e0e0;
             cursor: pointer;
             transition: all 0.2s ease;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 8px;
+            display: block;
+            background: #fff;
+            margin-bottom: 2px;
+            word-wrap: break-word; /* Wrap long text */
+            overflow-wrap: break-word; /* Better word wrapping */
+            min-width: 0; /* Allow shrinking */
         }
 
         .sidebar-prompt-item:hover {
             color: #3498db;
-            padding-left: 5px;
+            background: #f8f9fa;
         }
 
         .sidebar-prompt-item.active {
             color: #3498db;
             font-weight: 600;
+            background: #eaf4ff;
+            border-left: 3px solid #3498db;
         }
 
         .prompt-delete-btn {
@@ -851,7 +1186,8 @@
         <div class="tabs">
             <button class="tab active" data-tab="files">Files</button>
             <button class="tab" data-tab="prompts">Conversations</button>
-            <button class="tab" data-tab="groups">Reminders</button>
+            <button class="tab" data-tab="reminders">Reminders</button>
+            <button class="tab" data-tab="groups">Groups</button>
             <button id="theme-toggle" class="theme-toggle" type="button" title="Toggle dark mode">🌙</button>
         </div>
 
@@ -896,12 +1232,8 @@
         <div id="prompts" class="tab-content">
             <div class="prompts-container">
                 <div class="prompt-sidebar">
-                    <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+                    <div style="margin-bottom:10px;">
                         <h3 style="margin:0;">Conversations</h3>
-                        <select id="conversation-view-select" style="font-size:13px; padding:6px 8px;">
-                            <option value="conversations">Conversations</option>
-                            <option value="groups">Groups</option>
-                        </select>
                     </div>
                     <div id="prompts-list"></div>
                 </div>
@@ -922,11 +1254,6 @@
                                 </div>
                                 <button type="button" id="prompt-show-file-btn" style="padding: 8px 16px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Attach file</button>
                                 <button type="button" id="prompt-send-btn" style="padding: 8px 16px; background: #27ae60; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Send</button>
-                            </div>
-                            <div style="margin-top: 8px; display: flex; align-items: center; gap: 8px; font-size: 13px; color: #555;">
-                                <input type="checkbox" id="prompt-include-all" style="width: 16px; height: 16px; margin: 0;">
-                                <label for="prompt-include-all" style="margin: 0; font-weight: 500;">Include all groups when searching</label>
-                                <span style="color: #95a5a6;">(Group + conversation are the default)</span>
                             </div>
                         </div>
                     </form>
@@ -980,15 +1307,79 @@
             </div>
         </div>
 
+        <!-- Reminders Tab -->
+        <div id="reminders" class="tab-content">
+            <div class="section">
+                <h2>Set Reminder</h2>
+                <form id="reminder-form">
+                    <input type="hidden" id="reminder-id">
+                    
+                    <!-- Reminder Text Section -->
+                    <div style="margin-bottom: 20px;">
+                        <label style="display: block; margin-bottom: 8px; color: #7f8c8d; font-size: 14px;">Reminder Text</label>
+                        <div style="display: flex; gap: 10px;">
+                            <div style="position: relative; flex: 1;">
+                                <input type="text" id="reminder-name" placeholder="Enter reminder text..." required style="width: 100%; margin: 0; padding-right: 40px;">
+                                <span id="reminder-files-icon" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 20px; color: #95a5a6; cursor: pointer;">📎</span>
+                            </div>
+                            <button type="button" id="reminder-show-file-btn" style="padding: 8px 16px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">add file+</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Preview and Files Section (hidden by default) -->
+                    <div id="reminder-file-section" style="display: none; margin-bottom: 20px;">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                            <!-- Preview Panel -->
+                            <div id="reminder-preview-panel" style="border: 2px solid #3498db; border-radius: 8px; padding: 15px; position: relative;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                    <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Preview</h3>
+                                    <button type="button" onclick="document.getElementById('reminder-preview-panel').style.display='none'" style="background: none; border: none; font-size: 20px; color: #95a5a6; cursor: pointer; padding: 0; line-height: 1;">×</button>
+                                </div>
+                                <div id="reminder-preview-content" style="min-height: 200px; background: #f8f9fa; border-radius: 4px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; overflow: hidden;">
+                                    <div style="font-size: 48px; color: #95a5a6; margin-bottom: 10px;">📄</div>
+                                </div>
+                                <div id="reminder-preview-filename" style="margin: 10px 0; text-align: center; color: #2c3e50; font-size: 14px; font-weight: 500;"></div>
+                                <div class="form-group">
+                                    <label for="reminder-file-input">Upload File</label>
+                                    <input type="file" id="reminder-file-input" accept=".jpg,.jpeg,.png,.pdf,.docx,.txt">
+                                </div>
+                                <button type="button" id="reminder-upload-btn" style="width: 100%; padding: 10px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Upload</button>
+                            </div>
+                            
+                            <!-- Files Panel -->
+                            <div id="reminder-files-panel" data-context="reminders" style="border: 1px solid #e0e0e0; border-radius: 8px; padding: 15px; display: flex; flex-direction: column; position: relative;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                    <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Files</h3>
+                                    <button type="button" onclick="document.getElementById('reminder-files-panel').style.display='none'" style="background: none; border: none; font-size: 20px; color: #95a5a6; cursor: pointer; padding: 0; line-height: 1;">×</button>
+                                </div>
+                                <div id="reminder-files-list" style="flex: 1; overflow-y: scroll; border: 1px solid #e0e0e0; border-radius: 4px; background: white; max-height: 300px;">
+                                    <!-- Files will appear here when added -->
+                                </div>
+                                <button type="button" id="reminder-delete-selected-btn" onclick="deleteSelectedReminderFiles()" style="margin-top: 12px; padding: 8px 20px; background: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 500; align-self: flex-end;">Delete</button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <button type="submit" id="reminder-submit-btn">Create Reminder</button>
+                    <button type="button" id="reminder-cancel-btn" class="secondary" style="display: none;">Cancel</button>
+                </form>
+            </div>
+
+            <div class="section">
+                <h2>Reminders List</h2>
+                <div id="reminders-list"></div>
+            </div>
+        </div>
+
         
 
         <!-- Groups Tab -->
         <div id="groups" class="tab-content">
             <div class="section">
-                <h2>Set reminder</h2>
+                <h2>Create Group</h2>
                 <form id="group-form">
                     <input type="hidden" id="group-id">
-                    <input type="hidden" id="group-description" value="Reminder">
+                    <input type="hidden" id="group-description" value="Group">
                     
                     <!-- Prompt Text Section -->
                     <div style="margin-bottom: 20px;">
@@ -1036,20 +1427,20 @@
                         </div>
                     </div>
                     
-                    <button type="submit" id="group-submit-btn">Create Reminder</button>
+                    <button type="submit" id="group-submit-btn">Create Group</button>
                     <button type="button" id="group-cancel-btn" class="secondary" style="display: none;">Cancel</button>
                 </form>
             </div>
 
             <div class="section">
-                <h2>Reminders Set</h2>
+                <h2>Groups List</h2>
                 <div id="groups-list"></div>
             </div>
         </div>
     </div>
 
     <!-- Manage Group Resources Modal -->
-    <!-- File Preview Modal for Reminders -->
+    <!-- File Preview Modal for Groups -->
     <div id="group-file-preview-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.7); z-index: 10000; justify-content: center; align-items: center; padding: 20px;">
         <div style="background: white; border-radius: 8px; max-width: 700px; width: 90%; max-height: 80vh; display: flex; flex-direction: column; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);">
             <div style="padding: 15px 20px; border-bottom: 1px solid #e0e0e0; display: flex; justify-content: space-between; align-items: center;">
