@@ -159,6 +159,49 @@
             background-color: #2d3750 !important;
             color: #5ba3ff !important;
         }
+        
+        /* Dark mode for group cards */
+        body.dark .group-card {
+            background-color: #1e2535 !important;
+            border-color: #2d3750 !important;
+        }
+        
+        body.dark .group-card-active {
+            background-color: #1e2535 !important;
+            border-color: #5ba3ff !important;
+        }
+        
+        body.dark .group-card-input {
+            background-color: #161b28 !important;
+            color: #e8eef5 !important;
+            border-color: #2d3750 !important;
+        }
+        
+        body.dark .group-card-input-active {
+            background-color: #161b28 !important;
+            border-color: #5ba3ff !important;
+        }
+        
+        body.dark .group-card-meta {
+            color: #b8c5d9 !important;
+        }
+        
+        /* Dark mode for conversation history */
+        body.dark .conversation-history-container {
+            background-color: #1e2535 !important;
+        }
+        
+        body.dark .conversation-message-user {
+            color: #5ba3ff !important;
+        }
+        
+        body.dark .conversation-message-bot {
+            color: #58d68d !important;
+        }
+        
+        body.dark .conversation-message-content {
+            color: #e8eef5 !important;
+        }
 
         body.dark input[type="text"],
         body.dark input[type="file"],
@@ -334,6 +377,42 @@
         }
 
         .card-actions button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.2s ease;
+        }
+        
+        /* Group card styles */
+        .group-card {
+            background: #f5f5f5;
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 10px;
+            position: relative;
+            border: 2px solid transparent;
+        }
+        
+        .group-card-active {
+            background: #eaf4ff;
+            border-color: #3498db;
+        }
+        
+        .group-card-input {
+            border: 1px solid #ddd;
+            background: white;
+        }
+        
+        .group-card-input-active {
+            border-color: #3498db;
+            background: #ffffff;
+        }
+        
+        .group-card-meta {
+            color: #666;
+        }
             padding: 6px 12px;
             font-size: 13px;
         }
@@ -783,6 +862,27 @@
             background: white;
             border-radius: 6px;
             border: 1px solid #ddd;
+            color: #555;
+        }
+        
+        /* Conversation history styles */
+        .conversation-history-container {
+            background: #f8f9fa;
+        }
+        
+        .conversation-message-role {
+            color: #3498db;
+        }
+        
+        .conversation-message-bot {
+            color: #27ae60 !important;
+        }
+        
+        .conversation-message-user {
+            color: #3498db !important;
+        }
+        
+        .conversation-message-content {
             color: #555;
         }
 
