@@ -1368,18 +1368,18 @@ function createGroupCard(group) {
 
     div.dataset.groupCard = 'true';
     div.dataset.groupId = id;
-    div.style.cssText = `background: ${isActive ? '#eaf4ff' : '#f5f5f5'}; padding: 12px; border-radius: 6px; margin-bottom: 10px; position: relative; border: 2px solid ${isActive ? '#3498db' : 'transparent'};`;
+    div.className = `group-card ${isActive ? 'group-card-active' : ''}`;
     
     div.innerHTML = `
         <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 8px;">
             <div style="position: relative; flex: 1;">
-                <input type="text" value="${escapeHtml(name)}" readonly data-group-id="${id}" style="width: 100%; padding: 12px 90px 12px 12px; border: 1px solid ${isActive ? '#3498db' : '#ddd'}; border-radius: 4px; font-size: 14px; background: ${isActive ? '#ffffff' : 'white'}; cursor: pointer;">
+                <input type="text" value="${escapeHtml(name)}" readonly data-group-id="${id}" class="group-card-input ${isActive ? 'group-card-input-active' : ''}" style="width: 100%; padding: 12px 90px 12px 12px; border-radius: 4px; font-size: 14px; cursor: pointer;">
                 <span data-group-active-badge="true" class="group-badge group-badge-active" style="display: ${isActive ? 'inline-flex' : 'none'};">Active</span>
                 <span class="group-item-paperclip" data-group-id="${id}" data-group-name="${escapeHtml(name)}" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 24px; color: #95a5a6; cursor: pointer;">📎</span>
             </div>
             <button type="button" class="group-item-delete" data-group-id="${id}" style="padding: 8px 16px; background: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-size: 14px;">Delete</button>
         </div>
-        <div style="display: flex; gap: 8px; padding-left: 12px; font-size: 12px; color: #666;">
+        <div class="group-card-meta" style="display: flex; gap: 8px; padding-left: 12px; font-size: 12px;">
             <span title="${fileCount} file(s)"><span aria-hidden="true">📄</span> <span aria-label="${fileCount} files">${fileCount} files</span></span>
             <span title="${conversationCount} conversation(s)"><span aria-hidden="true">🗨️</span> <span aria-label="${conversationCount} conversations">${conversationCount} conversations</span></span>
             <span title="${reminderCount} reminder(s)"><span aria-hidden="true">⏰</span> <span aria-label="${reminderCount} reminders">${reminderCount} reminders</span></span>
@@ -1529,7 +1529,44 @@ document.getElementById('reminder-form')?.addEventListener('submit', async (e) =
             const groupId = result.id || result.Id;
             
             console.log('[CREATE REMINDER] Reminder created with ID:', groupId);
+            console.log('[CREATE REMINDER] Active prompt group ID:', activePromptGroupId);
             console.log('[CREATE REMINDER] Files to upload:', window.reminderSelectedFiles);
+            
+            // Auto-group: If there's an active prompt group, associate the reminder with it
+            if (activePromptGroupId && !id) {
+                try {
+                    console.log('[CREATE REMINDER] Linking reminder to active group:', activePromptGroupId);
+                    // Create a conversation for this reminder and link it to the active group
+                    const conversationData = {
+                        name: name,
+                        resourceGroupId: activePromptGroupId
+                    };
+                    const convRes = await fetch(`${API_BASE}/conversations`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(conversationData)
+                    });
+                    if (convRes.ok) {
+                        const convResult = await convRes.json();
+                        const conversationId = convResult.id || convResult.Id;
+                        console.log('[CREATE REMINDER] Created conversation:', conversationId, 'for reminder in group');
+                        
+                        // Link the conversation to the reminder (group)
+                        const linkRes = await fetch(`${API_BASE}/groups/${groupId}/prompts/${conversationId}`, {
+                            method: 'POST'
+                        });
+                        if (linkRes.ok || linkRes.status === 204) {
+                            console.log('[CREATE REMINDER] Successfully linked reminder to active group');
+                        } else {
+                            console.warn('[CREATE REMINDER] Failed to link reminder to conversation');
+                        }
+                    } else {
+                        console.warn('[CREATE REMINDER] Failed to create conversation for auto-grouping');
+                    }
+                } catch (autoGroupError) {
+                    console.error('[CREATE REMINDER] Error during auto-grouping:', autoGroupError);
+                }
+            }
             
             // Upload files if any are selected
             if (window.reminderSelectedFiles && window.reminderSelectedFiles.length > 0) {
@@ -2778,18 +2815,18 @@ async function init() {
                         : '';
 
                     return `
-                        <div style="margin-bottom: 12px;">
-                            <div style="color: ${msg.role === 'user' ? '#3498db' : '#27ae60'}; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
+                        <div class="conversation-message" style="margin-bottom: 12px;">
+                            <div class="conversation-message-role ${msg.role === 'user' ? 'conversation-message-user' : 'conversation-message-bot'}" style="font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
                                 <span>${msg.role === 'user' ? 'User' : 'Bot'}:</span>
                                 ${msg.files && msg.files.length > 0 ? `<button type="button" onclick="showAttachedFilesModal('${filesData}')" style="background: none; border: none; font-size: 16px; color: #3498db; cursor: pointer; padding: 0;" title="${escapeHtml(filesTitle)}">📎</button>` : ''}
                             </div>
-                            <div style="color: #555; padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
+                            <div class="conversation-message-content" style="padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
                             ${msgSourcesHtml}
                         </div>
                     `;
                 }).join('');
                 responseContent.innerHTML = `
-                    <div style="max-height: 500px; overflow-y: auto; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+                    <div class="conversation-history-container" style="max-height: 500px; overflow-y: auto; padding: 15px; border-radius: 8px;">
                         ${conversationHTML}
                     </div>
                 `;
