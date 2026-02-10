@@ -452,7 +452,8 @@ function createPromptCard(prompt) {
     
     // Click to load prompt
     div.addEventListener('click', () => {
-        autoSaveCurrentConversation('switch');
+        // Don't auto-save when viewing a conversation (read-only operation)
+        // Auto-save will happen via input, send, new_chat, or unload events
         document.querySelectorAll('.sidebar-prompt-item').forEach(item => item.classList.remove('active'));
         div.classList.add('active');
         loadPromptIntoForm(id, name, promptText);
