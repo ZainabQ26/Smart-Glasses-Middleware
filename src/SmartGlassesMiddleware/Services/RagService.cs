@@ -1082,46 +1082,9 @@ Answer:";
                 chunksIncluded, chunks.Count, currentTokens, _maxContextTokens);
         }
 
-        // If group IDs are provided, add additional context from group prompts (if budget allows)
-        if (groupIds != null && groupIds.Any() && currentTokens < _maxContextTokens)
-        {
-            var groupPrompts = await _context.ResourceGroups
-                .Where(g => groupIds.Contains(g.Id))
-                .Include(g => g.PromptGroups)
-                .ThenInclude(pg => pg.ManagedPrompt)
-                .SelectMany(g => g.PromptGroups.Select(pg => pg.ManagedPrompt))
-                .Distinct()
-                .OrderByDescending(p => p.IsPinned) // Prioritize pinned prompts
-                .ThenBy(p => p.CreatedAt)
-                .ToListAsync();
+        // Prompts are no longer associated with groups
+        // They are managed separately and can be used independently
 
-            if (groupPrompts.Any())
-            {
-                var groupContextHeader = "--- Additional Context from Groups ---";
-                var headerTokens = EstimateTokens(groupContextHeader);
-
-                if (currentTokens + headerTokens < _maxContextTokens)
-                {
-                    context.AppendLine(groupContextHeader);
-                    currentTokens += headerTokens;
-
-                    // Add pinned prompts first (they get priority)
-                    foreach (var prompt in groupPrompts)
-                    {
-                        var promptHeader = $"[{prompt.Name}]" + (prompt.IsPinned ? " [PINNED]:" : ":");
-                        var promptTokens = EstimateTokens(promptHeader + prompt.PromptText);
-
-                        if (currentTokens + promptTokens > _maxContextTokens)
-                            break;
-
-                        context.AppendLine(promptHeader);
-                        context.AppendLine(prompt.PromptText);
-                        context.AppendLine();
-                        currentTokens += promptTokens;
-                    }
-                }
-            }
-        }
 
         return context.ToString();
     }

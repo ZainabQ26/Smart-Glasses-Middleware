@@ -129,28 +129,12 @@ public class RAGServiceRobustnessTests
             CreatedAt = DateTime.UtcNow
         };
 
-        var prompt = new ManagedPrompt
-        {
-            Id = Guid.NewGuid(),
-            Name = "Context Prompt",
-            PromptText = "This is additional context from the group.",
-            CreatedAt = DateTime.UtcNow
-        };
-
-        var promptGroup = new ManagedPromptGroup
-        {
-            ManagedPromptId = prompt.Id,
-            ManagedPrompt = prompt,
-            ResourceGroupId = groupId,
-            ResourceGroup = group
-        };
-
-        group.PromptGroups.Add(promptGroup);
+        // Groups no longer have prompts associated with them
+        // Prompts are managed separately
 
         var doc = CreateTestDocument("test.txt", groupId);
 
         _context.ResourceGroups.Add(group);
-        _context.ManagedPrompts.Add(prompt);
         _context.DocumentMetadatas.Add(doc);
         await _context.SaveChangesAsync();
 
@@ -164,8 +148,9 @@ public class RAGServiceRobustnessTests
         // Assert
         Assert.NotNull(result);
         Assert.NotEmpty(result.Answer);
+        // Since prompts are no longer associated with groups, we just verify the query was processed
         _mockAIService.Verify(
-            s => s.ProcessRequestAsync(It.Is<string>(p => p.Contains("Context Prompt")), It.IsAny<CancellationToken>()),
+            s => s.ProcessRequestAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Once);
     }
 

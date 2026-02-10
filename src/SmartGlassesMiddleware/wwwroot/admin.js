@@ -1168,17 +1168,15 @@ async function loadGroups(reset = false) {
         const pagination = result.pagination || result.Pagination || {};
         console.log('Groups data length:', groupsData.length);
         
-        // Check for and delete empty groups (groups with no files, prompts, documents, or conversations)
+        // Check for and delete empty groups (groups with no files, documents, or conversations)
         const emptyGroups = groupsData.filter(group => {
             const files = getProp(group, 'files') || [];
-            const prompts = getProp(group, 'prompts') || [];
             const documents = getProp(group, 'documents') || [];
             const conversations = getProp(group, 'conversations') || [];
             const fileCount = Array.isArray(files) ? files.length : 0;
-            const promptCount = Array.isArray(prompts) ? prompts.length : 0;
             const documentCount = Array.isArray(documents) ? documents.length : 0;
             const conversationCount = Array.isArray(conversations) ? conversations.length : 0;
-            return fileCount === 0 && promptCount === 0 && documentCount === 0 && conversationCount === 0;
+            return fileCount === 0 && documentCount === 0 && conversationCount === 0;
         });
         
         // Auto-delete empty groups in parallel

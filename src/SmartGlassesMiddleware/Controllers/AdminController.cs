@@ -402,8 +402,6 @@ public class AdminController : ControllerBase
         var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
 
         var prompts = await _context.ManagedPrompts
-            .Include(p => p.PromptGroups)
-            .ThenInclude(pg => pg.ResourceGroup)
             .OrderByDescending(p => p.CreatedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
@@ -413,8 +411,7 @@ public class AdminController : ControllerBase
                 p.Name,
                 p.PromptText,
                 p.CreatedAt,
-                p.UpdatedAt,
-                Groups = p.PromptGroups.Select(pg => new { pg.ResourceGroup.Id, pg.ResourceGroup.Name })
+                p.UpdatedAt
             })
             .ToListAsync();
 
@@ -664,8 +661,8 @@ public class AdminController : ControllerBase
         var groups = await _context.ResourceGroups
             .Include(g => g.FileGroups)
             .ThenInclude(fg => fg.ManagedFile)
-            .Include(g => g.PromptGroups)
-            .ThenInclude(pg => pg.ManagedPrompt)
+            .Include(g => g.DocumentGroups)
+            .ThenInclude(dg => dg.DocumentMetadata)
             .Include(g => g.Conversations)
             .OrderByDescending(g => g.CreatedAt)
             .Skip((page - 1) * pageSize)
@@ -684,10 +681,11 @@ public class AdminController : ControllerBase
                     fg.ManagedFile.FileName,
                     fg.ManagedFile.Label
                 }).ToList(),
-                Prompts = g.PromptGroups.Select(pg => new
+                Documents = g.DocumentGroups.Select(dg => new
                 {
-                    pg.ManagedPrompt.Id,
-                    pg.ManagedPrompt.Name
+                    dg.DocumentMetadata.Id,
+                    dg.DocumentMetadata.FileName,
+                    dg.DocumentMetadata.DocumentType
                 }).ToList(),
                 Conversations = g.Conversations.Select(c => new
                 {
@@ -913,8 +911,8 @@ public class AdminController : ControllerBase
         var group = await _context.ResourceGroups
             .Include(g => g.FileGroups)
             .ThenInclude(fg => fg.ManagedFile)
-            .Include(g => g.PromptGroups)
-            .ThenInclude(pg => pg.ManagedPrompt)
+            .Include(g => g.DocumentGroups)
+            .ThenInclude(dg => dg.DocumentMetadata)
             .Include(g => g.Conversations)
             .ThenInclude(c => c.Messages)
             .FirstOrDefaultAsync(g => g.Id == id);
@@ -944,11 +942,14 @@ public class AdminController : ControllerBase
                 fg.ManagedFile.FileSize,
                 fg.ManagedFile.UploadedAt
             }).ToList(),
-            Prompts = group.PromptGroups.Select(pg => new
+            Documents = group.DocumentGroups.Select(dg => new
             {
-                pg.ManagedPrompt.Id,
-                pg.ManagedPrompt.Name,
-                pg.ManagedPrompt.PromptText
+                dg.DocumentMetadata.Id,
+                dg.DocumentMetadata.FileName,
+                dg.DocumentMetadata.DocumentType,
+                dg.DocumentMetadata.FileSize,
+                dg.DocumentMetadata.TotalPages,
+                dg.DocumentMetadata.UploadedAt
             }).ToList(),
             Conversations = group.Conversations.Select(c => new
             {
@@ -1092,114 +1093,6 @@ public class AdminController : ControllerBase
         }
     }
 
-    /// <summary>
-    /// Add a prompt to a group
-    /// </summary>
-    [HttpPost("groups/{groupId}/prompts/{promptId}")]
-    public async Task<ActionResult> AddPromptToGroup(Guid groupId, Guid promptId)
-    {
-        var group = await _context.ResourceGroups.FindAsync(groupId);
-        if (group == null)
-        {
-            return NotFound(new ProblemDetails
-            {
-                Title = "Not Found",
-                Detail = $"Group with ID {groupId} not found",
-                Status = StatusCodes.Status404NotFound
-            });
-        }
-
-        var prompt = await _context.ManagedPrompts.FindAsync(promptId);
-        if (prompt == null)
-        {
-            return NotFound(new ProblemDetails
-            {
-                Title = "Not Found",
-                Detail = $"Prompt with ID {promptId} not found",
-                Status = StatusCodes.Status404NotFound
-            });
-        }
-
-        try
-        {
-            var existing = await _context.Set<ManagedPromptGroup>()
-                .FirstOrDefaultAsync(pg => pg.ManagedPromptId == promptId && pg.ResourceGroupId == groupId);
-
-            if (existing != null)
-            {
-                return Ok(new { message = "Prompt is already in the group" });
-            }
-
-            var promptGroup = new ManagedPromptGroup
-            {
-                ManagedPromptId = promptId,
-                ResourceGroupId = groupId
-            };
-
-            _context.Set<ManagedPromptGroup>().Add(promptGroup);
-            await _context.SaveChangesAsync();
-
-            // Invalidate cache
-            await InvalidateAllCaches();
-
-            return Ok(new { message = "Prompt added to group successfully" });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error adding prompt {PromptId} to group {GroupId}", promptId, groupId);
-            return StatusCode(500, new ProblemDetails
-            {
-                Title = "Internal Server Error",
-                Detail = "An error occurred while adding the prompt to the group",
-                Status = StatusCodes.Status500InternalServerError
-            });
-        }
-    }
-
-    /// <summary>
-    /// Remove a prompt from a group
-    /// </summary>
-    [HttpDelete("groups/{groupId}/prompts/{promptId}")]
-    public async Task<ActionResult> RemovePromptFromGroup(Guid groupId, Guid promptId)
-    {
-        var promptGroup = await _context.Set<ManagedPromptGroup>()
-            .FirstOrDefaultAsync(pg => pg.ManagedPromptId == promptId && pg.ResourceGroupId == groupId);
-
-        if (promptGroup == null)
-        {
-            return NotFound(new ProblemDetails
-            {
-                Title = "Not Found",
-                Detail = "Prompt is not in the specified group",
-                Status = StatusCodes.Status404NotFound
-            });
-        }
-
-        try
-        {
-            _context.Set<ManagedPromptGroup>().Remove(promptGroup);
-            await _context.SaveChangesAsync();
-            
-            // Check if group is now empty and auto-delete
-            await AutoDeleteEmptyGroup(groupId);
-
-            // Invalidate cache
-            await InvalidateAllCaches();
-
-            return NoContent();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error removing prompt {PromptId} from group {GroupId}", promptId, groupId);
-            return StatusCode(500, new ProblemDetails
-            {
-                Title = "Internal Server Error",
-                Detail = "An error occurred while removing the prompt from the group",
-                Status = StatusCodes.Status500InternalServerError
-            });
-        }
-    }
-
     #endregion
 
     #region Helper Methods
@@ -1213,7 +1106,6 @@ public class AdminController : ControllerBase
         {
             var group = await _context.ResourceGroups
                 .Include(g => g.FileGroups)
-                .Include(g => g.PromptGroups)
                 .Include(g => g.DocumentGroups)
                 .Include(g => g.Conversations)
                 .FirstOrDefaultAsync(g => g.Id == groupId);
@@ -1225,7 +1117,6 @@ public class AdminController : ControllerBase
 
             // Check if group is empty
             bool isEmpty = !group.FileGroups.Any() && 
-                          !group.PromptGroups.Any() && 
                           !group.DocumentGroups.Any() &&
                           !group.Conversations.Any();
 

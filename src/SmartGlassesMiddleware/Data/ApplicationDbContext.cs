@@ -105,16 +105,6 @@ public class ApplicationDbContext : DbContext
                 .HasForeignKey(e => e.ResourceGroupId);
         });
 
-        modelBuilder.Entity<ManagedPromptGroup>(entity =>
-        {
-            entity.HasKey(e => new { e.ManagedPromptId, e.ResourceGroupId });
-            entity.HasOne(e => e.ManagedPrompt)
-                .WithMany(p => p.PromptGroups)
-                .HasForeignKey(e => e.ManagedPromptId);
-            entity.HasOne(e => e.ResourceGroup)
-                .WithMany(g => g.PromptGroups)
-                .HasForeignKey(e => e.ResourceGroupId);
-        });
         modelBuilder.Entity<RagEntry>(entity =>
         {
             entity.HasKey(e => e.Id);

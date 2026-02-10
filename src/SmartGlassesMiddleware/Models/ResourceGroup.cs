@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 namespace SmartGlassesMiddleware.Models;
 
 /// <summary>
-/// Represents a group that can contain files and prompts
+/// Represents a group that can contain files, documents, and conversations
 /// </summary>
 public class ResourceGroup
 {
@@ -14,7 +14,6 @@ public class ResourceGroup
 
     // Navigation properties
     public List<ManagedFileGroup> FileGroups { get; set; } = new();
-    public List<ManagedPromptGroup> PromptGroups { get; set; } = new();
     public List<DocumentGroup> DocumentGroups { get; set; } = new();
     [JsonIgnore]
     public List<Conversation> Conversations { get; set; } = new();
@@ -27,18 +26,6 @@ public class ManagedFileGroup
 {
     public Guid ManagedFileId { get; set; }
     public ManagedFile ManagedFile { get; set; } = null!;
-
-    public Guid ResourceGroupId { get; set; }
-    public ResourceGroup ResourceGroup { get; set; } = null!;
-}
-
-/// <summary>
-/// Join table for many-to-many relationship between ManagedPrompt and ResourceGroup
-/// </summary>
-public class ManagedPromptGroup
-{
-    public Guid ManagedPromptId { get; set; }
-    public ManagedPrompt ManagedPrompt { get; set; } = null!;
 
     public Guid ResourceGroupId { get; set; }
     public ResourceGroup ResourceGroup { get; set; } = null!;

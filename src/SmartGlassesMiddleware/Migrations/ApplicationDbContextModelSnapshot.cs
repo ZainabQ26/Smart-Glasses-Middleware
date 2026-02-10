@@ -410,21 +410,6 @@ namespace SmartGlassesMiddleware.Migrations
                     b.ToTable("ManagedPrompts");
                 });
 
-            modelBuilder.Entity("SmartGlassesMiddleware.Models.ManagedPromptGroup", b =>
-                {
-                    b.Property<Guid>("ManagedPromptId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("ResourceGroupId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("ManagedPromptId", "ResourceGroupId");
-
-                    b.HasIndex("ResourceGroupId");
-
-                    b.ToTable("ManagedPromptGroup");
-                });
-
             modelBuilder.Entity("SmartGlassesMiddleware.Models.RagEntry", b =>
                 {
                     b.Property<Guid>("Id")
@@ -702,25 +687,6 @@ namespace SmartGlassesMiddleware.Migrations
                     b.Navigation("ResourceGroup");
                 });
 
-            modelBuilder.Entity("SmartGlassesMiddleware.Models.ManagedPromptGroup", b =>
-                {
-                    b.HasOne("SmartGlassesMiddleware.Models.ManagedPrompt", "ManagedPrompt")
-                        .WithMany("PromptGroups")
-                        .HasForeignKey("ManagedPromptId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("SmartGlassesMiddleware.Models.ResourceGroup", "ResourceGroup")
-                        .WithMany("PromptGroups")
-                        .HasForeignKey("ResourceGroupId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("ManagedPrompt");
-
-                    b.Navigation("ResourceGroup");
-                });
-
             modelBuilder.Entity("SmartGlassesMiddleware.Models.RagEntry", b =>
                 {
                     b.HasOne("SmartGlassesMiddleware.Models.ManagedFile", null)
@@ -754,11 +720,6 @@ namespace SmartGlassesMiddleware.Migrations
                     b.Navigation("FileGroups");
                 });
 
-            modelBuilder.Entity("SmartGlassesMiddleware.Models.ManagedPrompt", b =>
-                {
-                    b.Navigation("PromptGroups");
-                });
-
             modelBuilder.Entity("SmartGlassesMiddleware.Models.ResourceGroup", b =>
                 {
                     b.Navigation("Conversations");
@@ -766,8 +727,6 @@ namespace SmartGlassesMiddleware.Migrations
                     b.Navigation("DocumentGroups");
 
                     b.Navigation("FileGroups");
-
-                    b.Navigation("PromptGroups");
                 });
 #pragma warning restore 612, 618
         }
