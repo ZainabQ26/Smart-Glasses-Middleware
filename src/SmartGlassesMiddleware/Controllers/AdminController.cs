@@ -670,7 +670,9 @@ public class AdminController : ControllerBase
             .OrderByDescending(g => g.CreatedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .Select(g => new
+            .ToListAsync();
+
+        var groupData = groups.Select(g => new
             {
                 g.Id,
                 g.Name,
@@ -681,12 +683,12 @@ public class AdminController : ControllerBase
                     fg.ManagedFile.Id,
                     fg.ManagedFile.FileName,
                     fg.ManagedFile.Label
-                }),
+                }).ToList(),
                 Prompts = g.PromptGroups.Select(pg => new
                 {
                     pg.ManagedPrompt.Id,
                     pg.ManagedPrompt.Name
-                }),
+                }).ToList(),
                 Conversations = g.Conversations.Select(c => new
                 {
                     c.Id,
@@ -695,13 +697,22 @@ public class AdminController : ControllerBase
                     c.UpdatedAt,
                     c.IsActive,
                     MessageCount = c.Messages.Count
-                })
+                }).ToList(),
+                // Count reminders that reference this group
+                Reminders = _context.ResourceGroups
+                    .Where(rg => rg.Description != null && rg.Description.ToLower() == "reminder")
+                    .Where(rg => rg.Conversations.Any(c => c.ResourceGroupId == g.Id))
+                    .Select(rg => new
+                    {
+                        rg.Id,
+                        rg.Name
+                    }).ToList()
             })
-            .ToListAsync();
+            .ToList();
 
         var result = new
         {
-            Data = groups,
+            Data = groupData,
             Pagination = new
             {
                 CurrentPage = page,
@@ -954,7 +965,20 @@ public class AdminController : ControllerBase
                     Content = m.Content.Length > 100 ? m.Content.Substring(0, 100) + "..." : m.Content,
                     m.Timestamp
                 }).ToList()
-            }).ToList()
+            }).ToList(),
+            // Find reminders (groups with description="Reminder") that have conversations pointing to this group
+            Reminders = _context.ResourceGroups
+                .Where(rg => rg.Description != null && rg.Description.ToLower() == "reminder")
+                .Where(rg => rg.Conversations.Any(c => c.ResourceGroupId == group.Id))
+                .Select(rg => new
+                {
+                    rg.Id,
+                    rg.Name,
+                    rg.Description,
+                    rg.CreatedAt,
+                    FileCount = rg.FileGroups.Count,
+                    ConversationCount = rg.Conversations.Count
+                }).ToList()
         };
 
         return Ok(result);
@@ -1047,6 +1071,9 @@ public class AdminController : ControllerBase
         {
             _context.Set<ManagedFileGroup>().Remove(fileGroup);
             await _context.SaveChangesAsync();
+            
+            // Check if group is now empty and auto-delete
+            await AutoDeleteEmptyGroup(groupId);
 
             // Invalidate cache
             await InvalidateAllCaches();
@@ -1152,6 +1179,9 @@ public class AdminController : ControllerBase
         {
             _context.Set<ManagedPromptGroup>().Remove(promptGroup);
             await _context.SaveChangesAsync();
+            
+            // Check if group is now empty and auto-delete
+            await AutoDeleteEmptyGroup(groupId);
 
             // Invalidate cache
             await InvalidateAllCaches();
@@ -1173,6 +1203,44 @@ public class AdminController : ControllerBase
     #endregion
 
     #region Helper Methods
+
+    /// <summary>
+    /// Auto-delete a group if it has no files, prompts, or conversations
+    /// </summary>
+    private async Task AutoDeleteEmptyGroup(Guid groupId)
+    {
+        try
+        {
+            var group = await _context.ResourceGroups
+                .Include(g => g.FileGroups)
+                .Include(g => g.PromptGroups)
+                .Include(g => g.Conversations)
+                .FirstOrDefaultAsync(g => g.Id == groupId);
+
+            if (group == null)
+            {
+                return; // Group already deleted
+            }
+
+            // Check if group is empty
+            bool isEmpty = !group.FileGroups.Any() && 
+                          !group.PromptGroups.Any() && 
+                          !group.Conversations.Any();
+
+            if (isEmpty)
+            {
+                _logger.LogInformation("Auto-deleting empty group: {GroupName} (ID: {GroupId})", group.Name, groupId);
+                _context.ResourceGroups.Remove(group);
+                await _context.SaveChangesAsync();
+                await InvalidateGroupsCache();
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error auto-deleting empty group {GroupId}", groupId);
+            // Don't throw - this is a best-effort cleanup
+        }
+    }
 
     /// <summary>
     /// Invalidate files cache for all pages

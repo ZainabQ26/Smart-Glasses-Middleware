@@ -39,6 +39,16 @@
                 .toast.info .icon { background:#2563eb }
                 .progress { position:absolute; left:0; bottom:0; height:4px; width:100%; transform-origin:left center; animation-name:progressAnim; animation-timing-function:linear; }
                 @keyframes progressAnim { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+                /* Dark mode variant (host gets .dark class when body has dark) */
+                :host(.dark) .toast { background: #0f1116; color: #d7e6f6; border: 1px solid rgba(255,255,255,0.04); box-shadow: 0 6px 18px rgba(0,0,0,0.6); }
+                :host(.dark) .toast .msg { color: #d7e6f6; }
+                :host(.dark) .toast .close { color: #9aa6bf; }
+                :host(.dark) .toast.success { border-left-color: #0f7a43 }
+                :host(.dark) .toast.error { border-left-color: #9b2c2c }
+                :host(.dark) .toast.info { border-left-color: #214f9f }
+                :host(.dark) .toast.success .icon { background: #0f7a43 }
+                :host(.dark) .toast.error .icon { background: #9b2c2c }
+                :host(.dark) .toast.info .icon { background: #214f9f }
             `;
 
             const styleEl = document.createElement('style');
@@ -49,6 +59,20 @@
 
             shadow.appendChild(styleEl);
             shadow.appendChild(container);
+
+            // Keep host dark class in sync with document body
+            if (document.body && document.body.classList.contains('dark')) {
+                host.classList.add('dark');
+            }
+            try {
+                const observer = new MutationObserver(() => {
+                    if (document.body && document.body.classList.contains('dark')) host.classList.add('dark');
+                    else host.classList.remove('dark');
+                });
+                observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+            } catch (e) {
+                // ignore if MutationObserver isn't available
+            }
         }
         return host;
     }
@@ -91,10 +115,13 @@
         const msg = document.createElement('div');
         msg.className = 'msg';
         msg.textContent = message;
+        // choose readable text color depending on site theme
+        const isDark = typeof document !== 'undefined' && document.body && document.body.classList.contains('dark');
+        const msgColor = isDark ? '#d7e6f6' : '#111827';
         // reset message styles to avoid large inherited headings
         Object.assign(msg.style, {
             marginRight: '8px',
-            color: '#111827',
+            color: msgColor,
             fontSize: '14px'
         });
 
@@ -104,10 +131,11 @@
         closeBtn.setAttribute('aria-label', 'Close notification');
         closeBtn.innerHTML = '\u00d7';
         // inline-reset the button to avoid site-wide button styling
+        const closeColor = isDark ? '#9aa6bf' : '#6b7280';
         Object.assign(closeBtn.style, {
             background: 'transparent',
             border: 'none',
-            color: '#6b7280',
+            color: closeColor,
             fontSize: '16px',
             cursor: 'pointer',
             padding: '6px',
