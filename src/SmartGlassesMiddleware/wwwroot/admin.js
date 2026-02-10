@@ -2821,7 +2821,7 @@ async function init() {
                 console.log('[SEND PROMPT] Sending documents query to', documentsUrl, 'payload:', payload);
 
                 currentRequestController = new AbortController();
-                const timeoutMs = 300000; // 300 seconds (5 minutes) - increased timeout
+                const timeoutMs = 300000; // 300 seconds
                 const timeoutId = setTimeout(() => currentRequestController.abort(), timeoutMs);
 
                 const queryResponse = await fetch(documentsUrl, {
@@ -2931,10 +2931,10 @@ async function init() {
                     responseContent.innerHTML = `
                         <div style="text-align: center; padding: 20px; color: #e67e22;">
                             <div style="font-size: 1.2rem; margin-bottom: 10px;">🚫 Cancelled</div>
-                            <div style="font-size: 0.9rem;">Request was cancelled.</div>
+                            <div style="font-size: 0.9rem;">Request successfully cancelled.</div>
                         </div>
                     `;
-                    showMessage('Request cancelled', 'info');
+                    showMessage('Request successfully cancelled', 'info');
                 } else {
                     const fallbackSources = lastQueryResult?.referencedSources || lastQueryResult?.ReferencedSources || lastQueryResult?.sources || lastQueryResult?.Sources || [];
                     const fallbackSourcesHtml = buildSourcesHtml(fallbackSources);
