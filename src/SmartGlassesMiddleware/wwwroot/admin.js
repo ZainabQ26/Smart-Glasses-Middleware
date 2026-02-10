@@ -100,18 +100,6 @@ document.querySelectorAll('.tab').forEach(tab => {
     });
 });
 
-// When the conversation/group view selector changes, reload the sidebar
-const convViewSelect = document.getElementById('conversation-view-select');
-if (convViewSelect) {
-    convViewSelect.addEventListener('change', () => {
-        state.prompts.page = 1;
-        state.prompts.hasMore = true;
-        state.prompts.data = [];
-        const listEl = document.getElementById('prompts-list'); if (listEl) listEl.innerHTML = '';
-        loadPrompts(true);
-    });
-}
-
 // Global `showMessage()` provided by `toasts.js` - do not redefine here
 
 function applyTheme(theme) {
@@ -217,12 +205,8 @@ async function loadPrompts(reset = false) {
     showLoading('prompts-list');
 
     try {
-        const viewSelect = document.getElementById('conversation-view-select');
-        const view = viewSelect ? viewSelect.value : 'conversations';
-
-        const endpoint = view === 'groups'
-            ? `${API_BASE}/groups?page=${state.prompts.page}&pageSize=${state.prompts.pageSize}`
-            : `/api/conversations?page=${state.prompts.page}&pageSize=${state.prompts.pageSize}`;
+        // Always load conversations (not groups)
+        const endpoint = `/api/conversations?page=${state.prompts.page}&pageSize=${state.prompts.pageSize}`;
 
         const response = await fetchWithRetry(endpoint);
         if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -242,8 +226,8 @@ async function loadPrompts(reset = false) {
                     const div = document.createElement('div');
                     div.className = 'sidebar-prompt-item';
 
-                    // Determine if this is a group or conversation
-                    const isGroup = view === 'groups' || (!!getProp(item, 'name') && !getProp(item, 'title'));
+                    // These are always conversations (not groups)
+                    const isGroup = false;
 
                     const id = getProp(item, 'id') || getProp(item, 'Id');
                     const title = getProp(item, 'title') || getProp(item, 'Title') || getProp(item, 'name') || getProp(item, 'Name') || id;
@@ -255,43 +239,30 @@ async function loadPrompts(reset = false) {
                         ? (messagesArr[messagesArr.length - 1].content || messagesArr[messagesArr.length - 1].text || messagesArr[messagesArr.length - 1].message || '')
                         : (getProp(item, 'lastMessage') || getProp(item, 'snippet') || getProp(item, 'description') || '');
 
-                    div.dataset.conversationId = isGroup ? '' : id;
-                    div.dataset.groupId = isGroup ? id : (getProp(item, 'resourceGroupId') || getProp(item, 'ResourceGroupId') || '');
+                    div.dataset.conversationId = id;
+                    div.dataset.groupId = getProp(item, 'resourceGroupId') || getProp(item, 'ResourceGroupId') || '';
 
-                    // Get group name if this conversation is associated with a group
-                    const groupId = div.dataset.groupId;
-                    let groupBadge = '';
-                    if (!isGroup && groupId) {
-                        // Try to find group name from state.allGroups cache
-                        const group = state.allGroups.find(g => String(getProp(g, 'id')) === String(groupId));
-                        const groupName = group ? (getProp(group, 'name') || 'Group') : 'Group';
-                        groupBadge = `<span class="group-badge" title="Associated with group: ${escapeHtml(groupName)}" aria-label="Group association: ${escapeHtml(groupName)}"><span aria-hidden="true">📁</span> ${escapeHtml(groupName)}</span>`;
-                    }
-
+                    // Don't show group badges in conversation list anymore
+                    
                     const displayName = escapeHtml(title || 'Untitled');
                     div.innerHTML = `
-                        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;">
-                            <span class="prompt-name">${displayName}${groupBadge}</span>
-                            <div style="display:flex;gap:8px;align-items:center;">
-                                <span style="font-size:11px;color:#95a5a6;">${updated ? new Date(updated).toLocaleString() : ''}</span>
+                        <div style="display:flex;justify-content:space-between;align-items:flex-start;padding:8px 10px;gap:8px;">
+                            <span class="prompt-name">${displayName}</span>
+                            <div style="display:flex;gap:8px;align-items:center;flex-shrink:0;">
+                                <span style="font-size:11px;color:#95a5a6;white-space:nowrap;">${updated ? new Date(updated).toLocaleString() : ''}</span>
                                 <span class="badge">${messageCount}</span>
                             </div>
                         </div>
-                        <div style="padding:0 10px 8px 10px;color:#666;font-size:12px;">${escapeHtml(String(lastMsg || ''))}</div>
+                        <div style="padding:0 10px 8px 10px;color:#666;font-size:12px;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(String(lastMsg || ''))}</div>
                     `;
 
                     div.addEventListener('click', async () => {
                         document.querySelectorAll('.sidebar-prompt-item').forEach(i => i.classList.remove('active'));
                         div.classList.add('active');
-                        if (!isGroup && id) {
-                            activeConversationId = id;
-                            await syncActiveGroupFromConversation(id);
-                            await loadConversationIntoView(id, title);
-                            showMessage('Conversation selected');
-                        } else if (isGroup) {
-                            setActivePromptGroup(id, title);
-                            showMessage('Group selected');
-                        }
+                        activeConversationId = id;
+                        await syncActiveGroupFromConversation(id);
+                        await loadConversationIntoView(id, title);
+                        showMessage('Conversation selected');
                     });
 
                     fragment.appendChild(div);
@@ -304,7 +275,7 @@ async function loadPrompts(reset = false) {
             state.prompts.hasMore = pagination.hasNext || pagination.HasNext || false;
             state.prompts.page++;
         } else if (reset && list) {
-            list.innerHTML = `<div class="empty-sidebar">No ${view} yet</div>`;
+            list.innerHTML = `<div class="empty-sidebar">No conversations yet</div>`;
         }
 
         state.prompts.loading = false;
