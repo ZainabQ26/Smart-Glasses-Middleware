@@ -753,24 +753,25 @@
         .sidebar-prompt-item {
             font-size: 0.85rem;
             color: #555;
-            padding: 8px 0;
+            padding: 10px 12px;
             border-bottom: 1px solid #e0e0e0;
             cursor: pointer;
             transition: all 0.2s ease;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 8px;
+            display: block;
+            background: #fff;
+            margin-bottom: 2px;
         }
 
         .sidebar-prompt-item:hover {
             color: #3498db;
-            padding-left: 5px;
+            background: #f8f9fa;
         }
 
         .sidebar-prompt-item.active {
             color: #3498db;
             font-weight: 600;
+            background: #eaf4ff;
+            border-left: 3px solid #3498db;
         }
 
         .prompt-delete-btn {
