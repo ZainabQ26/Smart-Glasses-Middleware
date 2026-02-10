@@ -321,6 +321,7 @@ public class ConversationsControllerTests
             conversationId,
             "user",
             "Hello",
+            null,
             null))
             .ReturnsAsync(message);
 
@@ -363,6 +364,7 @@ public class ConversationsControllerTests
             conversationId,
             "assistant",
             "Hello back",
+            null,
             "gpt-4"))
             .ReturnsAsync(message);
 
@@ -384,6 +386,7 @@ public class ConversationsControllerTests
             conversationId,
             "assistant",
             "Hello back",
+            null,
             "gpt-4"), Times.Once);
     }
 
@@ -398,6 +401,7 @@ public class ConversationsControllerTests
             It.IsAny<Guid>(),
             It.IsAny<string>(),
             It.IsAny<string>(),
+            It.IsAny<List<Guid>?>(),
             It.IsAny<string?>()))
             .ThrowsAsync(new ArgumentException("Conversation not found"));
 
@@ -427,6 +431,7 @@ public class ConversationsControllerTests
             It.IsAny<Guid>(),
             It.IsAny<string>(),
             It.IsAny<string>(),
+            It.IsAny<List<Guid>?>(),
             It.IsAny<string?>()))
             .ThrowsAsync(new Exception("Database error"));
 

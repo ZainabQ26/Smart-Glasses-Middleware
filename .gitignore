@@ -110,3 +110,7 @@ secrets/
 # Ignore test result artifacts and large dumps
 tests/**/TestResults/
 *.dmp
+
+# Build output
+bin/
+obj/
