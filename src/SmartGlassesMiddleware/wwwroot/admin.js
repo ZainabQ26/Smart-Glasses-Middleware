@@ -265,7 +265,7 @@ async function loadPrompts(reset = false) {
                         // Try to find group name from state.allGroups cache
                         const group = state.allGroups.find(g => String(getProp(g, 'id')) === String(groupId));
                         const groupName = group ? (getProp(group, 'name') || 'Group') : 'Group';
-                        groupBadge = `<span style="font-size:10px;color:#fff;background:#3498db;padding:2px 6px;border-radius:10px;margin-left:4px;" title="Associated with group: ${escapeHtml(groupName)}">📁 ${escapeHtml(groupName)}</span>`;
+                        groupBadge = `<span class="group-badge" title="Associated with group: ${escapeHtml(groupName)}">📁 ${escapeHtml(groupName)}</span>`;
                     }
 
                     const displayName = escapeHtml(title || 'Untitled');
@@ -1235,15 +1235,15 @@ function createGroupCard(group) {
         <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 8px;">
             <div style="position: relative; flex: 1;">
                 <input type="text" value="${escapeHtml(name)}" readonly data-group-id="${id}" style="width: 100%; padding: 12px 90px 12px 12px; border: 1px solid ${isActive ? '#3498db' : '#ddd'}; border-radius: 4px; font-size: 14px; background: ${isActive ? '#ffffff' : 'white'}; cursor: pointer;">
-                <span data-group-active-badge="true" style="position: absolute; right: 50px; top: 50%; transform: translateY(-50%); font-size: 11px; color: #ffffff; background: #3498db; padding: 2px 6px; border-radius: 10px; display: ${isActive ? 'inline-flex' : 'none'}; align-items: center;">Active</span>
+                <span data-group-active-badge="true" class="group-badge" style="position: absolute; right: 50px; top: 50%; transform: translateY(-50%); display: ${isActive ? 'inline-flex' : 'none'};">Active</span>
                 <span class="group-item-paperclip" data-group-id="${id}" data-group-name="${escapeHtml(name)}" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 24px; color: #95a5a6; cursor: pointer;">📎</span>
             </div>
             <button type="button" class="group-item-delete" data-group-id="${id}" style="padding: 8px 16px; background: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-size: 14px;">Delete</button>
         </div>
         <div style="display: flex; gap: 8px; padding-left: 12px; font-size: 12px; color: #666;">
-            <span title="${fileCount} file(s)">📄 ${fileCount}</span>
-            <span title="${promptCount} prompt(s)">💬 ${promptCount}</span>
-            <span title="${conversationCount} conversation(s)">🗨️ ${conversationCount}</span>
+            <span title="${fileCount} file(s)" aria-label="${fileCount} files">📄 ${fileCount} files</span>
+            <span title="${promptCount} prompt(s)" aria-label="${promptCount} prompts">💬 ${promptCount} prompts</span>
+            <span title="${conversationCount} conversation(s)" aria-label="${conversationCount} conversations">🗨️ ${conversationCount} conversations</span>
         </div>
     `;
 
