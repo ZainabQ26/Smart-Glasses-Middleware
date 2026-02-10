@@ -3027,8 +3027,6 @@ async function init() {
                 // Reload prompts list to show conversations
                 loadPrompts(true);
                 
-                showMessage('Starting new conversation', 'success');
-                
             } catch (error) {
                 console.error('Error starting new conversation:', error);
                 showMessage('Failed to start new conversation', 'error');
