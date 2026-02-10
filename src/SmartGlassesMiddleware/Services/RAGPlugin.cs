@@ -1,5 +1,6 @@
 using Microsoft.SemanticKernel;
 using System.ComponentModel;
+using SmartGlassesMiddleware.Models;
 
 namespace SmartGlassesMiddleware.Services;
 

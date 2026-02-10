@@ -7,6 +7,7 @@ This repository contains the backend middleware for a smart glasses application.
   - **Multi-format Document Processing**: Extracts text and layout information from PDFs (digital and scanned), DOCX, TXT, and various image formats.
   - **Vector Embeddings**: Generates embeddings for document chunks using configurable models and stores them in PostgreSQL with `pgvector` for efficient similarity searches.
   - **Semantic Querying**: Understands the meaning behind your questions to find the most relevant information.
+  - **Iterative RAG**: AI can dynamically query the document database as needed, allowing for complex, multi-faceted queries. See [Iterative RAG Documentation](docs/ITERATIVE_RAG.md).
   - **Document Highlighting**: Pinpoints and highlights the exact location of information within your documents.
   - **Resource Groups**: Organize documents and prompts into groups for targeted querying.
   - For more details, see the [RAG Process Documentation](docs/RAG_PROCESS.md).

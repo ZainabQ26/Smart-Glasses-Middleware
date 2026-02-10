@@ -126,6 +126,8 @@ services:
       - RAG__EmbeddingMaxConcurrency=${RAG_EMBEDDING_MAX_CONCURRENCY:-5}
       - RAG__UseVectorDB=${RAG_USE_VECTOR_DB:-true}
       - RAG__VectorSimilarityThreshold=${RAG_VECTOR_SIMILARITY_THRESHOLD:-0.7}
+      - RAG__UseIterativeRetrieval=${RAG_USE_ITERATIVE_RETRIEVAL:-false}
+      - RAG__MaxIterativeQueries=${RAG_MAX_ITERATIVE_QUERIES:-5}
       - Logging__LogLevel__Default=${LOG_LEVEL_DEFAULT:-Information}
       - Logging__LogLevel__Microsoft.AspNetCore=${LOG_LEVEL_ASPNETCORE:-Warning}
       - Logging__LogLevel__SmartGlassesMiddleware=${LOG_LEVEL_APP:-Information}
