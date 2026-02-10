@@ -1391,11 +1391,13 @@ function createGroupCard(group) {
         return null;
     }
     
-    // Get counts for files and conversations (remove prompts)
+    // Get counts for files, conversations, and reminders
     const files = getProp(group, 'files') || [];
     const conversations = getProp(group, 'conversations') || [];
+    const reminders = getProp(group, 'reminders') || [];
     const fileCount = Array.isArray(files) ? files.length : 0;
     const conversationCount = Array.isArray(conversations) ? conversations.length : 0;
+    const reminderCount = Array.isArray(reminders) ? reminders.length : 0;
 
     div.dataset.groupCard = 'true';
     div.dataset.groupId = id;
@@ -1413,6 +1415,7 @@ function createGroupCard(group) {
         <div style="display: flex; gap: 8px; padding-left: 12px; font-size: 12px; color: #666;">
             <span title="${fileCount} file(s)"><span aria-hidden="true">📄</span> <span aria-label="${fileCount} files">${fileCount} files</span></span>
             <span title="${conversationCount} conversation(s)"><span aria-hidden="true">🗨️</span> <span aria-label="${conversationCount} conversations">${conversationCount} conversations</span></span>
+            <span title="${reminderCount} reminder(s)"><span aria-hidden="true">⏰</span> <span aria-label="${reminderCount} reminders">${reminderCount} reminders</span></span>
         </div>
     `;
 
@@ -1838,11 +1841,13 @@ async function manageGroupResources(groupId, groupName) {
         const groupFiles = getProp(currentGroup, 'files') || [];
         const groupPrompts = getProp(currentGroup, 'prompts') || [];
         const groupConversations = getProp(currentGroup, 'conversations') || [];
+        const groupReminders = getProp(currentGroup, 'reminders') || [];
         const groupFileIds = new Set(groupFiles.map(f => getProp(f, 'id')));
         const groupPromptIds = new Set(groupPrompts.map(p => getProp(p, 'id')));
         
         console.log('[MANAGE] Group files:', groupFiles);
         console.log('[MANAGE] Group conversations:', groupConversations);
+        console.log('[MANAGE] Group reminders:', groupReminders);
         
         const modalBody = document.getElementById('modal-content-body');
 
@@ -1929,6 +1934,36 @@ async function manageGroupResources(groupId, groupName) {
             }).join('');
         }
         
+        // Build reminders list HTML
+        let remindersListHTML = '';
+        if (groupReminders.length === 0) {
+            remindersListHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No reminders yet</div>';
+        } else {
+            remindersListHTML = groupReminders.map(reminder => {
+                const reminderId = getProp(reminder, 'id');
+                const reminderName = getProp(reminder, 'name') || 'Untitled';
+                const fileCount = getProp(reminder, 'fileCount') || 0;
+                const conversationCount = getProp(reminder, 'conversationCount') || 0;
+                
+                return `
+                    <div style="padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0;">
+                        <div style="flex: 1; overflow: hidden;">
+                            <div style="font-size: 14px; color: #333; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                ${escapeHtml(reminderName)}
+                            </div>
+                            <div style="font-size: 11px; color: #666; margin-top: 2px;">
+                                📄 ${fileCount} file${fileCount !== 1 ? 's' : ''} · 🗨️ ${conversationCount} conversation${conversationCount !== 1 ? 's' : ''}
+                            </div>
+                        </div>
+                        <button type="button" onclick="manageGroupResources('${reminderId}', '${escapeHtml(reminderName).replace(/'/g, "\\'")}')"
+                            style="padding: 4px 12px; background: #e67e22; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">
+                            View
+                        </button>
+                    </div>
+                `;
+            }).join('');
+        }
+        
         // Attempt to fetch existing mapping for this group and include mapping UI
         let existingMapping = null;
         try {
@@ -1964,6 +1999,12 @@ async function manageGroupResources(groupId, groupName) {
                         <div style="font-weight: 600; color: #2c3e50; margin-bottom: 8px; font-size: 14px;">Conversations</div>
                         <div id="modal-conversations-list" style="flex: 1; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; background: white; max-height: 360px; min-height: 160px;">
                             ${conversationsListHTML}
+                        </div>
+                    </div>
+                    <div style="border: 2px solid #e67e22; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; position: relative;">
+                        <div style="font-weight: 600; color: #2c3e50; margin-bottom: 8px; font-size: 14px;">Reminders</div>
+                        <div id="modal-reminders-list" style="flex: 1; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; background: white; max-height: 360px; min-height: 160px;">
+                            ${remindersListHTML}
                         </div>
                     </div>
                 </div>
