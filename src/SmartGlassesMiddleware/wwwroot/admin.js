@@ -1218,19 +1218,32 @@ function createGroupCard(group) {
     const id = getProp(group, 'id');
     const name = getProp(group, 'name') || 'Untitled';
     const isActive = !!activePromptGroupId && String(activePromptGroupId) === String(id);
+    
+    // Get counts for files, prompts, and conversations
+    const files = getProp(group, 'files') || [];
+    const prompts = getProp(group, 'prompts') || [];
+    const conversations = getProp(group, 'conversations') || [];
+    const fileCount = Array.isArray(files) ? files.length : 0;
+    const promptCount = Array.isArray(prompts) ? prompts.length : 0;
+    const conversationCount = Array.isArray(conversations) ? conversations.length : 0;
 
     div.dataset.groupCard = 'true';
     div.dataset.groupId = id;
     div.style.cssText = `background: ${isActive ? '#eaf4ff' : '#f5f5f5'}; padding: 12px; border-radius: 6px; margin-bottom: 10px; position: relative; border: 2px solid ${isActive ? '#3498db' : 'transparent'};`;
     
     div.innerHTML = `
-        <div style="display: flex; gap: 10px; align-items: center;">
+        <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 8px;">
             <div style="position: relative; flex: 1;">
                 <input type="text" value="${escapeHtml(name)}" readonly data-group-id="${id}" style="width: 100%; padding: 12px 90px 12px 12px; border: 1px solid ${isActive ? '#3498db' : '#ddd'}; border-radius: 4px; font-size: 14px; background: ${isActive ? '#ffffff' : 'white'}; cursor: pointer;">
                 <span data-group-active-badge="true" style="position: absolute; right: 50px; top: 50%; transform: translateY(-50%); font-size: 11px; color: #ffffff; background: #3498db; padding: 2px 6px; border-radius: 10px; display: ${isActive ? 'inline-flex' : 'none'}; align-items: center;">Active</span>
                 <span class="group-item-paperclip" data-group-id="${id}" data-group-name="${escapeHtml(name)}" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 24px; color: #95a5a6; cursor: pointer;">📎</span>
             </div>
             <button type="button" class="group-item-delete" data-group-id="${id}" style="padding: 8px 16px; background: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-size: 14px;">Delete</button>
+        </div>
+        <div style="display: flex; gap: 8px; padding-left: 12px; font-size: 12px; color: #666;">
+            <span title="${fileCount} file(s)">📄 ${fileCount}</span>
+            <span title="${promptCount} prompt(s)">💬 ${promptCount}</span>
+            <span title="${conversationCount} conversation(s)">🗨️ ${conversationCount}</span>
         </div>
     `;
 
