@@ -57,11 +57,25 @@ async function fetchWithRetry(url, options = {}, retries = 3) {
     }
 }
 
+// Helper to safely encode attached files array into a URL-safe JSON string
+function encodeFilesData(msgFiles) {
+    if (!Array.isArray(msgFiles) || msgFiles.length === 0) return '';
+    try {
+        return encodeURIComponent(JSON.stringify(msgFiles.map(f => (
+            typeof f === 'string' ? { name: f } : { name: f.name || f.fileName || 'Document', id: f.id || f.documentId }
+        ))));
+    } catch (e) {
+        console.warn('Failed to encode files data', e);
+        return '';
+    }
+}
+
 // Pagination state
 const state = {
     files: { page: 1, pageSize: 20, hasMore: true, loading: false, data: [] },
     prompts: { page: 1, pageSize: 20, hasMore: true, loading: false, data: [] },
     groups: { page: 1, pageSize: 20, hasMore: true, loading: false, data: [] },
+    reminders: { page: 1, pageSize: 20, hasMore: true, loading: false, data: [] },
     allGroups: [] // Cache of all groups for quick-add
 };
 
@@ -80,6 +94,8 @@ document.querySelectorAll('.tab').forEach(tab => {
             loadFiles(true);
         } else if (tabName === 'prompts') {
             loadPrompts(true);
+        } else if (tabName === 'reminders') {
+            loadReminders(true);
         } else if (tabName === 'groups') {
             loadGroups(true);
             loadAllGroups();
@@ -87,15 +103,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     });
 });
 
-// Show message
-function showMessage(message, type = 'success') {
-    const container = document.getElementById('message-container');
-    const div = document.createElement('div');
-    div.className = `message ${type}`;
-    div.textContent = message;
-    container.appendChild(div);
-    setTimeout(() => div.remove(), 5000);
-}
+// Global `showMessage()` provided by `toasts.js` - do not redefine here
 
 function applyTheme(theme) {
     if (theme === 'dark') {
@@ -180,6 +188,112 @@ async function loadFiles(reset = false) {
         hideLoading('files-list');
         state.files.loading = false;
         showMessage('Error loading files: ' + error.message, 'error');
+    }
+}
+
+// Prompts with lazy loading
+async function loadPrompts(reset = false) {
+    if (state.prompts.loading) return;
+    if (!reset && !state.prompts.hasMore) return;
+
+    if (reset) {
+        state.prompts.page = 1;
+        state.prompts.hasMore = true;
+        state.prompts.data = [];
+        const listEl = document.getElementById('prompts-list');
+        if (listEl) listEl.innerHTML = '';
+    }
+
+    state.prompts.loading = true;
+    showLoading('prompts-list');
+
+    try {
+        // Always load conversations (not groups)
+        const endpoint = `/api/conversations?page=${state.prompts.page}&pageSize=${state.prompts.pageSize}`;
+
+        const response = await fetchWithRetry(endpoint);
+        if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+
+        const result = await response.json();
+        const items = Array.isArray(result) ? result : (result.data || result.Data || []);
+        const pagination = Array.isArray(result) ? {} : (result.pagination || result.Pagination || {});
+
+        hideLoading('prompts-list');
+
+        const list = document.getElementById('prompts-list');
+        if (items && items.length > 0) {
+            state.prompts.data.push(...items);
+            const fragment = document.createDocumentFragment();
+            items.forEach(item => {
+                try {
+                    const div = document.createElement('div');
+                    div.className = 'sidebar-prompt-item';
+
+                    // These are always conversations (not groups)
+                    const isGroup = false;
+
+                    const id = getProp(item, 'id') || getProp(item, 'Id');
+                    const title = getProp(item, 'title') || getProp(item, 'Title') || getProp(item, 'name') || getProp(item, 'Name') || id;
+                    const updated = getProp(item, 'updatedAt') || getProp(item, 'UpdatedAt') || getProp(item, 'lastUpdated') || '';
+                    // derive messages info when present
+                    const messagesArr = getProp(item, 'messages') || getProp(item, 'Messages') || getProp(item, 'MessagesList') || [];
+                    const messageCount = Array.isArray(messagesArr) ? messagesArr.length : (getProp(item, 'messageCount') || getProp(item, 'MessageCount') || 0);
+                    const lastMsg = (Array.isArray(messagesArr) && messagesArr.length > 0)
+                        ? (messagesArr[messagesArr.length - 1].content || messagesArr[messagesArr.length - 1].text || messagesArr[messagesArr.length - 1].message || '')
+                        : (getProp(item, 'lastMessage') || getProp(item, 'snippet') || getProp(item, 'description') || '');
+
+                    div.dataset.conversationId = id;
+                    div.dataset.groupId = getProp(item, 'resourceGroupId') || getProp(item, 'ResourceGroupId') || '';
+
+                    // Don't show group badges in conversation list anymore
+                    
+                    const displayName = escapeHtml(title || 'Untitled');
+                    const timestamp = updated ? new Date(updated).toLocaleString(undefined, {
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    }) : '';
+                    
+                    div.innerHTML = `
+                        <div style="display:block;">
+                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                                <span class="prompt-name" style="font-weight:600;color:#2c3e50;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%;">${displayName}</span>
+                                <span class="badge" style="background:#3498db;color:white;padding:2px 6px;border-radius:10px;font-size:11px;min-width:20px;text-align:center;">${messageCount}</span>
+                            </div>
+                            <div style="font-size:11px;color:#95a5a6;margin-bottom:4px;">${timestamp}</div>
+                            <div style="color:#666;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(String(lastMsg || 'No messages yet'))}</div>
+                        </div>
+                    `;
+
+                    div.addEventListener('click', async () => {
+                        document.querySelectorAll('.sidebar-prompt-item').forEach(i => i.classList.remove('active'));
+                        div.classList.add('active');
+                        activeConversationId = id;
+                        await syncActiveGroupFromConversation(id);
+                        await loadConversationIntoView(id, title);
+                        showMessage('Conversation selected');
+                    });
+
+                    fragment.appendChild(div);
+                } catch (err) {
+                    console.error('Error creating sidebar item', err);
+                }
+            });
+            if (list) list.appendChild(fragment);
+
+            state.prompts.hasMore = pagination.hasNext || pagination.HasNext || false;
+            state.prompts.page++;
+        } else if (reset && list) {
+            list.innerHTML = `<div class="empty-sidebar">No conversations yet</div>`;
+        }
+
+        state.prompts.loading = false;
+    } catch (error) {
+        hideLoading('prompts-list');
+        state.prompts.loading = false;
+        console.error('Error loading prompts/conversations:', error);
+        showMessage('Error loading items: ' + (error.message || error), 'error');
     }
 }
 
@@ -309,78 +423,7 @@ async function previewFile(id, fileName) {
     
     if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) {
         const img = new Image();
-        img.onload = function() {
-            previewContent.innerHTML = `<img src="${previewUrl}" alt="${escapeHtml(fileName)}" style="max-width: 100%; max-height: 500px; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">`;
-        };
-        img.onerror = function() {
-            previewContent.innerHTML = '<p style="color: #e74c3c;">Failed to load image. The file may not exist or there was an error.</p>';
-        };
-        img.src = previewUrl;
-    } else if (ext === 'pdf') {
-        previewContent.innerHTML = `<embed src="${previewUrl}" type="application/pdf" width="100%" height="600px" style="border-radius: 4px;">`;
-    } else {
-        previewContent.innerHTML = `<p style="color: #e74c3c;">Preview not available for this file type.</p>`;
-    }
-}
 
-// Prompts with lazy loading
-async function loadPrompts(reset = false) {
-    if (state.prompts.loading) return;
-    if (!reset && !state.prompts.hasMore) return;
-    
-    if (reset) {
-        state.prompts.page = 1;
-        state.prompts.hasMore = true;
-        state.prompts.data = [];
-        document.getElementById('prompts-list').innerHTML = '';
-    }
-    
-    state.prompts.loading = true;
-    showLoading('prompts-list');
-    
-    try {
-        const response = await fetchWithRetry(`${API_BASE}/prompts?page=${state.prompts.page}&pageSize=${state.prompts.pageSize}`);
-        
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        
-        const result = await response.json();
-        console.log('Prompts API response:', result);
-        // Handle both lowercase and uppercase from API
-        const promptsData = result.data || result.Data || [];
-        const pagination = result.pagination || result.Pagination || {};
-        console.log('Prompts data length:', promptsData.length);
-        
-        const list = document.getElementById('prompts-list');
-        
-        hideLoading('prompts-list');
-        
-        if (promptsData && promptsData.length > 0) {
-            state.prompts.data.push(...promptsData);
-            
-            const fragment = document.createDocumentFragment();
-            promptsData.forEach(prompt => {
-                console.log('[CREATE PROMPT CARD] Creating card for prompt:', prompt);
-                try {
-                    const div = createPromptCard(prompt);
-                    fragment.appendChild(div);
-                    console.log('[CREATE PROMPT CARD] Card created and appended');
-                } catch (err) {
-                    console.error('[CREATE PROMPT CARD] Error creating card:', err);
-                }
-            });
-            list.appendChild(fragment);
-            console.log('[PROMPTS] Fragment appended to list, children count:', list.children.length);
-            
-            state.prompts.hasMore = pagination.hasNext || pagination.HasNext;
-            state.prompts.page++;
-        } else if (reset) {
-            list.innerHTML = '<div class="empty-sidebar">No prompts yet</div>';
-        }
-        
-        state.prompts.loading = false;
-    } catch (error) {
         hideLoading('prompts-list');
         state.prompts.loading = false;
         showMessage('Error loading prompts: ' + error.message, 'error');
@@ -428,7 +471,7 @@ function createPromptCard(prompt) {
 // Removed form submission handler as Auto Groups display conversation history and files
 
 function loadPromptIntoForm(id, name, text) {
-    document.getElementById('prompt-form-title').textContent = 'Prompt';
+    document.getElementById('prompt-form-title').textContent = 'Conversation';
     
     // Parse conversation history and files from the prompt text
     // Assuming text is stored as JSON string with {messages: [], files: []}
@@ -449,9 +492,7 @@ function loadPromptIntoForm(id, name, text) {
     // Show the conversation history in a scrollable box
     const conversationHTML = messages.map(msg => {
         const msgFiles = Array.isArray(msg.files) ? msg.files : [];
-        const filesData = msgFiles.length > 0
-            ? encodeURIComponent(JSON.stringify(msgFiles.map(f => (typeof f === 'string' ? { name: f } : { name: f.name || f.fileName || 'Document', id: f.id || f.documentId }))))
-            : '';
+        const filesData = encodeFilesData(msgFiles);
         const filesTitle = msgFiles.length > 0
             ? `${msgFiles.length} file(s) attached: ${msgFiles.map(f => (typeof f === 'string' ? f : f.name || f.fileName || 'Document')).join(', ')}`
             : '';
@@ -548,7 +589,7 @@ function loadPromptIntoForm(id, name, text) {
 
 function createNewPrompt() {
     document.querySelectorAll('.sidebar-prompt-item').forEach(item => item.classList.remove('active'));
-    document.getElementById('prompt-form-title').textContent = 'Prompt';
+    document.getElementById('prompt-form-title').textContent = 'Conversation';
     
     // Reset conversation history
     currentConversationHistory = [];
@@ -556,7 +597,7 @@ function createNewPrompt() {
     // Reset response section
     const responseContent = document.getElementById('response-content');
     if (responseContent) {
-        responseContent.innerHTML = '<span style="color: #999;">Enter a prompt and click Send to get a response</span>';
+        responseContent.innerHTML = '<span style="color: #999;">Enter a message and click Send to get a response</span>';
     }
     
     // Clear input
@@ -566,14 +607,81 @@ function createNewPrompt() {
     }
 }
 
+async function loadConversationIntoView(conversationId, title) {
+    if (!conversationId) return;
+    try {
+        const responseContent = document.getElementById('response-content');
+        if (responseContent) {
+            responseContent.innerHTML = '<span style="color: #999;">Loading conversation...</span>';
+        }
+
+        const res = await fetchWithRetry(`/api/conversations/${conversationId}`);
+        if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        }
+
+        const conversation = await res.json().catch(() => null);
+        const messages = (conversation && (conversation.messages || conversation.Messages)) || [];
+
+        currentConversationHistory = Array.isArray(messages)
+            ? messages.map(m => ({
+                role: (m.role || m.Role || '').toLowerCase() === 'assistant' ? 'bot' : (m.role || m.Role || 'user').toLowerCase(),
+                content: m.content || m.Content || ''
+            }))
+            : [];
+
+        const promptIdInput = document.getElementById('prompt-id');
+        if (promptIdInput) promptIdInput.value = '';
+        const promptTitle = document.getElementById('prompt-form-title');
+        if (promptTitle) promptTitle.textContent = title || 'Conversation';
+
+        if (currentConversationHistory.length === 0) {
+            if (responseContent) {
+                responseContent.innerHTML = '<span style="color: #999;">No messages yet</span>';
+            }
+            return;
+        }
+
+        const conversationHTML = currentConversationHistory.map(msg => {
+            return `
+                <div style="margin-bottom: 12px;">
+                    <div style="color: ${msg.role === 'user' ? '#3498db' : '#27ae60'}; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
+                        <span>${msg.role === 'user' ? 'User' : 'Bot'}:</span>
+                    </div>
+                    <div style="color: #555; padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
+                </div>
+            `;
+        }).join('');
+
+        if (responseContent) {
+            responseContent.innerHTML = `
+                <div style="max-height: 500px; overflow-y: auto; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+                    ${conversationHTML}
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('[CONVERSATION] Failed to load conversation:', error);
+        showMessage('Failed to load conversation: ' + error.message, 'error');
+    }
+}
+
 // Handle file attachments for prompts
 let promptPreviewFile = null;
 let promptSelectedFiles = [];
+let reminderSelectedFiles = []; // Reminder file attachments (separate from prompts)
 let currentConversationHistory = []; // Track conversation messages
+let activePromptGroupId = null;
+// conversation mapping is now server-side; frontend will not persist ConversationId
+let activeConversationId = null;
 window.promptSelectedFiles = promptSelectedFiles;
+window.reminderSelectedFiles = reminderSelectedFiles;
 let lastAutoSavedSnapshot = null;
 let autoSaveInFlight = false;
 const draftStorageKey = 'adminPromptDraft';
+// Toggle automatic draft saving/restoring in the browser (false = disabled)
+// NOTE: enable to restore autosave for groups and drafts
+const AUTO_SAVE_ENABLED = true;
 
 function buildConversationSnapshot() {
     const files = promptSelectedFiles.map(f => ({
@@ -592,17 +700,11 @@ function hasConversationContent() {
 }
 
 async function autoSaveCurrentConversation(reason) {
-    if (autoSaveInFlight || !hasConversationContent()) return;
+    if (!AUTO_SAVE_ENABLED || autoSaveInFlight || !hasConversationContent()) return null;
 
     const snapshot = buildConversationSnapshot();
     const snapshotText = JSON.stringify(snapshot);
-    if (snapshotText === lastAutoSavedSnapshot) return;
-
-    try {
-        localStorage.setItem(draftStorageKey, snapshotText);
-    } catch (error) {
-        console.warn('[AUTO SAVE] Failed to write draft to storage:', error);
-    }
+    if (snapshotText === lastAutoSavedSnapshot) return null;
 
     autoSaveInFlight = true;
     try {
@@ -620,22 +722,64 @@ async function autoSaveCurrentConversation(reason) {
             body: JSON.stringify(payload)
         });
 
-        if (response.ok) {
-            const result = await response.json().catch(() => null);
-            const savedId = result?.id || result?.Id;
-            if (savedId) {
-                const promptIdInput = document.getElementById('prompt-id');
-                if (promptIdInput) {
-                    promptIdInput.value = savedId;
-                }
-            }
-            lastAutoSavedSnapshot = snapshotText;
-            console.log(`[AUTO SAVE] Conversation saved (${reason})`);
-        } else {
-            console.warn('[AUTO SAVE] Failed to save conversation:', response.status);
+        if (!response.ok) {
+            console.warn('[AUTO SAVE] Failed to save conversation to server:', response.status);
+            return null;
         }
+
+        const result = await response.json().catch(() => null);
+        const savedId = result?.id || result?.Id || null;
+        if (savedId) {
+            const promptIdInput = document.getElementById('prompt-id');
+            if (promptIdInput) promptIdInput.value = savedId;
+
+            // Fetch canonical saved record from server and load into UI
+            try {
+                // Try direct GET by id first (some APIs may not expose GET /prompts/{id})
+                let savedPrompt = null;
+                let savedRes = await fetchWithRetry(`${API_BASE}/prompts/${savedId}`);
+                if (savedRes.ok) {
+                    const savedJson = await savedRes.json().catch(() => null);
+                    savedPrompt = (savedJson && (savedJson.data || savedJson)) || savedJson || null;
+                } else if (savedRes.status === 405 || savedRes.status === 404) {
+                    // Fallback: fetch the prompts list and find the saved item
+                    const listRes = await fetchWithRetry(`${API_BASE}/prompts?page=1&pageSize=1000`);
+                    if (listRes.ok) {
+                        const listJson = await listRes.json().catch(() => null);
+                        const prompts = (listJson && (listJson.data || listJson.Data)) || listJson || [];
+                        savedPrompt = prompts.find(p => (p.id === savedId || p.Id === savedId || p.Id === (savedId + '')) ) || null;
+                    }
+                }
+
+                if (savedPrompt) {
+                    const promptText = savedPrompt.PromptText || savedPrompt.promptText || '';
+                    try {
+                        loadPromptIntoForm(savedId, savedPrompt.name || chatName, promptText);
+                    } catch (e) {
+                        console.warn('[AUTO SAVE] loadPromptIntoForm failed:', e);
+                    }
+
+                    // Refresh sidebar lists so other clients / tabs see the new entry
+                    try {
+                        await loadPrompts(true);
+                        await loadAllGroups(true);
+                    } catch (e) {
+                        console.warn('[AUTO SAVE] Failed to refresh lists:', e);
+                    }
+                } else {
+                    console.warn('[AUTO SAVE] Canonical prompt not found after save');
+                }
+            } catch (fetchErr) {
+                console.warn('[AUTO SAVE] Error fetching canonical prompt:', fetchErr);
+            }
+        }
+
+        lastAutoSavedSnapshot = snapshotText;
+        console.log(`[AUTO SAVE] Conversation saved to server (${reason})`);
+        return savedId;
     } catch (error) {
-        console.warn('[AUTO SAVE] Error saving conversation:', error);
+        console.warn('[AUTO SAVE] Error saving conversation to server:', error);
+        return null;
     } finally {
         autoSaveInFlight = false;
     }
@@ -660,9 +804,7 @@ function restoreDraftConversation() {
         if (currentConversationHistory.length > 0) {
             const conversationHTML = currentConversationHistory.map(msg => {
                 const msgFiles = Array.isArray(msg.files) ? msg.files : [];
-                const filesData = msgFiles.length > 0
-                    ? encodeURIComponent(JSON.stringify(msgFiles.map(f => (typeof f === 'string' ? { name: f } : { name: f.name || f.fileName || 'Document', id: f.id || f.documentId }))))
-                    : '';
+                const filesData = encodeFilesData(msgFiles);
                 const filesTitle = msgFiles.length > 0
                     ? `${msgFiles.length} file(s) attached: ${msgFiles.map(f => (typeof f === 'string' ? f : f.name || f.fileName || 'Document')).join(', ')}`
                     : '';
@@ -762,81 +904,166 @@ function updatePromptFilesList() {
     }
 }
 
-function togglePromptFileSelection(index) {
-    if (promptSelectedFiles[index]) {
-        promptSelectedFiles[index].selected = !promptSelectedFiles[index].selected;
-        updatePromptFilesList();
-    }
-}
+function updateActiveGroupStyles() {
+    document.querySelectorAll('[data-group-card="true"]').forEach(card => {
+        const groupId = card.dataset.groupId;
+        const isActive = !!activePromptGroupId && groupId === String(activePromptGroupId);
+        const badge = card.querySelector('[data-group-active-badge="true"]');
+        const input = card.querySelector('input[data-group-id]');
 
-function removePromptFile(index) {
-    promptSelectedFiles.splice(index, 1);
-    updatePromptFilesList();
-    showMessage('File removed', 'success');
-}
-
-async function deleteSelectedPromptFiles() {
-    const selected = promptSelectedFiles.filter(f => f.selected);
-    if (selected.length === 0) {
-        showMessage('No files selected', 'error');
-        return;
-    }
-    
-    if (!confirm(`Delete ${selected.length} file(s)?`)) {
-        return;
-    }
-    
-    // Delete uploaded documents from server if they have IDs
-    for (const fileObj of selected) {
-        const documentId = fileObj.documentId || fileObj.id;
-        if (documentId) {
-            try {
-                const deleteRes = await fetch(`/api/documents/${documentId}`, {
-                    method: 'DELETE'
-                });
-                if (!deleteRes.ok) {
-                    console.error(`Failed to delete document ${fileObj.name} from server`);
-                }
-            } catch (error) {
-                console.error('Error deleting document from server:', error);
-            }
+        card.style.background = isActive ? '#eaf4ff' : '#f5f5f5';
+        card.style.border = isActive ? '2px solid #3498db' : '2px solid transparent';
+        if (input) {
+            input.style.background = isActive ? '#ffffff' : 'white';
+            input.style.borderColor = isActive ? '#3498db' : '#ddd';
         }
-    }
-    
-    // Remove from local list
-    promptSelectedFiles = promptSelectedFiles.filter(f => !f.selected);
-    updatePromptFilesList();
-    showMessage(`${selected.length} file(s) deleted`, 'success');
-    
-    // Reload files list to reflect deletion
-    if (typeof loadFiles === 'function') {
-        loadFiles(true);
+        if (badge) {
+            badge.style.display = isActive ? 'inline-flex' : 'none';
+        }
+    });
+}
+
+function getConversationGroupKey() {
+    return activePromptGroupId ? String(activePromptGroupId) : 'ungrouped';
+}
+
+function setActivePromptGroup(groupId, groupName) {
+    activePromptGroupId = groupId || null;
+    updateActiveGroupStyles();
+    if (groupName) {
+        showMessage(`Active group set to: ${groupName}`);
     }
 }
 
-window.updatePromptFilesList = updatePromptFilesList;
-window.togglePromptFileSelection = togglePromptFileSelection;
-window.removePromptFile = removePromptFile;
-window.deleteSelectedPromptFiles = deleteSelectedPromptFiles;
+async function syncActiveGroupFromConversation(conversationId) {
+    if (!conversationId) return;
+    try {
+        const res = await fetchWithRetry(`/api/conversations/${conversationId}`);
+        if (!res.ok) return;
+        const conversation = await res.json().catch(() => null);
+        if (!conversation) return;
+
+        const groupId = getProp(conversation, 'resourceGroupId')
+            || getProp(conversation, 'ResourceGroupId')
+            || getProp(getProp(conversation, 'resourceGroup'), 'id')
+            || getProp(getProp(conversation, 'ResourceGroup'), 'id');
+        const groupName = getProp(getProp(conversation, 'resourceGroup'), 'name')
+            || getProp(getProp(conversation, 'ResourceGroup'), 'name');
+
+        if (groupId) {
+            activePromptGroupId = groupId;
+            updateActiveGroupStyles();
+            await loadGroups(true);
+            await loadAllGroups(true);
+        }
+    } catch (error) {
+        console.warn('[AUTO GROUP] Failed to sync active group:', error);
+    }
+}
+
+async function restoreDraftConversation() {
+    try {
+        // Fetch recent prompts from server and try to find the most recent prompt
+        // whose PromptText looks like an autosave snapshot (messages/files JSON)
+        const res = await fetchWithRetry(`${API_BASE}/prompts?page=1&pageSize=20`);
+        if (!res.ok) return false;
+        const json = await res.json().catch(() => null);
+        const prompts = (json && (json.data || json.Data)) || [];
+
+        let found = null;
+        for (const p of prompts) {
+            const text = p.PromptText || p.promptText || p.Prompttext || p.prompttext;
+            if (!text) continue;
+            try {
+                const draft = JSON.parse(text);
+                if (draft && (Array.isArray(draft.messages) || Array.isArray(draft.files))) {
+                    found = { draft, id: p.Id || p.id };
+                    break;
+                }
+            } catch { /* not JSON */ }
+        }
+
+        if (!found) return false;
+
+        const draft = found.draft;
+        currentConversationHistory = Array.isArray(draft.messages) ? draft.messages : [];
+        promptSelectedFiles = Array.isArray(draft.files) ? draft.files.map(f => ({
+            name: f.name || 'Document',
+            documentId: f.id || f.documentId,
+            selected: false
+        })) : [];
+        window.promptSelectedFiles = promptSelectedFiles;
+        updatePromptFilesList();
+
+        const promptIdInput = document.getElementById('prompt-id');
+        if (promptIdInput && found.id) promptIdInput.value = found.id;
+
+        if (currentConversationHistory.length > 0) {
+            const conversationHTML = currentConversationHistory.map(msg => {
+                const msgFiles = Array.isArray(msg.files) ? msg.files : [];
+                const filesData = encodeFilesData(msgFiles);
+                const filesTitle = msgFiles.length > 0
+                    ? `${msgFiles.length} file(s) attached: ${msgFiles.map(f => (typeof f === 'string' ? f : f.name || f.fileName || 'Document')).join(', ')}`
+                    : '';
+                const msgSources = Array.isArray(msg.sources) ? msg.sources : [];
+                const msgSourcesHtml = msgSources.length > 0 ? `
+                    <div style="margin-top: 8px; padding: 8px; background: #fff; border: 1px solid #dee2e6; border-radius: 4px;">
+                        <div style="font-weight: 600; color: #2c3e50; margin-bottom: 6px; font-size: 0.8rem;">Sources Used:</div>
+                        ${msgSources.map(source => {
+                            const documentId = source.documentId || source.DocumentId;
+                            const fileName = source.fileName || source.FileName || 'Document';
+                            const page = source.pageNumber || source.PageNumber;
+                            const label = page ? `${fileName} (p.${page})` : fileName;
+                            const href = documentId ? `/api/documents/${documentId}/download` : '#';
+                            const linkStyle = documentId ? 'color: #3498db; text-decoration: underline;' : 'color: #95a5a6; text-decoration: none;';
+                            return `
+                                <div style="display: flex; align-items: center; gap: 8px; font-size: 12px;">
+                                    <a href="${href}" target="_blank" style="${linkStyle}" onclick="${documentId ? '' : 'return false;'}">${escapeHtml(label)}</a>
+                                    ${documentId ? `<button type=\"button\" onclick=\"previewDocumentFile('${documentId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')\" style=\"padding: 2px 6px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 11px;\">Preview</button>` : ''}
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                ` : '';
+
+                return `
+                    <div style="margin-bottom: 12px;">
+                        <div style="color: ${msg.role === 'user' ? '#3498db' : '#27ae60'}; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
+                            <span>${msg.role === 'user' ? 'User' : 'Bot'}:</span>
+                            ${msgFiles.length > 0 ? `<button type=\"button\" onclick=\"showAttachedFilesModal('${filesData}')\" style=\"background: none; border: none; font-size: 16px; color: #3498db; cursor: pointer; padding: 0;\" title=\"${escapeHtml(filesTitle)}\">📎</button>` : ''}
+                        </div>
+                        <div style="color: #555; padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
+                        ${msg.role === 'bot' ? msgSourcesHtml : ''}
+                    </div>
+`;
+            }).join('');
+
+            const responseContent = document.getElementById('response-content');
+            if (responseContent) responseContent.innerHTML = conversationHTML;
+        }
+
+        return true;
+    } catch (error) {
+        console.warn('[AUTO SAVE] Failed to restore draft from server:', error);
+        return false;
+    }
+}
 
 async function deletePrompt(id) {
     if (!confirm('Are you sure you want to delete this prompt?')) return;
-    
+
     try {
-        const response = await fetch(`${API_BASE}/prompts/${id}`, {
-            method: 'DELETE'
-        });
-        
+        const response = await fetch(`${API_BASE}/prompts/${id}`, { method: 'DELETE' });
         if (response.ok || response.status === 204) {
             showMessage('Prompt deleted successfully');
             await loadPrompts(true);
             await loadAllGroups(true);
         } else {
-            const error = await response.json();
-            showMessage(error.detail || 'Error deleting prompt', 'error');
+            const error = await response.json().catch(() => null);
+            showMessage((error && (error.detail || error.error)) || 'Error deleting prompt', 'error');
         }
     } catch (error) {
-        showMessage('Error deleting prompt: ' + error.message, 'error');
+        showMessage('Error deleting prompt: ' + (error?.message || error), 'error');
     }
 }
 
@@ -887,6 +1114,30 @@ function trackPrompt() {
 // Make functions globally available
 window.trackPrompt = trackPrompt;
 window.createNewPrompt = createNewPrompt;
+window.viewConversation = async function(conversationId, title) {
+    try {
+        // Close the modal
+        const modal = document.getElementById('manage-group-modal');
+        if (modal) modal.classList.remove('active');
+        
+        // Switch to the prompts tab if not already there
+        const promptsTab = document.querySelector('.tab[data-tab="prompts"]');
+        if (promptsTab) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            promptsTab.classList.add('active');
+            document.getElementById('prompts').classList.add('active');
+        }
+        
+        // Load the conversation into view
+        activeConversationId = conversationId;
+        await loadConversationIntoView(conversationId, title);
+        showMessage(`Loaded conversation: ${title}`, 'success');
+    } catch (error) {
+        console.error('[VIEW CONVERSATION] Error:', error);
+        showMessage('Failed to load conversation: ' + error.message, 'error');
+    }
+};
 
 // Groups with lazy loading
 async function loadGroups(reset = false) {
@@ -917,6 +1168,48 @@ async function loadGroups(reset = false) {
         const pagination = result.pagination || result.Pagination || {};
         console.log('Groups data length:', groupsData.length);
         
+        // Check for and delete empty groups
+        const emptyGroups = groupsData.filter(group => {
+            const files = getProp(group, 'files') || [];
+            const prompts = getProp(group, 'prompts') || [];
+            const conversations = getProp(group, 'conversations') || [];
+            const fileCount = Array.isArray(files) ? files.length : 0;
+            const promptCount = Array.isArray(prompts) ? prompts.length : 0;
+            const conversationCount = Array.isArray(conversations) ? conversations.length : 0;
+            return fileCount === 0 && promptCount === 0 && conversationCount === 0;
+        });
+        
+        // Auto-delete empty groups in parallel
+        if (emptyGroups.length > 0) {
+            console.log(`[AUTO-DELETE] Found ${emptyGroups.length} empty groups, deleting...`);
+            const deletePromises = emptyGroups.map(async (group) => {
+                const id = getProp(group, 'id');
+                const name = getProp(group, 'name') || 'Untitled';
+                console.log(`[AUTO-DELETE] Deleting empty group: ${name} (${id})`);
+                try {
+                    const deleteRes = await fetch(`${API_BASE}/groups/${id}`, { method: 'DELETE' });
+                    if (deleteRes.ok || deleteRes.status === 204) {
+                        console.log(`[AUTO-DELETE] Successfully deleted empty group: ${name}`);
+                        return id;
+                    } else {
+                        console.warn(`[AUTO-DELETE] Failed to delete empty group: ${name}`, deleteRes.status);
+                        return null;
+                    }
+                } catch (err) {
+                    console.error(`[AUTO-DELETE] Error deleting empty group: ${name}`, err);
+                    return null;
+                }
+            });
+            
+            const deletedIds = (await Promise.all(deletePromises)).filter(id => id !== null);
+            const deletedIdsSet = new Set(deletedIds);
+            
+            // Filter out deleted groups using Set for O(1) lookup
+            const validGroups = groupsData.filter(g => !deletedIdsSet.has(getProp(g, 'id')));
+            groupsData.length = 0;
+            groupsData.push(...validGroups);
+        }
+        
         const list = document.getElementById('groups-list');
         
         hideLoading('groups-list');
@@ -927,7 +1220,10 @@ async function loadGroups(reset = false) {
             const fragment = document.createDocumentFragment();
             groupsData.forEach(group => {
                 const div = createGroupCard(group);
-                fragment.appendChild(div);
+                // Skip null returns (reminders are filtered out)
+                if (div) {
+                    fragment.appendChild(div);
+                }
             });
             list.appendChild(fragment);
             
@@ -945,22 +1241,157 @@ async function loadGroups(reset = false) {
     }
 }
 
-function createGroupCard(group) {
-    const div = document.createElement('div');
-    div.style.cssText = 'background: #f5f5f5; padding: 12px; border-radius: 4px; margin-bottom: 10px; position: relative;';
+async function loadReminders(reset = false) {
+    if (state.reminders.loading) return;
+    if (!reset && !state.reminders.hasMore) return;
     
-    const id = getProp(group, 'id');
-    const name = getProp(group, 'name') || 'Untitled';
+    if (reset) {
+        state.reminders.page = 1;
+        state.reminders.hasMore = true;
+        state.reminders.data = [];
+        document.getElementById('reminders-list').innerHTML = '';
+    }
+    
+    state.reminders.loading = true;
+    showLoading('reminders-list');
+    
+    try {
+        // Load all groups and filter for those with description "Reminder"
+        const response = await fetchWithRetry(`${API_BASE}/groups?page=${state.reminders.page}&pageSize=${state.reminders.pageSize}`);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const result = await response.json();
+        const groupsData = result.data || result.Data || [];
+        const pagination = result.pagination || result.Pagination || {};
+        
+        // Filter for reminders (groups with description "Reminder" - case insensitive)
+        const remindersData = groupsData.filter(g => {
+            const desc = getProp(g, 'description') || getProp(g, 'Description') || '';
+            return desc.toLowerCase() === 'reminder';
+        });
+        
+        // NOTE: Reminders can exist without files, so we don't auto-delete empty reminders
+        // This is different from groups which require at least one resource
+        
+        const list = document.getElementById('reminders-list');
+        hideLoading('reminders-list');
+        
+        if (remindersData && remindersData.length > 0) {
+            state.reminders.data.push(...remindersData);
+            
+            const fragment = document.createDocumentFragment();
+            remindersData.forEach(reminder => {
+                const div = createReminderCard(reminder);
+                fragment.appendChild(div);
+            });
+            list.appendChild(fragment);
+            
+            state.reminders.hasMore = pagination.hasNext || pagination.HasNext;
+            state.reminders.page++;
+        } else if (reset) {
+            list.innerHTML = '<div class="empty-state"><p>No reminders created yet</p></div>';
+        }
+        
+        state.reminders.loading = false;
+    } catch (error) {
+        hideLoading('reminders-list');
+        state.reminders.loading = false;
+        showMessage('Error loading reminders: ' + error.message, 'error');
+    }
+}
+
+function createReminderCard(reminder) {
+    const div = document.createElement('div');
+    const id = getProp(reminder, 'id');
+    const name = getProp(reminder, 'name') || 'Untitled';
+    
+    const files = getProp(reminder, 'files') || [];
+    const fileCount = Array.isArray(files) ? files.length : 0;
+
+    div.dataset.reminderId = id;
+    div.style.cssText = 'background: #f5f5f5; padding: 12px; border-radius: 6px; margin-bottom: 10px; position: relative; border: 2px solid transparent;';
     
     div.innerHTML = `
-        <div style="display: flex; gap: 10px; align-items: center;">
+        <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 8px;">
             <div style="position: relative; flex: 1;">
-                <input type="text" value="${escapeHtml(name)}" readonly data-group-id="${id}" style="width: 100%; padding: 12px 50px 12px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; background: white; cursor: default;">
+                <input type="text" value="${escapeHtml(name)}" readonly data-reminder-id="${id}" style="width: 100%; padding: 12px 50px 12px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; background: white; cursor: pointer;">
+                <span class="reminder-item-paperclip" data-reminder-id="${id}" data-reminder-name="${escapeHtml(name)}" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 24px; color: #95a5a6; cursor: pointer;">📎</span>
+            </div>
+            <button type="button" class="reminder-item-delete" data-reminder-id="${id}" style="padding: 8px 16px; background: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-size: 14px;">Delete</button>
+        </div>
+        <div style="display: flex; gap: 8px; padding-left: 12px; font-size: 12px; color: #666;">
+            <span title="${fileCount} file(s)"><span aria-hidden="true">📄</span> <span aria-label="${fileCount} files">${fileCount} files</span></span>
+        </div>
+    `;
+
+    // Attach event listener to delete button
+    div.querySelector('.reminder-item-delete').addEventListener('click', async (e) => {
+        if (!confirm('Are you sure you want to delete this reminder?')) return;
+        try {
+            const response = await fetch(`${API_BASE}/groups/${id}`, { method: 'DELETE' });
+            if (response.ok) {
+                showMessage('Reminder deleted successfully');
+                await loadReminders(true);
+            } else {
+                showMessage('Error deleting reminder', 'error');
+            }
+        } catch (error) {
+            showMessage('Error deleting reminder: ' + error.message, 'error');
+        }
+    });
+    
+    return div;
+}
+
+function createGroupCard(group) {
+    const div = document.createElement('div');
+    const id = getProp(group, 'id');
+    const name = getProp(group, 'name') || 'Untitled';
+    const description = getProp(group, 'description') || getProp(group, 'Description') || '';
+    const isActive = !!activePromptGroupId && String(activePromptGroupId) === String(id);
+    
+    // Skip if this is a reminder (will be shown in Reminders tab)
+    if (description && description.toLowerCase() === 'reminder') {
+        return null;
+    }
+    
+    // Get counts for files, conversations, and reminders
+    const files = getProp(group, 'files') || [];
+    const conversations = getProp(group, 'conversations') || [];
+    const reminders = getProp(group, 'reminders') || [];
+    const fileCount = Array.isArray(files) ? files.length : 0;
+    const conversationCount = Array.isArray(conversations) ? conversations.length : 0;
+    const reminderCount = Array.isArray(reminders) ? reminders.length : 0;
+
+    div.dataset.groupCard = 'true';
+    div.dataset.groupId = id;
+    div.className = `group-card ${isActive ? 'group-card-active' : ''}`;
+    
+    div.innerHTML = `
+        <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 8px;">
+            <div style="position: relative; flex: 1;">
+                <input type="text" value="${escapeHtml(name)}" readonly data-group-id="${id}" class="group-card-input ${isActive ? 'group-card-input-active' : ''}" style="width: 100%; padding: 12px 90px 12px 12px; border-radius: 4px; font-size: 14px; cursor: pointer;">
+                <span data-group-active-badge="true" class="group-badge group-badge-active" style="display: ${isActive ? 'inline-flex' : 'none'};">Active</span>
                 <span class="group-item-paperclip" data-group-id="${id}" data-group-name="${escapeHtml(name)}" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 24px; color: #95a5a6; cursor: pointer;">📎</span>
             </div>
             <button type="button" class="group-item-delete" data-group-id="${id}" style="padding: 8px 16px; background: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-size: 14px;">Delete</button>
         </div>
+        <div class="group-card-meta" style="display: flex; gap: 8px; padding-left: 12px; font-size: 12px;">
+            <span title="${fileCount} file(s)"><span aria-hidden="true">📄</span> <span aria-label="${fileCount} files">${fileCount} files</span></span>
+            <span title="${conversationCount} conversation(s)"><span aria-hidden="true">🗨️</span> <span aria-label="${conversationCount} conversations">${conversationCount} conversations</span></span>
+            <span title="${reminderCount} reminder(s)"><span aria-hidden="true">⏰</span> <span aria-label="${reminderCount} reminders">${reminderCount} reminders</span></span>
+        </div>
     `;
+
+    // Click group name to set active prompt group and show contents
+    const input = div.querySelector('input[data-group-id]');
+    input?.addEventListener('click', () => {
+        setActivePromptGroup(id, name);
+        manageGroupResources(id, name);
+    });
     
     // Attach event listener to paperclip
     div.querySelector('.group-item-paperclip').addEventListener('click', (e) => {
@@ -1073,13 +1504,154 @@ document.getElementById('group-form').addEventListener('submit', async (e) => {
     }
 });
 
-// Enter key handler for reminder/group name input
+// Reminder form submit handler
+document.getElementById('reminder-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const id = document.getElementById('reminder-id').value;
+    const name = document.getElementById('reminder-name').value;
+    const description = 'Reminder'; // Default description for reminders
+    
+    const data = { name, description };
+    
+    try {
+        // Reminders use the same groups API but we distinguish them by description
+        const url = id ? `${API_BASE}/groups/${id}` : `${API_BASE}/groups`;
+        const method = id ? 'PUT' : 'POST';
+        
+        const response = await fetch(url, {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            const groupId = result.id || result.Id;
+            
+            console.log('[CREATE REMINDER] Reminder created with ID:', groupId);
+            console.log('[CREATE REMINDER] Active prompt group ID:', activePromptGroupId);
+            console.log('[CREATE REMINDER] Files to upload:', window.reminderSelectedFiles);
+            
+            // Auto-group: If there's an active prompt group, associate the reminder with it
+            if (activePromptGroupId && !id) {
+                try {
+                    console.log('[CREATE REMINDER] Linking reminder to active group:', activePromptGroupId);
+                    // Create a conversation for this reminder and link it to the active group
+                    const conversationData = {
+                        name: name,
+                        resourceGroupId: activePromptGroupId
+                    };
+                    const convRes = await fetch(`${API_BASE}/conversations`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(conversationData)
+                    });
+                    if (convRes.ok) {
+                        const convResult = await convRes.json();
+                        const conversationId = convResult.id || convResult.Id;
+                        console.log('[CREATE REMINDER] Created conversation:', conversationId, 'for reminder in group');
+                        
+                        // Link the conversation to the reminder (group)
+                        const linkRes = await fetch(`${API_BASE}/groups/${groupId}/prompts/${conversationId}`, {
+                            method: 'POST'
+                        });
+                        if (linkRes.ok || linkRes.status === 204) {
+                            console.log('[CREATE REMINDER] Successfully linked reminder to active group');
+                        } else {
+                            console.warn('[CREATE REMINDER] Failed to link reminder to conversation');
+                        }
+                    } else {
+                        console.warn('[CREATE REMINDER] Failed to create conversation for auto-grouping');
+                    }
+                } catch (autoGroupError) {
+                    console.error('[CREATE REMINDER] Error during auto-grouping:', autoGroupError);
+                }
+            }
+            
+            // Upload files if any are selected
+            if (window.reminderSelectedFiles && window.reminderSelectedFiles.length > 0) {
+                console.log('[CREATE REMINDER] Uploading', window.reminderSelectedFiles.length, 'files...');
+                
+                for (const fileObj of window.reminderSelectedFiles) {
+                    const formData = new FormData();
+                    formData.append('file', fileObj.file);
+                    formData.append('label', fileObj.name);
+                    
+                    try {
+                        console.log('[CREATE REMINDER] Uploading file:', fileObj.name);
+                        const uploadRes = await fetch(`${API_BASE}/files`, {
+                            method: 'POST',
+                            body: formData
+                        });
+                        
+                        if (uploadRes.ok) {
+                            const fileData = await uploadRes.json();
+                            const fileId = fileData.id || fileData.Id;
+                            console.log('[CREATE REMINDER] File uploaded with ID:', fileId);
+                            
+                            // Add file to reminder/group
+                            const attachRes = await fetch(`${API_BASE}/groups/${groupId}/files/${fileId}`, {
+                                method: 'POST'
+                            });
+                            
+                            if (attachRes.ok) {
+                                console.log('[CREATE REMINDER] File successfully attached to reminder');
+                            } else {
+                                console.error('[CREATE REMINDER] Failed to attach file to reminder');
+                            }
+                        } else {
+                            const errorText = await uploadRes.text();
+                            console.error('[CREATE REMINDER] Failed to upload file:', errorText);
+                        }
+                    } catch (uploadError) {
+                        console.error('[CREATE REMINDER] Error uploading file:', uploadError);
+                    }
+                }
+                
+                console.log('[CREATE REMINDER] All files processed, clearing local list');
+                reminderSelectedFiles.length = 0;
+                if (typeof window.updateReminderFilesList === 'function') {
+                    window.updateReminderFilesList();
+                }
+                const reminderFileSection = document.getElementById('reminder-file-section');
+                if (reminderFileSection) {
+                    reminderFileSection.style.display = 'none';
+                }
+            } else {
+                console.log('[CREATE REMINDER] No files to upload');
+            }
+            
+            showMessage(id ? 'Reminder updated successfully' : 'Reminder created successfully');
+            document.getElementById('reminder-form').reset();
+            document.getElementById('reminder-id').value = '';
+            await loadReminders(true);
+        } else {
+            const error = await response.json();
+            showMessage(error.detail || 'Error saving reminder', 'error');
+        }
+    } catch (error) {
+        showMessage('Error saving reminder: ' + error.message, 'error');
+    }
+});
+
+// Enter key handler for group name input
 document.getElementById('group-name')?.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') {
         e.preventDefault();
         const groupForm = document.getElementById('group-form');
         if (groupForm) {
             groupForm.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+        }
+    }
+});
+
+// Enter key handler for reminder name input
+document.getElementById('reminder-name')?.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        const reminderForm = document.getElementById('reminder-form');
+        if (reminderForm) {
+            reminderForm.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
         }
     }
 });
@@ -1105,23 +1677,84 @@ function cancelEditGroup() {
 document.getElementById('group-cancel-btn').addEventListener('click', cancelEditGroup);
 
 async function deleteGroup(id) {
-    if (!confirm('Are you sure you want to delete this reminder?')) return;
-    
+    if (!confirm('Are you sure you want to permanently delete this group and all its conversations? This cannot be undone.')) return;
+
     try {
-        const response = await fetch(`${API_BASE}/groups/${id}`, {
-            method: 'DELETE'
-        });
-        
+        // 1) Fetch all conversations for this group (includes active conversations)
+        const convRes = await fetch(`${API_BASE}/conversations?groupId=${encodeURIComponent(id)}`);
+        if (!convRes.ok) {
+            showMessage('Failed to load conversations for group', 'error');
+            return;
+        }
+
+        const convJson = await convRes.json();
+        const conversations = convJson || [];
+
+        // 2) Permanently delete each conversation via the permanent delete API
+        if (conversations.length > 0) {
+            showMessage(`Deleting ${conversations.length} conversations...`);
+            const deletePromises = conversations.map(c =>
+                fetch(`${API_BASE}/conversations/${c.id}`, { method: 'DELETE' })
+                    .then(r => ({ ok: r.ok, status: r.status, id: c.id }))
+                    .catch(e => ({ ok: false, error: e.message, id: c.id }))
+            );
+
+            const results = await Promise.all(deletePromises);
+            const failed = results.filter(r => !r.ok);
+            if (failed.length > 0) {
+                console.warn('Failed to delete some conversations', failed);
+                showMessage(`Failed to delete ${failed.length} conversations. Aborting group delete.`, 'error');
+                return;
+            }
+        }
+
+        // 3) Delete the group itself via admin API
+        const response = await fetch(`${API_BASE}/groups/${id}`, { method: 'DELETE' });
         if (response.ok || response.status === 204) {
-            showMessage('Reminder deleted successfully');
+            showMessage('Group and its conversations deleted successfully');
+            if (activePromptGroupId === id) {
+                activePromptGroupId = null;
+            }
             await loadGroups(true);
             await loadAllGroups(true); // Force refresh groups cache
         } else {
-            const error = await response.json();
-            showMessage(error.detail || 'Error deleting reminder', 'error');
+            const error = await response.json().catch(() => null);
+            showMessage(error?.detail || 'Error deleting group', 'error');
         }
     } catch (error) {
-        showMessage('Error deleting reminder: ' + error.message, 'error');
+        showMessage('Error deleting group: ' + (error?.message || error), 'error');
+    }
+}
+
+async function loadPromptById(promptId, promptName) {
+    if (!promptId) return;
+    try {
+        let prompt = null;
+        const directRes = await fetchWithRetry(`${API_BASE}/prompts/${promptId}`);
+        if (directRes.ok) {
+            const directJson = await directRes.json().catch(() => null);
+            prompt = (directJson && (directJson.data || directJson)) || directJson || null;
+        }
+
+        if (!prompt) {
+            const listRes = await fetchWithRetry(`${API_BASE}/prompts?page=1&pageSize=1000`);
+            if (listRes.ok) {
+                const listJson = await listRes.json().catch(() => null);
+                const prompts = (listJson && (listJson.data || listJson.Data)) || listJson || [];
+                prompt = prompts.find(p => String(getProp(p, 'id')) === String(promptId)) || null;
+            }
+        }
+
+        if (!prompt) {
+            showMessage('Unable to load prompt details', 'error');
+            return;
+        }
+
+        const promptText = getProp(prompt, 'promptText') || '';
+        loadPromptIntoForm(promptId, promptName || getProp(prompt, 'name') || 'Prompt', promptText);
+        showMessage('Prompt loaded from group', 'success');
+    } catch (error) {
+        showMessage('Error loading prompt: ' + error.message, 'error');
     }
 }
 
@@ -1210,13 +1843,17 @@ async function manageGroupResources(groupId, groupName) {
         // Use getProp to access files and prompts arrays with case-insensitive fallback
         const groupFiles = getProp(currentGroup, 'files') || [];
         const groupPrompts = getProp(currentGroup, 'prompts') || [];
+        const groupConversations = getProp(currentGroup, 'conversations') || [];
+        const groupReminders = getProp(currentGroup, 'reminders') || [];
         const groupFileIds = new Set(groupFiles.map(f => getProp(f, 'id')));
         const groupPromptIds = new Set(groupPrompts.map(p => getProp(p, 'id')));
         
         console.log('[MANAGE] Group files:', groupFiles);
+        console.log('[MANAGE] Group conversations:', groupConversations);
+        console.log('[MANAGE] Group reminders:', groupReminders);
         
         const modalBody = document.getElementById('modal-content-body');
-        
+
         // Build files list HTML
         let filesListHTML = '';
         if (groupFiles.length === 0) {
@@ -1239,17 +1876,205 @@ async function manageGroupResources(groupId, groupName) {
             }).join('');
         }
         
+        // Build conversations list HTML
+        let conversationsListHTML = '';
+        if (groupConversations.length === 0) {
+            conversationsListHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No conversations yet</div>';
+        } else {
+            conversationsListHTML = groupConversations.map(convo => {
+                const convoId = getProp(convo, 'id');
+                const convoTitle = getProp(convo, 'title') || 'Untitled';
+                const messageCount = getProp(convo, 'messageCount') || 0;
+                const isActive = getProp(convo, 'isActive') || false;
+                const statusColor = isActive ? '#27ae60' : '#95a5a6';
+                const statusText = isActive ? 'Active' : 'Archived';
+                
+                // Validate conversation ID is a valid GUID format for security
+                const guidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+                if (!guidRegex.test(convoId)) {
+                    console.warn('[MANAGE] Invalid conversation ID format:', convoId);
+                    return '';
+                }
+                
+                return `
+                    <div style="padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0;">
+                        <div style="flex: 1; overflow: hidden;">
+                            <div style="font-size: 14px; color: #333; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                ${escapeHtml(convoTitle)}
+                            </div>
+                            <div style="font-size: 11px; color: #666; margin-top: 2px;">
+                                <span style="color: ${statusColor};">● ${statusText}</span> · ${messageCount} message${messageCount !== 1 ? 's' : ''}
+                            </div>
+                        </div>
+                        <button type="button" onclick="viewConversation('${convoId}', '${escapeHtml(convoTitle).replace(/'/g, "\\'")}')"
+                            style="padding: 4px 12px; background: #9b59b6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">
+                            View
+                        </button>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        // Build reminders list HTML
+        let remindersListHTML = '';
+        if (groupReminders.length === 0) {
+            remindersListHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No reminders yet</div>';
+        } else {
+            remindersListHTML = groupReminders.map(reminder => {
+                const reminderId = getProp(reminder, 'id');
+                const reminderName = getProp(reminder, 'name') || 'Untitled';
+                const fileCount = getProp(reminder, 'fileCount') || 0;
+                const conversationCount = getProp(reminder, 'conversationCount') || 0;
+                
+                return `
+                    <div style="padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0;">
+                        <div style="flex: 1; overflow: hidden;">
+                            <div style="font-size: 14px; color: #333; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                ${escapeHtml(reminderName)}
+                            </div>
+                            <div style="font-size: 11px; color: #666; margin-top: 2px;">
+                                📄 ${fileCount} file${fileCount !== 1 ? 's' : ''} · 🗨️ ${conversationCount} conversation${conversationCount !== 1 ? 's' : ''}
+                            </div>
+                        </div>
+                        <button type="button" onclick="manageGroupResources('${reminderId}', '${escapeHtml(reminderName).replace(/'/g, "\\'")}')"
+                            style="padding: 4px 12px; background: #e67e22; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">
+                            View
+                        </button>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        // Attempt to fetch existing mapping for this group and include mapping UI
+        let existingMapping = null;
+        try {
+            const mapRes = await fetchWithRetry(`/api/conversations/mapping?groupId=${groupId}`);
+            if (mapRes.ok) {
+                const mapJson = await mapRes.json().catch(() => null);
+                existingMapping = mapJson?.conversationId || mapJson?.ConversationId || null;
+            }
+        } catch (mapErr) {
+            console.warn('[MANAGE] Failed to fetch group->conversation mapping:', mapErr);
+        }
+
         modalBody.innerHTML = `
-            <div style="border: 2px solid #3498db; border-radius: 8px; padding: 15px; display: flex; flex-direction: column; position: relative;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                    <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Files</h3>
+            <div style="display: flex; flex-direction: column; gap: 12px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Group Contents</h3>
                     <button type="button" onclick="closeManageGroupModal()" style="background: none; border: none; font-size: 20px; color: #95a5a6; cursor: pointer; padding: 0; line-height: 1;">×</button>
                 </div>
-                <div id="modal-files-list" style="flex: 1; overflow-y: scroll; border: 1px solid #e0e0e0; border-radius: 4px; background: white; max-height: 400px; min-height: 200px;">
-                    ${filesListHTML}
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
+                    <div style="border: 2px solid #3498db; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; position: relative;">
+                        <div style="font-weight: 600; color: #2c3e50; margin-bottom: 8px; font-size: 14px;">Files</div>
+                        <div id="modal-files-list" style="flex: 1; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; background: white; max-height: 360px; min-height: 160px;">
+                            ${filesListHTML}
+                        </div>
+                    </div>
+                    <div style="border: 2px solid #9b59b6; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; position: relative;">
+                        <div style="font-weight: 600; color: #2c3e50; margin-bottom: 8px; font-size: 14px;">Conversations</div>
+                        <div id="modal-conversations-list" style="flex: 1; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; background: white; max-height: 360px; min-height: 160px;">
+                            ${conversationsListHTML}
+                        </div>
+                    </div>
+                    <div style="border: 2px solid #e67e22; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; position: relative;">
+                        <div style="font-weight: 600; color: #2c3e50; margin-bottom: 8px; font-size: 14px;">Reminders</div>
+                        <div id="modal-reminders-list" style="flex: 1; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; background: white; max-height: 360px; min-height: 160px;">
+                            ${remindersListHTML}
+                        </div>
+                    </div>
+                </div>
+                <div style="border-top: 1px dashed #e0e0e0; padding-top: 12px; margin-top: 8px;">
+                    <div style="font-weight: 600; color: #2c3e50; margin-bottom: 8px; font-size: 14px;">Group Conversation Mapping</div>
+                        <div style="font-size: 13px; color: #666; margin-bottom: 8px;">This is a global server-side mapping from this group to an active conversation. Use it to force which conversation continues when queries target this group.</div>
+                        <div id="mapping-prompt-area" style="display:flex; flex-direction:column; gap:8px;">
+                            <div style="display:flex; gap:8px; align-items:center;">
+                                <select id="mapping-conversation-select" style="flex:1; padding:8px; border:1px solid #ddd; border-radius:4px;"></select>
+                                <button id="mapping-bind-btn" class="btn-gradient">Bind</button>
+                                <button id="mapping-clear-btn" class="secondary">Clear</button>
+                            </div>
+                            <div style="display:flex; gap:8px; align-items:center;">
+                                <input id="mapping-conversation-id" type="text" placeholder="Or paste ConversationId (GUID)" value="${existingMapping || ''}" style="flex:1; padding:8px; border:1px solid #ddd; border-radius:4px;" />
+                                <button id="mapping-paste-save-btn" class="btn-gradient">Save Paste</button>
+                            </div>
+                            <div style="margin-top:6px; font-size:12px; color:#95a5a6;">Tip: pick a recent conversation or paste a ConversationId, then click Bind/Save. Clear removes the server-side mapping.</div>
+                        </div>
                 </div>
             </div>
         `;
+
+        // Populate conversation picker
+        try {
+            const convSel = document.getElementById('mapping-conversation-select');
+            if (convSel) {
+                convSel.innerHTML = '<option value="">Loading...</option>';
+                const convRes = await fetchWithRetry(`/api/conversations?groupId=${groupId}`);
+                if (convRes.ok) {
+                    const convJson = await convRes.json().catch(() => null);
+                    const convs = convJson?.data || convJson?.Data || convJson || [];
+                    if (convs && convs.length > 0) {
+                        convSel.innerHTML = '';
+                        convs.forEach(c => {
+                            const id = getProp(c, 'id') || getProp(c, 'Id');
+                            const title = getProp(c, 'title') || getProp(c, 'Title') || (getProp(c, 'messages') && getProp(c, 'messages')[0]?.content?.slice(0,50)) || id;
+                            const updated = getProp(c, 'updatedAt') || getProp(c, 'UpdatedAt') || '';
+                            const label = `${title}${updated ? ' — ' + new Date(updated).toLocaleString() : ''}`;
+                            const opt = document.createElement('option');
+                            opt.value = id;
+                            opt.textContent = label;
+                            convSel.appendChild(opt);
+                        });
+                        if (existingMapping) convSel.value = existingMapping;
+                    } else {
+                        convSel.innerHTML = '<option value="">No recent conversations</option>';
+                    }
+                } else {
+                    convSel.innerHTML = '<option value="">Failed to load</option>';
+                }
+            }
+        } catch (err) {
+            console.warn('[MANAGE] Failed to load conversations for picker', err);
+        }
+
+        // Bind button
+        const bindBtn = document.getElementById('mapping-bind-btn');
+        bindBtn?.addEventListener('click', async () => {
+            const convSel = document.getElementById('mapping-conversation-select');
+            const selected = convSel?.value;
+            if (!selected) { showMessage('Please choose a conversation to bind', 'error'); return; }
+            try {
+                const payload = { ResourceGroupId: groupId, ConversationId: selected };
+                const res = await fetch('/api/conversations/mapping', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                if (res.ok || res.status === 204) showMessage('Mapping bound successfully', 'success'); else showMessage('Failed to bind mapping', 'error');
+            } catch (err) { console.error(err); showMessage('Failed to bind mapping', 'error'); }
+        });
+
+        // Paste-save button (manual GUID)
+        const pasteSaveBtn = document.getElementById('mapping-paste-save-btn');
+        pasteSaveBtn?.addEventListener('click', async () => {
+            const input = document.getElementById('mapping-conversation-id');
+            const val = input?.value.trim();
+            if (!val) { showMessage('Please paste a ConversationId to save', 'error'); return; }
+            try {
+                const payload = { ResourceGroupId: groupId, ConversationId: val };
+                const res = await fetch('/api/conversations/mapping', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                if (res.ok || res.status === 204) showMessage('Mapping saved successfully', 'success'); else showMessage('Failed to save mapping', 'error');
+            } catch (err) { console.error(err); showMessage('Failed to save mapping', 'error'); }
+        });
+
+        // Clear mapping button
+        const clearBtn = document.getElementById('mapping-clear-btn');
+        clearBtn?.addEventListener('click', async () => {
+            try {
+                const res = await fetch(`/api/conversations/mapping?groupId=${groupId}`, { method: 'DELETE' });
+                if (res.ok || res.status === 204) {
+                    showMessage('Mapping cleared', 'success');
+                    const convSel = document.getElementById('mapping-conversation-select'); if (convSel) convSel.value = '';
+                    const input = document.getElementById('mapping-conversation-id'); if (input) input.value = '';
+                } else {
+                    showMessage('Failed to clear mapping', 'error');
+                }
+            } catch (err) { console.error(err); showMessage('Failed to clear mapping', 'error'); }
+        });
         
         document.getElementById('manage-group-modal').classList.add('active');
     } catch (error) {
@@ -1616,11 +2441,33 @@ function formatFileSize(bytes) {
 // Close modal event listener
 document.getElementById('close-modal-btn').addEventListener('click', closeManageGroupModal);
 
+// Close modal when clicking outside the modal content (overlay click)
+function attachOverlayClose(modalId, closeFn) {
+    try {
+        const modal = document.getElementById(modalId);
+        if (!modal) return;
+        modal.addEventListener('click', function (ev) {
+            if (ev.target === modal) {
+                try { closeFn(); } catch (e) { modal.classList.remove('active'); modal.style.display = 'none'; }
+            }
+        });
+    } catch (err) {
+        console.warn('attachOverlayClose failed for', modalId, err);
+    }
+}
+
+attachOverlayClose('manage-group-modal', closeManageGroupModal);
+attachOverlayClose('group-file-preview-modal', function() {
+    const m = document.getElementById('group-file-preview-modal'); if (m) m.style.display = 'none';
+});
+attachOverlayClose('reminder-file-preview-modal', closeReminderFilePreviewModal);
+
 // Infinite scroll implementation
 function setupInfiniteScroll() {
     const containers = [
         { id: 'files-list', loadFn: loadFiles },
         { id: 'prompts-list', loadFn: loadPrompts },
+        { id: 'reminders-list', loadFn: loadReminders },
         { id: 'groups-list', loadFn: loadGroups }
     ];
     
@@ -1691,6 +2538,7 @@ async function init() {
             const nextTheme = document.body.classList.contains('dark') ? 'light' : 'dark';
             applyTheme(nextTheme);
         });
+
         // Setup preview modal event listeners
         document.getElementById('close-preview').addEventListener('click', () => {
             document.getElementById('file-preview').style.display = 'none';
@@ -1912,10 +2760,13 @@ async function init() {
                 const documentIds = selectedFiles
                     .map(f => f.documentId || f.id)
                     .filter(Boolean);
-
+                const includeAllGroups = document.getElementById('prompt-include-all')?.checked;
                 const payload = { Query: promptText, TopK: 5 };
                 if (documentIds.length > 0) {
                     payload.DocumentIds = documentIds;
+                }
+                if (activePromptGroupId && !includeAllGroups) {
+                    payload.GroupIds = [activePromptGroupId];
                 }
                 console.log('[SEND PROMPT] Sending documents query to', documentsUrl, 'payload:', payload);
 
@@ -1949,6 +2800,15 @@ async function init() {
                     throw new Error(errorMsg);
                 }
 
+                const responseConversationId = result.conversationId || result.ConversationId;
+                if (responseConversationId) {
+                    // Server will persist group->conversation mapping. If we don't have an active group,
+                    // ask the server for the conversation to determine the associated group and activate it.
+                    if (!activePromptGroupId) {
+                        await syncActiveGroupFromConversation(responseConversationId);
+                    }
+                }
+
                 const answer = result.answer || result.Answer || result.AnswerText || result?.AnswerHtml || result?.answerText || 'No response received';
                 const sources = result.referencedSources || result.ReferencedSources || result.sources || result.Sources || [];
 
@@ -1976,18 +2836,18 @@ async function init() {
                         : '';
 
                     return `
-                        <div style="margin-bottom: 12px;">
-                            <div style="color: ${msg.role === 'user' ? '#3498db' : '#27ae60'}; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
+                        <div class="conversation-message" style="margin-bottom: 12px;">
+                            <div class="conversation-message-role ${msg.role === 'user' ? 'conversation-message-user' : 'conversation-message-bot'}" style="font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
                                 <span>${msg.role === 'user' ? 'User' : 'Bot'}:</span>
                                 ${msg.files && msg.files.length > 0 ? `<button type="button" onclick="showAttachedFilesModal('${filesData}')" style="background: none; border: none; font-size: 16px; color: #3498db; cursor: pointer; padding: 0;" title="${escapeHtml(filesTitle)}">📎</button>` : ''}
                             </div>
-                            <div style="color: #555; padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
+                            <div class="conversation-message-content" style="padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
                             ${msgSourcesHtml}
                         </div>
                     `;
                 }).join('');
                 responseContent.innerHTML = `
-                    <div style="max-height: 500px; overflow-y: auto; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+                    <div class="conversation-history-container" style="max-height: 500px; overflow-y: auto; padding: 15px; border-radius: 8px;">
                         ${conversationHTML}
                     </div>
                 `;
@@ -1996,6 +2856,13 @@ async function init() {
                 document.getElementById('prompt-name').value = '';
                 
                 showMessage('Response received successfully', 'success');
+
+                // Persist conversation snapshot to server so it survives reloads
+                try {
+                    await autoSaveCurrentConversation('send');
+                } catch (err) {
+                    console.warn('[SEND PROMPT] Auto-save after send failed:', err);
+                }
 
                 // Clear attached files after sending
                 promptSelectedFiles = [];
@@ -2362,11 +3229,139 @@ async function init() {
             updateGroupFilesList();
         };
         
+        // Setup reminder file management (separate from groups)
+        // reminderSelectedFiles is now declared at top level (line 673)
+        let reminderPreviewFile = null;
+        const reminderFileInput = document.getElementById('reminder-file-input');
+        const reminderFilesList = document.getElementById('reminder-files-list');
+        const reminderFilesIcon = document.getElementById('reminder-files-icon');
+        const reminderFileSection = document.getElementById('reminder-file-section');
+        const reminderPreviewContent = document.getElementById('reminder-preview-content');
+        const reminderPreviewFilename = document.getElementById('reminder-preview-filename');
+        
+        // Initialize updateReminderFilesList function
+        function updateReminderFilesList() {
+            if (reminderFilesIcon) {
+                if (reminderSelectedFiles.length === 0) {
+                    reminderFilesIcon.style.color = '#95a5a6';
+                } else {
+                    reminderFilesIcon.style.color = '#3498db';
+                }
+            }
+            
+            if (reminderFilesList) {
+                if (reminderSelectedFiles.length === 0) {
+                    reminderFilesList.innerHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No files attached yet</div>';
+                } else {
+                    reminderFilesList.innerHTML = reminderSelectedFiles.map((fileObj, index) => `
+                        <div style="padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0; ${fileObj.selected ? 'background: #f0f0f0;' : ''}">
+                            <input type="checkbox" ${fileObj.selected ? 'checked' : ''} style="width: 16px; height: 16px; cursor: pointer; margin: 0;" onclick="toggleReminderFileSelection(${index})">
+                            <span onclick="toggleReminderFileSelection(${index})" style="font-size: 14px; color: #333; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; user-select: none;">
+                                ${escapeHtml(fileObj.name)}
+                            </span>
+                        </div>
+                    `).join('');
+                }
+            }
+        }
+        window.updateReminderFilesList = updateReminderFilesList;
+        
+        // Initialize files list display
+        updateReminderFilesList();
+        
+        // Show file section when clicking "add file+" button
+        document.getElementById('reminder-show-file-btn')?.addEventListener('click', () => {
+            const isCurrentlyHidden = reminderFileSection.style.display === 'none' || !reminderFileSection.style.display;
+            if (isCurrentlyHidden) {
+                reminderFileSection.style.display = 'block';
+                document.getElementById('reminder-preview-panel').style.display = 'block';
+                document.getElementById('reminder-files-panel').style.display = 'flex';
+            } else {
+                reminderFileSection.style.display = 'none';
+            }
+        });
+        
+        // Show only Files panel when clicking paperclip
+        reminderFilesIcon?.addEventListener('click', () => {
+            const filesPanel = document.getElementById('reminder-files-panel');
+            document.getElementById('reminder-preview-panel').style.display = 'none';
+            filesPanel.style.display = 'flex';
+            reminderFileSection.style.display = 'block';
+            updateReminderFilesList();
+        });
+        
+        // Handle file selection - show preview
+        if (reminderFileInput) {
+            reminderFileInput.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    reminderPreviewFile = file;
+                    reminderPreviewFilename.textContent = file.name;
+                    
+                    const ext = file.name.split('.').pop().toLowerCase();
+                    if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) {
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            reminderPreviewContent.innerHTML = `<img src="${e.target.result}" style="max-width: 100%; max-height: 200px; border-radius: 4px; object-fit: contain;">`;
+                        };
+                        reader.readAsDataURL(file);
+                    } else if (ext === 'pdf') {
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            reminderPreviewContent.innerHTML = `<embed src="${e.target.result}" type="application/pdf" width="100%" height="200px" style="border-radius: 4px;">`;
+                        };
+                        reader.readAsDataURL(file);
+                    } else {
+                        reminderPreviewContent.innerHTML = `
+                            <div style="text-align: center;">
+                                <div style="font-size: 64px; margin-bottom: 10px;">📄</div>
+                                <div style="color: #7f8c8d; font-size: 12px;">Preview not available</div>
+                            </div>
+                        `;
+                    }
+                }
+            });
+        }
+        
+        // Upload button - adds file to list
+        document.getElementById('reminder-upload-btn')?.addEventListener('click', () => {
+            if (reminderPreviewFile) {
+                if (!reminderSelectedFiles.find(f => f.name === reminderPreviewFile.name)) {
+                    reminderSelectedFiles.push({file: reminderPreviewFile, name: reminderPreviewFile.name, selected: false});
+                    updateReminderFilesList();
+                }
+                reminderPreviewFile = null;
+                reminderFileInput.value = '';
+                reminderPreviewFilename.textContent = '';
+                reminderPreviewContent.innerHTML = '<div style="font-size: 48px; color: #95a5a6; margin-bottom: 10px;">📄</div>';
+                showMessage('File added to list', 'success');
+            }
+        });
+        
+        // Toggle file selection
+        window.toggleReminderFileSelection = function(index) {
+            if (reminderSelectedFiles[index]) {
+                reminderSelectedFiles[index].selected = !reminderSelectedFiles[index].selected;
+                updateReminderFilesList();
+            }
+        };
+        
+        // Delete selected files
+        window.deleteSelectedReminderFiles = function() {
+            const selectedCount = reminderSelectedFiles.filter(f => f.selected).length;
+            if (selectedCount === 0) {
+                return;
+            }
+            reminderSelectedFiles = reminderSelectedFiles.filter(fileObj => !fileObj.selected);
+            updateReminderFilesList();
+        };
+        
         // Load initial data with reset=true to ensure fresh load
         console.log('[INIT] Loading initial data...');
         const results = await Promise.allSettled([
             loadFiles(true),
             loadPrompts(true),
+            loadReminders(true),
             loadGroups(true),
             loadAllGroups()
         ]);
@@ -2385,10 +3380,11 @@ async function init() {
         console.log('[INIT] State:', JSON.stringify({
             filesCount: state.files.data.length,
             promptsCount: state.prompts.data.length,
+            remindersCount: state.reminders.data.length,
             groupsCount: state.groups.data.length
         }));
 
-        restoreDraftConversation();
+        if (AUTO_SAVE_ENABLED) restoreDraftConversation();
 
         window.addEventListener('beforeunload', () => {
             autoSaveCurrentConversation('unload');

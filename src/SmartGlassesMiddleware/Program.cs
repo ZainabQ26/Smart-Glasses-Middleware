@@ -177,6 +177,8 @@ builder.Services.AddScoped<IDocumentProcessingService, DocumentProcessingService
 builder.Services.AddScoped<IRAGService, RAGService>();
 builder.Services.AddScoped<IDocumentHighlightService, DocumentHighlightService>();
 builder.Services.AddScoped<IConversationService, ConversationService>();
+// Global mapping service for ResourceGroup -> Conversation
+builder.Services.AddScoped<IGroupConversationMappingService, GroupConversationMappingService>();
 // Transcription service (server-side) — registered as a typed HTTP client with timeout configuration
 builder.Services.AddHttpClient<ITranscriptionService, HttpTranscriptionService>((sp, client) =>
 {

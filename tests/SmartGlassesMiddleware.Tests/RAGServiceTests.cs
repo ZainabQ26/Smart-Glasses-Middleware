@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using Xunit;
 using Moq;
@@ -44,6 +45,8 @@ public class RAGServiceTests
         _mockConfiguration.Setup(c => c.GetSection("RAG:UseVectorDB").Value).Returns("true");
         _mockConfiguration.Setup(c => c.GetSection("RAG:VectorSimilarityThreshold").Value).Returns("0.7");
         _mockConfiguration.Setup(c => c.GetSection("RAG:QueryTimeoutSeconds").Value).Returns("120");
+        _mockConfiguration.Setup(c => c.GetSection("RAG:ConversationMessageLimit").Value).Returns("5");
+        _mockConfiguration.Setup(c => c.GetSection("RAG:ConversationHistoryPercentage").Value).Returns("25");
 
         var services = new ServiceCollection();
         services.AddSingleton(_mockTaskDispatcher.Object);
@@ -130,17 +133,23 @@ public class RAGServiceTests
     }
 
     [Fact]
-    public async Task QueryDocumentsAsync_NoRelevantChunks_ShouldReturnNoResultsMessage()
+    public async Task QueryDocumentsAsync_NoRelevantChunks_ShouldCallAIService()
     {
         // Arrange
         var query = "nonexistent topic";
+        var expectedResponse = "I don't have specific information about that topic.";
+        
+        _mockAIService.Setup(s => s.ProcessRequestAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(("unknown", expectedResponse, false));
 
         // Act
         var result = await _service.QueryDocumentsAsync(query);
 
         // Assert
-        Assert.Contains("No relevant information found", result.Answer);
+        Assert.Equal(expectedResponse, result.Answer);
         Assert.Empty(result.Sources);
+        Assert.False(result.UsedAdvancedModel);
+        _mockAIService.Verify(s => s.ProcessRequestAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
