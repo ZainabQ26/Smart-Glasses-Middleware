@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace SmartGlassesMiddleware.Models;
 
 /// <summary>
@@ -7,6 +9,7 @@ public class ChatMessage
 {
     public Guid Id { get; set; }
     public Guid ConversationId { get; set; }
+    [JsonIgnore]
     public Conversation Conversation { get; set; } = null!;
 
     public string Role { get; set; } = string.Empty; // "user", "assistant", "system"

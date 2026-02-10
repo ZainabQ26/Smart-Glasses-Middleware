@@ -346,9 +346,11 @@ Answer:";
 
             // Build context from chunks (with token budgeting)
             var contextBuilder = new StringBuilder();
+            bool hasDocumentContext = relevantChunks.Any();
+            bool hasConversationContext = recentMessages.Any();
 
             // Add conversation history first (if it fits in budget)
-            if (recentMessages.Any())
+            if (hasConversationContext)
             {
                 contextBuilder.AppendLine("--- Recent Conversation ---");
                 int historyTokens = 0;
@@ -370,7 +372,7 @@ Answer:";
             var usedTokens = EstimateTokens(contextBuilder.ToString());
             var remainingBudget = _maxContextTokens - usedTokens;
 
-            if (remainingBudget > 500 && relevantChunks.Any())
+            if (remainingBudget > 500 && hasDocumentContext)
             {
                 contextBuilder.AppendLine("--- Document Context ---");
 
@@ -390,14 +392,28 @@ Answer:";
                 }
             }
 
-            // Generate response with full context
-            var prompt = $@"Based on the conversation history and document context, answer the question.
+            // Conditionally format the prompt based on available context
+            string prompt;
+            if (hasConversationContext || hasDocumentContext)
+            {
+                // Include context sections when we have relevant information
+                prompt = $@"Based on the conversation history and document context, answer the question.
 
 {contextBuilder}
 
 Current Question: {query}
 
 Answer:";
+            }
+            else
+            {
+                // Simple prompt without context when no relevant information found
+                prompt = $@"Answer the following question to the best of your ability:
+
+Question: {query}
+
+Answer:";
+            }
 
             // Call the model directly without task detection wrapper to preserve conversation context
             var response = await GenerateResponseWithLocalModel(prompt);

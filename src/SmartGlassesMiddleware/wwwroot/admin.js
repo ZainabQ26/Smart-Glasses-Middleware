@@ -75,6 +75,7 @@ const state = {
     files: { page: 1, pageSize: 20, hasMore: true, loading: false, data: [] },
     prompts: { page: 1, pageSize: 20, hasMore: true, loading: false, data: [] },
     groups: { page: 1, pageSize: 20, hasMore: true, loading: false, data: [] },
+    reminders: { page: 1, pageSize: 20, hasMore: true, loading: false, data: [] },
     allGroups: [] // Cache of all groups for quick-add
 };
 
@@ -93,6 +94,8 @@ document.querySelectorAll('.tab').forEach(tab => {
             loadFiles(true);
         } else if (tabName === 'prompts') {
             loadPrompts(true);
+        } else if (tabName === 'reminders') {
+            loadReminders(true);
         } else if (tabName === 'groups') {
             loadGroups(true);
             loadAllGroups();
@@ -205,41 +208,92 @@ async function loadPrompts(reset = false) {
     showLoading('prompts-list');
 
     try {
-        const response = await fetchWithRetry(`${API_BASE}/prompts?page=${state.prompts.page}&pageSize=${state.prompts.pageSize}`);
+        // Always load conversations (not groups)
+        const endpoint = `/api/conversations?page=${state.prompts.page}&pageSize=${state.prompts.pageSize}`;
+
+        const response = await fetchWithRetry(endpoint);
         if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
 
         const result = await response.json();
-        const promptsData = result.data || result.Data || [];
-        const pagination = result.pagination || result.Pagination || {};
+        const items = Array.isArray(result) ? result : (result.data || result.Data || []);
+        const pagination = Array.isArray(result) ? {} : (result.pagination || result.Pagination || {});
 
         hideLoading('prompts-list');
 
         const list = document.getElementById('prompts-list');
-        if (promptsData && promptsData.length > 0) {
-            state.prompts.data.push(...promptsData);
+        if (items && items.length > 0) {
+            state.prompts.data.push(...items);
             const fragment = document.createDocumentFragment();
-            promptsData.forEach(prompt => {
+            items.forEach(item => {
                 try {
-                    const div = createPromptCard(prompt);
+                    const div = document.createElement('div');
+                    div.className = 'sidebar-prompt-item';
+
+                    // These are always conversations (not groups)
+                    const isGroup = false;
+
+                    const id = getProp(item, 'id') || getProp(item, 'Id');
+                    const title = getProp(item, 'title') || getProp(item, 'Title') || getProp(item, 'name') || getProp(item, 'Name') || id;
+                    const updated = getProp(item, 'updatedAt') || getProp(item, 'UpdatedAt') || getProp(item, 'lastUpdated') || '';
+                    // derive messages info when present
+                    const messagesArr = getProp(item, 'messages') || getProp(item, 'Messages') || getProp(item, 'MessagesList') || [];
+                    const messageCount = Array.isArray(messagesArr) ? messagesArr.length : (getProp(item, 'messageCount') || getProp(item, 'MessageCount') || 0);
+                    const lastMsg = (Array.isArray(messagesArr) && messagesArr.length > 0)
+                        ? (messagesArr[messagesArr.length - 1].content || messagesArr[messagesArr.length - 1].text || messagesArr[messagesArr.length - 1].message || '')
+                        : (getProp(item, 'lastMessage') || getProp(item, 'snippet') || getProp(item, 'description') || '');
+
+                    div.dataset.conversationId = id;
+                    div.dataset.groupId = getProp(item, 'resourceGroupId') || getProp(item, 'ResourceGroupId') || '';
+
+                    // Don't show group badges in conversation list anymore
+                    
+                    const displayName = escapeHtml(title || 'Untitled');
+                    const timestamp = updated ? new Date(updated).toLocaleString(undefined, {
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    }) : '';
+                    
+                    div.innerHTML = `
+                        <div style="display:block;">
+                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                                <span class="prompt-name" style="font-weight:600;color:#2c3e50;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%;">${displayName}</span>
+                                <span class="badge" style="background:#3498db;color:white;padding:2px 6px;border-radius:10px;font-size:11px;min-width:20px;text-align:center;">${messageCount}</span>
+                            </div>
+                            <div style="font-size:11px;color:#95a5a6;margin-bottom:4px;">${timestamp}</div>
+                            <div style="color:#666;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(String(lastMsg || 'No messages yet'))}</div>
+                        </div>
+                    `;
+
+                    div.addEventListener('click', async () => {
+                        document.querySelectorAll('.sidebar-prompt-item').forEach(i => i.classList.remove('active'));
+                        div.classList.add('active');
+                        activeConversationId = id;
+                        await syncActiveGroupFromConversation(id);
+                        await loadConversationIntoView(id, title);
+                        showMessage('Conversation selected');
+                    });
+
                     fragment.appendChild(div);
                 } catch (err) {
-                    console.error('Error creating prompt card', err);
+                    console.error('Error creating sidebar item', err);
                 }
             });
             if (list) list.appendChild(fragment);
 
-            state.prompts.hasMore = pagination.hasNext || pagination.HasNext;
+            state.prompts.hasMore = pagination.hasNext || pagination.HasNext || false;
             state.prompts.page++;
         } else if (reset && list) {
-            list.innerHTML = '<div class="empty-sidebar">No prompts yet</div>';
+            list.innerHTML = `<div class="empty-sidebar">No conversations yet</div>`;
         }
 
         state.prompts.loading = false;
     } catch (error) {
         hideLoading('prompts-list');
         state.prompts.loading = false;
-        console.error('Error loading prompts:', error);
-        showMessage('Error loading prompts: ' + (error.message || error), 'error');
+        console.error('Error loading prompts/conversations:', error);
+        showMessage('Error loading items: ' + (error.message || error), 'error');
     }
 }
 
@@ -417,7 +471,7 @@ function createPromptCard(prompt) {
 // Removed form submission handler as Auto Groups display conversation history and files
 
 function loadPromptIntoForm(id, name, text) {
-    document.getElementById('prompt-form-title').textContent = 'Prompt';
+    document.getElementById('prompt-form-title').textContent = 'Conversation';
     
     // Parse conversation history and files from the prompt text
     // Assuming text is stored as JSON string with {messages: [], files: []}
@@ -535,7 +589,7 @@ function loadPromptIntoForm(id, name, text) {
 
 function createNewPrompt() {
     document.querySelectorAll('.sidebar-prompt-item').forEach(item => item.classList.remove('active'));
-    document.getElementById('prompt-form-title').textContent = 'Prompt';
+    document.getElementById('prompt-form-title').textContent = 'Conversation';
     
     // Reset conversation history
     currentConversationHistory = [];
@@ -543,7 +597,7 @@ function createNewPrompt() {
     // Reset response section
     const responseContent = document.getElementById('response-content');
     if (responseContent) {
-        responseContent.innerHTML = '<span style="color: #999;">Enter a prompt and click Send to get a response</span>';
+        responseContent.innerHTML = '<span style="color: #999;">Enter a message and click Send to get a response</span>';
     }
     
     // Clear input
@@ -553,14 +607,75 @@ function createNewPrompt() {
     }
 }
 
+async function loadConversationIntoView(conversationId, title) {
+    if (!conversationId) return;
+    try {
+        const responseContent = document.getElementById('response-content');
+        if (responseContent) {
+            responseContent.innerHTML = '<span style="color: #999;">Loading conversation...</span>';
+        }
+
+        const res = await fetchWithRetry(`/api/conversations/${conversationId}`);
+        if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        }
+
+        const conversation = await res.json().catch(() => null);
+        const messages = (conversation && (conversation.messages || conversation.Messages)) || [];
+
+        currentConversationHistory = Array.isArray(messages)
+            ? messages.map(m => ({
+                role: (m.role || m.Role || '').toLowerCase() === 'assistant' ? 'bot' : (m.role || m.Role || 'user').toLowerCase(),
+                content: m.content || m.Content || ''
+            }))
+            : [];
+
+        const promptIdInput = document.getElementById('prompt-id');
+        if (promptIdInput) promptIdInput.value = '';
+        const promptTitle = document.getElementById('prompt-form-title');
+        if (promptTitle) promptTitle.textContent = title || 'Conversation';
+
+        if (currentConversationHistory.length === 0) {
+            if (responseContent) {
+                responseContent.innerHTML = '<span style="color: #999;">No messages yet</span>';
+            }
+            return;
+        }
+
+        const conversationHTML = currentConversationHistory.map(msg => {
+            return `
+                <div style="margin-bottom: 12px;">
+                    <div style="color: ${msg.role === 'user' ? '#3498db' : '#27ae60'}; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
+                        <span>${msg.role === 'user' ? 'User' : 'Bot'}:</span>
+                    </div>
+                    <div style="color: #555; padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
+                </div>
+            `;
+        }).join('');
+
+        if (responseContent) {
+            responseContent.innerHTML = `
+                <div style="max-height: 500px; overflow-y: auto; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+                    ${conversationHTML}
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('[CONVERSATION] Failed to load conversation:', error);
+        showMessage('Failed to load conversation: ' + error.message, 'error');
+    }
+}
+
 // Handle file attachments for prompts
 let promptPreviewFile = null;
 let promptSelectedFiles = [];
+let reminderSelectedFiles = []; // Reminder file attachments (separate from prompts)
 let currentConversationHistory = []; // Track conversation messages
 let activePromptGroupId = null;
 // conversation mapping is now server-side; frontend will not persist ConversationId
 let activeConversationId = null;
 window.promptSelectedFiles = promptSelectedFiles;
+window.reminderSelectedFiles = reminderSelectedFiles;
 let lastAutoSavedSnapshot = null;
 let autoSaveInFlight = false;
 const draftStorageKey = 'adminPromptDraft';
@@ -838,9 +953,6 @@ async function syncActiveGroupFromConversation(conversationId) {
         if (groupId) {
             activePromptGroupId = groupId;
             updateActiveGroupStyles();
-            if (groupName) {
-                showMessage(`Auto-grouped into: ${groupName}`);
-            }
             await loadGroups(true);
             await loadAllGroups(true);
         }
@@ -1002,6 +1114,30 @@ function trackPrompt() {
 // Make functions globally available
 window.trackPrompt = trackPrompt;
 window.createNewPrompt = createNewPrompt;
+window.viewConversation = async function(conversationId, title) {
+    try {
+        // Close the modal
+        const modal = document.getElementById('manage-group-modal');
+        if (modal) modal.classList.remove('active');
+        
+        // Switch to the prompts tab if not already there
+        const promptsTab = document.querySelector('.tab[data-tab="prompts"]');
+        if (promptsTab) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            promptsTab.classList.add('active');
+            document.getElementById('prompts').classList.add('active');
+        }
+        
+        // Load the conversation into view
+        activeConversationId = conversationId;
+        await loadConversationIntoView(conversationId, title);
+        showMessage(`Loaded conversation: ${title}`, 'success');
+    } catch (error) {
+        console.error('[VIEW CONVERSATION] Error:', error);
+        showMessage('Failed to load conversation: ' + error.message, 'error');
+    }
+};
 
 // Groups with lazy loading
 async function loadGroups(reset = false) {
@@ -1032,6 +1168,48 @@ async function loadGroups(reset = false) {
         const pagination = result.pagination || result.Pagination || {};
         console.log('Groups data length:', groupsData.length);
         
+        // Check for and delete empty groups
+        const emptyGroups = groupsData.filter(group => {
+            const files = getProp(group, 'files') || [];
+            const prompts = getProp(group, 'prompts') || [];
+            const conversations = getProp(group, 'conversations') || [];
+            const fileCount = Array.isArray(files) ? files.length : 0;
+            const promptCount = Array.isArray(prompts) ? prompts.length : 0;
+            const conversationCount = Array.isArray(conversations) ? conversations.length : 0;
+            return fileCount === 0 && promptCount === 0 && conversationCount === 0;
+        });
+        
+        // Auto-delete empty groups in parallel
+        if (emptyGroups.length > 0) {
+            console.log(`[AUTO-DELETE] Found ${emptyGroups.length} empty groups, deleting...`);
+            const deletePromises = emptyGroups.map(async (group) => {
+                const id = getProp(group, 'id');
+                const name = getProp(group, 'name') || 'Untitled';
+                console.log(`[AUTO-DELETE] Deleting empty group: ${name} (${id})`);
+                try {
+                    const deleteRes = await fetch(`${API_BASE}/groups/${id}`, { method: 'DELETE' });
+                    if (deleteRes.ok || deleteRes.status === 204) {
+                        console.log(`[AUTO-DELETE] Successfully deleted empty group: ${name}`);
+                        return id;
+                    } else {
+                        console.warn(`[AUTO-DELETE] Failed to delete empty group: ${name}`, deleteRes.status);
+                        return null;
+                    }
+                } catch (err) {
+                    console.error(`[AUTO-DELETE] Error deleting empty group: ${name}`, err);
+                    return null;
+                }
+            });
+            
+            const deletedIds = (await Promise.all(deletePromises)).filter(id => id !== null);
+            const deletedIdsSet = new Set(deletedIds);
+            
+            // Filter out deleted groups using Set for O(1) lookup
+            const validGroups = groupsData.filter(g => !deletedIdsSet.has(getProp(g, 'id')));
+            groupsData.length = 0;
+            groupsData.push(...validGroups);
+        }
+        
         const list = document.getElementById('groups-list');
         
         hideLoading('groups-list');
@@ -1042,7 +1220,10 @@ async function loadGroups(reset = false) {
             const fragment = document.createDocumentFragment();
             groupsData.forEach(group => {
                 const div = createGroupCard(group);
-                fragment.appendChild(div);
+                // Skip null returns (reminders are filtered out)
+                if (div) {
+                    fragment.appendChild(div);
+                }
             });
             list.appendChild(fragment);
             
@@ -1060,24 +1241,148 @@ async function loadGroups(reset = false) {
     }
 }
 
+async function loadReminders(reset = false) {
+    if (state.reminders.loading) return;
+    if (!reset && !state.reminders.hasMore) return;
+    
+    if (reset) {
+        state.reminders.page = 1;
+        state.reminders.hasMore = true;
+        state.reminders.data = [];
+        document.getElementById('reminders-list').innerHTML = '';
+    }
+    
+    state.reminders.loading = true;
+    showLoading('reminders-list');
+    
+    try {
+        // Load all groups and filter for those with description "Reminder"
+        const response = await fetchWithRetry(`${API_BASE}/groups?page=${state.reminders.page}&pageSize=${state.reminders.pageSize}`);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const result = await response.json();
+        const groupsData = result.data || result.Data || [];
+        const pagination = result.pagination || result.Pagination || {};
+        
+        // Filter for reminders (groups with description "Reminder" - case insensitive)
+        const remindersData = groupsData.filter(g => {
+            const desc = getProp(g, 'description') || getProp(g, 'Description') || '';
+            return desc.toLowerCase() === 'reminder';
+        });
+        
+        // NOTE: Reminders can exist without files, so we don't auto-delete empty reminders
+        // This is different from groups which require at least one resource
+        
+        const list = document.getElementById('reminders-list');
+        hideLoading('reminders-list');
+        
+        if (remindersData && remindersData.length > 0) {
+            state.reminders.data.push(...remindersData);
+            
+            const fragment = document.createDocumentFragment();
+            remindersData.forEach(reminder => {
+                const div = createReminderCard(reminder);
+                fragment.appendChild(div);
+            });
+            list.appendChild(fragment);
+            
+            state.reminders.hasMore = pagination.hasNext || pagination.HasNext;
+            state.reminders.page++;
+        } else if (reset) {
+            list.innerHTML = '<div class="empty-state"><p>No reminders created yet</p></div>';
+        }
+        
+        state.reminders.loading = false;
+    } catch (error) {
+        hideLoading('reminders-list');
+        state.reminders.loading = false;
+        showMessage('Error loading reminders: ' + error.message, 'error');
+    }
+}
+
+function createReminderCard(reminder) {
+    const div = document.createElement('div');
+    const id = getProp(reminder, 'id');
+    const name = getProp(reminder, 'name') || 'Untitled';
+    
+    const files = getProp(reminder, 'files') || [];
+    const fileCount = Array.isArray(files) ? files.length : 0;
+
+    div.dataset.reminderId = id;
+    div.style.cssText = 'background: #f5f5f5; padding: 12px; border-radius: 6px; margin-bottom: 10px; position: relative; border: 2px solid transparent;';
+    
+    div.innerHTML = `
+        <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 8px;">
+            <div style="position: relative; flex: 1;">
+                <input type="text" value="${escapeHtml(name)}" readonly data-reminder-id="${id}" style="width: 100%; padding: 12px 50px 12px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; background: white; cursor: pointer;">
+                <span class="reminder-item-paperclip" data-reminder-id="${id}" data-reminder-name="${escapeHtml(name)}" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 24px; color: #95a5a6; cursor: pointer;">📎</span>
+            </div>
+            <button type="button" class="reminder-item-delete" data-reminder-id="${id}" style="padding: 8px 16px; background: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-size: 14px;">Delete</button>
+        </div>
+        <div style="display: flex; gap: 8px; padding-left: 12px; font-size: 12px; color: #666;">
+            <span title="${fileCount} file(s)"><span aria-hidden="true">📄</span> <span aria-label="${fileCount} files">${fileCount} files</span></span>
+        </div>
+    `;
+
+    // Attach event listener to delete button
+    div.querySelector('.reminder-item-delete').addEventListener('click', async (e) => {
+        if (!confirm('Are you sure you want to delete this reminder?')) return;
+        try {
+            const response = await fetch(`${API_BASE}/groups/${id}`, { method: 'DELETE' });
+            if (response.ok) {
+                showMessage('Reminder deleted successfully');
+                await loadReminders(true);
+            } else {
+                showMessage('Error deleting reminder', 'error');
+            }
+        } catch (error) {
+            showMessage('Error deleting reminder: ' + error.message, 'error');
+        }
+    });
+    
+    return div;
+}
+
 function createGroupCard(group) {
     const div = document.createElement('div');
     const id = getProp(group, 'id');
     const name = getProp(group, 'name') || 'Untitled';
+    const description = getProp(group, 'description') || getProp(group, 'Description') || '';
     const isActive = !!activePromptGroupId && String(activePromptGroupId) === String(id);
+    
+    // Skip if this is a reminder (will be shown in Reminders tab)
+    if (description && description.toLowerCase() === 'reminder') {
+        return null;
+    }
+    
+    // Get counts for files, conversations, and reminders
+    const files = getProp(group, 'files') || [];
+    const conversations = getProp(group, 'conversations') || [];
+    const reminders = getProp(group, 'reminders') || [];
+    const fileCount = Array.isArray(files) ? files.length : 0;
+    const conversationCount = Array.isArray(conversations) ? conversations.length : 0;
+    const reminderCount = Array.isArray(reminders) ? reminders.length : 0;
 
     div.dataset.groupCard = 'true';
     div.dataset.groupId = id;
-    div.style.cssText = `background: ${isActive ? '#eaf4ff' : '#f5f5f5'}; padding: 12px; border-radius: 6px; margin-bottom: 10px; position: relative; border: 2px solid ${isActive ? '#3498db' : 'transparent'};`;
+    div.className = `group-card ${isActive ? 'group-card-active' : ''}`;
     
     div.innerHTML = `
-        <div style="display: flex; gap: 10px; align-items: center;">
+        <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 8px;">
             <div style="position: relative; flex: 1;">
-                <input type="text" value="${escapeHtml(name)}" readonly data-group-id="${id}" style="width: 100%; padding: 12px 90px 12px 12px; border: 1px solid ${isActive ? '#3498db' : '#ddd'}; border-radius: 4px; font-size: 14px; background: ${isActive ? '#ffffff' : 'white'}; cursor: pointer;">
-                <span data-group-active-badge="true" style="position: absolute; right: 50px; top: 50%; transform: translateY(-50%); font-size: 11px; color: #ffffff; background: #3498db; padding: 2px 6px; border-radius: 10px; display: ${isActive ? 'inline-flex' : 'none'}; align-items: center;">Active</span>
+                <input type="text" value="${escapeHtml(name)}" readonly data-group-id="${id}" class="group-card-input ${isActive ? 'group-card-input-active' : ''}" style="width: 100%; padding: 12px 90px 12px 12px; border-radius: 4px; font-size: 14px; cursor: pointer;">
+                <span data-group-active-badge="true" class="group-badge group-badge-active" style="display: ${isActive ? 'inline-flex' : 'none'};">Active</span>
                 <span class="group-item-paperclip" data-group-id="${id}" data-group-name="${escapeHtml(name)}" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 24px; color: #95a5a6; cursor: pointer;">📎</span>
             </div>
             <button type="button" class="group-item-delete" data-group-id="${id}" style="padding: 8px 16px; background: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-size: 14px;">Delete</button>
+        </div>
+        <div class="group-card-meta" style="display: flex; gap: 8px; padding-left: 12px; font-size: 12px;">
+            <span title="${fileCount} file(s)"><span aria-hidden="true">📄</span> <span aria-label="${fileCount} files">${fileCount} files</span></span>
+            <span title="${conversationCount} conversation(s)"><span aria-hidden="true">🗨️</span> <span aria-label="${conversationCount} conversations">${conversationCount} conversations</span></span>
+            <span title="${reminderCount} reminder(s)"><span aria-hidden="true">⏰</span> <span aria-label="${reminderCount} reminders">${reminderCount} reminders</span></span>
         </div>
     `;
 
@@ -1199,13 +1504,154 @@ document.getElementById('group-form').addEventListener('submit', async (e) => {
     }
 });
 
-// Enter key handler for reminder/group name input
+// Reminder form submit handler
+document.getElementById('reminder-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const id = document.getElementById('reminder-id').value;
+    const name = document.getElementById('reminder-name').value;
+    const description = 'Reminder'; // Default description for reminders
+    
+    const data = { name, description };
+    
+    try {
+        // Reminders use the same groups API but we distinguish them by description
+        const url = id ? `${API_BASE}/groups/${id}` : `${API_BASE}/groups`;
+        const method = id ? 'PUT' : 'POST';
+        
+        const response = await fetch(url, {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            const groupId = result.id || result.Id;
+            
+            console.log('[CREATE REMINDER] Reminder created with ID:', groupId);
+            console.log('[CREATE REMINDER] Active prompt group ID:', activePromptGroupId);
+            console.log('[CREATE REMINDER] Files to upload:', window.reminderSelectedFiles);
+            
+            // Auto-group: If there's an active prompt group, associate the reminder with it
+            if (activePromptGroupId && !id) {
+                try {
+                    console.log('[CREATE REMINDER] Linking reminder to active group:', activePromptGroupId);
+                    // Create a conversation for this reminder and link it to the active group
+                    const conversationData = {
+                        name: name,
+                        resourceGroupId: activePromptGroupId
+                    };
+                    const convRes = await fetch(`${API_BASE}/conversations`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(conversationData)
+                    });
+                    if (convRes.ok) {
+                        const convResult = await convRes.json();
+                        const conversationId = convResult.id || convResult.Id;
+                        console.log('[CREATE REMINDER] Created conversation:', conversationId, 'for reminder in group');
+                        
+                        // Link the conversation to the reminder (group)
+                        const linkRes = await fetch(`${API_BASE}/groups/${groupId}/prompts/${conversationId}`, {
+                            method: 'POST'
+                        });
+                        if (linkRes.ok || linkRes.status === 204) {
+                            console.log('[CREATE REMINDER] Successfully linked reminder to active group');
+                        } else {
+                            console.warn('[CREATE REMINDER] Failed to link reminder to conversation');
+                        }
+                    } else {
+                        console.warn('[CREATE REMINDER] Failed to create conversation for auto-grouping');
+                    }
+                } catch (autoGroupError) {
+                    console.error('[CREATE REMINDER] Error during auto-grouping:', autoGroupError);
+                }
+            }
+            
+            // Upload files if any are selected
+            if (window.reminderSelectedFiles && window.reminderSelectedFiles.length > 0) {
+                console.log('[CREATE REMINDER] Uploading', window.reminderSelectedFiles.length, 'files...');
+                
+                for (const fileObj of window.reminderSelectedFiles) {
+                    const formData = new FormData();
+                    formData.append('file', fileObj.file);
+                    formData.append('label', fileObj.name);
+                    
+                    try {
+                        console.log('[CREATE REMINDER] Uploading file:', fileObj.name);
+                        const uploadRes = await fetch(`${API_BASE}/files`, {
+                            method: 'POST',
+                            body: formData
+                        });
+                        
+                        if (uploadRes.ok) {
+                            const fileData = await uploadRes.json();
+                            const fileId = fileData.id || fileData.Id;
+                            console.log('[CREATE REMINDER] File uploaded with ID:', fileId);
+                            
+                            // Add file to reminder/group
+                            const attachRes = await fetch(`${API_BASE}/groups/${groupId}/files/${fileId}`, {
+                                method: 'POST'
+                            });
+                            
+                            if (attachRes.ok) {
+                                console.log('[CREATE REMINDER] File successfully attached to reminder');
+                            } else {
+                                console.error('[CREATE REMINDER] Failed to attach file to reminder');
+                            }
+                        } else {
+                            const errorText = await uploadRes.text();
+                            console.error('[CREATE REMINDER] Failed to upload file:', errorText);
+                        }
+                    } catch (uploadError) {
+                        console.error('[CREATE REMINDER] Error uploading file:', uploadError);
+                    }
+                }
+                
+                console.log('[CREATE REMINDER] All files processed, clearing local list');
+                reminderSelectedFiles.length = 0;
+                if (typeof window.updateReminderFilesList === 'function') {
+                    window.updateReminderFilesList();
+                }
+                const reminderFileSection = document.getElementById('reminder-file-section');
+                if (reminderFileSection) {
+                    reminderFileSection.style.display = 'none';
+                }
+            } else {
+                console.log('[CREATE REMINDER] No files to upload');
+            }
+            
+            showMessage(id ? 'Reminder updated successfully' : 'Reminder created successfully');
+            document.getElementById('reminder-form').reset();
+            document.getElementById('reminder-id').value = '';
+            await loadReminders(true);
+        } else {
+            const error = await response.json();
+            showMessage(error.detail || 'Error saving reminder', 'error');
+        }
+    } catch (error) {
+        showMessage('Error saving reminder: ' + error.message, 'error');
+    }
+});
+
+// Enter key handler for group name input
 document.getElementById('group-name')?.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') {
         e.preventDefault();
         const groupForm = document.getElementById('group-form');
         if (groupForm) {
             groupForm.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+        }
+    }
+});
+
+// Enter key handler for reminder name input
+document.getElementById('reminder-name')?.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        const reminderForm = document.getElementById('reminder-form');
+        if (reminderForm) {
+            reminderForm.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
         }
     }
 });
@@ -1397,10 +1843,14 @@ async function manageGroupResources(groupId, groupName) {
         // Use getProp to access files and prompts arrays with case-insensitive fallback
         const groupFiles = getProp(currentGroup, 'files') || [];
         const groupPrompts = getProp(currentGroup, 'prompts') || [];
+        const groupConversations = getProp(currentGroup, 'conversations') || [];
+        const groupReminders = getProp(currentGroup, 'reminders') || [];
         const groupFileIds = new Set(groupFiles.map(f => getProp(f, 'id')));
         const groupPromptIds = new Set(groupPrompts.map(p => getProp(p, 'id')));
         
         console.log('[MANAGE] Group files:', groupFiles);
+        console.log('[MANAGE] Group conversations:', groupConversations);
+        console.log('[MANAGE] Group reminders:', groupReminders);
         
         const modalBody = document.getElementById('modal-content-body');
 
@@ -1425,23 +1875,70 @@ async function manageGroupResources(groupId, groupName) {
                 `;
             }).join('');
         }
-
-        // Build prompts list HTML
-        let promptsListHTML = '';
-        if (groupPrompts.length === 0) {
-            promptsListHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No prompts attached yet</div>';
+        
+        // Build conversations list HTML
+        let conversationsListHTML = '';
+        if (groupConversations.length === 0) {
+            conversationsListHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No conversations yet</div>';
         } else {
-            promptsListHTML = groupPrompts.map(prompt => {
-                const promptId = getProp(prompt, 'id');
-                const promptName = getProp(prompt, 'name') || 'Untitled';
+            conversationsListHTML = groupConversations.map(convo => {
+                const convoId = getProp(convo, 'id');
+                const convoTitle = getProp(convo, 'title') || 'Untitled';
+                const messageCount = getProp(convo, 'messageCount') || 0;
+                const isActive = getProp(convo, 'isActive') || false;
+                const statusColor = isActive ? '#27ae60' : '#95a5a6';
+                const statusText = isActive ? 'Active' : 'Archived';
+                
+                // Validate conversation ID is a valid GUID format for security
+                const guidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+                if (!guidRegex.test(convoId)) {
+                    console.warn('[MANAGE] Invalid conversation ID format:', convoId);
+                    return '';
+                }
+                
                 return `
                     <div style="padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0;">
-                        <span style="font-size: 14px; color: #333; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                            ${escapeHtml(promptName)}
-                        </span>
-                        <button type="button" onclick="loadPromptById('${promptId}', '${escapeHtml(promptName).replace(/'/g, "\\'")}')"
-                            style="padding: 4px 12px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">
-                            Open
+                        <div style="flex: 1; overflow: hidden;">
+                            <div style="font-size: 14px; color: #333; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                ${escapeHtml(convoTitle)}
+                            </div>
+                            <div style="font-size: 11px; color: #666; margin-top: 2px;">
+                                <span style="color: ${statusColor};">● ${statusText}</span> · ${messageCount} message${messageCount !== 1 ? 's' : ''}
+                            </div>
+                        </div>
+                        <button type="button" onclick="viewConversation('${convoId}', '${escapeHtml(convoTitle).replace(/'/g, "\\'")}')"
+                            style="padding: 4px 12px; background: #9b59b6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">
+                            View
+                        </button>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        // Build reminders list HTML
+        let remindersListHTML = '';
+        if (groupReminders.length === 0) {
+            remindersListHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No reminders yet</div>';
+        } else {
+            remindersListHTML = groupReminders.map(reminder => {
+                const reminderId = getProp(reminder, 'id');
+                const reminderName = getProp(reminder, 'name') || 'Untitled';
+                const fileCount = getProp(reminder, 'fileCount') || 0;
+                const conversationCount = getProp(reminder, 'conversationCount') || 0;
+                
+                return `
+                    <div style="padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0;">
+                        <div style="flex: 1; overflow: hidden;">
+                            <div style="font-size: 14px; color: #333; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                ${escapeHtml(reminderName)}
+                            </div>
+                            <div style="font-size: 11px; color: #666; margin-top: 2px;">
+                                📄 ${fileCount} file${fileCount !== 1 ? 's' : ''} · 🗨️ ${conversationCount} conversation${conversationCount !== 1 ? 's' : ''}
+                            </div>
+                        </div>
+                        <button type="button" onclick="manageGroupResources('${reminderId}', '${escapeHtml(reminderName).replace(/'/g, "\\'")}')"
+                            style="padding: 4px 12px; background: #e67e22; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">
+                            View
                         </button>
                     </div>
                 `;
@@ -1473,10 +1970,16 @@ async function manageGroupResources(groupId, groupName) {
                             ${filesListHTML}
                         </div>
                     </div>
-                    <div style="border: 2px solid #16a085; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; position: relative;">
-                        <div style="font-weight: 600; color: #2c3e50; margin-bottom: 8px; font-size: 14px;">Prompts</div>
-                        <div id="modal-prompts-list" style="flex: 1; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; background: white; max-height: 360px; min-height: 160px;">
-                            ${promptsListHTML}
+                    <div style="border: 2px solid #9b59b6; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; position: relative;">
+                        <div style="font-weight: 600; color: #2c3e50; margin-bottom: 8px; font-size: 14px;">Conversations</div>
+                        <div id="modal-conversations-list" style="flex: 1; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; background: white; max-height: 360px; min-height: 160px;">
+                            ${conversationsListHTML}
+                        </div>
+                    </div>
+                    <div style="border: 2px solid #e67e22; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; position: relative;">
+                        <div style="font-weight: 600; color: #2c3e50; margin-bottom: 8px; font-size: 14px;">Reminders</div>
+                        <div id="modal-reminders-list" style="flex: 1; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; background: white; max-height: 360px; min-height: 160px;">
+                            ${remindersListHTML}
                         </div>
                     </div>
                 </div>
@@ -1938,11 +2441,33 @@ function formatFileSize(bytes) {
 // Close modal event listener
 document.getElementById('close-modal-btn').addEventListener('click', closeManageGroupModal);
 
+// Close modal when clicking outside the modal content (overlay click)
+function attachOverlayClose(modalId, closeFn) {
+    try {
+        const modal = document.getElementById(modalId);
+        if (!modal) return;
+        modal.addEventListener('click', function (ev) {
+            if (ev.target === modal) {
+                try { closeFn(); } catch (e) { modal.classList.remove('active'); modal.style.display = 'none'; }
+            }
+        });
+    } catch (err) {
+        console.warn('attachOverlayClose failed for', modalId, err);
+    }
+}
+
+attachOverlayClose('manage-group-modal', closeManageGroupModal);
+attachOverlayClose('group-file-preview-modal', function() {
+    const m = document.getElementById('group-file-preview-modal'); if (m) m.style.display = 'none';
+});
+attachOverlayClose('reminder-file-preview-modal', closeReminderFilePreviewModal);
+
 // Infinite scroll implementation
 function setupInfiniteScroll() {
     const containers = [
         { id: 'files-list', loadFn: loadFiles },
         { id: 'prompts-list', loadFn: loadPrompts },
+        { id: 'reminders-list', loadFn: loadReminders },
         { id: 'groups-list', loadFn: loadGroups }
     ];
     
@@ -2311,18 +2836,18 @@ async function init() {
                         : '';
 
                     return `
-                        <div style="margin-bottom: 12px;">
-                            <div style="color: ${msg.role === 'user' ? '#3498db' : '#27ae60'}; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
+                        <div class="conversation-message" style="margin-bottom: 12px;">
+                            <div class="conversation-message-role ${msg.role === 'user' ? 'conversation-message-user' : 'conversation-message-bot'}" style="font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
                                 <span>${msg.role === 'user' ? 'User' : 'Bot'}:</span>
                                 ${msg.files && msg.files.length > 0 ? `<button type="button" onclick="showAttachedFilesModal('${filesData}')" style="background: none; border: none; font-size: 16px; color: #3498db; cursor: pointer; padding: 0;" title="${escapeHtml(filesTitle)}">📎</button>` : ''}
                             </div>
-                            <div style="color: #555; padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
+                            <div class="conversation-message-content" style="padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
                             ${msgSourcesHtml}
                         </div>
                     `;
                 }).join('');
                 responseContent.innerHTML = `
-                    <div style="max-height: 500px; overflow-y: auto; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+                    <div class="conversation-history-container" style="max-height: 500px; overflow-y: auto; padding: 15px; border-radius: 8px;">
                         ${conversationHTML}
                     </div>
                 `;
@@ -2704,11 +3229,139 @@ async function init() {
             updateGroupFilesList();
         };
         
+        // Setup reminder file management (separate from groups)
+        // reminderSelectedFiles is now declared at top level (line 673)
+        let reminderPreviewFile = null;
+        const reminderFileInput = document.getElementById('reminder-file-input');
+        const reminderFilesList = document.getElementById('reminder-files-list');
+        const reminderFilesIcon = document.getElementById('reminder-files-icon');
+        const reminderFileSection = document.getElementById('reminder-file-section');
+        const reminderPreviewContent = document.getElementById('reminder-preview-content');
+        const reminderPreviewFilename = document.getElementById('reminder-preview-filename');
+        
+        // Initialize updateReminderFilesList function
+        function updateReminderFilesList() {
+            if (reminderFilesIcon) {
+                if (reminderSelectedFiles.length === 0) {
+                    reminderFilesIcon.style.color = '#95a5a6';
+                } else {
+                    reminderFilesIcon.style.color = '#3498db';
+                }
+            }
+            
+            if (reminderFilesList) {
+                if (reminderSelectedFiles.length === 0) {
+                    reminderFilesList.innerHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No files attached yet</div>';
+                } else {
+                    reminderFilesList.innerHTML = reminderSelectedFiles.map((fileObj, index) => `
+                        <div style="padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0; ${fileObj.selected ? 'background: #f0f0f0;' : ''}">
+                            <input type="checkbox" ${fileObj.selected ? 'checked' : ''} style="width: 16px; height: 16px; cursor: pointer; margin: 0;" onclick="toggleReminderFileSelection(${index})">
+                            <span onclick="toggleReminderFileSelection(${index})" style="font-size: 14px; color: #333; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; user-select: none;">
+                                ${escapeHtml(fileObj.name)}
+                            </span>
+                        </div>
+                    `).join('');
+                }
+            }
+        }
+        window.updateReminderFilesList = updateReminderFilesList;
+        
+        // Initialize files list display
+        updateReminderFilesList();
+        
+        // Show file section when clicking "add file+" button
+        document.getElementById('reminder-show-file-btn')?.addEventListener('click', () => {
+            const isCurrentlyHidden = reminderFileSection.style.display === 'none' || !reminderFileSection.style.display;
+            if (isCurrentlyHidden) {
+                reminderFileSection.style.display = 'block';
+                document.getElementById('reminder-preview-panel').style.display = 'block';
+                document.getElementById('reminder-files-panel').style.display = 'flex';
+            } else {
+                reminderFileSection.style.display = 'none';
+            }
+        });
+        
+        // Show only Files panel when clicking paperclip
+        reminderFilesIcon?.addEventListener('click', () => {
+            const filesPanel = document.getElementById('reminder-files-panel');
+            document.getElementById('reminder-preview-panel').style.display = 'none';
+            filesPanel.style.display = 'flex';
+            reminderFileSection.style.display = 'block';
+            updateReminderFilesList();
+        });
+        
+        // Handle file selection - show preview
+        if (reminderFileInput) {
+            reminderFileInput.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    reminderPreviewFile = file;
+                    reminderPreviewFilename.textContent = file.name;
+                    
+                    const ext = file.name.split('.').pop().toLowerCase();
+                    if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) {
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            reminderPreviewContent.innerHTML = `<img src="${e.target.result}" style="max-width: 100%; max-height: 200px; border-radius: 4px; object-fit: contain;">`;
+                        };
+                        reader.readAsDataURL(file);
+                    } else if (ext === 'pdf') {
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            reminderPreviewContent.innerHTML = `<embed src="${e.target.result}" type="application/pdf" width="100%" height="200px" style="border-radius: 4px;">`;
+                        };
+                        reader.readAsDataURL(file);
+                    } else {
+                        reminderPreviewContent.innerHTML = `
+                            <div style="text-align: center;">
+                                <div style="font-size: 64px; margin-bottom: 10px;">📄</div>
+                                <div style="color: #7f8c8d; font-size: 12px;">Preview not available</div>
+                            </div>
+                        `;
+                    }
+                }
+            });
+        }
+        
+        // Upload button - adds file to list
+        document.getElementById('reminder-upload-btn')?.addEventListener('click', () => {
+            if (reminderPreviewFile) {
+                if (!reminderSelectedFiles.find(f => f.name === reminderPreviewFile.name)) {
+                    reminderSelectedFiles.push({file: reminderPreviewFile, name: reminderPreviewFile.name, selected: false});
+                    updateReminderFilesList();
+                }
+                reminderPreviewFile = null;
+                reminderFileInput.value = '';
+                reminderPreviewFilename.textContent = '';
+                reminderPreviewContent.innerHTML = '<div style="font-size: 48px; color: #95a5a6; margin-bottom: 10px;">📄</div>';
+                showMessage('File added to list', 'success');
+            }
+        });
+        
+        // Toggle file selection
+        window.toggleReminderFileSelection = function(index) {
+            if (reminderSelectedFiles[index]) {
+                reminderSelectedFiles[index].selected = !reminderSelectedFiles[index].selected;
+                updateReminderFilesList();
+            }
+        };
+        
+        // Delete selected files
+        window.deleteSelectedReminderFiles = function() {
+            const selectedCount = reminderSelectedFiles.filter(f => f.selected).length;
+            if (selectedCount === 0) {
+                return;
+            }
+            reminderSelectedFiles = reminderSelectedFiles.filter(fileObj => !fileObj.selected);
+            updateReminderFilesList();
+        };
+        
         // Load initial data with reset=true to ensure fresh load
         console.log('[INIT] Loading initial data...');
         const results = await Promise.allSettled([
             loadFiles(true),
             loadPrompts(true),
+            loadReminders(true),
             loadGroups(true),
             loadAllGroups()
         ]);
@@ -2727,6 +3380,7 @@ async function init() {
         console.log('[INIT] State:', JSON.stringify({
             filesCount: state.files.data.length,
             promptsCount: state.prompts.data.length,
+            remindersCount: state.reminders.data.length,
             groupsCount: state.groups.data.length
         }));
 

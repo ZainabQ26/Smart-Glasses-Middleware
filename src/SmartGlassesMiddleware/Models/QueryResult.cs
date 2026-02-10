@@ -46,6 +46,16 @@ public class QueryResult
     /// Reason for delegation to advanced model (if applicable)
     /// </summary>
     public string? DelegationReason { get; set; }
+
+    /// <summary>
+    /// Whether a topic change was detected during this query
+    /// </summary>
+    public bool TopicChanged { get; set; }
+
+    /// <summary>
+    /// New conversation ID if topic changed and conversation was split
+    /// </summary>
+    public Guid? NewConversationId { get; set; }
 }
 
 /// <summary>
