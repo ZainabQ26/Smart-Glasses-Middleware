@@ -1273,43 +1273,8 @@ async function loadReminders(reset = false) {
             return desc.toLowerCase() === 'reminder';
         });
         
-        // Check for and delete empty reminders
-        const emptyReminders = remindersData.filter(reminder => {
-            const files = getProp(reminder, 'files') || [];
-            const fileCount = Array.isArray(files) ? files.length : 0;
-            return fileCount === 0;
-        });
-        
-        // Auto-delete empty reminders in parallel
-        if (emptyReminders.length > 0) {
-            console.log(`[AUTO-DELETE] Found ${emptyReminders.length} empty reminders, deleting...`);
-            const deletePromises = emptyReminders.map(async (reminder) => {
-                const id = getProp(reminder, 'id');
-                const name = getProp(reminder, 'name') || 'Untitled';
-                console.log(`[AUTO-DELETE] Deleting empty reminder: ${name} (${id})`);
-                try {
-                    const deleteRes = await fetch(`${API_BASE}/groups/${id}`, { method: 'DELETE' });
-                    if (deleteRes.ok || deleteRes.status === 204) {
-                        console.log(`[AUTO-DELETE] Successfully deleted empty reminder: ${name}`);
-                        return id;
-                    } else {
-                        console.warn(`[AUTO-DELETE] Failed to delete empty reminder: ${name}`, deleteRes.status);
-                        return null;
-                    }
-                } catch (err) {
-                    console.error(`[AUTO-DELETE] Error deleting empty reminder: ${name}`, err);
-                    return null;
-                }
-            });
-            
-            const deletedIds = (await Promise.all(deletePromises)).filter(id => id !== null);
-            const deletedIdsSet = new Set(deletedIds);
-            
-            // Filter out deleted reminders using Set for O(1) lookup
-            const validReminders = remindersData.filter(r => !deletedIdsSet.has(getProp(r, 'id')));
-            remindersData.length = 0;
-            remindersData.push(...validReminders);
-        }
+        // NOTE: Reminders can exist without files, so we don't auto-delete empty reminders
+        // This is different from groups which require at least one resource
         
         const list = document.getElementById('reminders-list');
         hideLoading('reminders-list');
