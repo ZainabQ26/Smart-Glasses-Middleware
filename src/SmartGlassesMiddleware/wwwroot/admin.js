@@ -1168,8 +1168,49 @@ async function loadGroups(reset = false) {
         const pagination = result.pagination || result.Pagination || {};
         console.log('Groups data length:', groupsData.length);
         
-        // Auto-delete of empty groups has been disabled to prevent documents from disappearing
-        // Users can manually delete groups they no longer need using the delete button
+        // Check for and delete empty groups (groups with no files, prompts, documents, or conversations)
+        const emptyGroups = groupsData.filter(group => {
+            const files = getProp(group, 'files') || [];
+            const prompts = getProp(group, 'prompts') || [];
+            const documents = getProp(group, 'documents') || [];
+            const conversations = getProp(group, 'conversations') || [];
+            const fileCount = Array.isArray(files) ? files.length : 0;
+            const promptCount = Array.isArray(prompts) ? prompts.length : 0;
+            const documentCount = Array.isArray(documents) ? documents.length : 0;
+            const conversationCount = Array.isArray(conversations) ? conversations.length : 0;
+            return fileCount === 0 && promptCount === 0 && documentCount === 0 && conversationCount === 0;
+        });
+        
+        // Auto-delete empty groups in parallel
+        if (emptyGroups.length > 0) {
+            console.log(`[AUTO-DELETE] Found ${emptyGroups.length} empty groups, deleting...`);
+            const deletePromises = emptyGroups.map(async (group) => {
+                const id = getProp(group, 'id');
+                const name = getProp(group, 'name') || 'Untitled';
+                console.log(`[AUTO-DELETE] Deleting empty group: ${name} (${id})`);
+                try {
+                    const deleteRes = await fetch(`${API_BASE}/groups/${id}`, { method: 'DELETE' });
+                    if (deleteRes.ok || deleteRes.status === 204) {
+                        console.log(`[AUTO-DELETE] Successfully deleted empty group: ${name}`);
+                        return id;
+                    } else {
+                        console.warn(`[AUTO-DELETE] Failed to delete empty group: ${name}`, deleteRes.status);
+                        return null;
+                    }
+                } catch (err) {
+                    console.error(`[AUTO-DELETE] Error deleting empty group: ${name}`, err);
+                    return null;
+                }
+            });
+            
+            const deletedIds = (await Promise.all(deletePromises)).filter(id => id !== null);
+            const deletedIdsSet = new Set(deletedIds);
+            
+            // Filter out deleted groups using Set for O(1) lookup
+            const validGroups = groupsData.filter(g => !deletedIdsSet.has(getProp(g, 'id')));
+            groupsData.length = 0;
+            groupsData.push(...validGroups);
+        }
         
         const list = document.getElementById('groups-list');
         

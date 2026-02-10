@@ -21,6 +21,7 @@ public class DocumentMetadata
     // Navigation properties
     public List<DocumentChunk> Chunks { get; set; } = new();
     public List<DocumentGroup> DocumentGroups { get; set; } = new();
+    public List<ChatMessageDocument> ChatMessageAttachments { get; set; } = new();
 }
 
 /// <summary>

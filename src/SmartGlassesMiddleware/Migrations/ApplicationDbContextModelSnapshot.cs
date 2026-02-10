@@ -21,6 +21,7 @@ namespace SmartGlassesMiddleware.Migrations
                 .HasAnnotation("ProductVersion", "10.0.0")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
+            NpgsqlModelBuilderExtensions.HasPostgresExtension(modelBuilder, "vector");
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
             modelBuilder.Entity("SmartGlassesMiddleware.Models.AIInteractionLog", b =>
@@ -122,6 +123,24 @@ namespace SmartGlassesMiddleware.Migrations
                     b.HasIndex("ConversationId");
 
                     b.ToTable("ChatMessages");
+                });
+
+            modelBuilder.Entity("SmartGlassesMiddleware.Models.ChatMessageDocument", b =>
+                {
+                    b.Property<Guid>("ChatMessageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("DocumentMetadataId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("AttachedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("ChatMessageId", "DocumentMetadataId");
+
+                    b.HasIndex("DocumentMetadataId");
+
+                    b.ToTable("ChatMessageDocuments");
                 });
 
             modelBuilder.Entity("SmartGlassesMiddleware.Models.Conversation", b =>
@@ -605,6 +624,25 @@ namespace SmartGlassesMiddleware.Migrations
                     b.Navigation("Conversation");
                 });
 
+            modelBuilder.Entity("SmartGlassesMiddleware.Models.ChatMessageDocument", b =>
+                {
+                    b.HasOne("SmartGlassesMiddleware.Models.ChatMessage", "ChatMessage")
+                        .WithMany("Attachments")
+                        .HasForeignKey("ChatMessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("SmartGlassesMiddleware.Models.DocumentMetadata", "DocumentMetadata")
+                        .WithMany("ChatMessageAttachments")
+                        .HasForeignKey("DocumentMetadataId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ChatMessage");
+
+                    b.Navigation("DocumentMetadata");
+                });
+
             modelBuilder.Entity("SmartGlassesMiddleware.Models.Conversation", b =>
                 {
                     b.HasOne("SmartGlassesMiddleware.Models.ResourceGroup", "ResourceGroup")
@@ -692,6 +730,11 @@ namespace SmartGlassesMiddleware.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("SmartGlassesMiddleware.Models.ChatMessage", b =>
+                {
+                    b.Navigation("Attachments");
+                });
+
             modelBuilder.Entity("SmartGlassesMiddleware.Models.Conversation", b =>
                 {
                     b.Navigation("Messages");
@@ -699,6 +742,8 @@ namespace SmartGlassesMiddleware.Migrations
 
             modelBuilder.Entity("SmartGlassesMiddleware.Models.DocumentMetadata", b =>
                 {
+                    b.Navigation("ChatMessageAttachments");
+
                     b.Navigation("Chunks");
 
                     b.Navigation("DocumentGroups");

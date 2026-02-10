@@ -91,6 +91,7 @@ public class ConversationsController : ControllerBase
                 id,
                 request.Role,
                 request.Content,
+                request.DocumentIds,
                 request.Model);
 
             return CreatedAtAction(nameof(GetConversation), new { id }, message);
@@ -249,6 +250,7 @@ public class AddMessageRequest
     public string Role { get; set; } = string.Empty;
     public string Content { get; set; } = string.Empty;
     public string? Model { get; set; }
+    public List<Guid>? DocumentIds { get; set; }
 }
 
 public class ConversationQueryRequest

@@ -19,6 +19,23 @@ public class ChatMessage
 
     // Token count for budget tracking
     public int? TokenCount { get; set; }
+
+    // Document attachments for this message
+    public List<ChatMessageDocument> Attachments { get; set; } = new();
+}
+
+/// <summary>
+/// Join table for many-to-many relationship between ChatMessage and DocumentMetadata
+/// </summary>
+public class ChatMessageDocument
+{
+    public Guid ChatMessageId { get; set; }
+    public ChatMessage ChatMessage { get; set; } = null!;
+
+    public Guid DocumentMetadataId { get; set; }
+    public DocumentMetadata DocumentMetadata { get; set; } = null!;
+
+    public DateTime AttachedAt { get; set; }
 }
 
 /// <summary>

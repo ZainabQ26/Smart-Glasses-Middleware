@@ -30,6 +30,7 @@ public class ApplicationDbContext : DbContext
     public DbSet<DocumentGroup> DocumentGroups { get; set; }
     public DbSet<Conversation> Conversations { get; set; }
     public DbSet<ChatMessage> ChatMessages { get; set; }
+    public DbSet<ChatMessageDocument> ChatMessageDocuments { get; set; }
     public DbSet<AIInteractionLog> AIInteractionLogs { get; set; }
     public DbSet<GroupConversationMapping> GroupConversationMappings { get; set; }
 
@@ -216,6 +217,22 @@ public class ApplicationDbContext : DbContext
             entity.HasOne(e => e.Conversation)
                 .WithMany(c => c.Messages)
                 .HasForeignKey(e => e.ConversationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ChatMessageDocument>(entity =>
+        {
+            entity.HasKey(e => new { e.ChatMessageId, e.DocumentMetadataId });
+            entity.Property(e => e.AttachedAt).IsRequired();
+
+            entity.HasOne(e => e.ChatMessage)
+                .WithMany(m => m.Attachments)
+                .HasForeignKey(e => e.ChatMessageId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.DocumentMetadata)
+                .WithMany(d => d.ChatMessageAttachments)
+                .HasForeignKey(e => e.DocumentMetadataId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

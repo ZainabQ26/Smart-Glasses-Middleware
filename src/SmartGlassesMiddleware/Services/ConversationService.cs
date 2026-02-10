@@ -10,6 +10,7 @@ public interface IConversationService
     Task<Conversation?> GetConversationAsync(Guid conversationId);
     Task<List<Conversation>> GetActiveConversationsAsync(Guid? groupId = null);
     Task<ChatMessage> AddMessageAsync(Guid conversationId, string role, string content, string? model = null);
+    Task<ChatMessage> AddMessageAsync(Guid conversationId, string role, string content, List<Guid>? documentIds, string? model = null);
     Task<List<ChatMessage>> GetRecentMessagesAsync(Guid conversationId, int count = 10);
     Task<Conversation> DetectOrCreateConversationAsync(string userMessage, Guid? groupId = null);
     Task<string> SummarizeConversationAsync(Guid conversationId);
@@ -115,6 +116,11 @@ public class ConversationService : IConversationService
 
     public async Task<ChatMessage> AddMessageAsync(Guid conversationId, string role, string content, string? model = null)
     {
+        return await AddMessageAsync(conversationId, role, content, null, model);
+    }
+
+    public async Task<ChatMessage> AddMessageAsync(Guid conversationId, string role, string content, List<Guid>? documentIds, string? model = null)
+    {
         var conversation = await _context.Conversations.FindAsync(conversationId);
         if (conversation == null)
         {
@@ -133,6 +139,23 @@ public class ConversationService : IConversationService
         };
 
         _context.ChatMessages.Add(message);
+
+        // Attach documents if provided
+        if (documentIds != null && documentIds.Any())
+        {
+            var attachedAt = DateTime.UtcNow;
+            foreach (var docId in documentIds)
+            {
+                var attachment = new ChatMessageDocument
+                {
+                    ChatMessageId = message.Id,
+                    DocumentMetadataId = docId,
+                    AttachedAt = attachedAt
+                };
+                _context.ChatMessageDocuments.Add(attachment);
+            }
+            _logger.LogDebug("Attached {Count} documents to message {MessageId}", documentIds.Count, message.Id);
+        }
 
         // Update conversation timestamp
         conversation.UpdatedAt = DateTime.UtcNow;
