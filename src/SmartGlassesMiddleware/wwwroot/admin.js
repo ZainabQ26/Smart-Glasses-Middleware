@@ -3128,7 +3128,6 @@ async function init() {
                 // Conversations are already persisted server-side
                 // No need to save to ManagedPrompts
                 // await autoSaveCurrentConversation('new_chat');
-                showMessage('Starting new conversation', 'success');
                 
                 // Reset for new chat
                 currentConversationHistory = [];
@@ -3141,12 +3140,14 @@ async function init() {
                 document.getElementById('prompt-name').value = '';
                 document.getElementById('response-content').innerHTML = '<span style="color: #999;">Enter a prompt and click Send to get a response</span>';
                 
-                // Reload prompts list to show new Auto Group
+                // Reload prompts list to show conversations
                 loadPrompts(true);
                 
+                showMessage('Starting new conversation', 'success');
+                
             } catch (error) {
-                console.error('Error saving conversation:', error);
-                showMessage('Failed to save conversation', 'error');
+                console.error('Error starting new conversation:', error);
+                showMessage('Failed to start new conversation', 'error');
             }
         });
         
@@ -3573,7 +3574,9 @@ async function init() {
             groupsCount: state.groups.data.length
         }));
 
-        if (AUTO_SAVE_ENABLED) restoreDraftConversation();
+        // Draft restoration disabled since auto-save is disabled
+        // Conversations are persisted server-side, not in localStorage
+        // if (AUTO_SAVE_ENABLED) restoreDraftConversation();
 
         // Conversations are already persisted server-side via ConversationService
         // No need to auto-save to ManagedPrompts on unload/hidden
