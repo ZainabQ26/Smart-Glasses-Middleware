@@ -626,8 +626,7 @@ async function loadConversationIntoView(conversationId, title) {
         currentConversationHistory = Array.isArray(messages)
             ? messages.map(m => ({
                 role: (m.role || m.Role || '').toLowerCase() === 'assistant' ? 'bot' : (m.role || m.Role || 'user').toLowerCase(),
-                content: m.content || m.Content || '',
-                files: m.files || m.Files || []
+                content: m.content || m.Content || ''
             }))
             : [];
 
@@ -650,56 +649,14 @@ async function loadConversationIntoView(conversationId, title) {
                         <span>${msg.role === 'user' ? 'User' : 'Bot'}:</span>
                     </div>
                     <div style="color: #555; padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
-                    ${msg.files && msg.files.length > 0 ? (() => {
-                        const filesData = encodeURIComponent(JSON.stringify(msg.files));
-                        const filesTitle = `${msg.files.length} file(s) attached: ${msg.files.map(f => f.name || f.fileName || f.FileName || f.name).join(', ')}`;
-                        return `<div style="padding-left:12px;margin-top:6px;"><button type="button" onclick="showAttachedFilesModal('${filesData}')" style="background:none;border:none;font-size:14px;color:#3498db;cursor:pointer;padding:0" title="${escapeHtml(filesTitle)}">📎 ${msg.files.length} file(s)</button></div>`;
-                    })() : ''}
                 </div>
             `;
         }).join('');
-
-        // Build HTML for files attached to the conversation's resource group (if any)
-        let filesHTML = '';
-        try {
-            const groupId = conversation && (conversation.resourceGroupId || conversation.ResourceGroupId || (conversation.resourceGroup && (conversation.resourceGroup.id || conversation.resourceGroup.Id)));
-            if (groupId) {
-                // Fetch authoritative group info (includes files) from admin API
-                try {
-                    const groupRes = await fetchWithRetry(`${API_BASE}/groups/${groupId}`);
-                    if (groupRes && groupRes.ok) {
-                        const groupJson = await groupRes.json();
-                        const files = groupJson.files || groupJson.Files || [];
-                        if (files && files.length > 0) {
-                            const filesList = files.map(mf => {
-                                const id = mf.id || mf.Id;
-                                const name = mf.fileName || mf.FileName || mf.label || mf.Label || 'File';
-                                const size = mf.fileSize || mf.FileSize || 0;
-                                return `<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eee;"><div>${escapeHtml(name)}${size ? ` <span style=\"color:#888;font-size:12px;\">(${Math.round(size/1024)} KB)</span>` : ''}</div><div style="display:flex;gap:8px;"><a href="${API_BASE}/files/${id}/download" target="_blank" style="color:#3498db">Download</a><a href="${API_BASE}/files/${id}/preview" target="_blank" style="color:#3498db">Preview</a></div></div>`;
-                            }).join('');
-
-                            filesHTML = `
-                                <div style="margin-top:12px;padding-top:12px;border-top:1px solid #e6e6e6;">
-                                    <div style="font-weight:600;margin-bottom:8px;color:#2c3e50;">Files in conversation</div>
-                                    <div style="background:#fff;border:1px solid #eee;border-radius:6px;padding:8px;">${filesList}</div>
-                                </div>
-                            `;
-                        }
-                    }
-                } catch (fetchErr) {
-                    console.warn('Failed to fetch group files for conversation', fetchErr);
-                }
-            }
-        } catch (err) {
-            console.warn('Failed to build conversation files list', err);
-            filesHTML = '';
-        }
 
         if (responseContent) {
             responseContent.innerHTML = `
                 <div style="max-height: 500px; overflow-y: auto; padding: 15px; background: #f8f9fa; border-radius: 8px;">
                     ${conversationHTML}
-                    ${filesHTML}
                 </div>
             `;
         }
@@ -715,9 +672,6 @@ let promptSelectedFiles = [];
 let reminderSelectedFiles = []; // Reminder file attachments (separate from prompts)
 let currentConversationHistory = []; // Track conversation messages
 let activePromptGroupId = null;
-// Abort controller for the inline prompt request and cancel button element
-let promptAbortController = null;
-let promptCancelBtn = null;
 // conversation mapping is now server-side; frontend will not persist ConversationId
 let activeConversationId = null;
 window.promptSelectedFiles = promptSelectedFiles;
@@ -1808,42 +1762,28 @@ async function loadPromptById(promptId, promptName) {
 async function manageGroupResources(groupId, groupName) {
     try {
         console.log('[MANAGE] Looking for group ID:', groupId);
-        // ALWAYS try fetching authoritative single-group details first
-        console.log('[MANAGE] Fetching single group details...');
-        let currentGroup = null;
-        try {
-            const singleRes = await fetchWithRetry(`${API_BASE}/groups/${groupId}`);
-            if (singleRes && singleRes.ok) {
-                const singleJson = await singleRes.json().catch(() => null);
-                // single-group endpoint returns the group object directly (not wrapped in Data)
-                currentGroup = singleJson || (singleJson && (singleJson.data || singleJson.Data)) || null;
-            } else {
-                console.warn('[MANAGE] Single-group fetch failed, status:', singleRes && singleRes.status);
-            }
-        } catch (ex) {
-            console.warn('[MANAGE] Error fetching single group details, will fallback to group list lookup', ex);
+        
+        // ALWAYS fetch fresh group data to avoid stale cache
+        console.log('[MANAGE] Fetching fresh group data...');
+        const groupRes = await fetchWithRetry(`${API_BASE}/groups?page=1&pageSize=1000`);
+        if (!groupRes.ok) {
+            throw new Error(`Failed to fetch groups: ${groupRes.status}`);
         }
-
-        // Fallback: fetch full groups list and find the matching group
+        const groupsResult = await groupRes.json();
+        // Handle both lowercase and uppercase from API
+        const groups = groupsResult.data || groupsResult.Data || [];
+        console.log('[MANAGE] Groups fetched:', groups.length);
+        
+        // Find group using case-insensitive property access
+        const currentGroup = groups.find(g => getProp(g, 'id') === groupId);
+        
         if (!currentGroup) {
-            console.log('[MANAGE] Falling back to groups list lookup...');
-            const groupRes = await fetchWithRetry(`${API_BASE}/groups?page=1&pageSize=1000`);
-            if (!groupRes.ok) {
-                throw new Error(`Failed to fetch groups: ${groupRes.status}`);
-            }
-            const groupsResult = await groupRes.json();
-            const groups = groupsResult.data || groupsResult.Data || [];
-            console.log('[MANAGE] Groups fetched:', groups.length);
-            currentGroup = groups.find(g => String(getProp(g, 'id')) === String(groupId));
-            if (!currentGroup) {
-                console.error('[MANAGE] Group not found. Looking for:', groupId);
-                console.error('[MANAGE] Available groups:', groups.map(g => getProp(g, 'id')));
-                throw new Error('Group not found');
-            }
-            console.log('[MANAGE] Using group from list lookup:', currentGroup);
-        } else {
-            console.log('[MANAGE] Using authoritative group data from single endpoint');
+            console.error('[MANAGE] Group not found. Looking for:', groupId);
+            console.error('[MANAGE] Available groups:', groups.map(g => getProp(g, 'id')));
+            throw new Error('Group not found');
         }
+        
+        console.log('[MANAGE] Using fresh group data:', currentGroup);
         
         // ALWAYS fetch files and prompts fresh - don't rely on state cache
         let allFiles = [];
@@ -2741,50 +2681,6 @@ async function init() {
                     selected: false,
                     documentId: documentId
                 });
-                // If there's an active prompt group, attach the uploaded document to that group
-                try {
-                    if (activePromptGroupId) {
-                        const attachRes = await fetch(`${API_BASE}/groups/${activePromptGroupId}/files/${documentId}`, { method: 'POST' });
-                        if (attachRes.ok) {
-                            console.log('[PROMPT UPLOAD] File attached to group', activePromptGroupId);
-                        } else {
-                            console.warn('[PROMPT UPLOAD] Failed to attach uploaded file to group', activePromptGroupId, await attachRes.text().catch(() => ''));
-                        }
-
-                        // If there is also an active conversation, ensure group <-> conversation mapping exists
-                        if (activeConversationId) {
-                            try {
-                                // Upsert mapping: ResourceGroupId = activePromptGroupId, ConversationId = activeConversationId
-                                await fetch('/api/conversations/mapping', {
-                                    method: 'PUT',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ ResourceGroupId: activePromptGroupId, ConversationId: activeConversationId })
-                                });
-                                console.log('[PROMPT UPLOAD] Bound group to conversation', activePromptGroupId, activeConversationId);
-                            } catch (mapErr) {
-                                console.warn('[PROMPT UPLOAD] Failed to upsert group->conversation mapping', mapErr);
-                            }
-                        }
-                    }
-                    else if (activeConversationId) {
-                        // If no active group but a conversation is active, try to fetch the conversation's ResourceGroupId and attach
-                        try {
-                            const convRes = await fetch(`${API_BASE}/conversations/${activeConversationId}`);
-                            if (convRes.ok) {
-                                const conv = await convRes.json();
-                                const convGroupId = conv.resourceGroupId || conv.ResourceGroupId || null;
-                                if (convGroupId) {
-                                    const attachRes2 = await fetch(`${API_BASE}/groups/${convGroupId}/files/${documentId}`, { method: 'POST' });
-                                    if (attachRes2.ok) console.log('[PROMPT UPLOAD] File attached to conversation group', convGroupId);
-                                }
-                            }
-                        } catch (ex) {
-                            console.warn('[PROMPT UPLOAD] Failed to attach file to conversation group', ex);
-                        }
-                    }
-                } catch (attachErr) {
-                    console.warn('[PROMPT UPLOAD] Error attaching file to group or mapping:', attachErr);
-                }
                 window.promptSelectedFiles = promptSelectedFiles;
                 updatePromptFilesList();
                 showMessage(`File "${promptPreviewFile.name}" uploaded successfully`, 'success');
@@ -2874,33 +2770,9 @@ async function init() {
                 }
                 console.log('[SEND PROMPT] Sending documents query to', documentsUrl, 'payload:', payload);
 
-                // create abort controller and expose cancel button; disable send while running
-                const sendBtn = document.getElementById('prompt-send-btn');
-                const originalSendText = sendBtn ? sendBtn.textContent : null;
-                if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = 'Sending...'; }
-
-                promptAbortController = new AbortController();
-                const controller = promptAbortController;
+                const controller = new AbortController();
                 const timeoutMs = 150000; // 150 seconds - longer than server timeout
                 const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-                // show cancel button if present and wire up enhanced UX
-                promptCancelBtn = promptCancelBtn || document.getElementById('prompt-cancel-btn');
-                let escHandler = null;
-                if (promptCancelBtn) {
-                    promptCancelBtn.style.display = 'inline-block';
-                    promptCancelBtn.disabled = false;
-                    promptCancelBtn.textContent = 'Cancel';
-                    promptCancelBtn.onclick = () => {
-                        try { controller.abort(); } catch { }
-                        promptCancelBtn.disabled = true;
-                        promptCancelBtn.textContent = 'Cancelling...';
-                    };
-
-                    // allow Escape key to cancel
-                    escHandler = (ev) => { if (ev.key === 'Escape') { try { controller.abort(); } catch {} promptCancelBtn.disabled = true; promptCancelBtn.textContent = 'Cancelling...'; } };
-                    document.addEventListener('keydown', escHandler);
-                }
 
                 const queryResponse = await fetch(documentsUrl, {
                     method: 'POST',
@@ -2909,9 +2781,6 @@ async function init() {
                     signal: controller.signal
                 });
                 clearTimeout(timeoutId);
-                // hide cancel button and restore send button
-                if (promptCancelBtn) { promptCancelBtn.style.display = 'none'; promptCancelBtn.onclick = null; if (escHandler) document.removeEventListener('keydown', escHandler); }
-                if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = originalSendText; }
 
                 console.log('[SEND PROMPT] documents query status:', queryResponse.status, queryResponse.statusText);
                 let result;
@@ -2924,52 +2793,6 @@ async function init() {
                     const text = await queryResponse.text().catch(() => '');
                     console.error('[SEND PROMPT] Failed to parse JSON response. Raw response:', text);
                     throw new Error('Invalid JSON response from server');
-                }
-
-                // If server accepted the request for async processing, it returns 202 with a taskId.
-                if (queryResponse.status === 202 || result?.taskId) {
-                    const taskId = result?.taskId || result?.taskID || null;
-                    // Show a small status area to the user
-                    const statusArea = document.getElementById('prompt-status') || document.createElement('div');
-                    statusArea.id = 'prompt-status';
-                    statusArea.style.marginTop = '8px';
-                    statusArea.style.color = '#555';
-                    statusArea.textContent = `Request queued (task ${taskId}). Waiting for result...`;
-                    responseContent.prepend(statusArea);
-
-                    // Poll for completion
-                    const poll = setInterval(async () => {
-                        try {
-                            const pollRes = await fetch(`/api/tasks/${taskId}`);
-                            if (pollRes.status === 200) {
-                                clearInterval(poll);
-                                const pollJson = await pollRes.json();
-                                const finalResult = pollJson.result || pollJson;
-                                // remove status area
-                                statusArea.textContent = 'Result ready';
-                                // Process finalResult similar to synchronous response
-                                lastQueryResult = finalResult;
-                                // emulate result processing by assigning to result and continuing
-                                result = finalResult;
-                            } else if (pollRes.status >= 500) {
-                                clearInterval(poll);
-                                statusArea.textContent = 'Task failed';
-                            } else {
-                                // still pending
-                                // no-op
-                            }
-                        } catch (err) {
-                            console.error('[POLL] Error polling task:', err);
-                        }
-                    }, 2000);
-
-                    // Allow cancel button to stop polling (client-side only)
-                    if (promptCancelBtn) {
-                        promptCancelBtn.style.display = 'inline-block';
-                        promptCancelBtn.disabled = false;
-                        promptCancelBtn.textContent = 'Stop Waiting';
-                        promptCancelBtn.onclick = () => { clearInterval(poll); statusArea.textContent = 'Stopped polling by user'; promptCancelBtn.disabled = true; };
-                    }
                 }
 
                 if (!queryResponse.ok) {
@@ -3061,9 +2884,6 @@ async function init() {
                         </div>
                     `;
                     showMessage('Request timed out after 60 seconds', 'error');
-                    if (promptCancelBtn) { promptCancelBtn.style.display = 'none'; promptCancelBtn.onclick = null; }
-                    if (escHandler) { document.removeEventListener('keydown', escHandler); }
-                    const sendBtn = document.getElementById('prompt-send-btn'); if (sendBtn) { sendBtn.disabled = false; if (originalSendText) sendBtn.textContent = originalSendText; }
                     return;
                 }
                 const fallbackSources = lastQueryResult?.referencedSources || lastQueryResult?.ReferencedSources || lastQueryResult?.sources || lastQueryResult?.Sources || [];
@@ -3076,9 +2896,6 @@ async function init() {
                     ${fallbackSourcesHtml}
                 `;
                 showMessage(`Error: ${error.message}`, 'error');
-                if (promptCancelBtn) { promptCancelBtn.style.display = 'none'; promptCancelBtn.onclick = null; }
-                if (escHandler) { document.removeEventListener('keydown', escHandler); }
-                const sendBtn2 = document.getElementById('prompt-send-btn'); if (sendBtn2) { sendBtn2.disabled = false; if (originalSendText) sendBtn2.textContent = originalSendText; }
             }
         };
         
