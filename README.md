@@ -226,11 +226,14 @@ Quick start for E2E tests:
 # Install dependencies
 npm install
 
-# Install Playwright browsers
-npx playwright install
+# Install Playwright browsers (Chromium is sufficient for most testing)
+npx playwright install chromium
 
 # Run all E2E tests
 npm test
+
+# Or run tests on Chromium only (faster)
+npx playwright test --project=chromium
 ```
 
 ### Run Application

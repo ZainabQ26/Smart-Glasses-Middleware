@@ -15,8 +15,9 @@ This repository includes comprehensive end-to-end tests using **Playwright 1.58.
 # Install dependencies
 npm install
 
-# Install Playwright browsers
-npx playwright install
+# Install Playwright browsers (install all or just one)
+npx playwright install          # Install all browsers
+npx playwright install chromium # Install only Chromium (recommended for quick start)
 ```
 
 ### Running Tests
@@ -51,6 +52,9 @@ npx playwright test e2e-tests/02-admin-page.spec.ts
 
 # Run monitoring page tests
 npx playwright test e2e-tests/03-monitoring-page.spec.ts
+
+# Run only on Chromium (faster for local dev)
+npx playwright test --project=chromium
 ```
 
 #### Run Tests in Headed Mode
