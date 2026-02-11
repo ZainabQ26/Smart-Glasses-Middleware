@@ -2,8 +2,8 @@ import { test, expect } from '@playwright/test';
 
 test.describe('Admin Page - File Management', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/admin.html');
-    await page.waitForLoadState('networkidle');
+    await page.goto('/admin.html', { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1000);
   });
 
   test('should display files list or empty state', async ({ page }) => {
@@ -36,27 +36,27 @@ test.describe('Admin Page - File Management', () => {
       await page.waitForTimeout(500);
       
       // Should not crash
-      await expect(page.locator('text=Files')).toBeVisible();
+      await expect(page.locator('button[data-tab="files"]')).toBeVisible();
     }
   });
 
   test('should maintain files view after reload', async ({ page }) => {
-    await page.reload();
-    await page.waitForLoadState('networkidle');
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1000);
     
     // Files section should still be visible
-    await expect(page.locator('text=Files')).toBeVisible();
+    await expect(page.locator('button[data-tab="files"]')).toBeVisible();
   });
 });
 
 test.describe('Admin Page - Prompt Management', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/admin.html');
-    await page.waitForLoadState('networkidle');
+    await page.goto('/admin.html', { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1000);
   });
 
   test('should display prompts section', async ({ page }) => {
-    await expect(page.locator('text=Prompts')).toBeVisible();
+    await expect(page.locator('button[data-tab="prompts"]')).toBeVisible();
   });
 
   test('should show create/add prompt button', async ({ page }) => {
@@ -97,21 +97,21 @@ test.describe('Admin Page - Prompt Management', () => {
   });
 
   test('should maintain prompts view after reload', async ({ page }) => {
-    await page.reload();
-    await page.waitForLoadState('networkidle');
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1000);
     
-    await expect(page.locator('text=Prompts')).toBeVisible();
+    await expect(page.locator('button[data-tab="prompts"]')).toBeVisible();
   });
 });
 
 test.describe('Admin Page - Group Management', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/admin.html');
-    await page.waitForLoadState('networkidle');
+    await page.goto('/admin.html', { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1000);
   });
 
   test('should display groups section', async ({ page }) => {
-    await expect(page.locator('text=Groups')).toBeVisible();
+    await expect(page.locator('button[data-tab="groups"]')).toBeVisible();
   });
 
   test('should show create group button', async ({ page }) => {
@@ -134,10 +134,10 @@ test.describe('Admin Page - Group Management', () => {
   });
 
   test('should maintain groups view after reload', async ({ page }) => {
-    await page.reload();
-    await page.waitForLoadState('networkidle');
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1000);
     
-    await expect(page.locator('text=Groups')).toBeVisible();
+    await expect(page.locator('button[data-tab="groups"]')).toBeVisible();
   });
 
   test('should handle group search/filter if available', async ({ page }) => {
@@ -148,15 +148,15 @@ test.describe('Admin Page - Group Management', () => {
       await page.waitForTimeout(500);
       
       // Should not crash
-      await expect(page.locator('text=Groups')).toBeVisible();
+      await expect(page.locator('button[data-tab="groups"]')).toBeVisible();
     }
   });
 });
 
 test.describe('Admin Page - Pagination', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/admin.html');
-    await page.waitForLoadState('networkidle');
+    await page.goto('/admin.html', { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1000);
   });
 
   test('should handle pagination controls if present', async ({ page }) => {
@@ -186,7 +186,7 @@ test.describe('Admin Page - Pagination', () => {
         await page.waitForTimeout(500);
         
         // Should still show the main sections
-        await expect(page.locator('text=Files')).toBeVisible();
+        await expect(page.locator('button[data-tab="files"]')).toBeVisible();
       }
     }
   });

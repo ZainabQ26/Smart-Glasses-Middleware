@@ -200,11 +200,6 @@ function applyTheme(theme) {
     } else {
         document.body.classList.remove('dark');
     }
-    try {
-        localStorage.setItem(themeStorageKey, theme);
-    } catch {
-        // ignore storage errors
-    }
 }
 
 // Loading indicator
@@ -948,76 +943,8 @@ async function autoSaveCurrentConversation(reason) {
 }
 
 function restoreDraftConversation() {
-    try {
-        const raw = localStorage.getItem(draftStorageKey);
-        if (!raw) return false;
-        const draft = JSON.parse(raw);
-        if (!draft || (!Array.isArray(draft.messages) && !Array.isArray(draft.files))) return false;
-
-        currentConversationHistory = Array.isArray(draft.messages) ? draft.messages : [];
-        promptSelectedFiles = Array.isArray(draft.files) ? draft.files.map(f => ({
-            name: f.name || 'Document',
-            documentId: f.id || f.documentId,
-            selected: false
-        })) : [];
-        window.promptSelectedFiles = promptSelectedFiles;
-        updatePromptFilesList();
-
-        if (currentConversationHistory.length > 0) {
-            const conversationHTML = currentConversationHistory.map(msg => {
-                const msgFiles = Array.isArray(msg.files) ? msg.files : [];
-                const filesData = encodeFilesData(msgFiles);
-                const filesTitle = msgFiles.length > 0
-                    ? `${msgFiles.length} file(s) attached: ${msgFiles.map(f => (typeof f === 'string' ? f : f.name || f.fileName || f.FileName || 'Document')).join(', ')}`
-                    : '';
-                const msgSources = Array.isArray(msg.sources) ? msg.sources : [];
-                const msgSourcesHtml = msgSources.length > 0 ? `
-                    <div style="margin-top: 8px; padding: 8px; background: #fff; border: 1px solid #dee2e6; border-radius: 4px;">
-                        <div style="font-weight: 600; color: #2c3e50; margin-bottom: 6px; font-size: 0.8rem;">Sources Used:</div>
-                        ${msgSources.map(source => {
-                            const documentId = source.documentId || source.DocumentId;
-                            const fileName = source.fileName || source.FileName || 'Document';
-                            const page = source.pageNumber || source.PageNumber;
-                            const label = page ? `${fileName} (p.${page})` : fileName;
-                            const href = documentId ? `/api/documents/${documentId}/download` : '#';
-                            const linkStyle = documentId ? 'color: #3498db; text-decoration: underline;' : 'color: #95a5a6; text-decoration: none;';
-                            return `
-                                <div style="display: flex; align-items: center; gap: 8px; font-size: 12px;">
-                                    <a href="${href}" target="_blank" style="${linkStyle}" onclick="${documentId ? '' : 'return false;'}">${escapeHtml(label)}</a>
-                                    ${documentId ? `<button type=\"button\" onclick=\"previewDocumentFile('${documentId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')\" style=\"padding: 2px 6px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 11px;\">Preview</button>` : ''}
-                                </div>
-                            `;
-                        }).join('')}
-                    </div>
-                ` : '';
-
-                return `
-                    <div style="margin-bottom: 12px;">
-                        <div style="color: ${msg.role === 'user' ? '#3498db' : '#27ae60'}; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
-                            <span>${msg.role === 'user' ? 'User' : 'Bot'}:</span>
-                            ${msgFiles.length > 0 ? `<button type=\"button\" onclick=\"showAttachedFilesModal('${filesData}')\" style=\"background: none; border: none; font-size: 16px; color: #3498db; cursor: pointer; padding: 0;\" title=\"${escapeHtml(filesTitle)}\">📎</button>` : ''}
-                        </div>
-                        <div style="color: #555; padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
-                        ${msg.role === 'bot' ? msgSourcesHtml : ''}
-                    </div>
-                `;
-            }).join('');
-
-            const responseContent = document.getElementById('response-content');
-            if (responseContent) {
-                responseContent.innerHTML = `
-                    <div style="max-height: 500px; overflow-y: auto; padding: 15px; background: #f8f9fa; border-radius: 8px;">
-                        ${conversationHTML}
-                    </div>
-                `;
-            }
-        }
-
-        return true;
-    } catch (error) {
-        console.warn('[AUTO SAVE] Failed to restore draft:', error);
-        return false;
-    }
+    // Browser storage draft restoration removed.
+    return false;
 }
 
 function closeAutoGroupView() {
@@ -2753,8 +2680,8 @@ async function init() {
     }
     
     try {
-        // Apply saved theme
-        const savedTheme = localStorage.getItem(themeStorageKey) || 'light';
+        // Apply theme: default to light (no browser storage persistence)
+        const savedTheme = 'light';
         applyTheme(savedTheme);
         document.getElementById('theme-toggle')?.addEventListener('click', () => {
             const nextTheme = document.body.classList.contains('dark') ? 'light' : 'dark';
@@ -3229,11 +3156,6 @@ async function init() {
                 promptSelectedFiles = [];
                 window.promptSelectedFiles = promptSelectedFiles;
                 updatePromptFilesList();
-                try {
-                    localStorage.removeItem(draftStorageKey);
-                } catch {
-                    // ignore
-                }
                 
             } catch (error) {
                 console.error('Error sending prompt:', error);
@@ -3766,7 +3688,7 @@ async function init() {
         }));
 
         // Draft restoration disabled since auto-save is disabled
-        // Conversations are persisted server-side, not in localStorage
+        // Conversations are persisted server-side, not in browser storage
         // if (AUTO_SAVE_ENABLED) restoreDraftConversation();
 
         // Conversations are already persisted server-side via ConversationService

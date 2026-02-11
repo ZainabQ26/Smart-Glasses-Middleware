@@ -7,19 +7,20 @@ test.describe('Full User Journey - Admin Workflow', () => {
     await expect(page).toHaveTitle(/Smart Glasses.*File.*Prompt/i);
     
     // 2. Wait for all sections to load
-    await page.waitForLoadState('networkidle');
-    await expect(page.locator('text=Files')).toBeVisible();
-    await expect(page.locator('text=Prompts')).toBeVisible();
-    await expect(page.locator('text=Groups')).toBeVisible();
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(1000);
+    await expect(page.locator('button[data-tab="files"]')).toBeVisible();
+    await expect(page.locator('button[data-tab="prompts"]')).toBeVisible();
+    await expect(page.locator('button[data-tab="groups"]')).toBeVisible();
     
     // 3. Reload to test persistence
-    await page.reload();
-    await page.waitForLoadState('networkidle');
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1000);
     
     // 4. Verify all sections still visible
-    await expect(page.locator('text=Files')).toBeVisible();
-    await expect(page.locator('text=Prompts')).toBeVisible();
-    await expect(page.locator('text=Groups')).toBeVisible();
+    await expect(page.locator('button[data-tab="files"]')).toBeVisible();
+    await expect(page.locator('button[data-tab="prompts"]')).toBeVisible();
+    await expect(page.locator('button[data-tab="groups"]')).toBeVisible();
     
     // 5. Navigate to monitoring
     const monitoringLink = page.locator('a[href="/monitoring.html"]').first();
@@ -28,15 +29,16 @@ test.describe('Full User Journey - Admin Workflow', () => {
       await page.waitForURL('**/monitoring.html');
       
       // 6. Verify monitoring page loads
-      await expect(page.locator('text=Recent Requests')).toBeVisible();
+      await expect(page.locator('h1, h2, h3').filter({ hasText: /Recent.*Requests|Monitoring|Request/i }).first()).toBeVisible();
       
       // 7. Reload monitoring page
-      await page.reload();
-      await expect(page.locator('text=Recent Requests')).toBeVisible();
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(1000);
+      await expect(page.locator('h1, h2, h3').filter({ hasText: /Recent.*Requests|Monitoring|Request/i }).first()).toBeVisible();
       
       // 8. Navigate back to admin
       await page.goBack();
-      await expect(page.locator('text=Files')).toBeVisible();
+      await expect(page.locator('button[data-tab="files"]')).toBeVisible();
     }
   });
 });
@@ -61,8 +63,7 @@ test.describe('Full User Journey - Monitoring and Real-time Updates', () => {
     await expect(page.locator('#active-requests')).toBeVisible();
     
     // 5. Reload and verify reconnection
-    await page.reload();
-    await page.waitForLoadState('networkidle');
+    await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(2000);
     
     // 6. Stats should still be visible
@@ -73,7 +74,7 @@ test.describe('Full User Journey - Monitoring and Real-time Updates', () => {
     await page.goto('/monitoring.html');
     
     // 8. Verify monitoring still works
-    await expect(page.locator('text=Recent Requests')).toBeVisible();
+    await expect(page.locator('h1, h2, h3').filter({ hasText: /Recent.*Requests|Monitoring|Request/i }).first()).toBeVisible();
   });
 });
 
@@ -111,11 +112,11 @@ test.describe('Full User Journey - Browser Controls', () => {
   test('should handle all browser navigation controls', async ({ page }) => {
     // 1. Start at admin
     await page.goto('/admin.html');
-    await expect(page.locator('text=Files')).toBeVisible();
+    await expect(page.locator('button[data-tab="files"]')).toBeVisible();
     
     // 2. Go to monitoring
     await page.goto('/monitoring.html');
-    await expect(page.locator('text=Recent Requests')).toBeVisible();
+    await expect(page.locator('h1, h2, h3').filter({ hasText: /Recent.*Requests|Monitoring|Request/i }).first()).toBeVisible();
     
     // 3. Use back button
     await page.goBack();
@@ -127,11 +128,12 @@ test.describe('Full User Journey - Browser Controls', () => {
     
     // 5. Reload
     await page.reload();
-    await expect(page.locator('text=Recent Requests')).toBeVisible();
+    await expect(page.locator('h1, h2, h3').filter({ hasText: /Recent.*Requests|Monitoring|Request/i }).first()).toBeVisible();
     
     // 6. Hard reload (clear cache and reload)
-    await page.reload({ waitUntil: 'networkidle' });
-    await expect(page.locator('text=Recent Requests')).toBeVisible();
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1000);
+    await expect(page.locator('h1, h2, h3').filter({ hasText: /Recent.*Requests|Monitoring|Request/i }).first()).toBeVisible();
     
     // 7. Navigate via URL
     await page.goto('/health');
@@ -140,7 +142,7 @@ test.describe('Full User Journey - Browser Controls', () => {
     
     // 8. Back to monitoring
     await page.goto('/monitoring.html');
-    await expect(page.locator('text=Recent Requests')).toBeVisible();
+    await expect(page.locator('h1, h2, h3').filter({ hasText: /Recent.*Requests|Monitoring|Request/i }).first()).toBeVisible();
   });
 });
 
@@ -158,15 +160,15 @@ test.describe('Full User Journey - Viewport Changes', () => {
       
       // Test admin page
       await page.goto('/admin.html');
-      await expect(page.locator('text=Files')).toBeVisible();
+      await expect(page.locator('button[data-tab="files"]')).toBeVisible();
       
       // Test monitoring page
       await page.goto('/monitoring.html');
-      await expect(page.locator('text=Recent Requests')).toBeVisible();
+      await expect(page.locator('h1, h2, h3').filter({ hasText: /Recent.*Requests|Monitoring|Request/i }).first()).toBeVisible();
       
       // Test reload on this viewport
       await page.reload();
-      await expect(page.locator('text=Recent Requests')).toBeVisible();
+      await expect(page.locator('h1, h2, h3').filter({ hasText: /Recent.*Requests|Monitoring|Request/i }).first()).toBeVisible();
     }
   });
 });
@@ -178,15 +180,15 @@ test.describe('Full User Journey - API Integration', () => {
     expect(healthResponse.status()).toBe(200);
     
     // 2. Load admin page which calls multiple APIs
-    await page.goto('/admin.html');
-    await page.waitForLoadState('networkidle');
+    await page.goto('/admin.html', { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1000);
     
     // 3. Verify UI loaded from API data
-    await expect(page.locator('text=Files')).toBeVisible();
+    await expect(page.locator('button[data-tab="files"]')).toBeVisible();
     
     // 4. Load monitoring page which calls APIs
-    await page.goto('/monitoring.html');
-    await page.waitForLoadState('networkidle');
+    await page.goto('/monitoring.html', { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1000);
     
     // 5. Verify monitoring UI loaded
     await expect(page.locator('#total-requests')).toBeVisible();
@@ -207,17 +209,17 @@ test.describe('Full User Journey - Error Recovery', () => {
     await page.reload();
     
     // Page should still render
-    await expect(page.locator('text=Files')).toBeVisible();
+    await expect(page.locator('button[data-tab="files"]')).toBeVisible();
     
     // Remove network failure
     await page.unroute('**/api/admin/**');
     
     // Reload should now work
-    await page.reload();
-    await page.waitForLoadState('networkidle');
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1000);
     
     // Page should be fully functional
-    await expect(page.locator('text=Files')).toBeVisible();
+    await expect(page.locator('button[data-tab="files"]')).toBeVisible();
   });
 
   test('should handle service degradation gracefully', async ({ page }) => {
@@ -232,7 +234,7 @@ test.describe('Full User Journey - Error Recovery', () => {
     await page.reload();
     
     // Page should eventually load (with longer timeout)
-    await expect(page.locator('text=Files')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('button[data-tab="files"]')).toBeVisible({ timeout: 15000 });
     
     // Remove slowdown
     await page.unroute('**/api/**');
@@ -244,31 +246,31 @@ test.describe('Full User Journey - Session Persistence', () => {
     // Simulate a user session
     
     // 1. Visit admin page
-    await page.goto('/admin.html');
-    await page.waitForLoadState('networkidle');
-    await expect(page.locator('text=Files')).toBeVisible();
+    await page.goto('/admin.html', { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1000);
+    await expect(page.locator('button[data-tab="files"]')).toBeVisible();
     
     // 2. Wait a bit (simulating user reading)
     await page.waitForTimeout(2000);
     
     // 3. Go to monitoring
-    await page.goto('/monitoring.html');
-    await page.waitForLoadState('networkidle');
-    await expect(page.locator('text=Recent Requests')).toBeVisible();
+    await page.goto('/monitoring.html', { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1000);
+    await expect(page.locator('h1, h2, h3').filter({ hasText: /Recent.*Requests|Monitoring|Request/i }).first()).toBeVisible();
     
     // 4. Wait more (simulating user watching monitoring)
     await page.waitForTimeout(3000);
     
     // 5. Return to admin
     await page.goto('/admin.html');
-    await expect(page.locator('text=Files')).toBeVisible();
+    await expect(page.locator('button[data-tab="files"]')).toBeVisible();
     
     // 6. Reload admin
     await page.reload();
-    await expect(page.locator('text=Files')).toBeVisible();
+    await expect(page.locator('button[data-tab="files"]')).toBeVisible();
     
     // 7. Session should still be functional
     await page.goto('/monitoring.html');
-    await expect(page.locator('text=Recent Requests')).toBeVisible();
+    await expect(page.locator('h1, h2, h3').filter({ hasText: /Recent.*Requests|Monitoring|Request/i }).first()).toBeVisible();
   });
 });

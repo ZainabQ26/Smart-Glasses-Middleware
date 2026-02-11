@@ -116,8 +116,8 @@ test.describe('Monitoring Page', () => {
       }
     });
     
-    await page.reload();
-    await page.waitForLoadState('networkidle');
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1000);
     
     // Filter out network errors from potentially unavailable services
     const criticalErrors = errors.filter(e => 
