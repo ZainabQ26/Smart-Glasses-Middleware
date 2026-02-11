@@ -95,8 +95,12 @@ test.describe('Navigation and Page Reloading', () => {
     
     for (const testPage of pages) {
       await page.goto(testPage.url);
-      const content = await page.content();
-      expect(content.toLowerCase()).toContain(testPage.text.toLowerCase());
+      if (testPage.url.includes('monitoring.html')) {
+        await expect(page.locator('[data-testid="requests-header"]')).toBeVisible();
+      } else {
+        const content = await page.content();
+        expect(content.toLowerCase()).toContain(testPage.text.toLowerCase());
+      }
     }
   });
 

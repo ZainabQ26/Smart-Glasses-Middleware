@@ -95,14 +95,22 @@ test.describe('Full User Journey - Multi-page Navigation', () => {
           await expect(page).toHaveTitle(testPage.title);
         }
         
-        const content = await page.content();
-        expect(content.toLowerCase()).toContain(testPage.marker.toLowerCase());
+        if (testPage.url.includes('monitoring.html')) {
+          await expect(page.locator('[data-testid="requests-header"]')).toBeVisible();
+        } else {
+          const content = await page.content();
+          expect(content.toLowerCase()).toContain(testPage.marker.toLowerCase());
+        }
         
         // Reload each page
         await page.reload();
         
-        const reloadedContent = await page.content();
-        expect(reloadedContent.toLowerCase()).toContain(testPage.marker.toLowerCase());
+        if (testPage.url.includes('monitoring.html')) {
+          await expect(page.locator('[data-testid="requests-header"]')).toBeVisible();
+        } else {
+          const reloadedContent = await page.content();
+          expect(reloadedContent.toLowerCase()).toContain(testPage.marker.toLowerCase());
+        }
       }
     }
   });

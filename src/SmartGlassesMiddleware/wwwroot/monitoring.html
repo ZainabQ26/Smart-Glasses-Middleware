@@ -280,47 +280,47 @@
 <body>
     <header>
         <div class="container">
-            <h1>📊 Request Monitoring</h1>
+            <h1 data-testid="monitoring-title">📊 Request Monitoring</h1>
             <div class="nav-links">
-                <a href="/admin.html">← Back to Admin</a>
+                <a href="/admin.html" data-testid="monitoring-back-link">← Back to Admin</a>
             </div>
         </div>
     </header>
 
     <div class="container">
-        <div id="connection-status" class="connection-status disconnected">
+        <div id="connection-status" class="connection-status disconnected" role="status" aria-live="polite" data-testid="connection-status">
             Connecting to real-time updates...
         </div>
 
-        <div class="stats-container">
-            <div class="stat-card">
-                <div class="value" id="total-requests">0</div>
+        <div class="stats-container" data-testid="stats-container">
+            <div class="stat-card" data-testid="stat-total">
+                <div class="value" id="total-requests" aria-label="Total requests" data-testid="stat-total-value">0</div>
                 <div class="label">Total Requests</div>
             </div>
-            <div class="stat-card success">
-                <div class="value" id="successful-requests">0</div>
+            <div class="stat-card success" data-testid="stat-successful">
+                <div class="value" id="successful-requests" aria-label="Successful requests" data-testid="stat-successful-value">0</div>
                 <div class="label">Successful</div>
             </div>
-            <div class="stat-card error">
-                <div class="value" id="failed-requests">0</div>
+            <div class="stat-card error" data-testid="stat-failed">
+                <div class="value" id="failed-requests" aria-label="Failed requests" data-testid="stat-failed-value">0</div>
                 <div class="label">Failed</div>
             </div>
-            <div class="stat-card active">
-                <div class="value" id="active-requests">0</div>
+            <div class="stat-card active" data-testid="stat-active">
+                <div class="value" id="active-requests" aria-label="Active requests" data-testid="stat-active-value">0</div>
                 <div class="label">Active</div>
             </div>
-            <div class="stat-card">
-                <div class="value" id="avg-duration">0ms</div>
+            <div class="stat-card" data-testid="stat-duration">
+                <div class="value" id="avg-duration" aria-label="Average duration" data-testid="stat-duration-value">0ms</div>
                 <div class="label">Avg Duration</div>
             </div>
         </div>
 
-        <div class="requests-container">
-            <div class="requests-header">
+        <div class="requests-container" data-testid="requests-container" role="region" aria-label="Recent requests">
+            <div class="requests-header" data-testid="requests-header">
                 Recent Requests
             </div>
-            <div id="requests-list">
-                <div class="no-requests">No requests yet. Monitoring in real-time...</div>
+            <div id="requests-list" data-testid="requests-list" aria-live="polite">
+                <div class="no-requests" data-testid="requests-empty">No requests yet. Monitoring in real-time...</div>
             </div>
         </div>
     </div>
@@ -551,11 +551,14 @@
                     if (histProgress.length) progress = Math.max(...histProgress);
                 }
 
+                const stageLabel = formatStageLabel(primary?.status, primary?.details);
+                const stageDetails = primary?.details ? String(primary.details) : '';
+
                 return `
-                    <div class="request-item ${isActive ? 'active' : ''}" data-request-id="${escapeHtml(group.id)}">
+                    <div class="request-item ${isActive ? 'active' : ''}" data-request-id="${escapeHtml(group.id)}" data-testid="request-item">
                                 <div class="request-header">
                                     <div style="flex:1">
-                                        <div class="request-type" style="font-size:1.1rem">${escapeHtml(primary?.description || primary?.requestType || 'Request')}</div>
+                                        <div class="request-type" style="font-size:1.1rem" data-testid="request-title">${escapeHtml(primary?.description || primary?.requestType || 'Request')}</div>
                                         <div style="font-size:0.9rem;color:#7f8c8d;margin-top:4px">${escapeHtml(primary?.requestType || '')}</div>
                                     </div>
                                     <div style="margin-left:12px">
@@ -563,7 +566,7 @@
                                     </div>
                                 </div>
                         <div class="request-description">${escapeHtml(primary?.description || (group.histories && group.histories[0] ? group.histories[0].inputText : ''))}</div>
-                        ${primary?.details ? `<div class="request-details">${escapeHtml(primary.details)}</div>` : ''}
+                        ${stageLabel ? `<div class="request-stage" style="margin-top:6px;color:#2c3e50" role="status" aria-live="polite" data-testid="request-stage"><strong>Now:</strong> ${escapeHtml(stageLabel)}${stageDetails ? ` — ${escapeHtml(stageDetails)}` : ''}</div>` : ''}
                         <div class="request-meta">
                             <span>Started: ${primary?.startTime ? new Date(primary.startTime).toLocaleTimeString() : ''}</span>
                             ${duration > 0 ? `<span class="duration">Duration: ${duration}ms</span>` : ''}
@@ -571,12 +574,29 @@
                         </div>
                         ${primary?.error ? `<div class="request-error"><strong>Error:</strong> ${escapeHtml(primary.error)}</div>` : ''}
                         ${primary?.result ? `<div class="request-result"><strong>Result:</strong> ${escapeHtml(primary.result)}</div>` : ''}
-                                <div class="progress-track"><div class="progress-fill" style="width:${Math.max(0, Math.min(100, progress || 0))}%" data-progress-id="${escapeHtml(group.id)}"></div></div>
-                                <div class="progress-percent" data-progress-id="${escapeHtml(group.id)}" style="font-size:0.85rem;color:#7f8c8d;margin-top:6px">Progress: ${progress || 0}%</div>
+                                <div class="progress-track">
+                                    <div class="progress-fill" style="width:${Math.max(0, Math.min(100, progress || 0))}%" data-progress-id="${escapeHtml(group.id)}" data-testid="request-progress" role="progressbar" aria-label="Request progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.max(0, Math.min(100, progress || 0))}"></div>
+                                </div>
+                                <div class="progress-percent" data-progress-id="${escapeHtml(group.id)}" data-testid="request-progress-label" style="font-size:0.85rem;color:#7f8c8d;margin-top:6px">Progress: ${progress || 0}%</div>
                         ${renderHistoryForRequest(group.id)}
                     </div>
                 `;
             }).join('');
+        }
+
+        function formatStageLabel(status, details) {
+            const raw = status ? String(status).trim() : '';
+            const lowered = raw.toLowerCase();
+
+            if (lowered.includes('transcrib')) return 'Transcribing audio';
+            if (lowered.includes('retrieval') || lowered.includes('rag')) return 'Retrieving documents';
+            if (lowered === 'ai' || lowered.includes('ai')) return 'Consulting AI';
+            if (lowered.includes('process') || lowered.includes('inprogress')) return 'Processing request';
+            if (lowered.includes('completed')) return 'Completed';
+            if (lowered.includes('failed')) return 'Failed';
+
+            if (details && String(details).trim().length > 0) return 'Processing request';
+            return raw;
         }
 
         function getGroupLatestTime(group) {
@@ -673,6 +693,7 @@
                         if (fill) {
                             const pct = Math.max(0, Math.min(100, Math.round(next)));
                             fill.style.width = pct + '%';
+                            fill.setAttribute('aria-valuenow', String(pct));
                         }
                         const pctEl = document.querySelector(`.request-item[data-request-id="${id}"] .progress-percent`);
                         if (pctEl) {
