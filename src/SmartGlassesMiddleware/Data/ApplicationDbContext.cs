@@ -30,7 +30,6 @@ public class ApplicationDbContext : DbContext
     public DbSet<DocumentGroup> DocumentGroups { get; set; }
     public DbSet<Conversation> Conversations { get; set; }
     public DbSet<ChatMessage> ChatMessages { get; set; }
-    public DbSet<ChatMessageFile> ChatMessageFiles { get; set; }
     public DbSet<AIInteractionLog> AIInteractionLogs { get; set; }
     public DbSet<GroupConversationMapping> GroupConversationMappings { get; set; }
 
@@ -103,19 +102,6 @@ public class ApplicationDbContext : DbContext
             entity.HasOne(e => e.ResourceGroup)
                 .WithMany(g => g.FileGroups)
                 .HasForeignKey(e => e.ResourceGroupId);
-        });
-
-        modelBuilder.Entity<ChatMessageFile>(entity =>
-        {
-            entity.HasKey(e => new { e.ChatMessageId, e.ManagedFileId });
-            entity.HasOne(e => e.ChatMessage)
-                .WithMany(m => m.Attachments)
-                .HasForeignKey(e => e.ChatMessageId)
-                .OnDelete(DeleteBehavior.Cascade);
-            entity.HasOne(e => e.ManagedFile)
-                .WithMany(f => f.MessageFiles)
-                .HasForeignKey(e => e.ManagedFileId)
-                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<ManagedPromptGroup>(entity =>
