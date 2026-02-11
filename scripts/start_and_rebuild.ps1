@@ -8,20 +8,6 @@ $ErrorActionPreference = 'Stop'
 
 Push-Location (Join-Path $PSScriptRoot '..')
 
-# Verify Docker is available and the daemon is running. Exit with a helpful message if not.
-Write-Host "Checking Docker availability..."
-# Run `docker info` and check exit code because docker may emit non-terminating errors
-$dockerCheck = docker info 2>&1
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "ERROR: Docker does not appear to be running or is not installed."
-    Write-Host "Details:"
-    Write-Host $dockerCheck
-    Write-Host "Please start Docker Desktop (Windows/Mac) or the Docker daemon (Linux) and re-run this script."
-    Write-Host "On Windows, open Docker Desktop from the Start menu; on Linux, run: sudo systemctl start docker"
-    Pop-Location
-    Exit 1
-}
-
 Write-Host "Building 'app' image..."
 Write-Host "Ensuring dependent images are available (pulling when needed)..."
 try {
