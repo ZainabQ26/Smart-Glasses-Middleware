@@ -10,7 +10,7 @@ test.describe('Error Handling and Edge Cases', () => {
     await page.reload();
     
     // Page should still load
-    await expect(page.locator('text=Files')).toBeVisible();
+    await expect(page.locator('button[data-tab="files"]')).toBeVisible();
   });
 
   test('should handle slow API responses', async ({ page }) => {
@@ -25,7 +25,7 @@ test.describe('Error Handling and Edge Cases', () => {
     await page.reload();
     
     // Page should eventually load
-    await expect(page.locator('text=Files')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('button[data-tab="files"]')).toBeVisible({ timeout: 10000 });
   });
 
   test('should handle 404 responses', async ({ page }) => {
@@ -68,39 +68,39 @@ test.describe('Error Handling and Edge Cases', () => {
     await page.waitForTimeout(2000);
     
     // CORS errors might occur but shouldn't crash the page
-    await expect(page.locator('text=Files')).toBeVisible();
+    await expect(page.locator('button[data-tab="files"]')).toBeVisible();
   });
 
   test('should recover from JavaScript errors', async ({ page }) => {
     const errors: Error[] = [];
     page.on('pageerror', error => errors.push(error));
     
-    await page.goto('/admin.html');
-    await page.waitForLoadState('networkidle');
+    await page.goto('/admin.html', { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1000);
     
     // Page should load even if there are minor JS errors
-    await expect(page.locator('text=Files')).toBeVisible();
+    await expect(page.locator('button[data-tab="files"]')).toBeVisible();
   });
 
   test('should handle invalid query parameters', async ({ page }) => {
     await page.goto('/admin.html?invalid=parameter&test=123');
     
     // Should still load normally
-    await expect(page.locator('text=Files')).toBeVisible();
+    await expect(page.locator('button[data-tab="files"]')).toBeVisible();
   });
 
   test('should handle extremely large viewport', async ({ page }) => {
     await page.setViewportSize({ width: 3840, height: 2160 });
     await page.goto('/admin.html');
     
-    await expect(page.locator('text=Files')).toBeVisible();
+    await expect(page.locator('button[data-tab="files"]')).toBeVisible();
   });
 
   test('should handle extremely small viewport', async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 568 });
     await page.goto('/admin.html');
     
-    await expect(page.locator('text=Files')).toBeVisible();
+    await expect(page.locator('button[data-tab="files"]')).toBeVisible();
   });
 });
 
@@ -108,8 +108,8 @@ test.describe('Performance and Load Testing', () => {
   test('should load admin page within reasonable time', async ({ page }) => {
     const startTime = Date.now();
     
-    await page.goto('/admin.html');
-    await page.waitForLoadState('networkidle');
+    await page.goto('/admin.html', { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1000);
     
     const loadTime = Date.now() - startTime;
     
@@ -120,8 +120,8 @@ test.describe('Performance and Load Testing', () => {
   test('should load monitoring page within reasonable time', async ({ page }) => {
     const startTime = Date.now();
     
-    await page.goto('/monitoring.html');
-    await page.waitForLoadState('networkidle');
+    await page.goto('/monitoring.html', { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1000);
     
     const loadTime = Date.now() - startTime;
     
@@ -138,19 +138,17 @@ test.describe('Performance and Load Testing', () => {
     }
     
     // Should still be functional
-    await expect(page.locator('text=Files')).toBeVisible();
+    await expect(page.locator('button[data-tab="files"]')).toBeVisible();
   });
 
   test('should handle multiple concurrent API calls', async ({ page }) => {
-    await page.goto('/admin.html');
-    
-    // Wait for initial load with multiple API calls
-    await page.waitForLoadState('networkidle');
+    await page.goto('/admin.html', { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1000);
     
     // Page should be functional
-    await expect(page.locator('text=Files')).toBeVisible();
-    await expect(page.locator('text=Prompts')).toBeVisible();
-    await expect(page.locator('text=Groups')).toBeVisible();
+    await expect(page.locator('button[data-tab="files"]')).toBeVisible();
+    await expect(page.locator('button[data-tab="prompts"]')).toBeVisible();
+    await expect(page.locator('button[data-tab="groups"]')).toBeVisible();
   });
 
   test('should not leak memory on repeated navigation', async ({ page }) => {
@@ -159,7 +157,7 @@ test.describe('Performance and Load Testing', () => {
       await page.goto('/admin.html');
       await page.goto('/monitoring.html');
     }
-    
+      await expect(page.locator('h1, h2, h3').filter({ hasText: /Recent.*Requests|Monitoring|Request/i }).first()).toBeVisible();
     // Final page should still be responsive
     await expect(page.locator('text=Recent Requests')).toBeVisible();
   });

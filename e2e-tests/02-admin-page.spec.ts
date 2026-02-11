@@ -9,17 +9,17 @@ test.describe('Admin Page', () => {
     await expect(page).toHaveTitle(/Smart Glasses.*File.*Prompt/i);
     
     // Check main sections are visible
-    await expect(page.locator('text=Files')).toBeVisible();
-    await expect(page.locator('text=Prompts')).toBeVisible();
-    await expect(page.locator('text=Groups')).toBeVisible();
+    await expect(page.locator('button[data-tab="files"]')).toBeVisible();
+    await expect(page.locator('button[data-tab="prompts"]')).toBeVisible();
+    await expect(page.locator('button[data-tab="groups"]')).toBeVisible();
   });
 
   test('should reload admin page without errors', async ({ page }) => {
     await page.reload();
     
     // Verify page is still functional after reload
-    await expect(page.locator('text=Files')).toBeVisible();
-    await expect(page.locator('text=Prompts')).toBeVisible();
+    await expect(page.locator('button[data-tab="files"]')).toBeVisible();
+    await expect(page.locator('button[data-tab="prompts"]')).toBeVisible();
   });
 
   test('should navigate to monitoring page and back', async ({ page }) => {
@@ -83,15 +83,16 @@ test.describe('Admin Page', () => {
 
   test('should handle page refresh maintaining state', async ({ page }) => {
     // Wait for initial load
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(1000);
     
     // Reload the page
     await page.reload();
     
     // Ensure all sections are still visible
-    await expect(page.locator('text=Files')).toBeVisible();
-    await expect(page.locator('text=Prompts')).toBeVisible();
-    await expect(page.locator('text=Groups')).toBeVisible();
+    await expect(page.locator('button[data-tab="files"]')).toBeVisible();
+    await expect(page.locator('button[data-tab="prompts"]')).toBeVisible();
+    await expect(page.locator('button[data-tab="groups"]')).toBeVisible();
   });
 
   test('should display pagination controls if data exists', async ({ page }) => {
@@ -132,8 +133,8 @@ test.describe('Admin Page', () => {
       }
     });
     
-    await page.reload();
-    await page.waitForLoadState('networkidle');
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1000);
     
     // Filter out known acceptable errors (like network errors from missing services)
     const criticalErrors = errors.filter(e => 
@@ -152,6 +153,6 @@ test.describe('Admin Page', () => {
     await page.reload();
     
     // Page should still load even if API fails
-    await expect(page.locator('text=Files')).toBeVisible();
+    await expect(page.locator('button[data-tab="files"]')).toBeVisible();
   });
 });

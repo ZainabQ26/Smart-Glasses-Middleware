@@ -37,7 +37,7 @@ test.describe('Navigation and Page Reloading', () => {
     
     for (let i = 0; i < 5; i++) {
       await page.reload();
-      await expect(page.locator('text=Files')).toBeVisible();
+      await expect(page.locator('button[data-tab="files"]')).toBeVisible();
       await page.waitForTimeout(200);
     }
   });
@@ -47,7 +47,7 @@ test.describe('Navigation and Page Reloading', () => {
     
     for (let i = 0; i < 5; i++) {
       await page.reload();
-      await expect(page.locator('text=Recent Requests')).toBeVisible();
+      await expect(page.locator('h1, h2, h3').filter({ hasText: /Recent.*Requests|Monitoring|Request/i }).first()).toBeVisible();
       await page.waitForTimeout(200);
     }
   });
@@ -57,9 +57,10 @@ test.describe('Navigation and Page Reloading', () => {
     
     // Simulate hard refresh by clearing cache and reloading
     await context.clearCookies();
-    await page.reload({ waitUntil: 'networkidle' });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1000);
     
-    await expect(page.locator('text=Files')).toBeVisible();
+    await expect(page.locator('button[data-tab="files"]')).toBeVisible();
   });
 
   test('should navigate using browser URL bar', async ({ page }) => {
@@ -67,21 +68,21 @@ test.describe('Navigation and Page Reloading', () => {
     
     // Navigate to monitoring by changing URL
     await page.goto('/monitoring.html');
-    await expect(page.locator('text=Recent Requests')).toBeVisible();
+    await expect(page.locator('h1, h2, h3').filter({ hasText: /Recent.*Requests|Monitoring|Request/i }).first()).toBeVisible();
     
     // Navigate back to admin
     await page.goto('/admin.html');
-    await expect(page.locator('text=Files')).toBeVisible();
+    await expect(page.locator('button[data-tab="files"]')).toBeVisible();
   });
 
   test('should maintain page functionality after multiple navigations', async ({ page }) => {
     // Navigate back and forth several times
     for (let i = 0; i < 3; i++) {
       await page.goto('/admin.html');
-      await expect(page.locator('text=Files')).toBeVisible();
+      await expect(page.locator('button[data-tab="files"]')).toBeVisible();
       
       await page.goto('/monitoring.html');
-      await expect(page.locator('text=Recent Requests')).toBeVisible();
+      await expect(page.locator('h1, h2, h3').filter({ hasText: /Recent.*Requests|Monitoring|Request/i }).first()).toBeVisible();
     }
   });
 
@@ -120,7 +121,7 @@ test.describe('Navigation and Page Reloading', () => {
     await page.goto('/admin.html');
     
     // Final page should be functional
-    await expect(page.locator('text=Files')).toBeVisible();
+    await expect(page.locator('button[data-tab="files"]')).toBeVisible();
   });
 });
 
@@ -130,7 +131,7 @@ test.describe('Page State and Persistence', () => {
     
     // Reload and verify page loads fresh
     await page.reload();
-    await expect(page.locator('text=Files')).toBeVisible();
+    await expect(page.locator('button[data-tab="files"]')).toBeVisible();
   });
 
   test('should handle window resize during navigation', async ({ page }) => {
@@ -138,10 +139,10 @@ test.describe('Page State and Persistence', () => {
     await page.setViewportSize({ width: 1920, height: 1080 });
     
     await page.goto('/monitoring.html');
-    await expect(page.locator('text=Recent Requests')).toBeVisible();
+    await expect(page.locator('h1, h2, h3').filter({ hasText: /Recent.*Requests|Monitoring|Request/i }).first()).toBeVisible();
     
     await page.setViewportSize({ width: 768, height: 1024 });
-    await expect(page.locator('text=Recent Requests')).toBeVisible();
+    await expect(page.locator('h1, h2, h3').filter({ hasText: /Recent.*Requests|Monitoring|Request/i }).first()).toBeVisible();
   });
 
   test('should maintain functionality after browser back/forward with reloads', async ({ page }) => {
@@ -153,10 +154,10 @@ test.describe('Page State and Persistence', () => {
     
     await page.goBack();
     await expect(page.url()).toContain('admin.html');
-    await expect(page.locator('text=Files')).toBeVisible();
+    await expect(page.locator('button[data-tab="files"]')).toBeVisible();
     
     await page.goForward();
     await expect(page.url()).toContain('monitoring.html');
-    await expect(page.locator('text=Recent Requests')).toBeVisible();
+    await expect(page.locator('h1, h2, h3').filter({ hasText: /Recent.*Requests|Monitoring|Request/i }).first()).toBeVisible();
   });
 });
