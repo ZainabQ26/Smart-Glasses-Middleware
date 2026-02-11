@@ -1198,8 +1198,8 @@
     <header>
         <h1>Smart Glasses - Admin Panel</h1>
         <div class="header-nav">
-            <a href="/monitoring.html" target="_blank">📊 Request Monitoring</a>
-            <span class="signalr-status" aria-label="SignalR connection status">
+            <a href="/monitoring.html" target="_blank" data-testid="monitoring-link">📊 Request Monitoring</a>
+            <span class="signalr-status" aria-label="SignalR connection status" data-testid="signalr-status">
                 <span id="signalr-status" class="signalr-dot" title="SignalR disconnected"></span>
                 SignalR
             </span>
@@ -1209,12 +1209,12 @@
     <div class="container">
         <!-- Toast container is created by toasts.js and appended to document.body -->
 
-        <div class="tabs">
-            <button class="tab active" data-tab="files">Files</button>
-            <button class="tab" data-tab="prompts">Conversations</button>
-            <button class="tab" data-tab="reminders">Reminders</button>
-            <button class="tab" data-tab="groups">Groups</button>
-            <button id="theme-toggle" class="theme-toggle" type="button" title="Toggle dark mode">🌙</button>
+        <div class="tabs" data-testid="admin-tabs">
+            <button class="tab active" data-tab="files" data-testid="tab-files" aria-controls="files">Files</button>
+            <button class="tab" data-tab="prompts" data-testid="tab-prompts" aria-controls="prompts">Conversations</button>
+            <button class="tab" data-tab="reminders" data-testid="tab-reminders" aria-controls="reminders">Reminders</button>
+            <button class="tab" data-tab="groups" data-testid="tab-groups" aria-controls="groups">Groups</button>
+            <button id="theme-toggle" class="theme-toggle" type="button" title="Toggle dark mode" aria-label="Toggle dark mode" data-testid="theme-toggle">🌙</button>
         </div>
 
         <!-- Files Tab -->

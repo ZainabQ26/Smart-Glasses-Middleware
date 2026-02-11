@@ -9,18 +9,18 @@ test.describe('Monitoring Page', () => {
     await expect(page).toHaveTitle(/Request Monitoring/i);
     
     // Check main heading
-    await expect(page.locator('h1:has-text("Request Monitoring")')).toBeVisible();
+    await expect(page.locator('[data-testid="monitoring-title"]')).toBeVisible();
   });
 
   test('should reload monitoring page without errors', async ({ page }) => {
     await page.reload();
     
     // Verify page is still functional after reload
-    await expect(page.locator('h1:has-text("Request Monitoring")')).toBeVisible();
+    await expect(page.locator('[data-testid="monitoring-title"]')).toBeVisible();
   });
 
   test('should display connection status', async ({ page }) => {
-    const connectionStatus = page.locator('#connection-status, .connection-status');
+    const connectionStatus = page.locator('[data-testid="connection-status"]');
     await expect(connectionStatus).toBeVisible();
     
     // Wait a bit for connection attempt
@@ -33,23 +33,23 @@ test.describe('Monitoring Page', () => {
 
   test('should display statistics cards', async ({ page }) => {
     // Check for stat cards
-    await expect(page.locator('text=Total Requests')).toBeVisible();
-    await expect(page.locator('text=Successful')).toBeVisible();
-    await expect(page.locator('text=Failed')).toBeVisible();
-    await expect(page.locator('text=Active')).toBeVisible();
+    await expect(page.locator('[data-testid="stat-total"]')).toBeVisible();
+    await expect(page.locator('[data-testid="stat-successful"]')).toBeVisible();
+    await expect(page.locator('[data-testid="stat-failed"]')).toBeVisible();
+    await expect(page.locator('[data-testid="stat-active"]')).toBeVisible();
   });
 
   test('should display requests container', async ({ page }) => {
-    const requestsContainer = page.locator('.requests-container, #requests-list');
-    await expect(requestsContainer.first()).toBeVisible();
+    const requestsContainer = page.locator('[data-testid="requests-container"]');
+    await expect(requestsContainer).toBeVisible();
   });
 
   test('should show "Recent Requests" header', async ({ page }) => {
-    await expect(page.locator('text=Recent Requests')).toBeVisible();
+    await expect(page.locator('[data-testid="requests-header"]')).toBeVisible();
   });
 
   test('should navigate back to admin page', async ({ page }) => {
-    const adminLink = page.locator('a[href="/admin.html"]');
+    const adminLink = page.locator('[data-testid="monitoring-back-link"]');
     await expect(adminLink).toBeVisible();
     
     await adminLink.click();
@@ -75,11 +75,11 @@ test.describe('Monitoring Page', () => {
   test('should initialize with empty or populated request list', async ({ page }) => {
     await page.waitForTimeout(1000);
     
-    const requestsList = page.locator('#requests-list');
+    const requestsList = page.locator('[data-testid="requests-list"]');
     await expect(requestsList).toBeVisible();
     
     // Either shows "No requests" or has request items
-    const noRequests = page.locator('text=No requests yet');
+    const noRequests = page.locator('[data-testid="requests-empty"]');
     const requestItems = page.locator('.request-item');
     
     const hasNoRequests = await noRequests.count() > 0;
@@ -91,7 +91,7 @@ test.describe('Monitoring Page', () => {
   test('should handle multiple page reloads', async ({ page }) => {
     for (let i = 0; i < 3; i++) {
       await page.reload();
-      await expect(page.locator('h1:has-text("Request Monitoring")')).toBeVisible();
+      await expect(page.locator('[data-testid="monitoring-title"]')).toBeVisible();
       await page.waitForTimeout(500);
     }
   });
@@ -99,13 +99,13 @@ test.describe('Monitoring Page', () => {
   test('should maintain responsive design', async ({ page }) => {
     // Test different viewport sizes
     await page.setViewportSize({ width: 1920, height: 1080 });
-    await expect(page.locator('text=Recent Requests')).toBeVisible();
+    await expect(page.locator('[data-testid="requests-header"]')).toBeVisible();
     
     await page.setViewportSize({ width: 768, height: 1024 });
-    await expect(page.locator('text=Recent Requests')).toBeVisible();
+    await expect(page.locator('[data-testid="requests-header"]')).toBeVisible();
     
     await page.setViewportSize({ width: 375, height: 667 });
-    await expect(page.locator('text=Recent Requests')).toBeVisible();
+    await expect(page.locator('[data-testid="requests-header"]')).toBeVisible();
   });
 
   test('should not have critical console errors', async ({ page }) => {
@@ -134,10 +134,10 @@ test.describe('Monitoring Page', () => {
   test('should display stats with numeric values', async ({ page }) => {
     await page.waitForTimeout(1000);
     
-    const totalRequests = page.locator('#total-requests');
-    const successfulRequests = page.locator('#successful-requests');
-    const failedRequests = page.locator('#failed-requests');
-    const activeRequests = page.locator('#active-requests');
+    const totalRequests = page.locator('[data-testid="stat-total-value"]');
+    const successfulRequests = page.locator('[data-testid="stat-successful-value"]');
+    const failedRequests = page.locator('[data-testid="stat-failed-value"]');
+    const activeRequests = page.locator('[data-testid="stat-active-value"]');
     
     // All stat values should be visible and numeric
     const stats = [totalRequests, successfulRequests, failedRequests, activeRequests];
@@ -170,7 +170,7 @@ test.describe('Monitoring Page', () => {
   });
 
   test('should update connection status over time', async ({ page }) => {
-    const connectionStatus = page.locator('#connection-status');
+    const connectionStatus = page.locator('[data-testid="connection-status"]');
     
     const initialStatus = await connectionStatus.textContent();
     expect(initialStatus).toBeTruthy();

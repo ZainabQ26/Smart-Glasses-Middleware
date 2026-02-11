@@ -157,7 +157,7 @@ test.describe('Performance and Load Testing', () => {
       await page.goto('/admin.html');
       await page.goto('/monitoring.html');
     }
-      await expect(page.locator('h1, h2, h3').filter({ hasText: /Recent.*Requests|Monitoring|Request/i }).first()).toBeVisible();
+      await expect(page.locator('[data-testid="requests-header"]')).toBeVisible();
     // Final page should still be responsive
     await expect(page.locator('text=Recent Requests')).toBeVisible();
   });

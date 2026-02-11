@@ -44,7 +44,7 @@ test.describe('Monitoring Page - Real-time Features', () => {
     await page.waitForTimeout(2000);
     
     const requestItems = page.locator('.request-item');
-    const noRequests = page.locator('text=No requests yet');
+    const noRequests = page.locator('[data-testid="requests-empty"]');
     
     const itemCount = await requestItems.count();
     const noRequestsVisible = await noRequests.isVisible().catch(() => false);
@@ -56,11 +56,31 @@ test.describe('Monitoring Page - Real-time Features', () => {
   test('should show progress indicators on active requests', async ({ page }) => {
     await page.waitForTimeout(2000);
     
-    const progressBars = page.locator('.progress-track, .progress-bar, .progress-fill');
+    const progressBars = page.locator('[data-testid="request-progress"]');
     
     // Progress bars might or might not exist depending on active requests
     const count = await progressBars.count();
     expect(count).toBeGreaterThanOrEqual(0);
+
+    const requestItems = page.locator('.request-item');
+    if (await requestItems.count() > 0) {
+      const progressFill = requestItems.first().locator('[data-testid="request-progress"]');
+      await expect(progressFill).toBeVisible();
+      const ariaNow = await progressFill.getAttribute('aria-valuenow');
+      expect(ariaNow).not.toBeNull();
+    }
+  });
+
+  test('should show current stage text when requests exist', async ({ page }) => {
+    await page.waitForTimeout(2000);
+
+    const requestItems = page.locator('.request-item');
+    if (await requestItems.count() > 0) {
+      const stageText = requestItems.first().locator('[data-testid="request-stage"]');
+      await expect(stageText).toBeVisible();
+      const text = await stageText.textContent();
+      expect(text && text.length > 0).toBeTruthy();
+    }
   });
 
   test('should handle connection status changes', async ({ page }) => {
@@ -81,11 +101,11 @@ test.describe('Monitoring Page - Real-time Features', () => {
     await page.waitForTimeout(1000);
     
     // Should reconnect and show monitoring UI
-    await expect(page.locator('h1, h2, h3').filter({ hasText: /Recent.*Requests|Monitoring|Request/i }).first()).toBeVisible();
+    await expect(page.locator('[data-testid="monitoring-title"]')).toBeVisible();
     
     await page.waitForTimeout(2000);
     
-    const statusElement = page.locator('#connection-status');
+    const statusElement = page.locator('[data-testid="connection-status"]');
     await expect(statusElement).toBeVisible();
   });
 
