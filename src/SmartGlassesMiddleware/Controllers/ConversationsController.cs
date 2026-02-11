@@ -68,8 +68,6 @@ public class ConversationsController : ControllerBase
         var messages = await _context.ChatMessages
             .Where(m => m.ConversationId == id)
             .OrderBy(m => m.Timestamp)
-            .Include(m => m.Attachments)
-                .ThenInclude(a => a.ManagedFile)
             .ToListAsync();
 
         var response = new
@@ -96,13 +94,7 @@ public class ConversationsController : ControllerBase
                 m.Model,
                 m.Timestamp,
                 m.TokenCount,
-                Attachments = m.Attachments.Select(a => new
-                {
-                    Id = a.ManagedFileId,
-                    Name = a.ManagedFile.FileName,
-                    Label = a.ManagedFile.Label,
-                    ContentType = a.ManagedFile.ContentType
-                }).ToList()
+                Attachments = new List<object>()
             }).ToList(),
             conversation.Summary,
             conversation.SummaryEmbedding,

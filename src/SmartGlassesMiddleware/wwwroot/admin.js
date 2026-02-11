@@ -656,11 +656,61 @@ async function loadConversationIntoView(conversationId, title) {
             `;
         }).join('');
 
+        // Build list of files used in this conversation (attachments + sources)
+        const filesFromMessages = currentConversationHistory.flatMap(msg => {
+            const list = [];
+            if (Array.isArray(msg.files)) {
+                msg.files.forEach(f => {
+                    if (!f) return;
+                    if (typeof f === 'string') list.push({ name: f });
+                    else list.push({ name: f.name || f.fileName || 'Document', id: f.id || f.documentId });
+                });
+            }
+            if (Array.isArray(msg.sources)) {
+                msg.sources.forEach(s => {
+                    if (!s) return;
+                    const name = s.fileName || s.FileName || s.name || 'Document';
+                    const id = s.documentId || s.DocumentId || s.id;
+                    const page = s.pageNumber || s.PageNumber;
+                    list.push({ name: page ? `${name} (p.${page})` : name, id });
+                });
+            }
+            return list;
+        });
+
+        const mergedFiles = filesFromMessages.reduce((acc, file) => {
+            const key = `${(file.name || '').toLowerCase()}::${file.id || ''}`;
+            if (!acc.seen.has(key)) {
+                acc.seen.add(key);
+                acc.items.push(file);
+            }
+            return acc;
+        }, { seen: new Set(), items: [] }).items;
+
+        const filesHTML = mergedFiles.length > 0 ? `
+            <div style="margin-top: 12px; padding: 12px; background: #f8f9fa; border-radius: 8px;">
+                <div style="font-weight: 600; color: #2c3e50; margin-bottom: 8px;">Files used in this conversation</div>
+                <div style="max-height: 200px; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; padding: 8px; background: white;">
+                    ${mergedFiles.map(f => {
+                        const fileId = f.id || '';
+                        const fileName = f.name || 'Document';
+                        return `
+                            <div style="padding: 6px 0; display:flex; align-items:center; justify-content:space-between; gap:8px;">
+                                <span>📎 ${escapeHtml(fileName)}</span>
+                                <button type="button" onclick="previewDocumentFile('${fileId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')" style="padding:2px 8px; background:#3498db; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px;">Preview</button>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            </div>
+        ` : '';
+
         if (responseContent) {
             responseContent.innerHTML = `
                 <div style="max-height: 500px; overflow-y: auto; padding: 15px; background: #f8f9fa; border-radius: 8px;">
                     ${conversationHTML}
                 </div>
+                ${filesHTML}
             `;
         }
     } catch (error) {
@@ -1869,20 +1919,89 @@ async function manageGroupResources(groupId, groupName) {
         
         const modalBody = document.getElementById('modal-content-body');
 
-        // Build files list HTML
+        // Build files list HTML - include files attached to the group AND files referenced by conversations in the group
         let filesListHTML = '';
-        if (groupFiles.length === 0) {
+
+        // Gather files referenced by conversations under this group
+        let convReferencedFiles = [];
+        try {
+            console.log('[MANAGE] Fetching conversations for group to collect referenced files...');
+            const convsRes = await fetchWithRetry(`/api/conversations?groupId=${groupId}&page=1&pageSize=1000`);
+            if (convsRes.ok) {
+                const convsJson = await convsRes.json().catch(() => null);
+                const convs = convsJson?.data || convsJson || [];
+                console.log('[MANAGE] Conversations fetched for file extraction:', convs.length);
+                // For each conversation, try to load messages (if provided inline) or fetch details
+                for (const c of convs) {
+                    const convoId = getProp(c, 'id');
+                    // If messages included, use them; otherwise fetch conversation detail
+                    let messages = getProp(c, 'messages') || getProp(c, 'Messages') || null;
+                    if (!messages) {
+                        try {
+                            const det = await fetchWithRetry(`/api/conversations/${convoId}`);
+                            if (det.ok) {
+                                const detJson = await det.json().catch(() => null);
+                                messages = detJson?.messages || detJson?.Messages || detJson || [];
+                            }
+                        } catch (e) {
+                            console.warn('[MANAGE] Failed to fetch conversation details for', convoId, e);
+                        }
+                    }
+
+                    if (Array.isArray(messages)) {
+                        messages.forEach(m => {
+                            if (Array.isArray(m.files)) {
+                                m.files.forEach(f => {
+                                    if (!f) return;
+                                    if (typeof f === 'string') convReferencedFiles.push({ name: f });
+                                    else convReferencedFiles.push({ name: f.name || f.fileName || 'Document', id: f.id || f.documentId });
+                                });
+                            }
+                            if (Array.isArray(m.sources)) {
+                                m.sources.forEach(s => {
+                                    if (!s) return;
+                                    const name = s.fileName || s.FileName || s.name || 'Document';
+                                    const id = s.documentId || s.DocumentId || s.id;
+                                    const page = s.pageNumber || s.PageNumber;
+                                    convReferencedFiles.push({ name: page ? `${name} (p.${page})` : name, id });
+                                });
+                            }
+                        });
+                    }
+                }
+            } else {
+                console.warn('[MANAGE] Failed to fetch conversations list for group file extraction', convsRes.status);
+            }
+        } catch (err) {
+            console.warn('[MANAGE] Error fetching convs for files:', err);
+        }
+
+        // Merge groupFiles with convReferencedFiles, dedupe by name+id
+        const combinedFiles = [];
+        const seen = new Set();
+        const pushFile = (f) => {
+            const key = `${(getProp(f, 'originalFileName') || getProp(f, 'fileName') || f.name || '').toLowerCase()}::${getProp(f, 'id') || f.id || f.documentId || ''}`;
+            if (!seen.has(key)) {
+                seen.add(key);
+                combinedFiles.push(f);
+            }
+        };
+
+        (groupFiles || []).forEach(f => pushFile(f));
+        convReferencedFiles.forEach(f => pushFile(f));
+
+        if (combinedFiles.length === 0) {
             filesListHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No files attached yet</div>';
         } else {
-            filesListHTML = groupFiles.map(file => {
-                const fileName = getProp(file, 'originalFileName') || getProp(file, 'fileName') || 'Unknown';
-                const fileId = getProp(file, 'id');
+            filesListHTML = combinedFiles.map(file => {
+                const fileName = getProp(file, 'originalFileName') || getProp(file, 'fileName') || file.name || 'Unknown';
+                const fileId = getProp(file, 'id') || file.id || file.documentId || '';
                 return `
                     <div style="padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0;">
                         <span style="font-size: 14px; color: #333; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                            ${escapeHtml(fileName)}
+                            ${escapeHtml(String(fileName))}
                         </span>
-                        <button type="button" onclick="previewReminderFile('${fileId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')"
+                        <button type="button" onclick="previewReminderFile('${fileId}', '${escapeHtml(String(fileName)).replace(/'/g, "\\'")}')"
                             style="padding: 4px 12px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">
                             Preview
                         </button>
@@ -2704,7 +2823,8 @@ async function init() {
                             xhr.addEventListener('abort', () => reject(new Error('Upload cancelled')));
                         });
                         
-                        xhr.open('POST', '/api/documents/upload');
+                        xhr.open('POST', API_BASE + '/files');
+                        formData.append('label', file.name);
                         xhr.send(formData);
                         
                         const fileData = await uploadPromise;
@@ -2832,7 +2952,7 @@ async function init() {
                             try {
                                 const fd = new FormData();
                                 fd.append('file', f.file);
-                                const upRes = await fetch('/api/documents/upload', { method: 'POST', body: fd });
+                                const upRes = await fetch(`${API_BASE}/files`, { method: 'POST', body: fd });
                                 if (upRes.ok) {
                                     const fdJson = await upRes.json().catch(() => null);
                                     const newId = fdJson?.id || fdJson?.Id;
