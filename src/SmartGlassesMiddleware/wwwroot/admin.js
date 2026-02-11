@@ -627,7 +627,9 @@ async function loadConversationIntoView(conversationId, title) {
         currentConversationHistory = Array.isArray(messages)
             ? messages.map(m => ({
                 role: (m.role || m.Role || '').toLowerCase() === 'assistant' ? 'bot' : (m.role || m.Role || 'user').toLowerCase(),
-                content: m.content || m.Content || ''
+                content: m.content || m.Content || '',
+                files: Array.isArray(m.files) ? m.files : (Array.isArray(m.Files) ? m.Files : (Array.isArray(m.attachments) ? m.attachments : [])),
+                sources: Array.isArray(m.sources) ? m.sources : (Array.isArray(m.Sources) ? m.Sources : [])
             }))
             : [];
 
