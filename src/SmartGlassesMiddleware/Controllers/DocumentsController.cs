@@ -21,6 +21,7 @@ public class DocumentsController : ControllerBase
     private readonly IMediaStorageService _mediaStorageService;
     private readonly IConversationService _conversationService;
     private readonly IGroupConversationMappingService? _groupConversationMappingService;
+    private readonly IBackgroundTaskQueue _backgroundQueue;
     private readonly long _maxFileSize;
 
     public DocumentsController(
@@ -34,7 +35,8 @@ public class DocumentsController : ControllerBase
         IHistoryService historyService,
         IMediaStorageService mediaStorageService,
         IConversationService conversationService,
-        IGroupConversationMappingService? groupConversationMappingService = null)
+        IGroupConversationMappingService? groupConversationMappingService = null,
+        IBackgroundTaskQueue? backgroundQueue = null)
     {
         _logger = logger;
         _processingService = processingService;
@@ -47,6 +49,7 @@ public class DocumentsController : ControllerBase
         _mediaStorageService = mediaStorageService;
         _conversationService = conversationService;
         _groupConversationMappingService = groupConversationMappingService;
+        _backgroundQueue = backgroundQueue ?? throw new ArgumentNullException(nameof(backgroundQueue));
         var maxFileSizeMB = configuration.GetValue<int?>("RAG:MaxFileSizeMB") ?? 50;
         _maxFileSize = maxFileSizeMB * 1024 * 1024;
     }
@@ -140,6 +143,36 @@ public class DocumentsController : ControllerBase
             return BadRequest("Query cannot be empty");
         }
 
+        // If client requests asynchronous processing (Prefer: respond-async header or ?async=true), enqueue and return 202
+        var preferAsync = false;
+        if (Request.Headers.TryGetValue("Prefer", out var preferVals) && preferVals.ToString().Contains("respond-async", StringComparison.OrdinalIgnoreCase)) preferAsync = true;
+        if (!preferAsync && HttpContext.Request.Query.TryGetValue("async", out var asyncVals) && asyncVals.ToString().Equals("true", StringComparison.OrdinalIgnoreCase)) preferAsync = true;
+
+        if (preferAsync)
+        {
+            try
+            {
+                var entry = new BackgroundTaskEntry
+                {
+                    TaskType = "DocumentQuery",
+                    PromptText = request.Query,
+                    TopK = request.TopK,
+                    GroupIds = request.GroupIds,
+                    DocumentIds = request.DocumentIds,
+                    ConversationId = request.ConversationId
+                };
+
+                await _backgroundQueue.EnqueueAsync(entry);
+                var location = $"/api/tasks/{entry.Id}";
+                return Accepted(location, new { taskId = entry.Id, location });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to enqueue async document query");
+                return StatusCode(500, new { error = "Failed to enqueue async document query", details = ex.Message });
+            }
+        }
+
         string? requestId = null;
         try
         {
@@ -180,8 +213,8 @@ public class DocumentsController : ControllerBase
             conversation ??= await _conversationService.DetectOrCreateConversationAsync(request.Query, groupId);
             _logger.LogInformation("Using conversation {ConversationId} for query", conversation.Id);
 
-            // Add user message to conversation
-            await _conversationService.AddMessageAsync(conversation.Id, "user", request.Query);
+            // Add user message to conversation (persist attached document ids if provided)
+            await _conversationService.AddMessageAsync(conversation.Id, "user", request.Query, null, request.DocumentIds);
 
             _logger.LogInformation("Calling RAG service QueryDocumentsWithConversationAsync...");
             var result = await _ragService.QueryDocumentsWithConversationAsync(
