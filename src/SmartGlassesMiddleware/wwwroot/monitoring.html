@@ -439,6 +439,15 @@
             updateStats();
         }
 
+        // Test hook for deterministic UI updates in Playwright.
+        window.__monitoringTestHooks = window.__monitoringTestHooks || {};
+        window.__monitoringTestHooks.updateRequest = updateRequest;
+        window.__monitoringTestHooks.setRequests = (items) => {
+            requests = Array.isArray(items) ? items.slice() : [];
+            renderRequests();
+            updateStats();
+        };
+
         /* simple renderer removed in favor of grouped renderer below */
 
         function updateStats() {
