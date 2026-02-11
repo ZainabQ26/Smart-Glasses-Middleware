@@ -56,6 +56,24 @@
             display: inline-block;
         }
 
+        .signalr-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin-left: 12px;
+            font-size: 12px;
+            color: #ecf0f1;
+        }
+
+        .signalr-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #e74c3c;
+            border: 1px solid rgba(255,255,255,0.6);
+            display: inline-block;
+        }
+
         .header-nav a:hover {
             background: #ecf0f1;
         }
@@ -124,6 +142,10 @@
             background: #2d3750 !important;
             color: #d7e6f6 !important;
             border: 1px solid rgba(255,255,255,0.04) !important;
+        }
+
+        body.dark .signalr-status {
+            color: #d7e6f6 !important;
         }
 
         body.dark .header-nav a:hover {
@@ -1177,6 +1199,10 @@
         <h1>Smart Glasses - Admin Panel</h1>
         <div class="header-nav">
             <a href="/monitoring.html" target="_blank">📊 Request Monitoring</a>
+            <span class="signalr-status" aria-label="SignalR connection status">
+                <span id="signalr-status" class="signalr-dot" title="SignalR disconnected"></span>
+                SignalR
+            </span>
         </div>
     </header>
 
@@ -1482,11 +1508,17 @@
         // Load shared toasts first (global showMessage)
         const toastsScript = document.createElement('script');
         toastsScript.src = `toasts.js?v=${timestamp}`;
+        toastsScript.onload = () => {
+            const signalRScript = document.createElement('script');
+            signalRScript.src = 'https://cdn.jsdelivr.net/npm/@microsoft/signalr@latest/dist/browser/signalr.min.js';
+            signalRScript.onload = () => {
+                const script = document.createElement('script');
+                script.src = `admin.js?v=${timestamp}`;
+                document.body.appendChild(script);
+            };
+            document.body.appendChild(signalRScript);
+        };
         document.body.appendChild(toastsScript);
-
-        const script = document.createElement('script');
-        script.src = `admin.js?v=${timestamp}`;
-        document.body.appendChild(script);
     </script>
     
 </body>

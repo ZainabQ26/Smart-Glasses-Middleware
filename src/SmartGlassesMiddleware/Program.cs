@@ -1299,6 +1299,8 @@ app.MapGet("/debug/new-ollama", async (IServiceProvider sp, ILoggerFactory lf) =
 
 // Map SignalR hubs LAST to avoid routing issues
 app.MapHub<SmartGlassesMiddleware.Hubs.TaskHub>("/hubs/tasks");
+app.MapHub<SmartGlassesMiddleware.Hubs.ConversationHub>("/hubs/conversations");
+app.MapHub<SmartGlassesMiddleware.Hubs.ResourceHub>("/hubs/resources");
 
 app.Run();
 
