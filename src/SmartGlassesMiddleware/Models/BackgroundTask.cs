@@ -24,13 +24,6 @@ public class BackgroundTaskEntry
     public BackgroundTaskStatus Status { get; set; } = BackgroundTaskStatus.Queued;
     // Optional monitoring request id tracked by the RequestMonitoringService / SignalR
     public string? MonitoringRequestId { get; set; }
-    // Task type - default 'Media' for backwards compatibility. Use 'DocumentQuery' for queued document queries.
-    public string TaskType { get; set; } = "Media";
-    // Optional parameters for document query tasks
-    public int? TopK { get; set; }
-    public List<Guid>? GroupIds { get; set; }
-    public List<Guid>? DocumentIds { get; set; }
-    public Guid? ConversationId { get; set; }
     public string? PromptText { get; set; }
     public Dictionary<string, string>? PerFileTranscriptions { get; set; }
     public List<BackgroundMediaItem> MediaItems { get; set; } = new List<BackgroundMediaItem>();

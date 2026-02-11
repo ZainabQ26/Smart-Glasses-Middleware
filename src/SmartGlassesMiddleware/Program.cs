@@ -177,8 +177,6 @@ builder.Services.AddScoped<IDocumentProcessingService, DocumentProcessingService
 builder.Services.AddScoped<IRAGService, RAGService>();
 builder.Services.AddScoped<IDocumentHighlightService, DocumentHighlightService>();
 builder.Services.AddScoped<IConversationService, ConversationService>();
-// Service to migrate legacy per-message attachment JSON into relational join table
-builder.Services.AddScoped<DataMigrationService>();
 // Global mapping service for ResourceGroup -> Conversation
 builder.Services.AddScoped<IGroupConversationMappingService, GroupConversationMappingService>();
 // Transcription service (server-side) — registered as a typed HTTP client with timeout configuration
@@ -342,8 +340,6 @@ else
     builder.Services.AddSingleton<IBackgroundTaskQueue, NoOpBackgroundTaskQueue>();
 }
 builder.Services.AddScoped<IMediaProcessor, MediaProcessor>();
-// Processor for queued document queries
-builder.Services.AddScoped<IDocumentTaskProcessor, DocumentQueryProcessor>();
 builder.Services.AddHostedService<BackgroundTaskHostedService>();
 if (!builder.Environment.IsEnvironment("Testing") && !string.IsNullOrWhiteSpace(redisConnection))
 {
@@ -494,63 +490,24 @@ using (var scope = app.Services.CreateScope())
         var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
         var logger = scope.ServiceProvider.GetService<ILogger<Program>>();
 
-        // Check configuration key first, then environment variable.
-        // Default behavior: enable migrations on startup for non-testing environments
+        // Check configuration key first, then environment variable. Default: disabled.
         var migrateSetting = configuration.GetValue<bool?>("MigrateOnStartup");
         var migrateEnv = Environment.GetEnvironmentVariable("MIGRATE_ON_STARTUP");
-        bool shouldMigrate;
-        if (migrateSetting.HasValue)
-        {
-            shouldMigrate = migrateSetting.Value;
-        }
-        else if (!string.IsNullOrWhiteSpace(migrateEnv))
-        {
-            shouldMigrate = string.Equals(migrateEnv, "true", StringComparison.OrdinalIgnoreCase);
-        }
-        else
-        {
-            shouldMigrate = !app.Environment.IsEnvironment("Testing");
-        }
+        var shouldMigrate = migrateSetting ?? string.Equals(migrateEnv, "true", StringComparison.OrdinalIgnoreCase);
 
         if (shouldMigrate)
         {
-            // Log the resolved database host/database (avoid logging credentials)
-            try
-            {
-                var cs = configuration.GetConnectionString("DefaultConnection") ?? string.Empty;
-                // Very small parse to extract Host and Database values for logging
-                string host = "<unknown>", dbName = "<unknown>";
-                try
-                {
-                    var parts = cs.Split(';', StringSplitOptions.RemoveEmptyEntries);
-                    foreach (var p in parts)
-                    {
-                        var kv = p.Split('=', 2);
-                        if (kv.Length != 2) continue;
-                        var key = kv[0].Trim().ToLowerInvariant();
-                        var val = kv[1].Trim();
-                        if (key == "host" || key == "server") host = val;
-                        if (key == "database" || key == "initial catalog") dbName = val;
-                    }
-                }
-                catch { /* ignore parsing errors */ }
-
-                logger?.LogInformation("Starting database migration (MigrateOnStartup=true) against host={Host} database={Database}", host, dbName);
-            }
-            catch (Exception ex)
-            {
-                logger?.LogWarning(ex, "Failed to resolve database connection info for migration logging");
-            }
-
-            // Run migration with a longer timeout to accommodate containerized DB startup and locks
+            logger?.LogInformation("Starting database migration...");
+            
+            // Run migration with a timeout to prevent indefinite hangs on lock acquisition
             var migrationTask = Task.Run(() => db.Database.Migrate());
-            var timeoutTask = Task.Delay(TimeSpan.FromSeconds(120));
-
+            var timeoutTask = Task.Delay(TimeSpan.FromSeconds(30));
+            
             var completedTask = await Task.WhenAny(migrationTask, timeoutTask);
-
+            
             if (completedTask == timeoutTask)
             {
-                var errorMessage = "Database migration timed out after 120 seconds. " +
+                var errorMessage = "Database migration timed out after 30 seconds. " +
                     "This usually means another instance is holding the migration lock. " +
                     "Application startup aborted to prevent schema issues.";
                 logger?.LogCritical(errorMessage);
@@ -559,21 +516,13 @@ using (var scope = app.Services.CreateScope())
             else
             {
                 // Wait for the actual task to propagate any exceptions
-                try
-                {
-                    await migrationTask;
-                    logger?.LogInformation("Database migration completed successfully.");
-                }
-                catch (Exception ex)
-                {
-                    logger?.LogError(ex, "Database.Migrate() threw an exception during startup");
-                    throw;
-                }
+                await migrationTask;
+                logger?.LogInformation("Database migration completed successfully.");
             }
         }
         else
         {
-            logger?.LogInformation("Skipping database migration on startup (MigrateOnStartup not enabled or running in Testing)." );
+            logger?.LogInformation("Skipping database migration on startup (MigrateOnStartup not enabled).");
         }
     }
     catch (InvalidOperationException ex)
@@ -591,26 +540,6 @@ using (var scope = app.Services.CreateScope())
         var logger = scope.ServiceProvider.GetService<ILogger<Program>>();
         logger?.LogError(ex, "Failed to apply migrations during startup; aborting application start");
         throw; // Re-throw to prevent app from starting with schema issues
-    }
-}
-
-// After applying schema migrations, run any necessary data migrations (legacy -> new schema)
-using (var scope = app.Services.CreateScope())
-{
-    try
-    {
-        var migrator = scope.ServiceProvider.GetService<DataMigrationService>();
-        if (migrator != null)
-        {
-            // Run with a short timeout to avoid blocking startup indefinitely
-            var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            await migrator.MigrateMessageAttachmentsAsync(cts.Token);
-        }
-    }
-    catch (Exception ex)
-    {
-        var logger = scope.ServiceProvider.GetService<ILogger<Program>>();
-        logger?.LogWarning(ex, "Data migration step failed (non-fatal)");
     }
 }
 
