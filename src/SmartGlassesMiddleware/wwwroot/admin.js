@@ -2821,6 +2821,9 @@ async function init() {
                 if (activePromptGroupId && !includeAllGroups) {
                     payload.GroupIds = [activePromptGroupId];
                 }
+                if (activeConversationId) {
+                    payload.ConversationId = activeConversationId;
+                }
                 // Ensure any locally attached files are uploaded to the server first
                 if (promptSelectedFiles && promptSelectedFiles.length > 0) {
                     for (let i = 0; i < promptSelectedFiles.length; i++) {
@@ -2912,10 +2915,22 @@ async function init() {
 
                 const responseConversationId = result.conversationId || result.ConversationId;
                 if (responseConversationId) {
+                    activeConversationId = responseConversationId;
                     // Server will persist group->conversation mapping. If we don't have an active group,
                     // ask the server for the conversation to determine the associated group and activate it.
                     if (!activePromptGroupId) {
                         await syncActiveGroupFromConversation(responseConversationId);
+                    }
+
+                    // Attach files to the conversation's group for persistence
+                    if (documentIdsAfterUpload && documentIdsAfterUpload.length > 0) {
+                        for (const fileId of documentIdsAfterUpload) {
+                            try {
+                                await fetch(`/api/conversations/${responseConversationId}/files/${fileId}`, { method: 'POST' });
+                            } catch (attachErr) {
+                                console.warn('[SEND PROMPT] Failed to attach file to conversation:', attachErr);
+                            }
+                        }
                     }
                 }
 
