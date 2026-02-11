@@ -110,3 +110,9 @@ secrets/
 # Ignore test result artifacts and large dumps
 tests/**/TestResults/
 *.dmp
+
+# Playwright artifacts
+node_modules/
+playwright-report/
+test-results/
+playwright/.cache/
