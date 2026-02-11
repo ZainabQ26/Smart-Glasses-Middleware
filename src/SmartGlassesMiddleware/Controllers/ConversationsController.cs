@@ -68,6 +68,8 @@ public class ConversationsController : ControllerBase
         var messages = await _context.ChatMessages
             .Where(m => m.ConversationId == id)
             .OrderBy(m => m.Timestamp)
+            .Include(m => m.Attachments)
+                .ThenInclude(a => a.Document)
             .ToListAsync();
 
         var response = new
@@ -94,7 +96,13 @@ public class ConversationsController : ControllerBase
                 m.Model,
                 m.Timestamp,
                 m.TokenCount,
-                Attachments = new List<object>()
+                Attachments = m.Attachments.Select(a => new
+                {
+                    Id = a.DocumentMetadataId,
+                    FileName = a.Document.FileName,
+                    ContentType = a.Document.ContentType,
+                    OriginalFileName = a.Document.OriginalFileName
+                }).ToList()
             }).ToList(),
             conversation.Summary,
             conversation.SummaryEmbedding,
@@ -129,7 +137,8 @@ public class ConversationsController : ControllerBase
                 id,
                 request.Role,
                 request.Content,
-                request.Model);
+                request.Model,
+                request.DocumentIds);
 
             return CreatedAtAction(nameof(GetConversation), new { id }, message);
         }
@@ -287,6 +296,7 @@ public class AddMessageRequest
     public string Role { get; set; } = string.Empty;
     public string Content { get; set; } = string.Empty;
     public string? Model { get; set; }
+    public List<Guid>? DocumentIds { get; set; }
 }
 
 public class ConversationQueryRequest

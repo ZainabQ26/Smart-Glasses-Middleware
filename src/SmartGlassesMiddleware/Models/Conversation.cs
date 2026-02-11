@@ -19,6 +19,22 @@ public class ChatMessage
 
     // Token count for budget tracking
     public int? TokenCount { get; set; }
+
+    // Attachments stored server-side (DocumentMetadata)
+    public List<ChatMessageAttachment> Attachments { get; set; } = new();
+}
+
+/// <summary>
+/// Join table for ChatMessage attachments to DocumentMetadata
+/// </summary>
+public class ChatMessageAttachment
+{
+    public Guid ChatMessageId { get; set; }
+    [JsonIgnore]
+    public ChatMessage ChatMessage { get; set; } = null!;
+
+    public Guid DocumentMetadataId { get; set; }
+    public DocumentMetadata Document { get; set; } = null!;
 }
 
 /// <summary>

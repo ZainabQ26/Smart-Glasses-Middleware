@@ -62,7 +62,9 @@ function encodeFilesData(msgFiles) {
     if (!Array.isArray(msgFiles) || msgFiles.length === 0) return '';
     try {
         return encodeURIComponent(JSON.stringify(msgFiles.map(f => (
-            typeof f === 'string' ? { name: f } : { name: f.name || f.fileName || 'Document', id: f.id || f.documentId }
+            typeof f === 'string'
+                ? { name: f }
+                : { name: f.name || f.fileName || f.FileName || 'Document', id: f.id || f.documentId }
         ))));
     } catch (e) {
         console.warn('Failed to encode files data', e);
@@ -78,6 +80,93 @@ const state = {
     reminders: { page: 1, pageSize: 20, hasMore: true, loading: false, data: [] },
     allGroups: [] // Cache of all groups for quick-add
 };
+
+let conversationHubConnection = null;
+let resourceHubConnection = null;
+
+async function initConversationHub() {
+    if (!window.signalR) {
+        console.warn('[SignalR] signalR client not loaded');
+        return;
+    }
+
+    try {
+        conversationHubConnection = new signalR.HubConnectionBuilder()
+            .withUrl('/hubs/conversations')
+            .withAutomaticReconnect()
+            .build();
+
+        conversationHubConnection.on('conversationUpdated', async (payload) => {
+            const convoId = payload?.conversationId || payload?.ConversationId;
+            if (convoId && activeConversationId && String(convoId) === String(activeConversationId)) {
+                await loadConversationIntoView(activeConversationId);
+            }
+        });
+
+        await conversationHubConnection.start();
+        console.log('[SignalR] Conversation hub connected');
+
+        if (activeConversationId) {
+            await joinConversationHubGroup(activeConversationId);
+        }
+    } catch (err) {
+        console.warn('[SignalR] Failed to connect conversation hub:', err);
+    }
+}
+
+function setSignalRIndicatorState(connected) {
+    const indicator = document.getElementById('signalr-status');
+    if (!indicator) return;
+    indicator.style.background = connected ? '#2ecc71' : '#e74c3c';
+    indicator.title = connected ? 'SignalR connected' : 'SignalR disconnected';
+}
+
+async function initResourceHub() {
+    if (!window.signalR) {
+        console.warn('[SignalR] signalR client not loaded');
+        return;
+    }
+
+    try {
+        resourceHubConnection = new signalR.HubConnectionBuilder()
+            .withUrl('/hubs/resources')
+            .withAutomaticReconnect()
+            .build();
+
+        resourceHubConnection.on('filesChanged', async () => {
+            await loadFiles(true);
+        });
+
+        resourceHubConnection.on('groupsChanged', async () => {
+            await loadGroups(true);
+            await loadAllGroups(true);
+        });
+
+        resourceHubConnection.on('conversationsChanged', async () => {
+            await loadPrompts(true);
+        });
+
+        resourceHubConnection.onreconnecting(() => setSignalRIndicatorState(false));
+        resourceHubConnection.onreconnected(() => setSignalRIndicatorState(true));
+        resourceHubConnection.onclose(() => setSignalRIndicatorState(false));
+
+        await resourceHubConnection.start();
+        setSignalRIndicatorState(true);
+        console.log('[SignalR] Resource hub connected');
+    } catch (err) {
+        console.warn('[SignalR] Failed to connect resource hub:', err);
+        setSignalRIndicatorState(false);
+    }
+}
+
+async function joinConversationHubGroup(conversationId) {
+    if (!conversationHubConnection || !conversationId) return;
+    try {
+        await conversationHubConnection.invoke('JoinConversation', String(conversationId));
+    } catch (err) {
+        console.warn('[SignalR] Failed to join conversation group:', err);
+    }
+}
 
 // Tab switching with forced refresh
 document.querySelectorAll('.tab').forEach(tab => {
@@ -495,7 +584,7 @@ function loadPromptIntoForm(id, name, text) {
         const msgFiles = Array.isArray(msg.files) ? msg.files : [];
         const filesData = encodeFilesData(msgFiles);
         const filesTitle = msgFiles.length > 0
-            ? `${msgFiles.length} file(s) attached: ${msgFiles.map(f => (typeof f === 'string' ? f : f.name || f.fileName || 'Document')).join(', ')}`
+            ? `${msgFiles.length} file(s) attached: ${msgFiles.map(f => (typeof f === 'string' ? f : f.name || f.fileName || f.FileName || 'Document')).join(', ')}`
             : '';
         const msgSources = Array.isArray(msg.sources) ? msg.sources : [];
         const msgSourcesHtml = msgSources.length > 0 ? `
@@ -535,7 +624,7 @@ function loadPromptIntoForm(id, name, text) {
         if (typeof f === 'string') {
             return { name: f };
         }
-        return { name: f.name || f.fileName || 'Document', id: f.id || f.documentId };
+        return { name: f.name || f.fileName || f.FileName || 'Document', id: f.id || f.documentId };
     });
 
     const filesFromMessages = messages.flatMap(msg => {
@@ -544,7 +633,7 @@ function loadPromptIntoForm(id, name, text) {
             if (typeof f === 'string') {
                 return { name: f };
             }
-            return { name: f.name || f.fileName || 'Document', id: f.id || f.documentId };
+            return { name: f.name || f.fileName || f.FileName || 'Document', id: f.id || f.documentId };
         });
     });
 
@@ -611,6 +700,7 @@ function createNewPrompt() {
 async function loadConversationIntoView(conversationId, title) {
     if (!conversationId) return;
     try {
+        await joinConversationHubGroup(conversationId);
         const responseContent = document.getElementById('response-content');
         if (responseContent) {
             responseContent.innerHTML = '<span style="color: #999;">Loading conversation...</span>';
@@ -628,7 +718,13 @@ async function loadConversationIntoView(conversationId, title) {
             ? messages.map(m => ({
                 role: (m.role || m.Role || '').toLowerCase() === 'assistant' ? 'bot' : (m.role || m.Role || 'user').toLowerCase(),
                 content: m.content || m.Content || '',
-                files: Array.isArray(m.files) ? m.files : (Array.isArray(m.Files) ? m.Files : (Array.isArray(m.attachments) ? m.attachments : [])),
+                files: Array.isArray(m.files)
+                    ? m.files
+                    : (Array.isArray(m.Files)
+                        ? m.Files
+                        : (Array.isArray(m.Attachments)
+                            ? m.Attachments
+                            : (Array.isArray(m.attachments) ? m.attachments : []))),
                 sources: Array.isArray(m.sources) ? m.sources : (Array.isArray(m.Sources) ? m.Sources : [])
             }))
             : [];
@@ -656,6 +752,7 @@ async function loadConversationIntoView(conversationId, title) {
             `;
         }).join('');
 
+
         // Build list of files used in this conversation (attachments + sources)
         const filesFromMessages = currentConversationHistory.flatMap(msg => {
             const list = [];
@@ -663,7 +760,7 @@ async function loadConversationIntoView(conversationId, title) {
                 msg.files.forEach(f => {
                     if (!f) return;
                     if (typeof f === 'string') list.push({ name: f });
-                    else list.push({ name: f.name || f.fileName || 'Document', id: f.id || f.documentId });
+                    else list.push({ name: f.name || f.fileName || f.FileName || 'Document', id: f.id || f.documentId });
                 });
             }
             if (Array.isArray(msg.sources)) {
@@ -871,7 +968,7 @@ function restoreDraftConversation() {
                 const msgFiles = Array.isArray(msg.files) ? msg.files : [];
                 const filesData = encodeFilesData(msgFiles);
                 const filesTitle = msgFiles.length > 0
-                    ? `${msgFiles.length} file(s) attached: ${msgFiles.map(f => (typeof f === 'string' ? f : f.name || f.fileName || 'Document')).join(', ')}`
+                    ? `${msgFiles.length} file(s) attached: ${msgFiles.map(f => (typeof f === 'string' ? f : f.name || f.fileName || f.FileName || 'Document')).join(', ')}`
                     : '';
                 const msgSources = Array.isArray(msg.sources) ? msg.sources : [];
                 const msgSourcesHtml = msgSources.length > 0 ? `
@@ -968,6 +1065,7 @@ function updatePromptFilesList() {
         }).join('');
     }
 }
+
 
 function updateActiveGroupStyles() {
     document.querySelectorAll('[data-group-card="true"]').forEach(card => {
@@ -1068,7 +1166,7 @@ async function restoreDraftConversation() {
                 const msgFiles = Array.isArray(msg.files) ? msg.files : [];
                 const filesData = encodeFilesData(msgFiles);
                 const filesTitle = msgFiles.length > 0
-                    ? `${msgFiles.length} file(s) attached: ${msgFiles.map(f => (typeof f === 'string' ? f : f.name || f.fileName || 'Document')).join(', ')}`
+                    ? `${msgFiles.length} file(s) attached: ${msgFiles.map(f => (typeof f === 'string' ? f : f.name || f.fileName || f.FileName || 'Document')).join(', ')}`
                     : '';
                 const msgSources = Array.isArray(msg.sources) ? msg.sources : [];
                 const msgSourcesHtml = msgSources.length > 0 ? `
@@ -1954,7 +2052,7 @@ async function manageGroupResources(groupId, groupName) {
                                 m.files.forEach(f => {
                                     if (!f) return;
                                     if (typeof f === 'string') convReferencedFiles.push({ name: f });
-                                    else convReferencedFiles.push({ name: f.name || f.fileName || 'Document', id: f.id || f.documentId });
+                                    else convReferencedFiles.push({ name: f.name || f.fileName || f.FileName || 'Document', id: f.id || f.documentId });
                                 });
                             }
                             if (Array.isArray(m.sources)) {
@@ -2431,28 +2529,18 @@ async function previewReminderFile(fileId, fileName) {
     }
 }
 
-let documentsCache = null;
-
 async function resolveDocumentIdByName(fileName) {
     if (!fileName) return null;
-    if (!documentsCache) {
-        try {
-            const response = await fetch('/api/documents?page=1&pageSize=1000');
-            if (!response.ok) return null;
-            const data = await response.json();
-            const docs = data.documents || data.Documents || [];
-            documentsCache = docs.reduce((acc, doc) => {
-                if (doc.fileName) {
-                    acc[doc.fileName.toLowerCase()] = doc.id || doc.Id;
-                }
-                return acc;
-            }, {});
-        } catch {
-            return null;
-        }
+    try {
+        const response = await fetch('/api/documents?page=1&pageSize=1000');
+        if (!response.ok) return null;
+        const data = await response.json();
+        const docs = data.documents || data.Documents || [];
+        const match = docs.find(doc => (doc.fileName || doc.FileName || '').toLowerCase() === fileName.toLowerCase());
+        return match ? (match.id || match.Id) : null;
+    } catch {
+        return null;
     }
-
-    return documentsCache[fileName.toLowerCase()] || null;
 }
 
 // Preview a document stored in /api/documents
@@ -2685,6 +2773,9 @@ async function init() {
                 showMessage('No file selected for download', 'error');
             }
         });
+
+        await initConversationHub();
+        await initResourceHub();
         
         // Setup prompts file management
         const promptFileInput = document.getElementById('prompt-file-input');
@@ -2823,8 +2914,20 @@ async function init() {
                             xhr.addEventListener('abort', () => reject(new Error('Upload cancelled')));
                         });
                         
-                        xhr.open('POST', API_BASE + '/files');
-                        formData.append('label', file.name);
+                        // Upload to Documents API so RAG can use the attachment
+                        let uploadGroupId = activePromptGroupId || null;
+                        if (!uploadGroupId && activeConversationId) {
+                            try {
+                                const conv = await (await fetch(`${API_BASE}/conversations/${activeConversationId}`)).json().catch(() => null);
+                                uploadGroupId = conv?.resourceGroupId || conv?.ResourceGroupId || null;
+                            } catch (err) {
+                                console.warn('[UPLOAD] Failed to resolve conversation group for file:', err);
+                            }
+                        }
+                        const uploadUrl = uploadGroupId
+                            ? `/api/documents/upload?groupIds=${encodeURIComponent(uploadGroupId)}`
+                            : '/api/documents/upload';
+                        xhr.open('POST', uploadUrl);
                         xhr.send(formData);
                         
                         const fileData = await uploadPromise;
@@ -2847,7 +2950,7 @@ async function init() {
                         if (promptPreviewContent) promptPreviewContent.innerHTML = `<div style="font-size: 48px; color: #95a5a6;">📄</div>`;
                         if (promptFileInput) promptFileInput.value = '';
                         
-                        // Reload files list to show the new file
+                        // Reload files list to show the new file (documents are listed via /api/documents)
                         if (typeof loadFiles === 'function') {
                             loadFiles(true);
                         }
@@ -2930,9 +3033,15 @@ async function init() {
                 const selectedFiles = promptSelectedFiles.some(f => f.selected)
                     ? promptSelectedFiles.filter(f => f.selected)
                     : promptSelectedFiles;
-                const documentIds = selectedFiles
-                    .map(f => f.documentId || f.id)
-                    .filter(Boolean);
+                const documentIds = [];
+                for (const f of selectedFiles) {
+                    let id = f.documentId || f.id;
+                    if (!id && f.name) {
+                        id = await resolveDocumentIdByName(f.name);
+                        if (id) f.documentId = id;
+                    }
+                    if (id) documentIds.push(id);
+                }
                 const includeAllGroups = document.getElementById('prompt-include-all')?.checked;
                 const payload = { Query: promptText, TopK: 5 };
                 if (documentIds.length > 0) {
@@ -2952,29 +3061,23 @@ async function init() {
                             try {
                                 const fd = new FormData();
                                 fd.append('file', f.file);
-                                const upRes = await fetch(`${API_BASE}/files`, { method: 'POST', body: fd });
+
+                                // Upload to Documents API so RAG can index and use the attachment
+                                let uploadGroupId = activePromptGroupId || null;
+                                if (!uploadGroupId && activeConversationId) {
+                                    const conv = await (await fetch(`${API_BASE}/conversations/${activeConversationId}`)).json().catch(() => null);
+                                    uploadGroupId = conv?.resourceGroupId || conv?.ResourceGroupId || null;
+                                }
+                                const uploadUrl = uploadGroupId
+                                    ? `/api/documents/upload?groupIds=${encodeURIComponent(uploadGroupId)}`
+                                    : '/api/documents/upload';
+                                const upRes = await fetch(uploadUrl, { method: 'POST', body: fd });
                                 if (upRes.ok) {
                                     const fdJson = await upRes.json().catch(() => null);
                                     const newId = fdJson?.id || fdJson?.Id;
                                     if (newId) {
                                         f.documentId = newId;
                                         console.log('[SEND PROMPT] Uploaded attached file', f.name, '=>', newId);
-
-                                        // if there is an active group, attach file to group for persistence
-                                        try {
-                                            if (activePromptGroupId) {
-                                                await fetch(`${API_BASE}/groups/${activePromptGroupId}/files/${newId}`, { method: 'POST' });
-                                            } else if (activeConversationId) {
-                                                // try to attach to conversation's group if available
-                                                const conv = await (await fetch(`${API_BASE}/conversations/${activeConversationId}`)).json().catch(() => null);
-                                                const convGroupId = conv?.resourceGroupId || conv?.ResourceGroupId || null;
-                                                if (convGroupId) {
-                                                    await fetch(`${API_BASE}/groups/${convGroupId}/files/${newId}`, { method: 'POST' });
-                                                }
-                                            }
-                                        } catch (attachErr) {
-                                            console.warn('[SEND PROMPT] Failed to attach uploaded file to group:', attachErr);
-                                        }
                                     }
                                 } else {
                                     console.warn('[SEND PROMPT] Failed to upload attached file:', f.name);
@@ -3036,6 +3139,7 @@ async function init() {
                 const responseConversationId = result.conversationId || result.ConversationId;
                 if (responseConversationId) {
                     activeConversationId = responseConversationId;
+                    await joinConversationHubGroup(responseConversationId);
                     // Server will persist group->conversation mapping. If we don't have an active group,
                     // ask the server for the conversation to determine the associated group and activate it.
                     if (!activePromptGroupId) {
@@ -3044,12 +3148,22 @@ async function init() {
 
                     // Attach files to the conversation's group for persistence
                     if (documentIdsAfterUpload && documentIdsAfterUpload.length > 0) {
-                        for (const fileId of documentIdsAfterUpload) {
-                            try {
-                                await fetch(`/api/conversations/${responseConversationId}/files/${fileId}`, { method: 'POST' });
-                            } catch (attachErr) {
-                                console.warn('[SEND PROMPT] Failed to attach file to conversation:', attachErr);
+                        // Fetch conversation to determine its ResourceGroup and attach files to that group
+                        try {
+                            const convRes = await fetch(`${API_BASE}/conversations/${responseConversationId}`);
+                            const convJson = convRes.ok ? await convRes.json().catch(() => null) : null;
+                            const convGroupId = convJson?.resourceGroupId || convJson?.ResourceGroupId || null;
+                            if (convGroupId) {
+                                for (const fileId of documentIdsAfterUpload) {
+                                    try {
+                                        await fetch(`${API_BASE}/groups/${convGroupId}/files/${fileId}`, { method: 'POST' });
+                                    } catch (attachErr) {
+                                        console.warn('[SEND PROMPT] Failed to attach file to group:', attachErr);
+                                    }
+                                }
                             }
+                        } catch (err) {
+                            console.warn('[SEND PROMPT] Failed to attach files to conversation group:', err);
                         }
                     }
                 }
@@ -3066,6 +3180,7 @@ async function init() {
                 // Add to conversation history with files and sources
                 currentConversationHistory.push({role: 'user', content: promptText, files: attachedFiles});
                 currentConversationHistory.push({role: 'bot', content: answer, sources});
+
                 
                 // Display the full conversation history
                 const conversationHTML = currentConversationHistory.map(msg => {
