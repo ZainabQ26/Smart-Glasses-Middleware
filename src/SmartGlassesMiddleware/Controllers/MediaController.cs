@@ -222,7 +222,7 @@ public class MediaController : ControllerBase
                         var history = new RequestHistory
                         {
                             RequestType = "Audio",
-                            InputText = inputText,
+                            InputText = inputText ?? string.Empty,
                             DetectedTask = tTask,
                             Response = tResponse,
                             UsedAdvancedModel = tUsedAdvancedModel
@@ -349,10 +349,10 @@ public class MediaController : ControllerBase
                         Title = "Validation Failed",
                         Status = StatusCodes.Status400BadRequest,
                         Detail = $"File '{file.FileName}' has an unsupported file type. Allowed types: {string.Join(", ", allowedExtensions)}",
-                        Instance = HttpContext.Request.Path
+                        Instance = HttpContext?.Request?.Path.ToString() ?? string.Empty
                     };
                     pd.Errors.Add("files", new[] { $"Invalid file type: {file.FileName}" });
-                    pd.Extensions["requestId"] = HttpContext.TraceIdentifier;
+                    pd.Extensions["requestId"] = HttpContext?.TraceIdentifier ?? Guid.NewGuid().ToString();
                     pd.Extensions["timestamp"] = DateTime.UtcNow.ToString("o");
 
                     return BadRequest(pd);
@@ -457,9 +457,9 @@ public class MediaController : ControllerBase
                 Title = "Internal Server Error",
                 Detail = "An unexpected error occurred while processing your media. Please try again later.",
                 Status = StatusCodes.Status500InternalServerError,
-                Instance = HttpContext.Request.Path
+                Instance = HttpContext?.Request?.Path.ToString() ?? string.Empty
             };
-            pd.Extensions["requestId"] = HttpContext.TraceIdentifier;
+                    pd.Extensions["requestId"] = HttpContext?.TraceIdentifier ?? Guid.NewGuid().ToString();
             pd.Extensions["timestamp"] = DateTime.UtcNow.ToString("o");
 
             return StatusCode(500, pd);

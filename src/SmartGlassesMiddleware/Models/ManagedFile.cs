@@ -16,4 +16,7 @@ public class ManagedFile
 
     // Navigation property for groups
     public List<ManagedFileGroup> FileGroups { get; set; } = new();
+
+    // Navigation property for message attachments
+    public List<ChatMessageFile> MessageFiles { get; set; } = new();
 }

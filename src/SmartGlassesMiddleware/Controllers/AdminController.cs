@@ -256,8 +256,93 @@ public class AdminController : ControllerBase
         {
             requestId = await _monitoringService.StartRequest("FileDelete", 
                 $"Deleting file: {file.FileName}");
-            
-            // Delete from MinIO
+            // Gather reference counts
+            var attachmentCount = await _context.Set<SmartGlassesMiddleware.Models.ChatMessageFile>()
+                .CountAsync(cm => cm.ManagedFileId == id);
+
+            if (attachmentCount > 0)
+            {
+                // Find up to 10 message references to include for debugging
+                var refs = await _context.Set<SmartGlassesMiddleware.Models.ChatMessageFile>()
+                    .Where(cm => cm.ManagedFileId == id)
+                    .Join(_context.ChatMessages, cm => cm.ChatMessageId, m => m.Id, (cm, m) => new { m.Id, m.ConversationId, m.Timestamp })
+                    .OrderByDescending(x => x.Timestamp)
+                    .Take(10)
+                    .ToListAsync();
+
+                var detail = new
+                {
+                    message = "File is referenced by one or more chat messages and cannot be deleted until those messages are removed.",
+                    referencingCount = attachmentCount,
+                    sampleReferences = refs.Select(r => new { r.Id, r.ConversationId, r.Timestamp })
+                };
+
+                if (requestId != null)
+                    await _monitoringService.CompleteRequest(requestId, false, error: "File has message attachments");
+
+                return Conflict(detail);
+            }
+
+            // Check RAG index references
+            var ragCount = await _context.RagEntries.CountAsync(r => r.FileId == id);
+            if (ragCount > 0)
+            {
+                var ragSamples = await _context.RagEntries
+                    .Where(r => r.FileId == id)
+                    .OrderByDescending(r => r.ProcessedAt)
+                    .Take(10)
+                    .Select(r => new { r.Id, r.ProcessedAt, r.FileName })
+                    .ToListAsync();
+
+                var ragDetail = new
+                {
+                    message = "File is present in the RAG index and cannot be deleted until RAG entries are removed.",
+                    referencingCount = ragCount,
+                    sampleEntries = ragSamples
+                };
+
+                if (requestId != null)
+                    await _monitoringService.CompleteRequest(requestId, false, error: "File has RAG index entries");
+
+                return Conflict(ragDetail);
+            }
+
+            // Check group assignments
+            var groupEntries = await _context.Set<SmartGlassesMiddleware.Models.ManagedFileGroup>()
+                .Where(g => g.ManagedFileId == id)
+                .ToListAsync();
+
+            if (groupEntries.Any())
+            {
+                // File is in groups but not referenced by messages or RAG; treat as removable but first remove group mappings
+                try
+                {
+                    _context.Set<SmartGlassesMiddleware.Models.ManagedFileGroup>().RemoveRange(groupEntries);
+                    await _context.SaveChangesAsync();
+                    // After removing the mappings, attempt to auto-delete empty groups
+                    foreach (var ge in groupEntries)
+                    {
+                        await AutoDeleteEmptyGroup(ge.ResourceGroupId);
+                    }
+
+                    // Invalidate group caches since mappings changed
+                    await InvalidateAllCaches();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to remove ManagedFileGroup mappings for file {FileId}", id);
+                    if (requestId != null)
+                        await _monitoringService.CompleteRequest(requestId, false, error: "Failed to remove group mappings");
+                    return StatusCode(500, new ProblemDetails
+                    {
+                        Title = "Internal Server Error",
+                        Detail = "Failed to remove group mappings for the file",
+                        Status = StatusCodes.Status500InternalServerError
+                    });
+                }
+            }
+
+            // Safe to delete: remove from MinIO first
             await _mediaStorageService.DeleteMediaAsync(file.StorageKey);
 
             // Delete from database
