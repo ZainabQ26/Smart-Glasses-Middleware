@@ -2866,6 +2866,17 @@ async function init() {
                     updatePromptFilesList();
                 }
 
+                // Recompute selected files and documentIds after any uploads
+                const selectedFilesAfterUpload = promptSelectedFiles.some(f => f.selected)
+                    ? promptSelectedFiles.filter(f => f.selected)
+                    : promptSelectedFiles;
+                const documentIdsAfterUpload = selectedFilesAfterUpload
+                    .map(f => f.documentId || f.id)
+                    .filter(Boolean);
+                if (documentIdsAfterUpload.length > 0) {
+                    payload.DocumentIds = documentIdsAfterUpload;
+                }
+
                 console.log('[SEND PROMPT] Sending documents query to', documentsUrl, 'payload:', payload);
 
                 currentRequestController = new AbortController();
