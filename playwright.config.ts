@@ -47,7 +47,8 @@ export default defineConfig({
   ],
 
   /* Run your local dev server before starting the tests */
-  webServer: {
+  // Only start web server if not running setup validation tests
+  webServer: process.env.SKIP_WEB_SERVER ? undefined : {
     command: 'docker-compose up',
     url: 'http://localhost:5000/health',
     reuseExistingServer: !process.env.CI,
