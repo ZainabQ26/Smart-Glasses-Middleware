@@ -153,64 +153,6 @@ public class ConversationsController : ControllerBase
     }
 
     /// <summary>
-    /// Attach an existing ManagedFile to a Conversation. This maps the file to the
-    /// Conversation's ResourceGroup so it becomes discoverable by group-scoped RAG queries.
-    /// If the Conversation has no ResourceGroup yet, a new one will be created.
-    /// </summary>
-    [HttpPost("{id}/files/{fileId}")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> AttachFileToConversation(Guid id, Guid fileId)
-    {
-        var file = await _context.ManagedFiles.FindAsync(fileId);
-        if (file == null)
-            return NotFound(new { error = "File not found" });
-
-        var conversation = await _context.Conversations.FindAsync(id);
-        if (conversation == null)
-            return NotFound(new { error = "Conversation not found" });
-
-        Guid groupId;
-        if (!conversation.ResourceGroupId.HasValue)
-        {
-            var newGroup = new ResourceGroup
-            {
-                Id = Guid.NewGuid(),
-                Name = conversation.Title ?? "Conversation Files",
-                CreatedAt = DateTime.UtcNow
-            };
-            _context.ResourceGroups.Add(newGroup);
-            // assign the new group to the conversation
-            conversation.ResourceGroupId = newGroup.Id;
-            await _context.SaveChangesAsync();
-            groupId = newGroup.Id;
-        }
-        else
-        {
-            groupId = conversation.ResourceGroupId.Value;
-        }
-
-        // Check existing mapping
-        var existing = await _context.Set<ManagedFileGroup>()
-            .FindAsync(new object[] { fileId, groupId });
-
-        if (existing != null)
-            return NoContent();
-
-        var mapping = new ManagedFileGroup
-        {
-            ManagedFileId = fileId,
-            ResourceGroupId = groupId
-        };
-
-        _context.Add(mapping);
-        await _context.SaveChangesAsync();
-
-        _logger.LogInformation("Attached file {FileId} to conversation {ConversationId} (group {GroupId})", fileId, id, groupId);
-        return NoContent();
-    }
-
-    /// <summary>
     /// Query documents with conversation context
     /// </summary>
     [HttpPost("{id}/query")]
