@@ -27,28 +27,16 @@ public class BackgroundTaskHostedService : BackgroundService
             entry.UpdatedAt = DateTime.UtcNow;
             await _queue.UpdateAsync(entry);
 
-                try
-                {
-                    using var scope = _services.CreateScope();
-                    object result;
-
-                    // Route to specific processors based on TaskType
-                    if (!string.IsNullOrWhiteSpace(entry.TaskType) && entry.TaskType.Equals("DocumentQuery", StringComparison.OrdinalIgnoreCase))
-                    {
-                        var docProcessor = scope.ServiceProvider.GetRequiredService<IDocumentTaskProcessor>();
-                        result = await docProcessor.ProcessBackgroundTaskAsync(entry, stoppingToken);
-                    }
-                    else
-                    {
-                        var mediaProcessor = scope.ServiceProvider.GetRequiredService<IMediaProcessor>();
-                        result = await mediaProcessor.ProcessBackgroundTaskAsync(entry, stoppingToken);
-                    }
-
-                    entry.Result = result;
-                    entry.Status = BackgroundTaskStatus.Completed;
-                    entry.UpdatedAt = DateTime.UtcNow;
-                    await _queue.UpdateAsync(entry);
-                }
+            try
+            {
+                using var scope = _services.CreateScope();
+                var mediaProcessor = scope.ServiceProvider.GetRequiredService<IMediaProcessor>();
+                var result = await mediaProcessor.ProcessBackgroundTaskAsync(entry, stoppingToken);
+                entry.Result = result;
+                entry.Status = BackgroundTaskStatus.Completed;
+                entry.UpdatedAt = DateTime.UtcNow;
+                await _queue.UpdateAsync(entry);
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Background task {Id} failed", entry.Id);

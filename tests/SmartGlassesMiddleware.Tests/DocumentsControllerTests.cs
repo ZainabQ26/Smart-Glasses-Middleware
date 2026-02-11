@@ -48,7 +48,6 @@ public class DocumentsControllerTests
         var mockMonitoring = monitoringService ?? new Mock<IRequestMonitoringService>();
         var mockHistory = historyService ?? new Mock<IHistoryService>();
         var mockConversation = conversationService ?? new Mock<IConversationService>();
-        var mockBackgroundQueue = new Mock<IBackgroundTaskQueue>();
 
         var config = configuration ?? new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -68,9 +67,7 @@ public class DocumentsControllerTests
             mockMonitoring.Object,
             mockHistory.Object,
             mockMediaStorage.Object,
-            mockConversation.Object,
-            null,
-            mockBackgroundQueue.Object);
+            mockConversation.Object);
 
         controller.ControllerContext = new ControllerContext
         {
