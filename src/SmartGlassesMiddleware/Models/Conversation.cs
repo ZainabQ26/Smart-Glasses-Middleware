@@ -19,9 +19,6 @@ public class ChatMessage
 
     // Token count for budget tracking
     public int? TokenCount { get; set; }
-
-    // Attachments associated with this message (many-to-many)
-    public List<ChatMessageFile> Attachments { get; set; } = new();
 }
 
 /// <summary>
