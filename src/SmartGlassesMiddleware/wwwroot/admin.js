@@ -2821,6 +2821,51 @@ async function init() {
                 if (activePromptGroupId && !includeAllGroups) {
                     payload.GroupIds = [activePromptGroupId];
                 }
+                // Ensure any locally attached files are uploaded to the server first
+                if (promptSelectedFiles && promptSelectedFiles.length > 0) {
+                    for (let i = 0; i < promptSelectedFiles.length; i++) {
+                        const f = promptSelectedFiles[i];
+                        if (!f.documentId && f.file) {
+                            try {
+                                const fd = new FormData();
+                                fd.append('file', f.file);
+                                const upRes = await fetch('/api/documents/upload', { method: 'POST', body: fd });
+                                if (upRes.ok) {
+                                    const fdJson = await upRes.json().catch(() => null);
+                                    const newId = fdJson?.id || fdJson?.Id;
+                                    if (newId) {
+                                        f.documentId = newId;
+                                        console.log('[SEND PROMPT] Uploaded attached file', f.name, '=>', newId);
+
+                                        // if there is an active group, attach file to group for persistence
+                                        try {
+                                            if (activePromptGroupId) {
+                                                await fetch(`${API_BASE}/groups/${activePromptGroupId}/files/${newId}`, { method: 'POST' });
+                                            } else if (activeConversationId) {
+                                                // try to attach to conversation's group if available
+                                                const conv = await (await fetch(`${API_BASE}/conversations/${activeConversationId}`)).json().catch(() => null);
+                                                const convGroupId = conv?.resourceGroupId || conv?.ResourceGroupId || null;
+                                                if (convGroupId) {
+                                                    await fetch(`${API_BASE}/groups/${convGroupId}/files/${newId}`, { method: 'POST' });
+                                                }
+                                            }
+                                        } catch (attachErr) {
+                                            console.warn('[SEND PROMPT] Failed to attach uploaded file to group:', attachErr);
+                                        }
+                                    }
+                                } else {
+                                    console.warn('[SEND PROMPT] Failed to upload attached file:', f.name);
+                                }
+                            } catch (upErr) {
+                                console.warn('[SEND PROMPT] Error uploading attached file:', upErr);
+                            }
+                        }
+                    }
+                    // sync window global
+                    window.promptSelectedFiles = promptSelectedFiles;
+                    updatePromptFilesList();
+                }
+
                 console.log('[SEND PROMPT] Sending documents query to', documentsUrl, 'payload:', payload);
 
                 currentRequestController = new AbortController();
