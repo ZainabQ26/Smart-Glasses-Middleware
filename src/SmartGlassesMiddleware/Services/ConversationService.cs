@@ -9,7 +9,7 @@ public interface IConversationService
     Task<Conversation> CreateConversationAsync(string? title = null, Guid? groupId = null);
     Task<Conversation?> GetConversationAsync(Guid conversationId);
     Task<List<Conversation>> GetActiveConversationsAsync(Guid? groupId = null);
-    Task<ChatMessage> AddMessageAsync(Guid conversationId, string role, string content, string? model = null, List<Guid>? attachedFileIds = null);
+    Task<ChatMessage> AddMessageAsync(Guid conversationId, string role, string content, string? model = null);
     Task<List<ChatMessage>> GetRecentMessagesAsync(Guid conversationId, int count = 10);
     Task<Conversation> DetectOrCreateConversationAsync(string userMessage, Guid? groupId = null);
     Task<string> SummarizeConversationAsync(Guid conversationId);
@@ -76,21 +76,6 @@ public class ConversationService : IConversationService
             .OrderBy(m => m.Timestamp)
             .ToListAsync();
 
-        // If the conversation has an associated ResourceGroup, load its files so callers can display them
-        if (conversation.ResourceGroupId.HasValue)
-        {
-            var group = await _context.ResourceGroups
-                .Where(r => r.Id == conversation.ResourceGroupId.Value)
-                .Include(r => r.FileGroups)
-                    .ThenInclude(fg => fg.ManagedFile)
-                .FirstOrDefaultAsync();
-
-            if (group != null)
-            {
-                conversation.ResourceGroup = group;
-            }
-        }
-
         return conversation;
     }
 
@@ -128,7 +113,7 @@ public class ConversationService : IConversationService
         return conversations;
     }
 
-    public async Task<ChatMessage> AddMessageAsync(Guid conversationId, string role, string content, string? model = null, List<Guid>? attachedFileIds = null)
+    public async Task<ChatMessage> AddMessageAsync(Guid conversationId, string role, string content, string? model = null)
     {
         var conversation = await _context.Conversations.FindAsync(conversationId);
         if (conversation == null)
@@ -136,15 +121,12 @@ public class ConversationService : IConversationService
             throw new ArgumentException($"Conversation {conversationId} not found");
         }
 
-        // Store message content as plain text. Attachments are persisted in the join table below.
-        string storedContent = content;
-
         var message = new ChatMessage
         {
             Id = Guid.NewGuid(),
             ConversationId = conversationId,
             Role = role,
-            Content = storedContent,
+            Content = content,
             Model = model,
             Timestamp = DateTime.UtcNow,
             TokenCount = EstimateTokens(content)
@@ -156,58 +138,6 @@ public class ConversationService : IConversationService
         conversation.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
-
-        // If attached files were provided, persist join entries and ensure files are mapped to the conversation's resource group
-        if (attachedFileIds != null && attachedFileIds.Count > 0)
-        {
-            // Ensure conversation has a resource group to make files discoverable
-            Guid groupId;
-            if (!conversation.ResourceGroupId.HasValue)
-            {
-                var newGroup = new ResourceGroup
-                {
-                    Id = Guid.NewGuid(),
-                    Name = conversation.Title ?? "Conversation Files",
-                    CreatedAt = DateTime.UtcNow
-                };
-                _context.ResourceGroups.Add(newGroup);
-                await _context.SaveChangesAsync();
-                conversation.ResourceGroupId = newGroup.Id;
-                groupId = newGroup.Id;
-            }
-            else
-            {
-                groupId = conversation.ResourceGroupId.Value;
-            }
-
-            foreach (var fileId in attachedFileIds)
-            {
-                // validate file exists
-                var file = await _context.ManagedFiles.FindAsync(fileId);
-                if (file == null) continue;
-
-                // create ChatMessageFile mapping if not exists
-                var existing = await _context.Set<ChatMessageFile>().FindAsync(new object[] { message.Id, fileId });
-                if (existing == null)
-                {
-                    var mapping = new ChatMessageFile
-                    {
-                        ChatMessageId = message.Id,
-                        ManagedFileId = fileId
-                    };
-                    _context.Add(mapping);
-                }
-
-                // ensure ManagedFile is part of the conversation's ResourceGroup (so group-scoped searches find it)
-                var existingGroupMap = await _context.Set<ManagedFileGroup>().FindAsync(new object[] { fileId, groupId });
-                if (existingGroupMap == null)
-                {
-                    _context.Add(new ManagedFileGroup { ManagedFileId = fileId, ResourceGroupId = groupId });
-                }
-            }
-
-            await _context.SaveChangesAsync();
-        }
 
         _logger.LogDebug("Added {Role} message to conversation {ConversationId}", role, conversationId);
         return message;
