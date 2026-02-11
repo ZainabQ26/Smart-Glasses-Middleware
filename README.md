@@ -217,6 +217,22 @@ dotnet build
 dotnet test
 ```
 
+### End-to-End Testing
+
+This repository includes comprehensive end-to-end tests using Playwright 1.58.2. For detailed information about running and writing E2E tests, see [E2E_TESTING.md](E2E_TESTING.md).
+
+Quick start for E2E tests:
+```bash
+# Install dependencies
+npm install
+
+# Install Playwright browsers
+npx playwright install
+
+# Run all E2E tests
+npm test
+```
+
 ### Run Application
 ```bash
 dotnet run --project src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj
