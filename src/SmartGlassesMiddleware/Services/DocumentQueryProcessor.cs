@@ -60,7 +60,7 @@ public class DocumentQueryProcessor : IDocumentTaskProcessor
             conversation ??= await _conversationService.DetectOrCreateConversationAsync(query, groupId);
 
             // Add user message to conversation
-            await _conversationService.AddMessageAsync(conversation.Id, "user", query);
+                await _conversationService.AddMessageAsync(conversation.Id, "user", query, null, entry.DocumentIds);
 
             // Perform the document query with conversation context
             var result = await _ragService.QueryDocumentsWithConversationAsync(query, conversation.Id, entry.TopK ?? 5, entry.GroupIds, entry.DocumentIds);

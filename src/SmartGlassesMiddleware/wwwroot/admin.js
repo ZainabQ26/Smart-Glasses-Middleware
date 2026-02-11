@@ -626,7 +626,8 @@ async function loadConversationIntoView(conversationId, title) {
         currentConversationHistory = Array.isArray(messages)
             ? messages.map(m => ({
                 role: (m.role || m.Role || '').toLowerCase() === 'assistant' ? 'bot' : (m.role || m.Role || 'user').toLowerCase(),
-                content: m.content || m.Content || ''
+                content: m.content || m.Content || '',
+                files: m.files || m.Files || []
             }))
             : [];
 
@@ -649,14 +650,56 @@ async function loadConversationIntoView(conversationId, title) {
                         <span>${msg.role === 'user' ? 'User' : 'Bot'}:</span>
                     </div>
                     <div style="color: #555; padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
+                    ${msg.files && msg.files.length > 0 ? (() => {
+                        const filesData = encodeURIComponent(JSON.stringify(msg.files));
+                        const filesTitle = `${msg.files.length} file(s) attached: ${msg.files.map(f => f.name || f.fileName || f.FileName || f.name).join(', ')}`;
+                        return `<div style="padding-left:12px;margin-top:6px;"><button type="button" onclick="showAttachedFilesModal('${filesData}')" style="background:none;border:none;font-size:14px;color:#3498db;cursor:pointer;padding:0" title="${escapeHtml(filesTitle)}">📎 ${msg.files.length} file(s)</button></div>`;
+                    })() : ''}
                 </div>
             `;
         }).join('');
+
+        // Build HTML for files attached to the conversation's resource group (if any)
+        let filesHTML = '';
+        try {
+            const groupId = conversation && (conversation.resourceGroupId || conversation.ResourceGroupId || (conversation.resourceGroup && (conversation.resourceGroup.id || conversation.resourceGroup.Id)));
+            if (groupId) {
+                // Fetch authoritative group info (includes files) from admin API
+                try {
+                    const groupRes = await fetchWithRetry(`${API_BASE}/groups/${groupId}`);
+                    if (groupRes && groupRes.ok) {
+                        const groupJson = await groupRes.json();
+                        const files = groupJson.files || groupJson.Files || [];
+                        if (files && files.length > 0) {
+                            const filesList = files.map(mf => {
+                                const id = mf.id || mf.Id;
+                                const name = mf.fileName || mf.FileName || mf.label || mf.Label || 'File';
+                                const size = mf.fileSize || mf.FileSize || 0;
+                                return `<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eee;"><div>${escapeHtml(name)}${size ? ` <span style=\"color:#888;font-size:12px;\">(${Math.round(size/1024)} KB)</span>` : ''}</div><div style="display:flex;gap:8px;"><a href="${API_BASE}/files/${id}/download" target="_blank" style="color:#3498db">Download</a><a href="${API_BASE}/files/${id}/preview" target="_blank" style="color:#3498db">Preview</a></div></div>`;
+                            }).join('');
+
+                            filesHTML = `
+                                <div style="margin-top:12px;padding-top:12px;border-top:1px solid #e6e6e6;">
+                                    <div style="font-weight:600;margin-bottom:8px;color:#2c3e50;">Files in conversation</div>
+                                    <div style="background:#fff;border:1px solid #eee;border-radius:6px;padding:8px;">${filesList}</div>
+                                </div>
+                            `;
+                        }
+                    }
+                } catch (fetchErr) {
+                    console.warn('Failed to fetch group files for conversation', fetchErr);
+                }
+            }
+        } catch (err) {
+            console.warn('Failed to build conversation files list', err);
+            filesHTML = '';
+        }
 
         if (responseContent) {
             responseContent.innerHTML = `
                 <div style="max-height: 500px; overflow-y: auto; padding: 15px; background: #f8f9fa; border-radius: 8px;">
                     ${conversationHTML}
+                    ${filesHTML}
                 </div>
             `;
         }
@@ -1765,28 +1808,42 @@ async function loadPromptById(promptId, promptName) {
 async function manageGroupResources(groupId, groupName) {
     try {
         console.log('[MANAGE] Looking for group ID:', groupId);
-        
-        // ALWAYS fetch fresh group data to avoid stale cache
-        console.log('[MANAGE] Fetching fresh group data...');
-        const groupRes = await fetchWithRetry(`${API_BASE}/groups?page=1&pageSize=1000`);
-        if (!groupRes.ok) {
-            throw new Error(`Failed to fetch groups: ${groupRes.status}`);
+        // ALWAYS try fetching authoritative single-group details first
+        console.log('[MANAGE] Fetching single group details...');
+        let currentGroup = null;
+        try {
+            const singleRes = await fetchWithRetry(`${API_BASE}/groups/${groupId}`);
+            if (singleRes && singleRes.ok) {
+                const singleJson = await singleRes.json().catch(() => null);
+                // single-group endpoint returns the group object directly (not wrapped in Data)
+                currentGroup = singleJson || (singleJson && (singleJson.data || singleJson.Data)) || null;
+            } else {
+                console.warn('[MANAGE] Single-group fetch failed, status:', singleRes && singleRes.status);
+            }
+        } catch (ex) {
+            console.warn('[MANAGE] Error fetching single group details, will fallback to group list lookup', ex);
         }
-        const groupsResult = await groupRes.json();
-        // Handle both lowercase and uppercase from API
-        const groups = groupsResult.data || groupsResult.Data || [];
-        console.log('[MANAGE] Groups fetched:', groups.length);
-        
-        // Find group using case-insensitive property access
-        const currentGroup = groups.find(g => getProp(g, 'id') === groupId);
-        
+
+        // Fallback: fetch full groups list and find the matching group
         if (!currentGroup) {
-            console.error('[MANAGE] Group not found. Looking for:', groupId);
-            console.error('[MANAGE] Available groups:', groups.map(g => getProp(g, 'id')));
-            throw new Error('Group not found');
+            console.log('[MANAGE] Falling back to groups list lookup...');
+            const groupRes = await fetchWithRetry(`${API_BASE}/groups?page=1&pageSize=1000`);
+            if (!groupRes.ok) {
+                throw new Error(`Failed to fetch groups: ${groupRes.status}`);
+            }
+            const groupsResult = await groupRes.json();
+            const groups = groupsResult.data || groupsResult.Data || [];
+            console.log('[MANAGE] Groups fetched:', groups.length);
+            currentGroup = groups.find(g => String(getProp(g, 'id')) === String(groupId));
+            if (!currentGroup) {
+                console.error('[MANAGE] Group not found. Looking for:', groupId);
+                console.error('[MANAGE] Available groups:', groups.map(g => getProp(g, 'id')));
+                throw new Error('Group not found');
+            }
+            console.log('[MANAGE] Using group from list lookup:', currentGroup);
+        } else {
+            console.log('[MANAGE] Using authoritative group data from single endpoint');
         }
-        
-        console.log('[MANAGE] Using fresh group data:', currentGroup);
         
         // ALWAYS fetch files and prompts fresh - don't rely on state cache
         let allFiles = [];

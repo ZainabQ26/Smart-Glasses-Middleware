@@ -36,7 +36,7 @@ public class DocumentsController : ControllerBase
         IMediaStorageService mediaStorageService,
         IConversationService conversationService,
         IGroupConversationMappingService? groupConversationMappingService = null,
-        IBackgroundTaskQueue backgroundQueue = null)
+        IBackgroundTaskQueue? backgroundQueue = null)
     {
         _logger = logger;
         _processingService = processingService;
@@ -213,8 +213,8 @@ public class DocumentsController : ControllerBase
             conversation ??= await _conversationService.DetectOrCreateConversationAsync(request.Query, groupId);
             _logger.LogInformation("Using conversation {ConversationId} for query", conversation.Id);
 
-            // Add user message to conversation
-            await _conversationService.AddMessageAsync(conversation.Id, "user", request.Query);
+            // Add user message to conversation (persist attached document ids if provided)
+            await _conversationService.AddMessageAsync(conversation.Id, "user", request.Query, null, request.DocumentIds);
 
             _logger.LogInformation("Calling RAG service QueryDocumentsWithConversationAsync...");
             var result = await _ragService.QueryDocumentsWithConversationAsync(
