@@ -362,6 +362,21 @@ namespace SmartGlassesMiddleware.Migrations
                     b.ToTable("ManagedFileGroup");
                 });
 
+            modelBuilder.Entity("SmartGlassesMiddleware.Models.ChatMessageFile", b =>
+                {
+                    b.Property<Guid>("ChatMessageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ManagedFileId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("ChatMessageId", "ManagedFileId");
+
+                    b.HasIndex("ManagedFileId");
+
+                    b.ToTable("ChatMessageFiles");
+                });
+
             modelBuilder.Entity("SmartGlassesMiddleware.Models.ManagedPrompt", b =>
                 {
                     b.Property<Guid>("Id")
@@ -603,6 +618,7 @@ namespace SmartGlassesMiddleware.Migrations
                         .IsRequired();
 
                     b.Navigation("Conversation");
+                    b.Navigation("Attachments");
                 });
 
             modelBuilder.Entity("SmartGlassesMiddleware.Models.Conversation", b =>
@@ -664,6 +680,25 @@ namespace SmartGlassesMiddleware.Migrations
                     b.Navigation("ResourceGroup");
                 });
 
+            modelBuilder.Entity("SmartGlassesMiddleware.Models.ChatMessageFile", b =>
+                {
+                    b.HasOne("SmartGlassesMiddleware.Models.ChatMessage", "ChatMessage")
+                        .WithMany("Attachments")
+                        .HasForeignKey("ChatMessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("SmartGlassesMiddleware.Models.ManagedFile", "ManagedFile")
+                        .WithMany("MessageFiles")
+                        .HasForeignKey("ManagedFileId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ChatMessage");
+
+                    b.Navigation("ManagedFile");
+                });
+
             modelBuilder.Entity("SmartGlassesMiddleware.Models.ManagedPromptGroup", b =>
                 {
                     b.HasOne("SmartGlassesMiddleware.Models.ManagedPrompt", "ManagedPrompt")
@@ -707,6 +742,7 @@ namespace SmartGlassesMiddleware.Migrations
             modelBuilder.Entity("SmartGlassesMiddleware.Models.ManagedFile", b =>
                 {
                     b.Navigation("FileGroups");
+                    b.Navigation("MessageFiles");
                 });
 
             modelBuilder.Entity("SmartGlassesMiddleware.Models.ManagedPrompt", b =>

@@ -81,6 +81,48 @@ public class AdminControllerTests
         return formFile;
     }
 
+    private async Task<ManagedFile> CreateManagedFileAsync(ApplicationDbContext ctx, string fileName, string? label = null, string contentType = "text/plain", string? storageKey = null)
+    {
+        var file = new ManagedFile
+        {
+            Id = Guid.NewGuid(),
+            FileName = fileName,
+            Label = label ?? "test",
+            ContentType = contentType,
+            StorageKey = storageKey ?? Guid.NewGuid().ToString(),
+            UploadedAt = DateTime.UtcNow,
+            FileSize = 10
+        };
+        ctx.ManagedFiles.Add(file);
+        await ctx.SaveChangesAsync();
+        return file;
+    }
+
+    private async Task<RagEntry> CreateRagEntryAsync(ApplicationDbContext ctx, Guid fileId)
+    {
+        var entry = new RagEntry { Id = Guid.NewGuid(), FileId = fileId, FileName = "ragfile", ProcessedAt = DateTime.UtcNow };
+        ctx.RagEntries.Add(entry);
+        await ctx.SaveChangesAsync();
+        return entry;
+    }
+
+    private async Task CreateGroupAndMappingAsync(ApplicationDbContext ctx, Guid fileId, Guid groupId)
+    {
+        var group = new ResourceGroup { Id = groupId, Name = "g", CreatedAt = DateTime.UtcNow };
+        ctx.ResourceGroups.Add(group);
+        ctx.Set<ManagedFileGroup>().Add(new ManagedFileGroup { ManagedFileId = fileId, ResourceGroupId = groupId });
+        await ctx.SaveChangesAsync();
+    }
+
+    private async Task<ChatMessage> CreateMessageWithAttachmentAsync(ApplicationDbContext ctx, Guid fileId)
+    {
+        var message = new ChatMessage { Id = Guid.NewGuid(), Role = "user", Content = "hi", Timestamp = DateTime.UtcNow };
+        ctx.ChatMessages.Add(message);
+        ctx.Set<ChatMessageFile>().Add(new ChatMessageFile { ChatMessageId = message.Id, ManagedFileId = fileId });
+        await ctx.SaveChangesAsync();
+        return message;
+    }
+
     #region Files Tests
 
     [Fact]
@@ -352,7 +394,7 @@ public class AdminControllerTests
         var controller = CreateController(context, mockMediaStorage, mockCache);
 
         // Act
-        var result = await controller.DeleteFile(fileId);
+        var result = await controller.DeleteFile(file.Id);
 
         // Assert
         Assert.IsType<NoContentResult>(result);
@@ -391,11 +433,239 @@ public class AdminControllerTests
         var controller = CreateController(context, mockMediaStorage);
 
         // Act
-        var result = await controller.DeleteFile(fileId);
+        var result = await controller.DeleteFile(file.Id);
 
         // Assert
         var statusCodeResult = Assert.IsType<ObjectResult>(result);
         Assert.Equal(500, statusCodeResult.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeleteFile_Returns_Conflict_When_RagEntries_Exist()
+    {
+        // Arrange
+        var context = GetInMemoryContext();
+        var mockMediaStorage = new Mock<IMediaStorageService>();
+        var mockCache = new Mock<ICacheService>();
+
+        var file = await CreateManagedFileAsync(context, "ragfile.txt", "Rag", "text/plain", "rag-key");
+        await CreateRagEntryAsync(context, file.Id);
+
+        var controller = CreateController(context, mockMediaStorage, mockCache);
+
+        // Act
+        var result = await controller.DeleteFile(file.Id);
+
+        // Assert
+        var conflict = Assert.IsType<ConflictObjectResult>(result);
+        var valType = conflict.Value.GetType();
+        var prop = valType.GetProperty("referencingCount");
+        Assert.NotNull(prop);
+        var count = (int)prop.GetValue(conflict.Value)!;
+        Assert.True(count > 0);
+    }
+
+    [Fact]
+    public async Task DeleteFile_Removes_GroupMappings_And_Deletes_File_When_Only_In_Group()
+    {
+        // Arrange
+        var context = GetInMemoryContext();
+        var mockMediaStorage = new Mock<IMediaStorageService>();
+        var mockCache = new Mock<ICacheService>();
+
+        var file = await CreateManagedFileAsync(context, "groupfile.txt", "Group", "text/plain", "group-key");
+        var groupId = Guid.NewGuid();
+        await CreateGroupAndMappingAsync(context, file.Id, groupId);
+
+        mockMediaStorage.Setup(m => m.DeleteMediaAsync(It.IsAny<string>())).Returns(Task.CompletedTask);
+
+        var controller = CreateController(context, mockMediaStorage, mockCache);
+
+        // Act
+        var result = await controller.DeleteFile(file.Id);
+
+        // Assert - should succeed and mapping removed
+        Assert.IsType<NoContentResult>(result);
+        var remainingMapping = await context.Set<ManagedFileGroup>().FindAsync(new object[] { file.Id, groupId });
+        Assert.Null(remainingMapping);
+        var deletedFile = await context.ManagedFiles.FindAsync(file.Id);
+        Assert.Null(deletedFile);
+    }
+
+    [Fact]
+    public async Task DeleteFile_Returns_Conflict_When_Message_Attachments_Exist()
+    {
+        // Arrange
+        var context = GetInMemoryContext();
+        var mockMediaStorage = new Mock<IMediaStorageService>();
+        var mockCache = new Mock<ICacheService>();
+
+        var file = await CreateManagedFileAsync(context, "msgfile.txt", "Msg", "text/plain", "msg-key");
+        var message = await CreateMessageWithAttachmentAsync(context, file.Id);
+
+        var controller = CreateController(context, mockMediaStorage, mockCache);
+
+        // Act
+        var result = await controller.DeleteFile(file.Id);
+
+        // Assert
+        var conflict = Assert.IsType<ConflictObjectResult>(result);
+        var valType = conflict.Value.GetType();
+        var prop = valType.GetProperty("referencingCount");
+        Assert.NotNull(prop);
+        var count = (int)prop.GetValue(conflict.Value)!;
+        Assert.True(count > 0);
+    }
+
+    [Fact]
+    public async Task DeleteFile_Returns_Conflict_When_File_Has_Message_Attachments()
+    {
+        // Arrange
+        var context = GetInMemoryContext();
+
+        var fileId = Guid.NewGuid();
+        var file = new ManagedFile
+        {
+            Id = fileId,
+            FileName = "attached.pdf",
+            Label = "Attached",
+            ContentType = "application/pdf",
+            StorageKey = "attached-key",
+            UploadedAt = DateTime.UtcNow,
+            FileSize = 100
+        };
+
+        var message = new ChatMessage
+        {
+            Id = Guid.NewGuid(),
+            ConversationId = Guid.NewGuid(),
+            Role = "user",
+            Content = "hello",
+            Timestamp = DateTime.UtcNow
+        };
+
+        var mapping = new SmartGlassesMiddleware.Models.ChatMessageFile
+        {
+            ChatMessageId = message.Id,
+            ManagedFileId = fileId
+        };
+
+        context.ManagedFiles.Add(file);
+        context.ChatMessages.Add(message);
+        context.Set<SmartGlassesMiddleware.Models.ChatMessageFile>().Add(mapping);
+        await context.SaveChangesAsync();
+
+        var controller = CreateController(context);
+
+        // Act
+        var result = await controller.DeleteFile(file.Id);
+
+        // Assert
+        var conflict = Assert.IsType<ConflictObjectResult>(result);
+        Assert.NotNull(conflict.Value);
+        // Should indicate message attachments
+        Assert.Contains("message", conflict.Value!.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task DeleteFile_Returns_Conflict_When_File_Has_RagEntries()
+    {
+        // Arrange
+        var context = GetInMemoryContext();
+
+        var fileId = Guid.NewGuid();
+        var file = new ManagedFile
+        {
+            Id = fileId,
+            FileName = "ragged.pdf",
+            Label = "Ragged",
+            ContentType = "application/pdf",
+            StorageKey = "rag-key",
+            UploadedAt = DateTime.UtcNow,
+            FileSize = 200
+        };
+
+        var rag = new RagEntry
+        {
+            Id = Guid.NewGuid(),
+            FileId = fileId,
+            FileName = file.FileName,
+            ContentType = file.ContentType,
+            StorageKey = file.StorageKey,
+            ProcessedAt = DateTime.UtcNow,
+            IndexedContent = "sample"
+        };
+
+        context.ManagedFiles.Add(file);
+        context.RagEntries.Add(rag);
+        await context.SaveChangesAsync();
+
+        var controller = CreateController(context);
+
+        // Act
+        var result = await controller.DeleteFile(fileId);
+
+        // Assert
+        var conflict = Assert.IsType<ConflictObjectResult>(result);
+        Assert.NotNull(conflict.Value);
+        Assert.Contains("RAG", conflict.Value!.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task DeleteFile_Removes_Groups_And_Deletes_File_When_Only_Groups()
+    {
+        // Arrange
+        var context = GetInMemoryContext();
+        var mockMediaStorage = new Mock<IMediaStorageService>();
+        var mockCache = new Mock<ICacheService>();
+
+        var fileId = Guid.NewGuid();
+        var file = new ManagedFile
+        {
+            Id = fileId,
+            FileName = "grouped.pdf",
+            Label = "Grouped",
+            ContentType = "application/pdf",
+            StorageKey = "group-key",
+            UploadedAt = DateTime.UtcNow,
+            FileSize = 300
+        };
+
+        var groupId = Guid.NewGuid();
+        var group = new ResourceGroup
+        {
+            Id = groupId,
+            Name = "Test Group",
+            CreatedAt = DateTime.UtcNow
+        };
+
+        var mapping = new ManagedFileGroup
+        {
+            ManagedFileId = fileId,
+            ResourceGroupId = groupId
+        };
+
+        context.ManagedFiles.Add(file);
+        context.ResourceGroups.Add(group);
+        context.Set<ManagedFileGroup>().Add(mapping);
+        await context.SaveChangesAsync();
+
+        mockMediaStorage.Setup(m => m.DeleteMediaAsync(It.IsAny<string>())).Returns(Task.CompletedTask);
+
+        var controller = CreateController(context, mockMediaStorage, mockCache);
+
+        // Act
+        var result = await controller.DeleteFile(fileId);
+
+        // Assert
+        Assert.IsType<NoContentResult>(result);
+        mockMediaStorage.Verify(m => m.DeleteMediaAsync("group-key"), Times.Once);
+
+        // Ensure group mapping removed and file deleted
+        var remainingMappings = await context.Set<ManagedFileGroup>().Where(m => m.ManagedFileId == fileId).ToListAsync();
+        Assert.Empty(remainingMappings);
+        var deletedFile = await context.ManagedFiles.FindAsync(fileId);
+        Assert.Null(deletedFile);
     }
 
     #endregion
