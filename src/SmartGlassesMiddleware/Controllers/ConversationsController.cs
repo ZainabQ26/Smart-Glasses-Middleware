@@ -58,12 +58,58 @@ public class ConversationsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetConversation(Guid id)
     {
-        var conversation = await _conversationService.GetConversationAsync(id);
+        var conversation = await _context.Conversations
+            .Include(c => c.ResourceGroup)
+            .FirstOrDefaultAsync(c => c.Id == id);
 
         if (conversation == null)
             return NotFound();
 
-        return Ok(conversation);
+        var messages = await _context.ChatMessages
+            .Where(m => m.ConversationId == id)
+            .OrderBy(m => m.Timestamp)
+            .Include(m => m.Attachments)
+                .ThenInclude(a => a.ManagedFile)
+            .ToListAsync();
+
+        var response = new
+        {
+            conversation.Id,
+            conversation.Title,
+            conversation.CreatedAt,
+            conversation.UpdatedAt,
+            conversation.IsActive,
+            conversation.ResourceGroupId,
+            ResourceGroup = conversation.ResourceGroup == null ? null : new
+            {
+                conversation.ResourceGroup.Id,
+                conversation.ResourceGroup.Name,
+                conversation.ResourceGroup.Description,
+                conversation.ResourceGroup.CreatedAt
+            },
+            Messages = messages.Select(m => new
+            {
+                m.Id,
+                m.ConversationId,
+                m.Role,
+                m.Content,
+                m.Model,
+                m.Timestamp,
+                m.TokenCount,
+                Attachments = m.Attachments.Select(a => new
+                {
+                    Id = a.ManagedFileId,
+                    Name = a.ManagedFile.FileName,
+                    Label = a.ManagedFile.Label,
+                    ContentType = a.ManagedFile.ContentType
+                }).ToList()
+            }).ToList(),
+            conversation.Summary,
+            conversation.SummaryEmbedding,
+            conversation.SummaryEmbeddingDimension
+        };
+
+        return Ok(response);
     }
 
     /// <summary>

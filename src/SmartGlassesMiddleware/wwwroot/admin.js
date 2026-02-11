@@ -452,7 +452,8 @@ function createPromptCard(prompt) {
     
     // Click to load prompt
     div.addEventListener('click', () => {
-        autoSaveCurrentConversation('switch');
+        // Don't auto-save when viewing a conversation (read-only operation)
+        // Auto-save will happen via input, send, new_chat, or unload events
         document.querySelectorAll('.sidebar-prompt-item').forEach(item => item.classList.remove('active'));
         div.classList.add('active');
         loadPromptIntoForm(id, name, promptText);
@@ -626,7 +627,9 @@ async function loadConversationIntoView(conversationId, title) {
         currentConversationHistory = Array.isArray(messages)
             ? messages.map(m => ({
                 role: (m.role || m.Role || '').toLowerCase() === 'assistant' ? 'bot' : (m.role || m.Role || 'user').toLowerCase(),
-                content: m.content || m.Content || ''
+                content: m.content || m.Content || '',
+                files: Array.isArray(m.files) ? m.files : (Array.isArray(m.Files) ? m.Files : (Array.isArray(m.attachments) ? m.attachments : [])),
+                sources: Array.isArray(m.sources) ? m.sources : (Array.isArray(m.Sources) ? m.Sources : [])
             }))
             : [];
 
@@ -706,10 +709,22 @@ async function autoSaveCurrentConversation(reason) {
     const snapshotText = JSON.stringify(snapshot);
     if (snapshotText === lastAutoSavedSnapshot) return null;
 
+    // Don't auto-save if there are no messages (only files is not enough to save)
+    if (snapshot.messages.length === 0) {
+        console.log('[AUTO SAVE] Skipping save - no messages in conversation');
+        return null;
+    }
+
     autoSaveInFlight = true;
     try {
         const firstMessage = snapshot.messages.find(m => m.role === 'user');
-        const chatName = firstMessage ? firstMessage.content.substring(0, 50) : 'Untitled Chat';
+        // If no user message exists, skip auto-save to prevent "Untitled Chat"
+        if (!firstMessage) {
+            console.log('[AUTO SAVE] Skipping save - no user message found');
+            autoSaveInFlight = false;
+            return null;
+        }
+        const chatName = firstMessage.content.substring(0, 50);
         const payload = { name: chatName, promptText: snapshotText };
 
         const existingId = document.getElementById('prompt-id')?.value;
@@ -2606,9 +2621,9 @@ async function init() {
             updatePromptFilesList();
         });
         
-        // Handle file selection - show preview
+        // Handle file selection - show preview and auto-upload
         if (promptFileInput) {
-            promptFileInput.addEventListener('change', (e) => {
+            promptFileInput.addEventListener('change', async (e) => {
                 const file = e.target.files[0];
                 if (file) {
                     promptPreviewFile = file;
@@ -2638,70 +2653,102 @@ async function init() {
                             </div>
                         `;
                     }
+                    
+                    // Auto-upload the file
+                    // Check if file already exists in list
+                    if (promptSelectedFiles.find(f => f.name === file.name)) {
+                        showMessage('File already uploaded', 'error');
+                        promptFileInput.value = '';
+                        return;
+                    }
+                    
+                    try {
+                        // Show progress bar
+                        if (promptUploadProgress) {
+                            promptUploadProgress.style.display = 'block';
+                        }
+                        const progressBar = document.getElementById('prompt-upload-progress-bar');
+                        if (progressBar) {
+                            progressBar.style.width = '0%';
+                        }
+                        
+                        // Upload file to server with progress tracking
+                        const formData = new FormData();
+                        formData.append('file', file);
+                        
+                        const xhr = new XMLHttpRequest();
+                        
+                        // Track upload progress
+                        xhr.upload.addEventListener('progress', (e) => {
+                            if (e.lengthComputable && progressBar) {
+                                const percentComplete = (e.loaded / e.total) * 100;
+                                progressBar.style.width = percentComplete + '%';
+                            }
+                        });
+                        
+                        // Handle upload completion
+                        const uploadPromise = new Promise((resolve, reject) => {
+                            xhr.addEventListener('load', () => {
+                                if (xhr.status >= 200 && xhr.status < 300) {
+                                    try {
+                                        const fileData = JSON.parse(xhr.responseText);
+                                        resolve(fileData);
+                                    } catch (e) {
+                                        reject(new Error('Invalid JSON response'));
+                                    }
+                                } else {
+                                    reject(new Error(`Upload failed: ${xhr.responseText}`));
+                                }
+                            });
+                            xhr.addEventListener('error', () => reject(new Error('Network error')));
+                            xhr.addEventListener('abort', () => reject(new Error('Upload cancelled')));
+                        });
+                        
+                        xhr.open('POST', '/api/documents/upload');
+                        xhr.send(formData);
+                        
+                        const fileData = await uploadPromise;
+                        const documentId = fileData.id || fileData.Id;
+                        
+                        // Add uploaded file to list with server ID
+                        promptSelectedFiles.push({
+                            file: file, 
+                            name: file.name, 
+                            selected: false,
+                            documentId: documentId
+                        });
+                        window.promptSelectedFiles = promptSelectedFiles;
+                        updatePromptFilesList();
+                        showMessage(`File "${file.name}" uploaded successfully`, 'success');
+                        
+                        // Clear preview
+                        promptPreviewFile = null;
+                        if (promptPreviewFilename) promptPreviewFilename.textContent = '';
+                        if (promptPreviewContent) promptPreviewContent.innerHTML = `<div style="font-size: 48px; color: #95a5a6;">📄</div>`;
+                        if (promptFileInput) promptFileInput.value = '';
+                        
+                        // Reload files list to show the new file
+                        if (typeof loadFiles === 'function') {
+                            loadFiles(true);
+                        }
+                    } catch (error) {
+                        console.error('Error uploading file:', error);
+                        showMessage(`Failed to upload file: ${error.message}`, 'error');
+                        if (promptFileInput) promptFileInput.value = '';
+                    } finally {
+                        // Hide progress bar after a short delay
+                        setTimeout(() => {
+                            if (promptUploadProgress) {
+                                promptUploadProgress.style.display = 'none';
+                            }
+                        }, 1000);
+                    }
                 }
             });
         }
         
-        // Upload button - uploads file to server and adds to list
-        document.getElementById('prompt-upload-btn')?.addEventListener('click', async () => {
-            if (!promptPreviewFile) {
-                showMessage('Please select a file first', 'error');
-                return;
-            }
-            
-            // Check if file already exists in list
-            if (promptSelectedFiles.find(f => f.name === promptPreviewFile.name)) {
-                showMessage('File already uploaded', 'error');
-                return;
-            }
-            
-            try {
-                setPromptUploadLoading(true);
-                // Upload file to server
-                const formData = new FormData();
-                formData.append('file', promptPreviewFile);
-                
-                const uploadRes = await fetch('/api/documents/upload', {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                if (!uploadRes.ok) {
-                    const errorText = await uploadRes.text();
-                    throw new Error(`Upload failed: ${errorText}`);
-                }
-                
-                const fileData = await uploadRes.json();
-                const documentId = fileData.id || fileData.Id;
-                
-                // Add uploaded file to list with server ID
-                promptSelectedFiles.push({
-                    file: promptPreviewFile, 
-                    name: promptPreviewFile.name, 
-                    selected: false,
-                    documentId: documentId
-                });
-                window.promptSelectedFiles = promptSelectedFiles;
-                updatePromptFilesList();
-                showMessage(`File "${promptPreviewFile.name}" uploaded successfully`, 'success');
-                
-                // Clear preview
-                promptPreviewFile = null;
-                if (promptPreviewFilename) promptPreviewFilename.textContent = '';
-                if (promptPreviewContent) promptPreviewContent.innerHTML = `<div style="font-size: 48px; color: #95a5a6;">📄</div>`;
-                if (promptFileInput) promptFileInput.value = '';
-                
-                // Reload files list to show the new file
-                if (typeof loadFiles === 'function') {
-                    loadFiles(true);
-                }
-            } catch (error) {
-                console.error('Error uploading file:', error);
-                showMessage(`Failed to upload file: ${error.message}`, 'error');
-            } finally {
-                setPromptUploadLoading(false);
-            }
-        });
+        // Global abort controller for cancelling requests
+        let currentRequestController = null;
         
         // Send button function - sends prompt to API
         const buildSourcesHtml = (sources) => {
@@ -2736,6 +2783,8 @@ async function init() {
         const sendPrompt = async () => {
             const promptText = document.getElementById('prompt-name')?.value;
             const responseContent = document.getElementById('response-content');
+            const sendBtn = document.getElementById('prompt-send-btn');
+            const cancelBtn = document.getElementById('prompt-cancel-btn');
             let lastQueryResult = null;
             
             if (!promptText || !promptText.trim()) {
@@ -2744,13 +2793,17 @@ async function init() {
             }
             
             try {
-                // Show loading state
+                // Show loading state and cancel button
                 responseContent.innerHTML = `
                     <div style="text-align: center; padding: 20px; color: #3498db;">
                         <div style="font-size: 1.2rem; margin-bottom: 10px;">⏳ Sending...</div>
                         <div style="font-size: 0.9rem; color: #666;">Processing your request...</div>
                     </div>
                 `;
+                
+                // Show cancel button, hide send button
+                if (sendBtn) sendBtn.style.display = 'none';
+                if (cancelBtn) cancelBtn.style.display = 'block';
                 
                 // Send query to documents endpoint. Use server-expected property names (Query/TopK)
                 const documentsUrl = '/api/documents/query';
@@ -2768,19 +2821,79 @@ async function init() {
                 if (activePromptGroupId && !includeAllGroups) {
                     payload.GroupIds = [activePromptGroupId];
                 }
+                if (activeConversationId) {
+                    payload.ConversationId = activeConversationId;
+                }
+                // Ensure any locally attached files are uploaded to the server first
+                if (promptSelectedFiles && promptSelectedFiles.length > 0) {
+                    for (let i = 0; i < promptSelectedFiles.length; i++) {
+                        const f = promptSelectedFiles[i];
+                        if (!f.documentId && f.file) {
+                            try {
+                                const fd = new FormData();
+                                fd.append('file', f.file);
+                                const upRes = await fetch('/api/documents/upload', { method: 'POST', body: fd });
+                                if (upRes.ok) {
+                                    const fdJson = await upRes.json().catch(() => null);
+                                    const newId = fdJson?.id || fdJson?.Id;
+                                    if (newId) {
+                                        f.documentId = newId;
+                                        console.log('[SEND PROMPT] Uploaded attached file', f.name, '=>', newId);
+
+                                        // if there is an active group, attach file to group for persistence
+                                        try {
+                                            if (activePromptGroupId) {
+                                                await fetch(`${API_BASE}/groups/${activePromptGroupId}/files/${newId}`, { method: 'POST' });
+                                            } else if (activeConversationId) {
+                                                // try to attach to conversation's group if available
+                                                const conv = await (await fetch(`${API_BASE}/conversations/${activeConversationId}`)).json().catch(() => null);
+                                                const convGroupId = conv?.resourceGroupId || conv?.ResourceGroupId || null;
+                                                if (convGroupId) {
+                                                    await fetch(`${API_BASE}/groups/${convGroupId}/files/${newId}`, { method: 'POST' });
+                                                }
+                                            }
+                                        } catch (attachErr) {
+                                            console.warn('[SEND PROMPT] Failed to attach uploaded file to group:', attachErr);
+                                        }
+                                    }
+                                } else {
+                                    console.warn('[SEND PROMPT] Failed to upload attached file:', f.name);
+                                }
+                            } catch (upErr) {
+                                console.warn('[SEND PROMPT] Error uploading attached file:', upErr);
+                            }
+                        }
+                    }
+                    // sync window global
+                    window.promptSelectedFiles = promptSelectedFiles;
+                    updatePromptFilesList();
+                }
+
+                // Recompute selected files and documentIds after any uploads
+                const selectedFilesAfterUpload = promptSelectedFiles.some(f => f.selected)
+                    ? promptSelectedFiles.filter(f => f.selected)
+                    : promptSelectedFiles;
+                const documentIdsAfterUpload = selectedFilesAfterUpload
+                    .map(f => f.documentId || f.id)
+                    .filter(Boolean);
+                if (documentIdsAfterUpload.length > 0) {
+                    payload.DocumentIds = documentIdsAfterUpload;
+                }
+
                 console.log('[SEND PROMPT] Sending documents query to', documentsUrl, 'payload:', payload);
 
-                const controller = new AbortController();
-                const timeoutMs = 150000; // 150 seconds - longer than server timeout
-                const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+                currentRequestController = new AbortController();
+                const timeoutMs = 300000; // 300 seconds
+                const timeoutId = setTimeout(() => currentRequestController.abort(), timeoutMs);
 
                 const queryResponse = await fetch(documentsUrl, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
                     body: JSON.stringify(payload),
-                    signal: controller.signal
+                    signal: currentRequestController.signal
                 });
                 clearTimeout(timeoutId);
+                currentRequestController = null;
 
                 console.log('[SEND PROMPT] documents query status:', queryResponse.status, queryResponse.statusText);
                 let result;
@@ -2802,10 +2915,22 @@ async function init() {
 
                 const responseConversationId = result.conversationId || result.ConversationId;
                 if (responseConversationId) {
+                    activeConversationId = responseConversationId;
                     // Server will persist group->conversation mapping. If we don't have an active group,
                     // ask the server for the conversation to determine the associated group and activate it.
                     if (!activePromptGroupId) {
                         await syncActiveGroupFromConversation(responseConversationId);
+                    }
+
+                    // Attach files to the conversation's group for persistence
+                    if (documentIdsAfterUpload && documentIdsAfterUpload.length > 0) {
+                        for (const fileId of documentIdsAfterUpload) {
+                            try {
+                                await fetch(`/api/conversations/${responseConversationId}/files/${fileId}`, { method: 'POST' });
+                            } catch (attachErr) {
+                                console.warn('[SEND PROMPT] Failed to attach file to conversation:', attachErr);
+                            }
+                        }
                     }
                 }
 
@@ -2857,12 +2982,13 @@ async function init() {
                 
                 showMessage('Response received successfully', 'success');
 
-                // Persist conversation snapshot to server so it survives reloads
-                try {
-                    await autoSaveCurrentConversation('send');
-                } catch (err) {
-                    console.warn('[SEND PROMPT] Auto-save after send failed:', err);
-                }
+                // Conversations are already persisted server-side via ConversationService
+                // No need to auto-save to ManagedPrompts (which are for reusable templates)
+                // try {
+                //     await autoSaveCurrentConversation('send');
+                // } catch (err) {
+                //     console.warn('[SEND PROMPT] Auto-save after send failed:', err);
+                // }
 
                 // Clear attached files after sending
                 promptSelectedFiles = [];
@@ -2879,28 +3005,41 @@ async function init() {
                 if (error.name === 'AbortError') {
                     responseContent.innerHTML = `
                         <div style="text-align: center; padding: 20px; color: #e67e22;">
-                            <div style="font-size: 1.2rem; margin-bottom: 10px;">⏱️ Timeout</div>
-                            <div style="font-size: 0.9rem;">The server took too long to respond. Try again.</div>
+                            <div style="font-size: 1.2rem; margin-bottom: 10px;">🚫 Cancelled</div>
+                            <div style="font-size: 0.9rem;">Request successfully cancelled.</div>
                         </div>
                     `;
-                    showMessage('Request timed out after 60 seconds', 'error');
-                    return;
-                }
-                const fallbackSources = lastQueryResult?.referencedSources || lastQueryResult?.ReferencedSources || lastQueryResult?.sources || lastQueryResult?.Sources || [];
-                const fallbackSourcesHtml = buildSourcesHtml(fallbackSources);
-                responseContent.innerHTML = `
-                    <div style="text-align: center; padding: 20px; color: #e74c3c;">
-                        <div style="font-size: 1.2rem; margin-bottom: 10px;">❌ Error</div>
-                        <div style="font-size: 0.9rem;">${escapeHtml(error.message)}</div>
-                    </div>
-                    ${fallbackSourcesHtml}
-                `;
-                showMessage(`Error: ${error.message}`, 'error');
+                    showMessage('Request successfully cancelled', 'info');
+                } else {
+                    const fallbackSources = lastQueryResult?.referencedSources || lastQueryResult?.ReferencedSources || lastQueryResult?.sources || lastQueryResult?.Sources || [];
+                    const fallbackSourcesHtml = buildSourcesHtml(fallbackSources);
+                    responseContent.innerHTML = `
+                        <div style="text-align: center; padding: 20px; color: #e74c3c;">
+                            <div style="font-size: 1.2rem; margin-bottom: 10px;">❌ Error</div>
+                            <div style="font-size: 0.9rem;">${escapeHtml(error.message)}</div>
+                        </div>
+                        ${fallbackSourcesHtml}
+                    `;
+                        showMessage(`Error: ${error.message}`, 'error');
+                    }
+                } finally {
+                // Reset buttons regardless of success or error
+                currentRequestController = null;
+                if (sendBtn) sendBtn.style.display = 'block';
+                if (cancelBtn) cancelBtn.style.display = 'none';
             }
         };
         
         // Send button click handler
         document.getElementById('prompt-send-btn')?.addEventListener('click', sendPrompt);
+        
+        // Cancel button click handler
+        document.getElementById('prompt-cancel-btn')?.addEventListener('click', () => {
+            if (currentRequestController) {
+                currentRequestController.abort();
+                showMessage('Cancelling request...', 'info');
+            }
+        });
         
         // Enter key handler for prompt text input
         document.getElementById('prompt-name')?.addEventListener('keypress', (e) => {
@@ -2910,9 +3049,11 @@ async function init() {
             }
         });
 
-        document.getElementById('prompt-name')?.addEventListener('input', () => {
-            autoSaveCurrentConversation('input');
-        });
+        // Conversations are already persisted server-side
+        // Auto-save to ManagedPrompts is unnecessary
+        // document.getElementById('prompt-name')?.addEventListener('input', () => {
+        //     autoSaveCurrentConversation('input');
+        // });
         
         // New Chat button - saves current conversation to Auto Groups
         document.getElementById('new-chat-btn')?.addEventListener('click', async () => {
@@ -2923,7 +3064,11 @@ async function init() {
             
             // Get the first user message as the name
             const firstMessage = currentConversationHistory.find(m => m.role === 'user');
-            const chatName = firstMessage ? firstMessage.content.substring(0, 50) : 'Untitled Chat';
+            if (!firstMessage) {
+                showMessage('No user messages to save', 'error');
+                return;
+            }
+            const chatName = firstMessage.content.substring(0, 50);
             
             // Get file details from uploaded files
             const fileDetails = promptSelectedFiles.map(f => ({
@@ -2938,8 +3083,9 @@ async function init() {
             });
             
             try {
-                await autoSaveCurrentConversation('new_chat');
-                showMessage('Conversation saved to Auto Groups', 'success');
+                // Conversations are already persisted server-side
+                // No need to save to ManagedPrompts
+                // await autoSaveCurrentConversation('new_chat');
                 
                 // Reset for new chat
                 currentConversationHistory = [];
@@ -2952,12 +3098,12 @@ async function init() {
                 document.getElementById('prompt-name').value = '';
                 document.getElementById('response-content').innerHTML = '<span style="color: #999;">Enter a prompt and click Send to get a response</span>';
                 
-                // Reload prompts list to show new Auto Group
+                // Reload prompts list to show conversations
                 loadPrompts(true);
                 
             } catch (error) {
-                console.error('Error saving conversation:', error);
-                showMessage('Failed to save conversation', 'error');
+                console.error('Error starting new conversation:', error);
+                showMessage('Failed to start new conversation', 'error');
             }
         });
         
@@ -3384,17 +3530,21 @@ async function init() {
             groupsCount: state.groups.data.length
         }));
 
-        if (AUTO_SAVE_ENABLED) restoreDraftConversation();
+        // Draft restoration disabled since auto-save is disabled
+        // Conversations are persisted server-side, not in localStorage
+        // if (AUTO_SAVE_ENABLED) restoreDraftConversation();
 
-        window.addEventListener('beforeunload', () => {
-            autoSaveCurrentConversation('unload');
-        });
+        // Conversations are already persisted server-side via ConversationService
+        // No need to auto-save to ManagedPrompts on unload/hidden
+        // window.addEventListener('beforeunload', () => {
+        //     autoSaveCurrentConversation('unload');
+        // });
 
-        document.addEventListener('visibilitychange', () => {
-            if (document.hidden) {
-                autoSaveCurrentConversation('hidden');
-            }
-        });
+        // document.addEventListener('visibilitychange', () => {
+        //     if (document.hidden) {
+        //         autoSaveCurrentConversation('hidden');
+        //     }
+        // });
     } catch (error) {
         console.error('[INIT] Error during initialization:', error);
         showMessage('Error loading initial data: ' + error.message, 'error');
