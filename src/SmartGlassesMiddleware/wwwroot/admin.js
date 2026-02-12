@@ -3554,7 +3554,7 @@ async function init() {
             
             if (reminderFilesList) {
                 if (reminderSelectedFiles.length === 0) {
-                    reminderFilesList.innerHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No files attached yet</div>';
+                    reminderFilesList.innerHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No attachments yet</div>';
                 } else {
                     reminderFilesList.innerHTML = reminderSelectedFiles.map((fileObj, index) => `
                         <div style="padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0; ${fileObj.selected ? 'background: #f0f0f0;' : ''}">

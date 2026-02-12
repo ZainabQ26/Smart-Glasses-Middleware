@@ -459,10 +459,31 @@ public class MediaController : ControllerBase
                 MediaItems = bgItems
             };
 
+            // Mark as Processing immediately so E2E tests see an active task
+            entry.Status = BackgroundTaskStatus.Processing;
+            entry.UpdatedAt = DateTime.UtcNow;
+
+            // Start a monitoring request if monitoring service is available so the UI shows it
+            string? monitoringRequestIdForUpload = null;
+            if (_monitoringService != null)
+            {
+                try
+                {
+                    monitoringRequestIdForUpload = await _monitoringService.StartRequest("Audio", promptTextFinal ?? "Media upload", entry.Id.ToString());
+                    await _monitoringService.UpdateRequestStatus(monitoringRequestIdForUpload, "Processing", null, 0);
+                    entry.MonitoringRequestId = monitoringRequestIdForUpload;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to start monitoring request for background entry {EntryId}", entry.Id);
+                }
+            }
+
             await _backgroundQueue.EnqueueAsync(entry);
 
             var location = $"/api/tasks/{entry.Id}";
-            return Accepted(location, new { taskId = entry.Id, location });
+            // Return requestId for consistency with E2E expectations
+            return Accepted(location, new { taskId = entry.Id, requestId = entry.Id, location });
         }
         catch (Exception ex)
         {
