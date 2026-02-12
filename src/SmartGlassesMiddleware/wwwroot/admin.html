@@ -438,11 +438,15 @@
         }
 
         .tab-content {
-            display: block;
+            display: none;
             background-color: white;
             border-radius: 8px;
             padding: 20px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .tab-content.active {
+            display: block;
         }
 
         .section {
@@ -1254,18 +1258,17 @@
                     Close
                 </button>
             </div>
-            </section>
         </div>
         <div id="preview-content" style="max-width: 100%; text-align: center;"></div>
     </div>
     <div id="files-list"></div>
             </div>
+            </section>
         </div>
 
         <!-- Prompts Tab -->
         <div id="prompts" class="tab-content">
             <section id="prompts-section" class="prompts-container">
-            <div class="prompts-container">
                 <div class="prompt-sidebar">
                     <div style="margin-bottom:10px;">
                         <h3 style="margin:0;">Conversations</h3>
@@ -1339,7 +1342,6 @@
                         </div>
                     </div>
                 </div>
-            </div>
             </section>
         </div>
 
