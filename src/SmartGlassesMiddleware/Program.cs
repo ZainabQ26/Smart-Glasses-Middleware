@@ -160,7 +160,16 @@ builder.Services.AddHttpClient<IAIService, OllamaAIService>((sp, client) =>
 // Register application services
 builder.Services.AddScoped<IHistoryService, HistoryService>();
 builder.Services.AddScoped<IMediaStorageService, MinioMediaStorageService>();
-builder.Services.AddScoped<ICacheService, RedisCacheService>();
+// Register cache service: prefer Redis when configured, otherwise fall back to in-memory implementation
+if (!builder.Environment.IsEnvironment("Testing") && !string.IsNullOrWhiteSpace(redisConnection))
+{
+    builder.Services.AddScoped<ICacheService, RedisCacheService>();
+}
+else
+{
+    builder.Services.AddScoped<ICacheService, InMemoryCacheService>();
+    _startupLogger.LogWarning("Redis not configured or running in Testing environment — using in-memory cache fallback.");
+}
 builder.Services.AddSingleton<IMetricsService, MetricsService>();
 builder.Services.AddSingleton<IRequestMonitoringService, RequestMonitoringService>();
 builder.Services.AddScoped<IRagService, RagService>();
