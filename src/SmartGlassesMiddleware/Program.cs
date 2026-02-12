@@ -749,6 +749,30 @@ app.Use(async (context, next) =>
     }
 });
 
+// Ensure baseline security headers are set for all responses, including static files.
+// Placed before UseStaticFiles so static file responses receive these headers.
+app.Use(async (context, next) =>
+{
+    context.Response.OnStarting(() =>
+    {
+        if (!context.Response.Headers.ContainsKey("X-Content-Type-Options"))
+        {
+            context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+        }
+        if (!context.Response.Headers.ContainsKey("X-Frame-Options"))
+        {
+            context.Response.Headers["X-Frame-Options"] = "DENY";
+        }
+        if (!context.Response.Headers.ContainsKey("Referrer-Policy"))
+        {
+            context.Response.Headers["Referrer-Policy"] = "no-referrer";
+        }
+        return Task.CompletedTask;
+    });
+
+    await next();
+});
+
 app.UseStaticFiles();
 
 // Diagnostic middleware: capture raw request body for /api/ask for troubleshooting

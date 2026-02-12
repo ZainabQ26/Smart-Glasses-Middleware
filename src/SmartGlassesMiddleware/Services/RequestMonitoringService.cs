@@ -9,7 +9,7 @@ namespace SmartGlassesMiddleware.Services;
 
 public interface IRequestMonitoringService
 {
-    Task<string> StartRequest(string requestType, string description);
+    Task<string> StartRequest(string requestType, string description, string? requestId = null);
     Task UpdateRequestStatus(string requestId, string status, string? details = null, int? progress = null);
     Task CompleteRequest(string requestId, bool success, string? result = null, string? error = null);
     Task<List<RequestStatus>> GetRecentRequests(int count = 50);
@@ -37,22 +37,22 @@ public class RequestMonitoringService : IRequestMonitoringService
         _maxRecentRequests = configuration.GetValue<int?>("Monitoring:MaxRecentRequests") ?? 100;
     }
 
-    public async Task<string> StartRequest(string requestType, string description)
+    public async Task<string> StartRequest(string requestType, string description, string? requestId = null)
     {
         await EnsureInitializedAsync();
         
-        var requestId = Guid.NewGuid().ToString();
+        var generatedRequestId = requestId ?? Guid.NewGuid().ToString();
         var request = new RequestStatus
         {
             Id = Guid.NewGuid(),
-            RequestId = requestId,
+            RequestId = generatedRequestId,
             RequestType = requestType,
             Description = description,
             Status = "Started",
             StartTime = DateTime.UtcNow
         };
 
-        _activeRequests[requestId] = request;
+        _activeRequests[request.RequestId] = request;
         _recentRequests.Enqueue(request);
 
         // Trim old requests
