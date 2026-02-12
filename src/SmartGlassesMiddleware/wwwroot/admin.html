@@ -97,13 +97,25 @@
             transition: all 0.3s ease;
         }
 
+        /* Make hover rules specific to button.tab to override generic button:hover rules */
+        button.tab:hover,
         .tab:hover {
-            color: #2c3e50;
+            color: #2c3e50 !important;
+            background-color: rgba(11,99,166,0.06) !important;
+            border-radius: 6px 6px 0 0;
         }
 
         .tab.active {
-            color: #2c3e50;
+            background-color: #0b63a6; /* visible active tab background */
+            color: #ffffff; /* ensure text is readable on the blue background */
             border-bottom-color: #0b63a6;
+            border-radius: 6px 6px 0 0;
+            box-shadow: 0 2px 0 rgba(11,99,166,0.06) inset;
+        }
+
+        /* Keep active tab text white on hover so it remains legible */
+        .tab.active:hover {
+            color: #ffffff !important;
         }
 
         .theme-toggle {
@@ -256,6 +268,12 @@
 
         body.dark .tab {
             color: #a3b3cc !important;
+        }
+
+        body.dark button.tab:hover,
+        body.dark .tab:hover {
+            color: #ffffff !important;
+            background-color: rgba(91,163,255,0.08) !important;
         }
 
         /* Make certain script elements detectable by Playwright's visibility checks */
