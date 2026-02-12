@@ -1,19 +1,19 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('API Endpoints', () => {
-  test('should return healthy status from /health endpoint', async ({ page }) => {
-    const response = await page.goto('/health');
-    expect(response?.status()).toBe(200);
+  test('should return healthy status from /health endpoint', async ({ request }) => {
+    const response = await request.get('/health');
+    expect(response.status()).toBe(200);
     
-    const body = await page.textContent('body');
-    expect(body?.toLowerCase()).toContain('healthy');
+    const body = await response.text();
+    expect(body.toLowerCase()).toContain('healthy');
   });
 
-  test('should access /api/history endpoint', async ({ page }) => {
-    const response = await page.goto('/api/history');
+  test('should access /api/history endpoint', async ({ request }) => {
+    const response = await request.get('/api/history');
     
     // Should be accessible (200 or 204 if no data)
-    expect(response?.status()).toBeLessThan(500);
+    expect(response.status()).toBeLessThan(500);
   });
 
   test('should handle /api/admin/files endpoint', async ({ request }) => {
@@ -66,9 +66,9 @@ test.describe('API Endpoints', () => {
     expect(response.status()).toBeGreaterThanOrEqual(400);
   });
 
-  test('should handle /metrics endpoint', async ({ page }) => {
-    const response = await page.goto('/metrics');
-    expect(response?.status()).toBe(200);
+  test('should handle /metrics endpoint', async ({ request }) => {
+    const response = await request.get('/metrics');
+    expect(response.status()).toBe(200);
   });
 
   test('should handle CORS headers appropriately', async ({ request }) => {

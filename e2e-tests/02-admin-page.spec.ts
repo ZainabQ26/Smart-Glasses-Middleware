@@ -44,11 +44,13 @@ test.describe('Admin Page', () => {
   });
 
   test('should display prompts section', async ({ page }) => {
+    await page.click('button[data-tab="prompts"]');
     const promptsSection = page.locator('#prompts-section, section:has-text("Prompts")').first();
     await expect(promptsSection).toBeVisible();
   });
 
   test('should display groups section', async ({ page }) => {
+    await page.click('button[data-tab="groups"]');
     const groupsSection = page.locator('#groups-section, section:has-text("Groups")').first();
     await expect(groupsSection).toBeVisible();
   });
@@ -76,8 +78,9 @@ test.describe('Admin Page', () => {
     }
   });
 
-  test('should show create prompt button', async ({ page }) => {
-    const createButton = page.locator('button:has-text("Create"), button:has-text("New Prompt"), button:has-text("Add Prompt")').first();
+  test('should show new conversation button', async ({ page }) => {
+    await page.click('button[data-tab="prompts"]');
+    const createButton = page.locator('#new-chat-btn, button:has-text("New Conversation")').first();
     await expect(createButton).toBeVisible();
   });
 
