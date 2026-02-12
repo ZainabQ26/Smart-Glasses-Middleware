@@ -208,7 +208,7 @@ function showLoading(listId) {
     const loading = document.createElement('div');
     loading.className = 'loading-indicator';
     loading.id = `${listId}-loading`;
-    loading.innerHTML = '<p style="text-align: center; padding: 20px; color: #95a5a6;">Loading...</p>';
+    loading.innerHTML = '<p style="text-align: center; padding: 20px; color: #5c6b6f;">Loading...</p>';
     list.appendChild(loading);
 }
 
@@ -343,10 +343,10 @@ async function loadPrompts(reset = false) {
                         <div style="display:block;">
                             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
                                 <span class="prompt-name" style="font-weight:600;color:#2c3e50;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%;">${displayName}</span>
-                                <span class="badge" style="background:#3498db;color:white;padding:2px 6px;border-radius:10px;font-size:11px;min-width:20px;text-align:center;">${messageCount}</span>
+                                <span class="badge" style="background:#0b63a6;color:white;padding:2px 6px;border-radius:10px;font-size:11px;min-width:20px;text-align:center;">${messageCount}</span>
                             </div>
-                            <div style="font-size:11px;color:#95a5a6;margin-bottom:4px;">${timestamp}</div>
-                            <div style="color:#666;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(String(lastMsg || 'No messages yet'))}</div>
+                            <div style="font-size:11px;color:#5c6b6f;margin-bottom:4px;">${timestamp}</div>
+                            <div style="color:#444;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(String(lastMsg || 'No messages yet'))}</div>
                         </div>
                     `;
 
@@ -495,7 +495,7 @@ async function previewFile(id, fileName) {
     // Store file info for download button
     currentPreviewFile = { id, fileName };
     
-    previewContent.innerHTML = '<p style="color: #95a5a6;">Loading preview...</p>';
+    previewContent.innerHTML = '<p style="color: #5c6b6f;">Loading preview...</p>';
     previewContainer.style.display = 'block';
     
     // Scroll to preview
@@ -591,11 +591,11 @@ function loadPromptIntoForm(id, name, text) {
                     const page = source.pageNumber || source.PageNumber;
                     const label = page ? `${fileName} (p.${page})` : fileName;
                     const href = documentId ? `/api/documents/${documentId}/download` : '#';
-                    const linkStyle = documentId ? 'color: #3498db; text-decoration: underline;' : 'color: #95a5a6; text-decoration: none;';
+                    const linkStyle = documentId ? 'color: #0b63a6; text-decoration: underline;' : 'color: #5c6b6f; text-decoration: none;';
                     return `
                         <div style="display: flex; align-items: center; gap: 8px; font-size: 12px;">
                             <a href="${href}" target="_blank" style="${linkStyle}" onclick="${documentId ? '' : 'return false;'}">${escapeHtml(label)}</a>
-                            ${documentId ? `<button type=\"button\" onclick=\"previewDocumentFile('${documentId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')\" style=\"padding: 2px 6px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 11px;\">Preview</button>` : ''}
+                            ${documentId ? `<button type=\"button\" onclick=\"previewDocumentFile('${documentId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')\" style=\"padding: 2px 6px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 11px;\">Preview</button>` : ''}
                         </div>
                     `;
                 }).join('')}
@@ -604,11 +604,11 @@ function loadPromptIntoForm(id, name, text) {
 
         return `
             <div style="margin-bottom: 12px;">
-                <div style="color: ${msg.role === 'user' ? '#3498db' : '#27ae60'}; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
+                <div style="color: ${msg.role === 'user' ? '#0b63a6' : '#27ae60'}; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
                     <span>${msg.role === 'user' ? 'User' : 'Bot'}:</span>
-                    ${msgFiles.length > 0 ? `<button type="button" onclick="showAttachedFilesModal('${filesData}')" style="background: none; border: none; font-size: 16px; color: #3498db; cursor: pointer; padding: 0;" title="${escapeHtml(filesTitle)}">📎</button>` : ''}
+                    ${msgFiles.length > 0 ? `<button type="button" onclick="showAttachedFilesModal('${filesData}')" style="background: none; border: none; font-size: 16px; color: #0b63a6; cursor: pointer; padding: 0;" title="${escapeHtml(filesTitle)}">📎</button>` : ''}
                 </div>
-                <div style="color: #555; padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
+                <div style="color: #444; padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
                 ${msg.role === 'bot' ? msgSourcesHtml : ''}
             </div>
         `;
@@ -649,9 +649,9 @@ function loadPromptIntoForm(id, name, text) {
                     const fileId = f.id || '';
                     const fileName = f.name || 'Document';
                     return `
-                        <div style="padding: 4px 0; color: #555; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                        <div style="padding: 4px 0; color: #444; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
                             <span>📎 ${escapeHtml(fileName)}</span>
-                            <button type="button" onclick="previewDocumentFile('${fileId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')" style="padding: 2px 8px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">Preview</button>
+                            <button type="button" onclick="previewDocumentFile('${fileId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')" style="padding: 2px 8px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">Preview</button>
                         </div>
                     `;
                 }).join('')}
@@ -739,10 +739,10 @@ async function loadConversationIntoView(conversationId, title) {
         const conversationHTML = currentConversationHistory.map(msg => {
             return `
                 <div style="margin-bottom: 12px;">
-                    <div style="color: ${msg.role === 'user' ? '#3498db' : '#27ae60'}; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
+                    <div style="color: ${msg.role === 'user' ? '#0b63a6' : '#27ae60'}; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
                         <span>${msg.role === 'user' ? 'User' : 'Bot'}:</span>
                     </div>
-                    <div style="color: #555; padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
+                    <div style="color: #444; padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
                 </div>
             `;
         }).join('');
@@ -789,7 +789,7 @@ async function loadConversationIntoView(conversationId, title) {
                         return `
                             <div style="padding: 6px 0; display:flex; align-items:center; justify-content:space-between; gap:8px;">
                                 <span>📎 ${escapeHtml(fileName)}</span>
-                                <button type="button" onclick="previewDocumentFile('${fileId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')" style="padding:2px 8px; background:#3498db; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px;">Preview</button>
+                                <button type="button" onclick="previewDocumentFile('${fileId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')" style="padding:2px 8px; background:#0b63a6; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px;">Preview</button>
                             </div>
                         `;
                     }).join('')}
@@ -966,14 +966,14 @@ function updatePromptFilesList() {
     // Update paperclip icon color
     if (promptFilesIcon) {
         if (promptSelectedFiles.length === 0) {
-            promptFilesIcon.style.color = '#95a5a6'; // Gray when no files
+            promptFilesIcon.style.color = '#5c6b6f'; // Gray when no files
         } else {
-            promptFilesIcon.style.color = '#3498db'; // Blue when files present
+            promptFilesIcon.style.color = '#0b63a6'; // Blue when files present
         }
     }
     
     if (promptSelectedFiles.length === 0) {
-        filesList.innerHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No files to show</div>';
+        filesList.innerHTML = '<div style="color: #5c6b6f; text-align: center; padding: 20px; font-size: 14px;">No files to show</div>';
     } else {
         filesList.innerHTML = promptSelectedFiles.map((fileObj, index) => {
             const fileName = fileObj.file?.name || fileObj.name || 'Document';
@@ -984,7 +984,7 @@ function updatePromptFilesList() {
                     <span onclick="togglePromptFileSelection(${index})" style="font-size: 14px; color: #333; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; user-select: none;">
                         ${escapeHtml(fileName)}
                     </span>
-                    <button type="button" onclick="event.stopPropagation(); previewDocumentFile('${fileId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')" style="padding: 4px 10px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                    <button type="button" onclick="event.stopPropagation(); previewDocumentFile('${fileId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')" style="padding: 4px 10px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">
                         Preview
                     </button>
                 </div>
@@ -1002,10 +1002,10 @@ function updateActiveGroupStyles() {
         const input = card.querySelector('input[data-group-id]');
 
         card.style.background = isActive ? '#eaf4ff' : '#f5f5f5';
-        card.style.border = isActive ? '2px solid #3498db' : '2px solid transparent';
+        card.style.border = isActive ? '2px solid #0b63a6' : '2px solid transparent';
         if (input) {
             input.style.background = isActive ? '#ffffff' : 'white';
-            input.style.borderColor = isActive ? '#3498db' : '#ddd';
+            input.style.borderColor = isActive ? '#0b63a6' : '#ddd';
         }
         if (badge) {
             badge.style.display = isActive ? 'inline-flex' : 'none';
@@ -1105,11 +1105,11 @@ async function restoreDraftConversation() {
                             const page = source.pageNumber || source.PageNumber;
                             const label = page ? `${fileName} (p.${page})` : fileName;
                             const href = documentId ? `/api/documents/${documentId}/download` : '#';
-                            const linkStyle = documentId ? 'color: #3498db; text-decoration: underline;' : 'color: #95a5a6; text-decoration: none;';
+                            const linkStyle = documentId ? 'color: #0b63a6; text-decoration: underline;' : 'color: #5c6b6f; text-decoration: none;';
                             return `
                                 <div style="display: flex; align-items: center; gap: 8px; font-size: 12px;">
                                     <a href="${href}" target="_blank" style="${linkStyle}" onclick="${documentId ? '' : 'return false;'}">${escapeHtml(label)}</a>
-                                    ${documentId ? `<button type=\"button\" onclick=\"previewDocumentFile('${documentId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')\" style=\"padding: 2px 6px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 11px;\">Preview</button>` : ''}
+                                    ${documentId ? `<button type=\"button\" onclick=\"previewDocumentFile('${documentId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')\" style=\"padding: 2px 6px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 11px;\">Preview</button>` : ''}
                                 </div>
                             `;
                         }).join('')}
@@ -1118,11 +1118,11 @@ async function restoreDraftConversation() {
 
                 return `
                     <div style="margin-bottom: 12px;">
-                        <div style="color: ${msg.role === 'user' ? '#3498db' : '#27ae60'}; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
+                        <div style="color: ${msg.role === 'user' ? '#0b63a6' : '#27ae60'}; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
                             <span>${msg.role === 'user' ? 'User' : 'Bot'}:</span>
-                            ${msgFiles.length > 0 ? `<button type=\"button\" onclick=\"showAttachedFilesModal('${filesData}')\" style=\"background: none; border: none; font-size: 16px; color: #3498db; cursor: pointer; padding: 0;\" title=\"${escapeHtml(filesTitle)}\">📎</button>` : ''}
+                            ${msgFiles.length > 0 ? `<button type=\"button\" onclick=\"showAttachedFilesModal('${filesData}')\" style=\"background: none; border: none; font-size: 16px; color: #0b63a6; cursor: pointer; padding: 0;\" title=\"${escapeHtml(filesTitle)}\">📎</button>` : ''}
                         </div>
-                        <div style="color: #555; padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
+                        <div style="color: #444; padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
                         ${msg.role === 'bot' ? msgSourcesHtml : ''}
                     </div>
 `;
@@ -1190,7 +1190,7 @@ function trackPrompt() {
     
     responseContent.innerHTML = `
         <div style="text-align: center; padding: 20px;">
-            <div style="color: #3498db; font-size: 1.2rem; margin-bottom: 10px;">📊 Tracking Active</div>
+            <div style="color: #0b63a6; font-size: 1.2rem; margin-bottom: 10px;">📊 Tracking Active</div>
             <div style="color: #666; font-size: 0.9rem;">Monitoring prompt usage and responses...</div>
             <div style="margin-top: 15px; padding: 10px; background: #e8f5e9; border-radius: 4px; color: #2e7d32;">
                 ✓ Ready to track interactions
@@ -2027,7 +2027,7 @@ async function manageGroupResources(groupId, groupName) {
                             ${escapeHtml(String(fileName))}
                         </span>
                         <button type="button" onclick="previewReminderFile('${fileId}', '${escapeHtml(String(fileName)).replace(/'/g, "\\'")}')"
-                            style="padding: 4px 12px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">
+                            style="padding: 4px 12px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">
                             Preview
                         </button>
                     </div>
@@ -2123,7 +2123,7 @@ async function manageGroupResources(groupId, groupName) {
                     <button type="button" onclick="closeManageGroupModal()" style="background: none; border: none; font-size: 20px; color: #95a5a6; cursor: pointer; padding: 0; line-height: 1;">×</button>
                 </div>
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
-                    <div style="border: 2px solid #3498db; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; position: relative;">
+                    <div style="border: 2px solid #0b63a6; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; position: relative;">
                         <div style="font-weight: 600; color: #2c3e50; margin-bottom: 8px; font-size: 14px;">Files</div>
                         <div id="modal-files-list" style="flex: 1; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; background: white; max-height: 360px; min-height: 160px;">
                             ${filesListHTML}
@@ -2556,7 +2556,7 @@ function showAttachedFilesModal(encodedFiles) {
                 return `
                     <div style="padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #f0f0f0; gap: 10px;">
                         <span style="font-size: 14px; color: #333; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(fileName)}</span>
-                        <button type="button" onclick="previewDocumentFile('${fileId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')" style="padding: 4px 10px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                        <button type="button" onclick="previewDocumentFile('${fileId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')" style="padding: 4px 10px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">
                             Preview
                         </button>
                     </div>
@@ -2914,12 +2914,12 @@ async function init() {
                             const chunkText = source.chunkText || source.ChunkText || '';
                             const label = page ? `${fileName} (p.${page})` : fileName;
                             const href = documentId ? `/api/documents/${documentId}/download` : '#';
-                            const linkStyle = documentId ? 'color: #3498db; text-decoration: underline;' : 'color: #95a5a6; text-decoration: none;';
+                            const linkStyle = documentId ? 'color: #0b63a6; text-decoration: underline;' : 'color: #95a5a6; text-decoration: none;';
                             return `
                                 <div style="display: flex; flex-direction: column; gap: 4px;">
                                     <div style="display: flex; align-items: center; gap: 8px;">
                                         <a href="${href}" target="_blank" style="${linkStyle}" onclick="${documentId ? '' : 'return false;'}">${escapeHtml(label)}</a>
-                                        ${documentId ? `<button type=\"button\" onclick=\"previewDocumentFile('${documentId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')\" style=\"padding: 2px 8px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;\">Preview</button>` : ''}
+                                        ${documentId ? `<button type=\"button\" onclick=\"previewDocumentFile('${documentId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')\" style=\"padding: 2px 8px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;\">Preview</button>` : ''}
                                     </div>
                                     ${chunkText ? `<div style=\"font-size: 12px; color: #666; padding-left: 4px;\">${escapeHtml(chunkText)}</div>` : ''}
                                 </div>
@@ -2945,7 +2945,7 @@ async function init() {
             try {
                 // Show loading state and cancel button
                 responseContent.innerHTML = `
-                    <div style="text-align: center; padding: 20px; color: #3498db;">
+                    <div style="text-align: center; padding: 20px; color: #0b63a6;">
                         <div style="font-size: 1.2rem; margin-bottom: 10px;">⏳ Sending...</div>
                         <div style="font-size: 0.9rem; color: #666;">Processing your request...</div>
                     </div>
@@ -3126,7 +3126,7 @@ async function init() {
                         <div class="conversation-message" style="margin-bottom: 12px;">
                             <div class="conversation-message-role ${msg.role === 'user' ? 'conversation-message-user' : 'conversation-message-bot'}" style="font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
                                 <span>${msg.role === 'user' ? 'User' : 'Bot'}:</span>
-                                ${msg.files && msg.files.length > 0 ? `<button type="button" onclick="showAttachedFilesModal('${filesData}')" style="background: none; border: none; font-size: 16px; color: #3498db; cursor: pointer; padding: 0;" title="${escapeHtml(filesTitle)}">📎</button>` : ''}
+                                ${msg.files && msg.files.length > 0 ? `<button type="button" onclick="showAttachedFilesModal('${filesData}')" style="background: none; border: none; font-size: 16px; color: #0b63a6; cursor: pointer; padding: 0;" title="${escapeHtml(filesTitle)}">📎</button>` : ''}
                             </div>
                             <div class="conversation-message-content" style="padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
                             ${msgSourcesHtml}
@@ -3284,7 +3284,7 @@ async function init() {
                 if (groupSelectedFiles.length === 0) {
                     groupFilesIcon.style.color = '#95a5a6'; // Gray when no files
                 } else {
-                    groupFilesIcon.style.color = '#3498db'; // Blue when files present
+                    groupFilesIcon.style.color = '#0b63a6'; // Blue when files present
                 }
             }
             
@@ -3299,7 +3299,7 @@ async function init() {
                             <span onclick="toggleGroupFileSelection(${index})" style="font-size: 14px; color: #333; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; user-select: none;">
                                 ${escapeHtml(fileObj.name)}
                             </span>
-                            <button type="button" onclick="event.stopPropagation(); previewGroupFile(${index})" style="padding: 4px 12px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">Preview</button>
+                            <button type="button" onclick="event.stopPropagation(); previewGroupFile(${index})" style="padding: 4px 12px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">Preview</button>
                         </div>
                     `).join('');
                 }
@@ -3548,7 +3548,7 @@ async function init() {
                 if (reminderSelectedFiles.length === 0) {
                     reminderFilesIcon.style.color = '#95a5a6';
                 } else {
-                    reminderFilesIcon.style.color = '#3498db';
+                    reminderFilesIcon.style.color = '#0b63a6';
                 }
             }
             
