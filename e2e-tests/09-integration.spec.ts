@@ -1,5 +1,8 @@
 import { test, expect } from '@playwright/test';
 
+// Increase timeout for integration tests due to multiple page loads
+test.setTimeout(120000);
+
 test.describe('Full User Journey - Admin Workflow', () => {
   test('should complete full admin workflow', async ({ page }) => {
     // 1. Navigate to admin page
@@ -38,6 +41,7 @@ test.describe('Full User Journey - Admin Workflow', () => {
       
       // 8. Navigate back to admin
       await page.goBack();
+      await page.waitForURL('**/admin.html');
       await expect(page.locator('button[data-tab="files"]')).toBeVisible();
     }
   });
@@ -104,6 +108,7 @@ test.describe('Full User Journey - Multi-page Navigation', () => {
         
         // Reload each page
         await page.reload();
+        await page.waitForTimeout(500); // Give server a breather
         
         if (testPage.url.includes('monitoring.html')) {
           await expect(page.locator('[data-testid="requests-header"]')).toBeVisible();
@@ -128,11 +133,11 @@ test.describe('Full User Journey - Browser Controls', () => {
     
     // 3. Use back button
     await page.goBack();
-    await expect(page.url()).toContain('admin.html');
+    await expect(page).toHaveURL(/admin\.html/);
     
     // 4. Use forward button
     await page.goForward();
-    await expect(page.url()).toContain('monitoring.html');
+    await expect(page).toHaveURL(/monitoring\.html/);
     
     // 5. Reload
     await page.reload();

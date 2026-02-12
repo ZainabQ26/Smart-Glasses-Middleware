@@ -15,13 +15,13 @@ test.describe('Backend error injection and UI mapping', () => {
       }
     ];
 
-    await page.route('**/api/monitoring/requests', route => route.fulfill({
+    await page.route('**/api/monitoring/requests*', route => route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify(failedPayload)
     }));
 
-    await page.route('**/api/history', route => route.fulfill({
+    await page.route('**/api/history*', route => route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: '[]'
