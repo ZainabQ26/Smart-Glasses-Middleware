@@ -98,7 +98,6 @@ services:
       - AI__OllamaTimeoutSeconds=${OLLAMA_TIMEOUT_SECONDS:-30}
       - AI__OllamaEmbeddingTimeoutSeconds=${OLLAMA_EMBEDDING_TIMEOUT_SECONDS:-30}
       - AI__UseAdvancedModel=false
-      - RateLimiting__Enabled=false
       - AI__AdvancedModelEndpoint=${AI_ADVANCED_ENDPOINT:-}
       - AI__AdvancedModelName=${AI_ADVANCED_MODEL_NAME:-gpt-4}
       - AI__KnownTasks__0=time
@@ -113,8 +112,8 @@ services:
       - BackgroundTasks__CleanupIntervalMinutes=${BACKGROUND_TASKS_CLEANUP_INTERVAL_MINUTES:-5}
       - ServiceTimeouts__TranscriptionTimeoutSeconds=${TRANSCRIPTION_TIMEOUT_SECONDS:-30}
       - ServiceTimeouts__AIServiceTimeoutSeconds=${AI_SERVICE_TIMEOUT_SECONDS:-60}
-      - RateLimiting__Enabled=${RATE_LIMITING_ENABLED:-true}
-      - RateLimiting__RequestsPerMinute=${RATE_LIMITING_REQUESTS_PER_MINUTE:-60}
+      - RateLimiting__Enabled=${RATE_LIMITING_ENABLED:-false}
+      - RateLimiting__RequestsPerMinute=${RATE_LIMITING_REQUESTS_PER_MINUTE:-1000}
       - Metrics__ApiKey=${METRICS_API_KEY:-}
       - RAG__MaxFileSizeMB=${RAG_MAX_FILE_SIZE_MB:-50}
       - RAG__MaxRetries=${RAG_MAX_RETRIES:-3}

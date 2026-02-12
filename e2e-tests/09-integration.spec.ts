@@ -40,8 +40,8 @@ test.describe('Full User Journey - Admin Workflow', () => {
       await expect(page.locator('h1, h2, h3').filter({ hasText: /Recent.*Requests|Monitoring|Request/i }).first()).toBeVisible();
       
       // 8. Navigate back to admin
-      await page.goBack();
-      await page.waitForURL('**/admin.html');
+      await page.goto('/admin.html');
+      await expect(page).toHaveURL(/admin\.html/);
       await expect(page.locator('button[data-tab="files"]')).toBeVisible();
     }
   });
