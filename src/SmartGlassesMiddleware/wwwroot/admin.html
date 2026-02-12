@@ -1231,14 +1231,13 @@
     <link rel="stylesheet" href="toasts.css">
 </head>
 <body>
+    <!-- SignalR warning bar (hidden by default). Sticky/fixed at top when visible. -->
+    <div id="signalr-warning" role="status" aria-live="polite" style="display: none; position: fixed; top: 0; left: 0; width: 100%; background: #e74c3c; color: white; padding: 10px 16px; text-align: center; font-weight: 600; z-index: 20000; box-shadow: 0 2px 6px rgba(0,0,0,0.15);">Reconnecting to server...</div>
     <header>
         <h1>Smart Glasses - Admin Panel</h1>
         <div class="header-nav">
             <a href="/monitoring.html" data-testid="monitoring-link">📊 Request Monitoring</a>
-            <span class="signalr-status" aria-label="SignalR connection status" data-testid="signalr-status">
-                <span id="signalr-status" class="signalr-dot" title="SignalR disconnected"></span>
-                SignalR
-            </span>
+            <!-- SignalR indicator removed in favor of a top warning bar when disconnected -->
         </div>
     </header>
 

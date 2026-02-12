@@ -36,15 +36,16 @@ async function fetchWithRetry(url, options = {}, retries = 3) {
     for (let i = 0; i < retries; i++) {
         try {
             console.log(`[API] Request: ${fetchOptions.method || 'GET'} ${url}${i > 0 ? ` (retry ${i})` : ''}`);
+
             const response = await fetch(bustUrl, fetchOptions);
             console.log(`[API] Response: ${response.status} ${response.statusText} for ${url}`);
-            
+
             if (!response.ok && response.status >= 500 && i < retries - 1) {
                 console.warn(`[API] Server error, retrying in ${(i + 1) * 500}ms...`);
                 await new Promise(resolve => setTimeout(resolve, (i + 1) * 500));
                 continue;
             }
-            
+
             return response;
         } catch (error) {
             console.error(`[API] Network error on attempt ${i + 1}:`, error);
@@ -55,6 +56,8 @@ async function fetchWithRetry(url, options = {}, retries = 3) {
             throw error;
         }
     }
+
+    throw new Error(`Failed to fetch ${url} after ${retries} attempts`);
 }
 
 // Helper to safely encode attached files array into a URL-safe JSON string
@@ -84,6 +87,11 @@ const state = {
 let conversationHubConnection = null;
 let resourceHubConnection = null;
 
+// Track individual hub connection states; banner shows if either hub is disconnected
+// Default to `true` so the banner is hidden until a hub explicitly reports disconnected.
+let resourceHubConnected = true;
+let conversationHubConnected = true;
+
 async function initConversationHub() {
     if (!window.signalR) {
         console.warn('[SignalR] signalR client not loaded');
@@ -103,7 +111,13 @@ async function initConversationHub() {
             }
         });
 
+        // Track reconnect events for the conversation hub and update banner state
+        conversationHubConnection.onreconnecting(() => setConversationHubState(false));
+        conversationHubConnection.onreconnected(() => setConversationHubState(true));
+        conversationHubConnection.onclose(() => setConversationHubState(false));
+
         await conversationHubConnection.start();
+        setConversationHubState(true);
         console.log('[SignalR] Conversation hub connected');
 
         if (activeConversationId) {
@@ -111,14 +125,74 @@ async function initConversationHub() {
         }
     } catch (err) {
         console.warn('[SignalR] Failed to connect conversation hub:', err);
+        setConversationHubState(false);
     }
 }
 
+function updateSignalRBanner() {
+    const warning = document.getElementById('signalr-warning');
+    if (!warning) return;
+    try {
+        // Show banner if either hub is disconnected
+        if (resourceHubConnected && conversationHubConnected) {
+            warning.style.setProperty('display', 'none', 'important');
+            warning.style.setProperty('visibility', 'hidden', 'important');
+            warning.style.setProperty('opacity', '0', 'important');
+        } else {
+            warning.textContent = 'Reconnecting to server...';
+            warning.style.setProperty('display', 'block', 'important');
+            warning.style.setProperty('visibility', 'visible', 'important');
+            warning.style.setProperty('opacity', '1', 'important');
+            warning.style.setProperty('position', 'fixed', 'important');
+            warning.style.setProperty('top', '0', 'important');
+            warning.style.setProperty('left', '0', 'important');
+            warning.style.setProperty('width', '100%', 'important');
+            warning.style.setProperty('z-index', '20000', 'important');
+        }
+    } catch (e) {
+        console.warn('[SignalR] Unable to toggle warning bar', e);
+    }
+}
+
+function setResourceHubState(connected) {
+    resourceHubConnected = !!connected;
+    updateSignalRBanner();
+}
+
+function setConversationHubState(connected) {
+    conversationHubConnected = !!connected;
+    updateSignalRBanner();
+}
+
+// Backwards-compatible wrapper used by tests and any callers that expect the old API
 function setSignalRIndicatorState(connected) {
-    const indicator = document.getElementById('signalr-status');
-    if (!indicator) return;
-    indicator.style.background = connected ? '#2ecc71' : '#e74c3c';
-    indicator.title = connected ? 'SignalR connected' : 'SignalR disconnected';
+    // Backwards-compatible API used by tests and external callers.
+    // Toggle the banner immediately for deterministic behavior and update internal flags.
+    const warning = document.getElementById('signalr-warning');
+    try {
+        if (!warning) return;
+        if (connected) {
+            resourceHubConnected = true;
+            conversationHubConnected = true;
+            warning.style.display = 'none';
+            warning.style.visibility = 'hidden';
+            warning.style.opacity = '0';
+        } else {
+            resourceHubConnected = false;
+            conversationHubConnected = false;
+            warning.textContent = 'Reconnecting to server...';
+            warning.style.display = 'block';
+            warning.style.visibility = 'visible';
+            warning.style.opacity = '1';
+            warning.style.position = 'fixed';
+            warning.style.top = '0';
+            warning.style.left = '0';
+            warning.style.width = '100%';
+            warning.style.zIndex = '20000';
+        }
+    } catch (e) {
+        console.warn('[SignalR] Unable to toggle warning bar (compat wrapper)', e);
+    }
 }
 
 async function initResourceHub() {
@@ -146,16 +220,16 @@ async function initResourceHub() {
             await loadPrompts(true);
         });
 
-        resourceHubConnection.onreconnecting(() => setSignalRIndicatorState(false));
-        resourceHubConnection.onreconnected(() => setSignalRIndicatorState(true));
-        resourceHubConnection.onclose(() => setSignalRIndicatorState(false));
+        resourceHubConnection.onreconnecting(() => setResourceHubState(false));
+        resourceHubConnection.onreconnected(() => setResourceHubState(true));
+        resourceHubConnection.onclose(() => setResourceHubState(false));
 
         await resourceHubConnection.start();
-        setSignalRIndicatorState(true);
+        setResourceHubState(true);
         console.log('[SignalR] Resource hub connected');
     } catch (err) {
         console.warn('[SignalR] Failed to connect resource hub:', err);
-        setSignalRIndicatorState(false);
+        setResourceHubState(false);
     }
 }
 
@@ -2671,6 +2745,18 @@ async function init() {
     console.log('[INIT] Current time:', new Date().toISOString());
     console.log('[INIT] API Base:', API_BASE);
     
+    // Apply theme early so UI controls are available even if API health checks are slow
+    try {
+        const savedTheme = 'light';
+        applyTheme(savedTheme);
+        document.getElementById('theme-toggle')?.addEventListener('click', () => {
+            const nextTheme = document.body.classList.contains('dark') ? 'light' : 'dark';
+            applyTheme(nextTheme);
+        });
+    } catch (e) {
+        console.warn('[INIT] Failed to attach theme toggle early:', e);
+    }
+
     // Wait for API to be ready
     const apiReady = await waitForAPI();
     if (!apiReady) {
@@ -2680,13 +2766,7 @@ async function init() {
     }
     
     try {
-        // Apply theme: default to light (no browser storage persistence)
-        const savedTheme = 'light';
-        applyTheme(savedTheme);
-        document.getElementById('theme-toggle')?.addEventListener('click', () => {
-            const nextTheme = document.body.classList.contains('dark') ? 'light' : 'dark';
-            applyTheme(nextTheme);
-        });
+        // Other initialization assumes API is available
 
         // Setup preview modal event listeners
         document.getElementById('close-preview').addEventListener('click', () => {

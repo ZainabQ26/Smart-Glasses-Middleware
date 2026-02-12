@@ -146,8 +146,8 @@ test.describe('UI Features and Consistency', () => {
       const count = await cards.count();
       
       if (count >= 2) {
-        const first = cards.nth(0).boundingBox();
-        const second = cards.nth(1).boundingBox();
+        const first = await cards.nth(0).boundingBox();
+        const second = await cards.nth(1).boundingBox();
         
         // Ensure second starts after first ends with some gap
         if (first && second) {
