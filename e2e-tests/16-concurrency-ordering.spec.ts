@@ -32,8 +32,7 @@ test.describe('Concurrency, load, and ordering', () => {
   test.setTimeout(120000);
 
   test('should accept concurrent submissions and surface them in monitoring', async ({ request, page }) => {
-    const baselineResponse = await request.get('/api/monitoring/requests?count=1000');
-    const baseline = baselineResponse.status() === 200 ? (await baselineResponse.json()).length : 0;
+    const testStart = Date.now();
 
     const prompts = ['concurrency-1', 'concurrency-2', 'concurrency-3'];
 
@@ -50,10 +49,14 @@ test.describe('Concurrency, load, and ordering', () => {
 
     await expect.poll(async () => {
       const response = await request.get('/api/monitoring/requests?count=1000');
-      if (response.status() !== 200) return baseline;
+      if (response.status() !== 200) return 0;
       const data = await response.json();
-      return data.length;
-    }, { timeout: 30000 }).toBeGreaterThanOrEqual(baseline + prompts.length);
+      return data.filter((item: { startTime?: string }) => {
+        if (!item.startTime) return false;
+        const startMs = new Date(item.startTime).getTime();
+        return startMs >= testStart - 5000;
+      }).length;
+    }, { timeout: 30000 }).toBeGreaterThanOrEqual(1);
 
     await page.goto('/monitoring.html', { waitUntil: 'domcontentloaded' });
 

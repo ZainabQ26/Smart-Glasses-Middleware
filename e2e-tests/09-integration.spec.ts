@@ -241,7 +241,12 @@ test.describe('Full User Journey - Error Recovery', () => {
     // Slow down API responses
     await page.route('**/api/**', async route => {
       await new Promise(resolve => setTimeout(resolve, 1000));
-      await route.continue();
+      try {
+        const response = await route.fetch();
+        await route.fulfill({ response });
+      } catch {
+        // Request may have been canceled during reload; ignore
+      }
     });
     
     await page.reload();
