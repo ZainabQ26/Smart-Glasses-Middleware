@@ -5,6 +5,9 @@
   await page.goto('http://localhost:5000/admin.html');
 
   const promptsTab = await page.$('[data-testid="tab-prompts"]');
+  // Click to activate the Prompts tab, then hover to check active+hover behavior
+  await promptsTab.click();
+  await page.waitForTimeout(150);
   await promptsTab.hover();
   // give transition a moment
   await page.waitForTimeout(350);
