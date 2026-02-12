@@ -32,7 +32,7 @@ test.describe('Concurrency, load, and ordering', () => {
   test.setTimeout(120000);
 
   test('should accept concurrent submissions and surface them in monitoring', async ({ request, page }) => {
-    const baselineResponse = await request.get('/api/monitoring/requests');
+    const baselineResponse = await request.get('/api/monitoring/requests?count=1000');
     const baseline = baselineResponse.status() === 200 ? (await baselineResponse.json()).length : 0;
 
     const prompts = ['concurrency-1', 'concurrency-2', 'concurrency-3'];
@@ -49,7 +49,7 @@ test.describe('Concurrency, load, and ordering', () => {
     })));
 
     await expect.poll(async () => {
-      const response = await request.get('/api/monitoring/requests');
+      const response = await request.get('/api/monitoring/requests?count=1000');
       if (response.status() !== 200) return baseline;
       const data = await response.json();
       return data.length;

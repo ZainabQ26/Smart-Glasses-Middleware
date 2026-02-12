@@ -23,7 +23,7 @@ public class BackgroundTaskHostedService : BackgroundService
             var entry = await _queue.DequeueAsync(stoppingToken);
             if (entry == null) break;
 
-            _logger.LogInformation("[DIAG] Dequeued task {TaskId}, starting processing", entry.Id);
+            _logger.LogInformation("Dequeued task {TaskId}, starting processing", entry.Id);
             entry.Status = BackgroundTaskStatus.Processing;
             entry.UpdatedAt = DateTime.UtcNow;
             await _queue.UpdateAsync(entry);
@@ -37,7 +37,7 @@ public class BackgroundTaskHostedService : BackgroundService
                 entry.Status = BackgroundTaskStatus.Completed;
                 entry.UpdatedAt = DateTime.UtcNow;
                 await _queue.UpdateAsync(entry);
-                _logger.LogInformation("[DIAG] Completed task {TaskId}", entry.Id);
+                _logger.LogInformation("Completed task {TaskId}", entry.Id);
             }
             catch (Exception ex)
             {

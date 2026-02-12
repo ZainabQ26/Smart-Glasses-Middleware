@@ -21,7 +21,7 @@ public class NoOpBackgroundTaskQueue : IBackgroundTaskQueue
         _store[entry.Id] = entry;
         _queue.Enqueue(entry);
         _signal.Release();
-        _logger.LogInformation("[DIAG] Enqueued task {TaskId}, queue count: {QueueCount}", entry.Id, _queue.Count);
+        // Log removed
         return Task.CompletedTask;
     }
 

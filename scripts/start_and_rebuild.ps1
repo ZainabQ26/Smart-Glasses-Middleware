@@ -26,7 +26,7 @@ Write-Host "Starting any stopped services (so all containers are running)..."
 try { docker compose start } catch { }
 
 Write-Host "Waiting for http://localhost:5000/health to return success..."
-$maxAttempts = 120
+$maxAttempts = 60
 $attempt = 0
 while ($attempt -lt $maxAttempts) {
     try {

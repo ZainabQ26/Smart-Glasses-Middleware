@@ -428,9 +428,9 @@
                 requests.unshift(request);
             }
 
-            // Keep only last 100 requests
-            if (requests.length > 100) {
-                requests = requests.slice(0, 100);
+            // Keep only last 1000 active/recent requests
+            if (requests.length > 1000) {
+                requests = requests.slice(0, 1000);
             }
 
             // Update progress target for this request id and its correlation id (if present)
@@ -657,8 +657,8 @@
         
         async function loadRecentRequests() {
             try {
-                const histRes = await fetch(`${API_BASE}/history`);
-                const monRes = await fetch(`${API_BASE}/monitoring/requests`);
+                const histRes = await fetch(`${API_BASE}/history?count=1000`);
+                const monRes = await fetch(`${API_BASE}/monitoring/requests?count=1000`);
 
                 if (histRes.ok) {
                     const histData = await histRes.json();
