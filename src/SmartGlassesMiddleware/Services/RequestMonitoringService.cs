@@ -62,12 +62,18 @@ public class RequestMonitoringService : IRequestMonitoringService
         }
 
         await BroadcastUpdate(request);
-        _logger.LogInformation("Started request {RequestId}: {Description}", requestId, description);
-        return requestId;
+        _logger.LogInformation("Started request {RequestId}: {Description}", generatedRequestId, description);
+        return generatedRequestId;
     }
 
     public async Task UpdateRequestStatus(string requestId, string status, string? details = null, int? progress = null)
     {
+        if (string.IsNullOrWhiteSpace(requestId))
+        {
+            _logger.LogWarning("UpdateRequestStatus called with null or empty requestId");
+            return;
+        }
+
         if (_activeRequests.TryGetValue(requestId, out var request))
         {
             request.Status = status;
@@ -87,6 +93,12 @@ public class RequestMonitoringService : IRequestMonitoringService
 
     public async Task CompleteRequest(string requestId, bool success, string? result = null, string? error = null)
     {
+        if (string.IsNullOrWhiteSpace(requestId))
+        {
+            _logger.LogWarning("CompleteRequest called with null or empty requestId");
+            return;
+        }
+
         if (_activeRequests.TryRemove(requestId, out var request))
         {
             request.Status = success ? "Completed" : "Failed";
