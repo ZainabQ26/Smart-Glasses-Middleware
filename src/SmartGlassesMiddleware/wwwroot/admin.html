@@ -118,6 +118,14 @@
             color: #ffffff !important;
         }
 
+        /* Ensure active tab remains white text and keeps its active background when hovered.
+           This selector is very specific to override other generic button:hover rules. */
+        button.tab.active:hover,
+        .tab.active:hover {
+            color: #ffffff !important;
+            background-color: #0b63a6 !important;
+        }
+
         .theme-toggle {
             margin-left: auto;
             background: #ecf0f1;
