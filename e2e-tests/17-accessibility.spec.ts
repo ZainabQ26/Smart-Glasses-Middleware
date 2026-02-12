@@ -10,8 +10,12 @@ test.describe('Accessibility audits', () => {
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(500);
 
-    // Limit axe scan to the main content to reduce runtime
-    const results = await new AxeBuilder({ page }).include('[data-testid="main-content"], main, #app').analyze();
+    // Try to limit axe scan to the main content to reduce runtime; fall back to full scan
+    const mainSelector = '[data-testid="main-content"], main, #app';
+    const hasMain = await page.locator(mainSelector).count() > 0;
+    const results = hasMain
+      ? await new AxeBuilder({ page }).include(mainSelector).analyze()
+      : await new AxeBuilder({ page }).analyze();
     // Allow non-critical 'serious' contrast issues for now; fail only on critical violations
     const critical = results.violations.filter(v => v.impact === 'critical');
     expect(critical).toEqual([]);
@@ -22,8 +26,12 @@ test.describe('Accessibility audits', () => {
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(500);
 
-    // Limit axe scan to requests container to speed up analysis
-    const results = await new AxeBuilder({ page }).include('[data-testid="requests-container"], main, #app').analyze();
+    // Try to limit axe scan to requests container to speed up analysis; fall back to full scan
+    const monitorSelector = '[data-testid="requests-container"], main, #app';
+    const hasMonitor = await page.locator(monitorSelector).count() > 0;
+    const results = hasMonitor
+      ? await new AxeBuilder({ page }).include(monitorSelector).analyze()
+      : await new AxeBuilder({ page }).analyze();
     const critical = results.violations.filter(v => v.impact === 'critical');
     expect(critical).toEqual([]);
   });
