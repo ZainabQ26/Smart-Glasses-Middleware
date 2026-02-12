@@ -359,7 +359,16 @@ if (!builder.Environment.IsEnvironment("Testing") && !string.IsNullOrWhiteSpace(
 }
 
 // Add rate limiting
-var rateLimitEnabled = builder.Configuration.GetValue<bool?>("RateLimiting:Enabled") ?? true;
+// Default rate limiting to enabled in production only. Disable by default during
+// development or testing runs to avoid flakiness in automated E2E tests.
+// Allow explicit override via environment variable for CI/E2E runs.
+var e2eDisable = false;
+var e2eEnv = Environment.GetEnvironmentVariable("E2E_DISABLE_RATE_LIMIT");
+if (!string.IsNullOrEmpty(e2eEnv))
+{
+    bool.TryParse(e2eEnv, out e2eDisable);
+}
+var rateLimitEnabled = builder.Configuration.GetValue<bool?>("RateLimiting:Enabled") ?? !(builder.Environment.IsDevelopment() || builder.Environment.IsEnvironment("Testing") || e2eDisable);
 if (rateLimitEnabled)
 {
     builder.Services.AddRateLimiter(options =>
@@ -780,9 +789,8 @@ app.UseCors();
 // CRITICAL: UseRouting() is required for controller endpoints to work
 app.UseRouting();
 
-// Only use rate limiter if it's enabled
-var rateLimitConfig = app.Configuration.GetValue<bool?>("RateLimiting:Enabled") ?? true;
-if (rateLimitConfig)
+// Only use rate limiter if it's enabled (respect the computed flag including E2E override)
+if (rateLimitEnabled)
 {
     app.UseRateLimiter();
 }

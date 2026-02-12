@@ -197,7 +197,7 @@ test.describe('Monitoring Page - UI Responsiveness', () => {
     await page.goto('/monitoring.html');
     
     await expect(page.locator('h1')).toBeVisible();
-    await expect(page.locator('.stats-container, .stat-card')).toBeVisible();
+    await expect(page.locator('.stats-container, .stat-card').first()).toBeVisible();
   });
 
   test('should be responsive on desktop viewport', async ({ page }) => {
