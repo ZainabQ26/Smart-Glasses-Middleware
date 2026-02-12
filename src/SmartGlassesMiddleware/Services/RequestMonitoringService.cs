@@ -61,6 +61,7 @@ public class RequestMonitoringService : IRequestMonitoringService
             _recentRequests.TryDequeue(out _);
         }
 
+        _logger.LogInformation("[DIAG] About to broadcast for request {RequestId}", generatedRequestId);
         await BroadcastUpdate(request);
         _logger.LogInformation("Started request {RequestId}: {Description}", generatedRequestId, description);
         return generatedRequestId;
@@ -111,6 +112,15 @@ public class RequestMonitoringService : IRequestMonitoringService
             // Ensure UI progress reaches 100% on completion
             try { request.Progress = 100; } catch { }
 
+            // Add to recent requests queue
+            _recentRequests.Enqueue(request);
+            
+            // Trim old requests
+            while (_recentRequests.Count > _maxRecentRequests)
+            {
+                _recentRequests.TryDequeue(out _);
+            }
+
             await BroadcastUpdate(request);
             
             // Persist to database using a scoped DbContext
@@ -131,15 +141,26 @@ public class RequestMonitoringService : IRequestMonitoringService
         }
     }
 
-    public async Task<List<RequestStatus>> GetRecentRequests(int count = 50)
+    public async Task<List<RequestStatus>> GetRecentRequests(int count = 200)
     {
         await EnsureInitializedAsync();
         
-        var requests = _recentRequests
-            .Reverse()
+        // Prioritize active requests, then recent completed requests
+        var activeList = _activeRequests.Values.ToList();
+        var recentList = _recentRequests
+            .OrderByDescending(r => r.LastUpdateTime ?? r.StartTime)
+            .ToList();
+        
+        // Combine: all active + as many recent as needed to reach count
+        var combined = activeList
+            .Concat(recentList)
+            .DistinctBy(r => r.RequestId)
             .Take(count)
             .ToList();
-        return requests;
+            
+        _logger.LogInformation("[DIAG] GetRecentRequests: active={Active}, recent={Recent}, combined={Combined}", 
+            activeList.Count, _recentRequests.Count, combined.Count);
+        return combined;
     }
     
     private async Task EnsureInitializedAsync()

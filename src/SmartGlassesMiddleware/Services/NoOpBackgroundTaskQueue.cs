@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using SmartGlassesMiddleware.Models;
+using Microsoft.Extensions.Logging;
 
 namespace SmartGlassesMiddleware.Services;
 
@@ -8,12 +9,19 @@ public class NoOpBackgroundTaskQueue : IBackgroundTaskQueue
     private readonly ConcurrentQueue<BackgroundTaskEntry> _queue = new();
     private readonly ConcurrentDictionary<Guid, BackgroundTaskEntry> _store = new();
     private readonly SemaphoreSlim _signal = new(0);
+    private readonly ILogger<NoOpBackgroundTaskQueue> _logger;
+
+    public NoOpBackgroundTaskQueue(ILogger<NoOpBackgroundTaskQueue> logger)
+    {
+        _logger = logger;
+    }
 
     public Task EnqueueAsync(BackgroundTaskEntry entry)
     {
         _store[entry.Id] = entry;
         _queue.Enqueue(entry);
         _signal.Release();
+        _logger.LogInformation("[DIAG] Enqueued task {TaskId}, queue count: {QueueCount}", entry.Id, _queue.Count);
         return Task.CompletedTask;
     }
 
