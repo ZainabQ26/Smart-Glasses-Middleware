@@ -28,9 +28,10 @@ test.describe('Error Handling and Edge Cases', () => {
     await expect(page.locator('button[data-tab="files"]')).toBeVisible({ timeout: 10000 });
   });
 
-  test('should handle 404 responses', async ({ page }) => {
-    const response = await page.goto('/nonexistent-page.html');
-    expect(response?.status()).toBe(404);
+  test('should handle 404 responses', async ({ request }) => {
+    // Use direct request to reliably validate 404 responses across browsers
+    const response = await request.get('/nonexistent-page.html');
+    expect(response.status()).toBe(404);
   });
 
   test('should handle 500 errors gracefully', async ({ page, request }) => {

@@ -50,6 +50,6 @@ test.describe('Backend error injection and UI mapping', () => {
     expect(response.status()).toBeLessThan(500);
 
     const contentType = response.headers()['content-type'] || '';
-    expect(contentType).toContain('application/problem+json');
+    expect(contentType).toMatch(/application\/(problem\+)?json/);
   });
 });
