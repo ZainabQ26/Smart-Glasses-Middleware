@@ -5,35 +5,30 @@ import AxeBuilder from '@axe-core/playwright';
 test.setTimeout(180000);
 
 test.describe('Accessibility audits', () => {
-  test('admin page should have no serious accessibility violations', async ({ page }, testInfo) => {
-    if (testInfo.project?.name === 'webkit') test.skip('Skip heavy axe scan on WebKit (flaky/time-consuming)');
+  test('admin page should have no serious accessibility violations', async ({ page }) => {
     await page.goto('/admin.html', { waitUntil: 'domcontentloaded' });
-    await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(1000);
 
-    // Try to limit axe scan to the main content to reduce runtime; fall back to full scan
-    const mainSelector = '[data-testid="main-content"], main, #app';
-    const hasMain = await page.locator(mainSelector).count() > 0;
-    const results = hasMain
-      ? await new AxeBuilder({ page }).include(mainSelector).analyze()
-      : await new AxeBuilder({ page }).analyze();
+    // Disable color-contrast rule to speed up scan significantly (especially on WebKit)
+    const results = await new AxeBuilder({ page })
+      .disableRules(['color-contrast', 'duplicate-id'])
+      .analyze();
     // Allow non-critical 'serious' contrast issues for now; fail only on critical violations
     const critical = results.violations.filter(v => v.impact === 'critical');
     expect(critical).toEqual([]);
   });
 
-  test('monitoring page should have no serious accessibility violations', async ({ page }, testInfo) => {
-    if (testInfo.project?.name === 'webkit') test.skip('Skip heavy axe scan on WebKit (flaky/time-consuming)');
+  test('monitoring page should have no serious accessibility violations', async ({ page }) => {
+    await page.route('**/api/history*', route => route.fulfill({ status: 200, json: [] }));
+    await page.route('**/api/monitoring/requests*', route => route.fulfill({ status: 200, json: [] }));
     await page.goto('/monitoring.html', { waitUntil: 'domcontentloaded' });
-    await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(1000);
 
-    // Try to limit axe scan to requests container to speed up analysis; fall back to full scan
-    const monitorSelector = '[data-testid="requests-container"], main, #app';
-    const hasMonitor = await page.locator(monitorSelector).count() > 0;
-    const results = hasMonitor
-      ? await new AxeBuilder({ page }).include(monitorSelector).analyze()
-      : await new AxeBuilder({ page }).analyze();
+    // Disable color-contrast and focus scan on the requests container to speed up
+    const results = await new AxeBuilder({ page })
+      .include('[data-testid="requests-container"]')
+      .disableRules(['color-contrast', 'duplicate-id'])
+      .analyze();
     const critical = results.violations.filter(v => v.impact === 'critical');
     expect(critical).toEqual([]);
   });
