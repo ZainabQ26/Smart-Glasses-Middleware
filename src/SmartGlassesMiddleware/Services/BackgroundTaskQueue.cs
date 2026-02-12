@@ -36,7 +36,6 @@ public class BackgroundTaskQueue : IBackgroundTaskQueue
         await _db.StringSetAsync(key, json);
         await _db.ListRightPushAsync(QueueKey, entry.Id.ToString());
         var queueLen = await _db.ListLengthAsync(QueueKey);
-        _logger.LogInformation("[DIAG] Enqueued task {TaskId}, queue length: {QueueLength}", entry.Id, queueLen);
         // Monitoring is handled by the caller (MediaController), so we don't create a duplicate entry here
     }
 

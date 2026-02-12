@@ -61,7 +61,6 @@ public class RequestMonitoringService : IRequestMonitoringService
             _recentRequests.TryDequeue(out _);
         }
 
-        _logger.LogInformation("[DIAG] About to broadcast for request {RequestId}", generatedRequestId);
         await BroadcastUpdate(request);
         _logger.LogInformation("Started request {RequestId}: {Description}", generatedRequestId, description);
         return generatedRequestId;
@@ -158,8 +157,6 @@ public class RequestMonitoringService : IRequestMonitoringService
             .Take(count)
             .ToList();
             
-        _logger.LogInformation("[DIAG] GetRecentRequests: active={Active}, recent={Recent}, combined={Combined}", 
-            activeList.Count, _recentRequests.Count, combined.Count);
         return combined;
     }
     
