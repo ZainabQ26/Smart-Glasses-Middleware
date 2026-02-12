@@ -826,7 +826,20 @@ app.Use(async (context, next) =>
     // ensure header is added even if later middleware short-circuits
     context.Response.OnStarting(() =>
     {
-        context.Response.Headers["X-Request-Id"] = requestId;
+            context.Response.Headers["X-Request-Id"] = requestId;
+            // Baseline security headers for basic hardening and tests
+            if (!context.Response.Headers.ContainsKey("X-Content-Type-Options"))
+            {
+                context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+            }
+            if (!context.Response.Headers.ContainsKey("X-Frame-Options"))
+            {
+                context.Response.Headers["X-Frame-Options"] = "DENY";
+            }
+            if (!context.Response.Headers.ContainsKey("Referrer-Policy"))
+            {
+                context.Response.Headers["Referrer-Policy"] = "no-referrer";
+            }
         return Task.CompletedTask;
     });
 

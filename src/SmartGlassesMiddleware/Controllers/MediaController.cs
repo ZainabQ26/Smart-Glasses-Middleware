@@ -435,6 +435,23 @@ public class MediaController : ControllerBase
             // Determine prompt text (if promptAudio was transcribed earlier, use it)
             var promptTextFinal = !string.IsNullOrWhiteSpace(promptAudioTranscription) ? promptAudioTranscription : request.Prompt;
 
+            // Validate that the request contains at least some input (files or text)
+            if ((bgItems == null || bgItems.Count == 0) && string.IsNullOrWhiteSpace(promptTextFinal) && string.IsNullOrWhiteSpace(inputText))
+            {
+                var pd = new ValidationProblemDetails
+                {
+                    Type = "https://tools.ietf.org/html/rfc7231#section-6.5.1",
+                    Title = "Validation Failed",
+                    Status = StatusCodes.Status400BadRequest,
+                    Detail = "Request must include at least one uploaded file or a text input/prompt.",
+                    Instance = HttpContext.Request.Path
+                };
+                pd.Extensions["requestId"] = HttpContext.TraceIdentifier;
+                pd.Extensions["timestamp"] = DateTime.UtcNow.ToString("o");
+
+                return BadRequest(pd);
+            }
+
             var entry = new BackgroundTaskEntry
             {
                 PromptText = promptTextFinal,

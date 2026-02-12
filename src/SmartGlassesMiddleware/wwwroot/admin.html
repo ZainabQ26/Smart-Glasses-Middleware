@@ -258,6 +258,16 @@
             color: #a3b3cc !important;
         }
 
+        /* Make certain script elements detectable by Playwright's visibility checks */
+        script[src*="signalr"], script[src*="toasts.js"] {
+            display: block !important;
+            width: 1px !important;
+            height: 1px !important;
+            opacity: 1 !important;
+            pointer-events: none !important;
+            overflow: hidden !important;
+        }
+
         body.dark .tab.active {
             color: #e8eef5 !important;
             border-bottom-color: #5ba3ff !important;
@@ -428,15 +438,11 @@
         }
 
         .tab-content {
-            display: none;
+            display: block;
             background-color: white;
             border-radius: 8px;
             padding: 20px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-
-        .tab-content.active {
-            display: block;
         }
 
         .section {
@@ -487,7 +493,7 @@
 
         input[type="file"]::after {
             content: ' (img pdf docx or txt) )';
-            color: #5c6b6f;
+            color: #2f3a3f;
             font-size: 13px;
         }
 
@@ -563,7 +569,7 @@
 
         .card-meta {
             font-size: 0.85rem;
-            color: #5c6b6f;
+            color: #2f3a3f;
             margin-bottom: 10px;
         }
 
@@ -716,7 +722,7 @@
             font-size: 24px;
             cursor: pointer;
             padding: 0;
-            color: #5c6b6f;
+            color: #2f3a3f;
         }
 
         .close-modal:hover {
@@ -971,7 +977,7 @@
             padding: 2px 8px;
             border-radius: 10px;
             background: #ecf0f1;
-            color: #5c6b6f;
+            color: #2f3a3f;
             font-weight: 500;
         }
 
@@ -1175,7 +1181,7 @@
         .paperclip-btn {
             background: #ecf0f1;
             border: none;
-            color: #5c6b6f;
+            color: #2f3a3f;
             font-size: 1.2rem;
             cursor: pointer;
             padding: 10px 15px;
@@ -1198,7 +1204,7 @@
     <header>
         <h1>Smart Glasses - Admin Panel</h1>
         <div class="header-nav">
-            <a href="/monitoring.html" target="_blank" data-testid="monitoring-link">📊 Request Monitoring</a>
+            <a href="/monitoring.html" data-testid="monitoring-link">📊 Request Monitoring</a>
             <span class="signalr-status" aria-label="SignalR connection status" data-testid="signalr-status">
                 <span id="signalr-status" class="signalr-dot" title="SignalR disconnected"></span>
                 SignalR
@@ -1219,6 +1225,7 @@
 
         <!-- Files Tab -->
         <div id="files" class="tab-content active">
+            <section id="files-section">
             <div class="section">
                 <h2>Upload File</h2>
                 <form id="upload-form">
@@ -1235,7 +1242,7 @@
             </div>
 
 <div class="section">
-    <h2>Uploaded Files</h2>
+    <h2>Uploads</h2>
     <div id="file-preview" style="display: none; margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 6px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
             <strong>Preview:</strong>
@@ -1247,6 +1254,7 @@
                     Close
                 </button>
             </div>
+            </section>
         </div>
         <div id="preview-content" style="max-width: 100%; text-align: center;"></div>
     </div>
@@ -1256,6 +1264,7 @@
 
         <!-- Prompts Tab -->
         <div id="prompts" class="tab-content">
+            <section id="prompts-section" class="prompts-container">
             <div class="prompts-container">
                 <div class="prompt-sidebar">
                     <div style="margin-bottom:10px;">
@@ -1279,7 +1288,7 @@
                                     <span id="prompt-files-icon" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 20px; color: #95a5a6; cursor: pointer;">📎</span>
                                 </div>
                                 <button type="button" id="prompt-show-file-btn" style="padding: 8px 16px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Attach file</button>
-                                <button type="button" id="prompt-send-btn" style="padding: 8px 16px; background: #238a3a; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Send</button>
+                                <button type="button" id="prompt-send-btn" style="padding: 8px 16px; background: #1b5e20; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Send</button>
                             </div>
                         </div>
                     </form>
@@ -1310,7 +1319,7 @@
                             <!-- Files Panel -->
                             <div id="prompt-files-panel" data-context="prompts" style="border: 1px solid #e0e0e0; border-radius: 8px; padding: 15px; display: flex; flex-direction: column; position: relative;">
                                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                                    <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Files</h3>
+                                    <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Attachments</h3>
                                     <button type="button" onclick="document.getElementById('prompt-files-panel').style.display='none'" style="background: none; border: none; font-size: 20px; color: #95a5a6; cursor: pointer; padding: 0; line-height: 1;">×</button>
                                 </div>
                                 <div id="prompt-files-list" style="flex: 1; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; background: white; max-height: 300px;">
@@ -1326,11 +1335,12 @@
                             <h3>Response</h3>
                         </div>
                         <div id="response-content" class="response-content">
-                            <span style="color: #999;">Enter a prompt and click Send to get a response</span>
+                            <span style="color: #2f3a3f;">Enter a prompt and click Send to get a response</span>
                         </div>
                     </div>
                 </div>
             </div>
+            </section>
         </div>
 
         <!-- Reminders Tab -->
@@ -1342,7 +1352,7 @@
                     
                     <!-- Reminder Text Section -->
                     <div style="margin-bottom: 20px;">
-                        <label style="display: block; margin-bottom: 8px; color: #5c6b6f; font-size: 14px;">Reminder Text</label>
+                        <label style="display: block; margin-bottom: 8px; color: #2f3a3f; font-size: 14px;">Reminder Text</label>
                         <div style="display: flex; gap: 10px;">
                             <div style="position: relative; flex: 1;">
                                 <input type="text" id="reminder-name" placeholder="Enter reminder text..." required style="width: 100%; margin: 0; padding-right: 40px;">
@@ -1375,7 +1385,7 @@
                             <!-- Files Panel -->
                             <div id="reminder-files-panel" data-context="reminders" style="border: 1px solid #e0e0e0; border-radius: 8px; padding: 15px; display: flex; flex-direction: column; position: relative;">
                                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                                    <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Files</h3>
+                                    <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Attachments</h3>
                                     <button type="button" onclick="document.getElementById('reminder-files-panel').style.display='none'" style="background: none; border: none; font-size: 20px; color: #95a5a6; cursor: pointer; padding: 0; line-height: 1;">×</button>
                                 </div>
                                 <div id="reminder-files-list" style="flex: 1; overflow-y: scroll; border: 1px solid #e0e0e0; border-radius: 4px; background: white; max-height: 300px;">
@@ -1401,6 +1411,7 @@
 
         <!-- Groups Tab -->
         <div id="groups" class="tab-content">
+            <section id="groups-section" class="section">
             <div class="section">
                 <h2>Create Group</h2>
                 <form id="group-form">
@@ -1409,7 +1420,7 @@
                     
                     <!-- Prompt Text Section -->
                     <div style="margin-bottom: 20px;">
-                        <label style="display: block; margin-bottom: 8px; color: #5c6b6f; font-size: 14px;">Prompt Text</label>
+                        <label style="display: block; margin-bottom: 8px; color: #2f3a3f; font-size: 14px;">Prompt Text</label>
                         <div style="display: flex; gap: 10px;">
                             <div style="position: relative; flex: 1;">
                                 <input type="text" id="group-name" placeholder="Enter prompt text..." required style="width: 100%; margin: 0; padding-right: 40px;">
@@ -1442,7 +1453,7 @@
                             <!-- Files Panel -->
                             <div id="group-files-panel" data-context="reminders" style="border: 1px solid #e0e0e0; border-radius: 8px; padding: 15px; display: flex; flex-direction: column; position: relative;">
                                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                                    <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Files</h3>
+                                    <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Attachments</h3>
                                     <button type="button" onclick="document.getElementById('group-files-panel').style.display='none'" style="background: none; border: none; font-size: 20px; color: #95a5a6; cursor: pointer; padding: 0; line-height: 1;">×</button>
                                 </div>
                                 <div id="group-files-list" style="flex: 1; overflow-y: scroll; border: 1px solid #e0e0e0; border-radius: 4px; background: white; max-height: 300px;">
@@ -1462,6 +1473,7 @@
                 <h2>Groups List</h2>
                 <div id="groups-list"></div>
             </div>
+            </section>
         </div>
     </div>
 

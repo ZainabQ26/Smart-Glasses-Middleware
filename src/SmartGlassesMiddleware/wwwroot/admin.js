@@ -208,7 +208,7 @@ function showLoading(listId) {
     const loading = document.createElement('div');
     loading.className = 'loading-indicator';
     loading.id = `${listId}-loading`;
-    loading.innerHTML = '<p style="text-align: center; padding: 20px; color: #5c6b6f;">Loading...</p>';
+    loading.innerHTML = '<p style="text-align: center; padding: 20px; color: #2f3a3f;">Loading...</p>';
     list.appendChild(loading);
 }
 
@@ -264,7 +264,7 @@ async function loadFiles(reset = false) {
             state.files.hasMore = pagination.hasNext || pagination.HasNext;
             state.files.page++;
         } else if (reset) {
-            list.innerHTML = '<div class="empty-state"><p>No files uploaded yet</p></div>';
+            list.innerHTML = '<div class="empty-state"><p>No uploads yet</p></div>';
         }
         
         state.files.loading = false;
@@ -345,7 +345,7 @@ async function loadPrompts(reset = false) {
                                 <span class="prompt-name" style="font-weight:600;color:#2c3e50;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%;">${displayName}</span>
                                 <span class="badge" style="background:#0b63a6;color:white;padding:2px 6px;border-radius:10px;font-size:11px;min-width:20px;text-align:center;">${messageCount}</span>
                             </div>
-                            <div style="font-size:11px;color:#5c6b6f;margin-bottom:4px;">${timestamp}</div>
+                            <div style="font-size:11px;color:#2f3a3f;margin-bottom:4px;">${timestamp}</div>
                             <div style="color:#444;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(String(lastMsg || 'No messages yet'))}</div>
                         </div>
                     `;
@@ -495,7 +495,7 @@ async function previewFile(id, fileName) {
     // Store file info for download button
     currentPreviewFile = { id, fileName };
     
-    previewContent.innerHTML = '<p style="color: #5c6b6f;">Loading preview...</p>';
+    previewContent.innerHTML = '<p style="color: #2f3a3f;">Loading preview...</p>';
     previewContainer.style.display = 'block';
     
     // Scroll to preview
@@ -591,7 +591,7 @@ function loadPromptIntoForm(id, name, text) {
                     const page = source.pageNumber || source.PageNumber;
                     const label = page ? `${fileName} (p.${page})` : fileName;
                     const href = documentId ? `/api/documents/${documentId}/download` : '#';
-                    const linkStyle = documentId ? 'color: #0b63a6; text-decoration: underline;' : 'color: #5c6b6f; text-decoration: none;';
+                    const linkStyle = documentId ? 'color: #0b63a6; text-decoration: underline;' : 'color: #2f3a3f; text-decoration: none;';
                     return `
                         <div style="display: flex; align-items: center; gap: 8px; font-size: 12px;">
                             <a href="${href}" target="_blank" style="${linkStyle}" onclick="${documentId ? '' : 'return false;'}">${escapeHtml(label)}</a>
@@ -682,7 +682,7 @@ function createNewPrompt() {
     // Reset response section
     const responseContent = document.getElementById('response-content');
     if (responseContent) {
-        responseContent.innerHTML = '<span style="color: #999;">Enter a message and click Send to get a response</span>';
+        responseContent.innerHTML = '<span style="color: #2f3a3f;">Enter a message and click Send to get a response</span>';
     }
     
     // Clear input
@@ -698,7 +698,7 @@ async function loadConversationIntoView(conversationId, title) {
         await joinConversationHubGroup(conversationId);
         const responseContent = document.getElementById('response-content');
         if (responseContent) {
-            responseContent.innerHTML = '<span style="color: #999;">Loading conversation...</span>';
+            responseContent.innerHTML = '<span style="color: #2f3a3f;">Loading conversation...</span>';
         }
 
         const res = await fetchWithRetry(`/api/conversations/${conversationId}`);
@@ -731,7 +731,7 @@ async function loadConversationIntoView(conversationId, title) {
 
         if (currentConversationHistory.length === 0) {
             if (responseContent) {
-                responseContent.innerHTML = '<span style="color: #999;">No messages yet</span>';
+                responseContent.innerHTML = '<span style="color: #2f3a3f;">No messages yet</span>';
             }
             return;
         }
@@ -953,7 +953,7 @@ function closeAutoGroupView() {
     if (promptIdInput) promptIdInput.value = '';
     const responseContent = document.getElementById('response-content');
     if (responseContent) {
-        responseContent.innerHTML = '<span style="color: #999;">Enter a prompt and click Send to get a response</span>';
+        responseContent.innerHTML = '<span style="color: #2f3a3f;">Enter a prompt and click Send to get a response</span>';
     }
 }
 
@@ -966,14 +966,14 @@ function updatePromptFilesList() {
     // Update paperclip icon color
     if (promptFilesIcon) {
         if (promptSelectedFiles.length === 0) {
-            promptFilesIcon.style.color = '#5c6b6f'; // Gray when no files
+            promptFilesIcon.style.color = '#2f3a3f'; // Gray when no files
         } else {
             promptFilesIcon.style.color = '#0b63a6'; // Blue when files present
         }
     }
     
     if (promptSelectedFiles.length === 0) {
-        filesList.innerHTML = '<div style="color: #5c6b6f; text-align: center; padding: 20px; font-size: 14px;">No files to show</div>';
+        filesList.innerHTML = '<div style="color: #2f3a3f; text-align: center; padding: 20px; font-size: 14px;">No uploads to show</div>';
     } else {
         filesList.innerHTML = promptSelectedFiles.map((fileObj, index) => {
             const fileName = fileObj.file?.name || fileObj.name || 'Document';
@@ -1105,7 +1105,7 @@ async function restoreDraftConversation() {
                             const page = source.pageNumber || source.PageNumber;
                             const label = page ? `${fileName} (p.${page})` : fileName;
                             const href = documentId ? `/api/documents/${documentId}/download` : '#';
-                            const linkStyle = documentId ? 'color: #0b63a6; text-decoration: underline;' : 'color: #5c6b6f; text-decoration: none;';
+                            const linkStyle = documentId ? 'color: #0b63a6; text-decoration: underline;' : 'color: #2f3a3f; text-decoration: none;';
                             return `
                                 <div style="display: flex; align-items: center; gap: 8px; font-size: 12px;">
                                     <a href="${href}" target="_blank" style="${linkStyle}" onclick="${documentId ? '' : 'return false;'}">${escapeHtml(label)}</a>
@@ -1168,7 +1168,7 @@ function showPromptResponse(promptName, promptText) {
         <div style="padding: 10px; background: #f8f9fa; border-radius: 4px; font-size: 0.9rem; color: #555;">
             ${escapeHtml(promptText.substring(0, 200))}${promptText.length > 200 ? '...' : ''}
         </div>
-        <div style="margin-top: 10px; color: #999; font-size: 0.85rem;">
+        <div style="margin-top: 10px; color: #2f3a3f; font-size: 0.85rem;">
             Click "Track" to monitor this prompt's usage
         </div>
     `;
@@ -1176,7 +1176,7 @@ function showPromptResponse(promptName, promptText) {
 
 function hidePromptResponse() {
     const responseContent = document.getElementById('response-content');
-    responseContent.innerHTML = '<span style="color: #999;">Click Track to monitor prompt responses</span>';
+    responseContent.innerHTML = '<span style="color: #2f3a3f;">Click Track to monitor prompt responses</span>';
 }
 
 function trackPrompt() {
@@ -2016,7 +2016,7 @@ async function manageGroupResources(groupId, groupName) {
         convReferencedFiles.forEach(f => pushFile(f));
 
         if (combinedFiles.length === 0) {
-            filesListHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No files attached yet</div>';
+            filesListHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No attachments yet</div>';
         } else {
             filesListHTML = combinedFiles.map(file => {
                 const fileName = getProp(file, 'originalFileName') || getProp(file, 'fileName') || file.name || 'Unknown';
@@ -2449,7 +2449,7 @@ async function previewReminderFile(fileId, fileName) {
         modalContent.innerHTML = `
             <div style="text-align: center; padding: 40px;">
                 <div style="font-size: 64px; margin-bottom: 20px;">📄</div>
-                <p style="color: #7f8c8d; font-size: 14px;">Preview not available for this file type.</p>
+                <p style="color: #2f3a3f; font-size: 14px;">Preview not available for this file type.</p>
                 <p style="color: #95a5a6; font-size: 12px; margin-top: 10px;">File: ${escapeHtml(fileName)}</p>
             </div>
         `;
@@ -2522,7 +2522,7 @@ async function previewDocumentFile(documentId, fileName) {
         modalContent.innerHTML = `
             <div style="text-align: center; padding: 40px;">
                 <div style="font-size: 64px; margin-bottom: 20px;">📄</div>
-                <p style="color: #7f8c8d; font-size: 14px;">Preview not available for this file type.</p>
+                <p style="color: #2f3a3f; font-size: 14px;">Preview not available for this file type.</p>
                 <p style="color: #95a5a6; font-size: 12px; margin-top: 10px;">File: ${escapeHtml(safeName)}</p>
             </div>
         `;
@@ -2786,7 +2786,7 @@ async function init() {
                         promptPreviewContent.innerHTML = `
                             <div style="text-align: center;">
                                 <div style="font-size: 64px; margin-bottom: 10px;">📄</div>
-                                <div style="color: #7f8c8d; font-size: 12px;">Preview not available</div>
+                                <div style="color: #2f3a3f; font-size: 12px;">Preview not available</div>
                             </div>
                         `;
                     }
@@ -3253,7 +3253,7 @@ async function init() {
                 const promptIdInput = document.getElementById('prompt-id');
                 if (promptIdInput) promptIdInput.value = '';
                 document.getElementById('prompt-name').value = '';
-                document.getElementById('response-content').innerHTML = '<span style="color: #999;">Enter a prompt and click Send to get a response</span>';
+                document.getElementById('response-content').innerHTML = '<span style="color: #2f3a3f;">Enter a prompt and click Send to get a response</span>';
                 
                 // Reload prompts list to show conversations
                 loadPrompts(true);
@@ -3291,7 +3291,7 @@ async function init() {
             // Update files list in Files section with checkboxes (only show if files exist)
             if (groupFilesList) {
                 if (groupSelectedFiles.length === 0) {
-                    groupFilesList.innerHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No files attached yet</div>';
+                    groupFilesList.innerHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No attachments yet</div>';
                 } else {
                     groupFilesList.innerHTML = groupSelectedFiles.map((fileObj, index) => `
                         <div style="padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0; ${fileObj.selected ? 'background: #f0f0f0;' : ''}">
@@ -3311,7 +3311,7 @@ async function init() {
             // Update dropdown list
             if (groupFilesListDropdown) {
                 if (groupSelectedFiles.length === 0) {
-                    groupFilesListDropdown.innerHTML = '<div style="color: #95a5a6; text-align: center; padding: 10px;">No files attached</div>';
+                    groupFilesListDropdown.innerHTML = '<div style="color: #95a5a6; text-align: center; padding: 10px;">No attachments</div>';
                 } else {
                     groupFilesListDropdown.innerHTML = groupSelectedFiles.map((fileObj, index) => `
                         <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
@@ -3386,7 +3386,7 @@ async function init() {
                         groupPreviewContent.innerHTML = `
                             <div style="text-align: center;">
                                 <div style="font-size: 64px; margin-bottom: 10px;">📄</div>
-                                <div style="color: #7f8c8d; font-size: 12px;">Preview not available</div>
+                                <div style="color: #2f3a3f; font-size: 12px;">Preview not available</div>
                             </div>
                         `;
                     }
@@ -3493,7 +3493,7 @@ async function init() {
                 modalContent.innerHTML = `
                     <div style="text-align: center; padding: 40px;">
                         <div style="font-size: 64px; margin-bottom: 20px;">📄</div>
-                        <p style="color: #7f8c8d; font-size: 14px;">Preview not available for this file type.</p>
+                        <p style="color: #2f3a3f; font-size: 14px;">Preview not available for this file type.</p>
                         <p style="color: #95a5a6; font-size: 12px; margin-top: 10px;">File: ${escapeHtml(file.name)}</p>
                         <p style="color: #95a5a6; font-size: 12px;">Size: ${formatFileSize(file.size)}</p>
                     </div>
@@ -3618,7 +3618,7 @@ async function init() {
                         reminderPreviewContent.innerHTML = `
                             <div style="text-align: center;">
                                 <div style="font-size: 64px; margin-bottom: 10px;">📄</div>
-                                <div style="color: #7f8c8d; font-size: 12px;">Preview not available</div>
+                                <div style="color: #2f3a3f; font-size: 12px;">Preview not available</div>
                             </div>
                         `;
                     }
