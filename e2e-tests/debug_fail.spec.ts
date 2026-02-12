@@ -9,6 +9,7 @@ test('debug monitoring request rendering', async ({ page }) => {
         status: 'Failed',
         error: 'Injected backend error',
         progress: 100,
+        success: false,
         startTime: new Date().toISOString(),
         endTime: new Date().toISOString()
       }
@@ -17,7 +18,7 @@ test('debug monitoring request rendering', async ({ page }) => {
     await page.route('**/api/monitoring/requests*', route => route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify(failedPayload)
+      body: '[]'
     }));
 
     await page.route('**/api/history*', route => route.fulfill({
@@ -27,22 +28,13 @@ test('debug monitoring request rendering', async ({ page }) => {
     }));
 
     await page.goto('/monitoring.html');
-    await page.waitForTimeout(2000); // Wait for JS
+    await page.waitForFunction(() => Boolean((window as any).__monitoringTestHooks));
+    await page.evaluate((payload) => {
+      (window as any).__monitoringTestHooks.setRequests(payload);
+    }, failedPayload);
 
     const item = page.locator('[data-testid="request-item"]').first();
-    // Check if item exists
-    if (await item.count() === 0) {
-        console.log('No request item found!');
-        const html = await page.content();
-        console.log(html);
-        return;
-    }
-    
-    const status = await item.locator('.request-status').textContent();
-    const classes = await item.locator('.request-status').getAttribute('class');
-    
-    console.log('Status Text:', status);
-    console.log('Classes:', classes);
-    
-    expect(status).toContain('Failed');
+    await expect(item).toBeVisible();
+    await expect(item.locator('.request-status')).toHaveClass(/failed/);
+    await expect(item.locator('.request-status')).toContainText(/failed/i);
 });
