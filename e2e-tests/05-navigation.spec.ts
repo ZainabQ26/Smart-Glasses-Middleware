@@ -149,7 +149,6 @@ test.describe('Page State and Persistence', () => {
   });
 
   test('should maintain functionality after browser back/forward with reloads', async ({ page, browserName }) => {
-    test.skip(browserName === 'firefox', 'Firefox has issues with history navigation after reloads in this environment');
     if (browserName === 'firefox') {
       // Firefox sometimes exhibits history issues after reloads; use explicit navigation as a workaround
       await page.goto('/admin.html');
