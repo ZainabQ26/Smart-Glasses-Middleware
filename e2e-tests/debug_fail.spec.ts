@@ -32,7 +32,8 @@ test('debug monitoring request rendering', async ({ page }) => {
     await page.evaluate((payload) => {
       (window as any).__monitoringTestHooks.setRequests(payload);
     }, failedPayload);
-
+    // Wait for the UI to render the injected request item (some browsers may be slower)
+    await page.waitForSelector('[data-testid="request-item"]', { timeout: 5000 });
     const item = page.locator('[data-testid="request-item"]').first();
     await expect(item).toBeVisible();
     // Accept either a failed status OR an error block rendering (some browsers update DOM timing differently)
