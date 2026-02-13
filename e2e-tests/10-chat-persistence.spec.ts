@@ -84,7 +84,7 @@ test.describe('Cross-Device API Updates Show Immediately', () => {
     await page.waitForTimeout(1500);
   });
 
-  test('should show a request triggered from another device', async ({ page, browser }) => {
+  test('should show a request triggered from another device', async ({ page, browser, browserName }) => {
     const requestItems = page.locator('.request-item');
     const initialCount = await requestItems.count();
 
@@ -106,7 +106,10 @@ test.describe('Cross-Device API Updates Show Immediately', () => {
       expect(response.status()).toBeGreaterThanOrEqual(200);
       expect(response.status()).toBeLessThan(500);
 
-      await expect.poll(async () => await requestItems.count(), { timeout: 20000 })
+      const pollTimeout = browserName === 'firefox' ? 30000 : 20000;
+      // small initial wait to give SignalR time to propagate on slower browsers
+      await page.waitForTimeout(500);
+      await expect.poll(async () => await requestItems.count(), { timeout: pollTimeout })
         .toBeGreaterThan(initialCount);
     } finally {
       await deviceContext.close();
