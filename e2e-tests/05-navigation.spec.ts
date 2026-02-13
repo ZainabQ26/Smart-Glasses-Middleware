@@ -133,8 +133,18 @@ test.describe('Page State and Persistence', () => {
     await page.goto('/admin.html');
     
     // Reload and verify page loads fresh
-    await page.reload();
-    await expect(page.locator('button[data-tab="files"]')).toBeVisible();
+    // Sometimes a reload may hit a transient connection reset (container redeploys); retry once.
+    let reloaded = false;
+    for (let attempt = 0; attempt < 2 && !reloaded; attempt++) {
+      try {
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        reloaded = true;
+      } catch (err) {
+        // brief backoff then retry
+        await page.waitForTimeout(500);
+      }
+    }
+    await expect(page.locator('button[data-tab="files"]')).toBeVisible({ timeout: 10000 });
   });
 
   test('should handle window resize during navigation', async ({ page }) => {
