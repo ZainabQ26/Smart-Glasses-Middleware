@@ -196,30 +196,35 @@ public class DocumentProcessingService : IDocumentProcessingService
     {
         if (!string.IsNullOrWhiteSpace(markdown))
         {
-            using var reader = new StringReader(markdown);
-            string? line;
-            while ((line = reader.ReadLine()) != null)
+            // First, attempt to find a markdown heading
+            using (var reader = new StringReader(markdown))
             {
-                if (string.IsNullOrWhiteSpace(line)) continue;
-                var trimmed = line.Trim();
-                if (trimmed.StartsWith("#"))
+                string? line;
+                while ((line = reader.ReadLine()) != null)
                 {
-                    var title = trimmed.TrimStart('#').Trim();
-                    if (!string.IsNullOrWhiteSpace(title))
-                        return Slugify(title);
+                    if (string.IsNullOrWhiteSpace(line)) continue;
+                    var trimmed = line.Trim();
+                    if (trimmed.StartsWith("#"))
+                    {
+                        var title = trimmed.TrimStart('#').Trim();
+                        if (!string.IsNullOrWhiteSpace(title))
+                            return Slugify(title);
+                    }
                 }
             }
 
             // No heading found; take first non-empty line and use first few words
-            reader.Dispose();
-            reader = new StringReader(markdown);
-            while ((line = reader.ReadLine()) != null)
+            using (var reader2 = new StringReader(markdown))
             {
-                if (string.IsNullOrWhiteSpace(line)) continue;
-                var words = line.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                var snippet = string.Join(' ', words.Take(6));
-                if (!string.IsNullOrWhiteSpace(snippet))
-                    return Slugify(snippet);
+                string? line;
+                while ((line = reader2.ReadLine()) != null)
+                {
+                    if (string.IsNullOrWhiteSpace(line)) continue;
+                    var words = line.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                    var snippet = string.Join(' ', words.Take(6));
+                    if (!string.IsNullOrWhiteSpace(snippet))
+                        return Slugify(snippet);
+                }
             }
         }
 

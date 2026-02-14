@@ -129,6 +129,7 @@ services:
       - Logging__LogLevel__Default=${LOG_LEVEL_DEFAULT:-Information}
       - Logging__LogLevel__Microsoft.AspNetCore=${LOG_LEVEL_ASPNETCORE:-Warning}
       - Logging__LogLevel__SmartGlassesMiddleware=${LOG_LEVEL_APP:-Information}
+      - E2E_MODE=${E2E_MODE:-false}
     ports:
       - "5000:5000"
     depends_on:

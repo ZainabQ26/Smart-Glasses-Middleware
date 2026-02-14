@@ -366,7 +366,21 @@ Assembly? CompileSourceFiles(string[] filePaths, ILogger logger)
 
 // Task dispatcher (configurable handler selection)
 builder.Services.AddScoped<ITaskDispatcher, TaskDispatcher>();
-if (!builder.Environment.IsEnvironment("Testing") && !string.IsNullOrWhiteSpace(redisConnection))
+
+// Allow an explicit E2E_MODE env var to opt into synchronous background processing
+// which makes end-to-end tests deterministic by completing tasks inline.
+var e2eMode = false;
+var e2eModeEnv = Environment.GetEnvironmentVariable("E2E_MODE");
+if (!string.IsNullOrEmpty(e2eModeEnv))
+{
+    bool.TryParse(e2eModeEnv, out e2eMode);
+}
+
+if (e2eMode)
+{
+    builder.Services.AddSingleton<IBackgroundTaskQueue, SynchronousBackgroundTaskQueue>();
+}
+else if (!builder.Environment.IsEnvironment("Testing") && !string.IsNullOrWhiteSpace(redisConnection))
 {
     builder.Services.AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();
 }
@@ -375,12 +389,20 @@ else
     // When Redis is not configured (local dev), use an in-memory fallback queue to avoid requiring Redis.
     builder.Services.AddSingleton<IBackgroundTaskQueue, NoOpBackgroundTaskQueue>();
 }
+
 builder.Services.AddScoped<IMediaProcessor, MediaProcessor>();
-builder.Services.AddHostedService<BackgroundTaskHostedService>();
-if (!builder.Environment.IsEnvironment("Testing") && !string.IsNullOrWhiteSpace(redisConnection))
+
+// Only run the hosted worker in non-E2E mode — synchronous queue handles execution inline for tests
+if (!e2eMode)
+{
+    builder.Services.AddHostedService<BackgroundTaskHostedService>();
+}
+
+if (!builder.Environment.IsEnvironment("Testing") && !string.IsNullOrWhiteSpace(redisConnection) && !e2eMode)
 {
     builder.Services.AddHostedService<BackgroundTaskCleanupService>();
 }
+
 builder.Services.AddHostedService<DocumentProcessingBackgroundService>();
 
 // Add SignalR for real-time notifications with WebSocket optimizations
