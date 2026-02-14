@@ -167,7 +167,10 @@ public class AudioController : ControllerBase
                 
                 if (!string.IsNullOrWhiteSpace(monitoringRequestId) && _monitoringService != null)
                 {
-                    await _monitoringService.CompleteRequest(monitoringRequestId, true, result: $"Transcribed: {transcription?.Substring(0, Math.Min(50, transcription?.Length ?? 0))}...");
+                    var preview = !string.IsNullOrEmpty(transcription) && transcription.Length > 50 
+                        ? transcription.Substring(0, 50) + "..."
+                        : transcription ?? "";
+                    await _monitoringService.CompleteRequest(monitoringRequestId, true, result: $"Transcribed: {preview}");
                 }
 
                 return Ok(new { 

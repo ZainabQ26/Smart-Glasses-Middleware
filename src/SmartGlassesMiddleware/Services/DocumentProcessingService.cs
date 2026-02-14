@@ -238,7 +238,13 @@ public class DocumentProcessingService : IDocumentProcessingService
                         
                         if (styleId != null && styleId.StartsWith("Heading"))
                         {
-                            var level = styleId.Length > 7 ? int.Parse(styleId.Substring(7)) : 1;
+                            // Try to extract heading level, default to 1 if not numeric
+                            var levelStr = styleId.Substring(7);
+                            int level = 1;
+                            if (!string.IsNullOrEmpty(levelStr) && int.TryParse(levelStr, out var parsedLevel))
+                            {
+                                level = parsedLevel;
+                            }
                             markdown.AppendLine($"{new string('#', Math.Min(level, 6))} {text}");
                         }
                         else
