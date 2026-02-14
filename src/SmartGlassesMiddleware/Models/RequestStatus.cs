@@ -1,4 +1,17 @@
+using System.ComponentModel.DataAnnotations.Schema;
+
 namespace SmartGlassesMiddleware.Models;
+
+/// <summary>
+/// Represents a single activity/step in a request's progress
+/// </summary>
+[NotMapped]
+public class RequestActivity
+{
+    public DateTime Timestamp { get; set; }
+    public string Activity { get; set; } = string.Empty;
+    public int? Progress { get; set; }
+}
 
 /// <summary>
 /// Represents the status of a request being monitored
@@ -16,6 +29,12 @@ public class RequestStatus
     /// Progress percentage (0-100) for UI progress bar
     /// </summary>
     public int? Progress { get; set; }
+    
+    /// <summary>
+    /// History of activities performed during request processing (not persisted to DB, only for real-time streaming)
+    /// </summary>
+    [NotMapped]
+    public List<RequestActivity> ActivityHistory { get; set; } = new();
     
     public DateTime StartTime { get; set; }
     public DateTime? LastUpdateTime { get; set; }

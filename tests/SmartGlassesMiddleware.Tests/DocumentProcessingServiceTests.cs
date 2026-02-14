@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Xunit;
 using Moq;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Configuration;
 using SmartGlassesMiddleware.Services;
 using SmartGlassesMiddleware.Data;
 using SmartGlassesMiddleware.Models;
@@ -17,6 +18,8 @@ public class DocumentProcessingServiceTests
 {
     private readonly Mock<ILogger<DocumentProcessingService>> _mockLogger;
     private readonly Mock<IMediaStorageService> _mockStorageService;
+    private readonly Mock<IRequestMonitoringService> _mockMonitoringService;
+    private readonly Mock<IConfiguration> _mockConfiguration;
     private readonly ApplicationDbContext _context;
     private readonly DocumentProcessingService _service;
 
@@ -24,6 +27,8 @@ public class DocumentProcessingServiceTests
     {
         _mockLogger = new Mock<ILogger<DocumentProcessingService>>();
         _mockStorageService = new Mock<IMediaStorageService>();
+        _mockMonitoringService = new Mock<IRequestMonitoringService>();
+        _mockConfiguration = new Mock<IConfiguration>();
 
         // Create in-memory database for testing
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -34,12 +39,14 @@ public class DocumentProcessingServiceTests
         _service = new DocumentProcessingService(
             _mockLogger.Object,
             _mockStorageService.Object,
-            _context
+            _context,
+            _mockMonitoringService.Object,
+            _mockConfiguration.Object
         );
     }
 
     [Fact]
-    public async Task ProcessDocumentAsync_TextFile_ShouldCreateChunks()
+    public async Task ProcessDocumentAsync_TextFile_ShouldCreateMarkdownAndChunks()
     {
         // Arrange
         var content = "This is a test document. It has multiple sentences. This will be chunked appropriately.";
@@ -56,15 +63,72 @@ public class DocumentProcessingServiceTests
 
         // Assert
         Assert.NotNull(result);
-        Assert.Equal(fileName, result.FileName);
-        Assert.Equal("txt", result.DocumentType);
+        Assert.EndsWith(".md", result.FileName); // Now produces markdown
+        Assert.Equal("markdown", result.DocumentType); // Document type is now markdown
+        Assert.Equal("text/markdown", result.ContentType); // Content type is markdown
         Assert.True(result.IsProcessed);
         Assert.NotEmpty(result.Chunks);
 
-        // Verify storage was called
+        // Verify storage was called with markdown content type
         _mockStorageService.Verify(
-            s => s.UploadFileAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string>()),
+            s => s.UploadFileAsync(It.IsAny<string>(), It.IsAny<Stream>(), "text/markdown"),
             Times.Once
+        );
+    }
+
+    [Fact]
+    public async Task ProcessDocumentAsync_XMLFile_ShouldConvertToMarkdown()
+    {
+        // Arrange
+        var xmlContent = "<?xml version=\"1.0\"?><root><item>Test</item></root>";
+        var stream = new MemoryStream(Encoding.UTF8.GetBytes(xmlContent));
+        var fileName = "test.xml";
+        var contentType = "application/xml";
+
+        _mockStorageService
+            .Setup(s => s.UploadFileAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string>()))
+            .ReturnsAsync("test-storage-key");
+
+        // Act
+        var result = await _service.ProcessDocumentAsync(stream, fileName, contentType);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.EndsWith(".md", result.FileName);
+        Assert.Equal("markdown", result.DocumentType);
+        Assert.True(result.IsProcessed);
+        Assert.NotEmpty(result.Chunks);
+    }
+
+    [Fact]
+    public async Task ProcessDocumentAsync_WithRequestId_ShouldReportProgress()
+    {
+        // Arrange
+        var content = "Test content";
+        var stream = new MemoryStream(Encoding.UTF8.GetBytes(content));
+        var fileName = "test.txt";
+        var contentType = "text/plain";
+        var requestId = "test-request-123";
+
+        _mockStorageService
+            .Setup(s => s.UploadFileAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string>()))
+            .ReturnsAsync("test-storage-key");
+
+        // Act
+        var result = await _service.ProcessDocumentAsync(stream, fileName, contentType, requestId);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.True(result.IsProcessed);
+
+        // Verify progress was reported
+        _mockMonitoringService.Verify(
+            m => m.UpdateRequestStatus(
+                requestId, 
+                It.IsAny<string>(), 
+                It.IsAny<string>(), 
+                It.IsAny<int>()),
+            Times.AtLeastOnce
         );
     }
 
@@ -80,13 +144,10 @@ public class DocumentProcessingServiceTests
             .Setup(s => s.UploadFileAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string>()))
             .ReturnsAsync("test-storage-key");
 
-        // Act
-        var result = await _service.ProcessDocumentAsync(stream, fileName, contentType);
-
-        // Assert
-        Assert.NotNull(result);
-        Assert.False(result.IsProcessed);
-        Assert.False(string.IsNullOrWhiteSpace(result.ProcessingError));
+        // Act & Assert - Should throw NotSupportedException
+        await Assert.ThrowsAsync<NotSupportedException>(
+            async () => await _service.ProcessDocumentAsync(stream, fileName, contentType)
+        );
     }
 
     [Fact]
@@ -97,13 +158,13 @@ public class DocumentProcessingServiceTests
         var doc = new DocumentMetadata
         {
             Id = documentId,
-            FileName = "test.txt",
+            FileName = "test.md",
             OriginalFileName = "test.txt",
-            ContentType = "text/plain",
+            ContentType = "text/markdown",
             StorageKey = "key",
             UploadedAt = DateTime.UtcNow,
             FileSize = 100,
-            DocumentType = "txt",
+            DocumentType = "markdown",
             IsProcessed = true
         };
 
