@@ -146,6 +146,60 @@ namespace SmartGlassesMiddleware.Tests
             mockRag.Verify(r => r.ProcessFileForRagAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()), Times.AtLeastOnce);
         }
 
+        [Fact(Timeout = 20000)]
+        public async Task DocumentsUpload_TextFile_Is_AutoNamed_And_Stored_As_Markdown()
+        {
+            var mockStorage = new Mock<IMediaStorageService>();
+
+            string capturedMarkdown = null;
+            mockStorage.Setup(s => s.UploadFileAsync(It.IsAny<string>(), It.IsAny<System.IO.Stream>(), It.IsAny<string>()))
+                .ReturnsAsync((string key, System.IO.Stream st, string ct) =>
+                {
+                    try { st.Seek(0, System.IO.SeekOrigin.Begin); } catch { }
+                    using var sr = new System.IO.StreamReader(st, System.Text.Encoding.UTF8, true, 1024, leaveOpen: true);
+                    capturedMarkdown = sr.ReadToEnd();
+                    return key;
+                });
+
+            var factory = _factory.WithWebHostBuilder(builder =>
+            {
+                builder.ConfigureServices(services =>
+                {
+                    services.AddSingleton<IMediaStorageService>(mockStorage.Object);
+                });
+            });
+
+            using var client = factory.CreateClient();
+
+            var text = "# Integration Title\n\nThis is the body of the document for integration test.";
+            var bytes = System.Text.Encoding.UTF8.GetBytes(text);
+
+            using var content = new MultipartFormDataContent();
+            var byteContent = new ByteArrayContent(bytes);
+            byteContent.Headers.ContentType = new MediaTypeHeaderValue("text/plain");
+            content.Add(byteContent, "file", "test.txt");
+
+            var resp = await client.PostAsync("/api/documents/upload", content);
+            Assert.True(resp.IsSuccessStatusCode, await resp.Content.ReadAsStringAsync());
+
+            var body = await resp.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+            var returnedFileName = body.GetProperty("fileName").GetString();
+
+            Assert.Equal("integration-title.md", returnedFileName);
+
+            // Verify database entry exists
+            using var scope = factory.Services.CreateScope();
+            var ctx = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var doc = await ctx.DocumentMetadatas.FirstOrDefaultAsync(d => d.FileName == returnedFileName);
+            Assert.NotNull(doc);
+            Assert.Contains("documents/", doc.StorageKey);
+
+            // Ensure uploaded markdown content contains heading and body
+            Assert.False(string.IsNullOrEmpty(capturedMarkdown));
+            Assert.Contains("Integration Title", capturedMarkdown);
+            Assert.Contains("This is the body of the document for integration test.", capturedMarkdown);
+        }
+
         // Simple test background queue implementation for integration tests
         private class TestBackgroundTaskQueue : IBackgroundTaskQueue
         {
