@@ -12,6 +12,8 @@ using Tesseract;
 using System.Text;
 using System.Xml;
 using System.Xml.Linq;
+using System.Globalization;
+using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Markdig;
 
@@ -144,26 +146,106 @@ public class DocumentProcessingService : IDocumentProcessingService
         var baseFileName = System.IO.Path.GetFileNameWithoutExtension(fileName);
         var markdownFileName = $"{baseFileName}.md";
 
+        MemoryStream convertedStream;
+        string convertedName;
+
         switch (documentType)
         {
             case "pdf":
-                return await ConvertPdfToMarkdownAsync(inputStream, markdownFileName, requestId);
+                (convertedStream, convertedName) = await ConvertPdfToMarkdownAsync(inputStream, markdownFileName, requestId);
+                break;
 
             case "docx":
-                return await ConvertDocxToMarkdownAsync(inputStream, markdownFileName, requestId);
+                (convertedStream, convertedName) = await ConvertDocxToMarkdownAsync(inputStream, markdownFileName, requestId);
+                break;
 
             case "txt":
-                return await ConvertTextToMarkdownAsync(inputStream, markdownFileName, requestId);
+                (convertedStream, convertedName) = await ConvertTextToMarkdownAsync(inputStream, markdownFileName, requestId);
+                break;
 
             case "xml":
-                return await ConvertXmlToMarkdownAsync(inputStream, markdownFileName, requestId);
+                (convertedStream, convertedName) = await ConvertXmlToMarkdownAsync(inputStream, markdownFileName, requestId);
+                break;
 
             case "image":
-                return await ConvertImageToMarkdownAsync(inputStream, markdownFileName, requestId);
+                (convertedStream, convertedName) = await ConvertImageToMarkdownAsync(inputStream, markdownFileName, requestId);
+                break;
 
             default:
                 throw new NotSupportedException($"Document type {documentType} is not supported");
         }
+
+        // Read converted markdown to decide on a content-based filename
+        convertedStream.Position = 0;
+        string markdownText;
+        using (var reader = new StreamReader(convertedStream, Encoding.UTF8, true, 1024, true))
+        {
+            markdownText = await reader.ReadToEndAsync();
+        }
+
+        // Pick a slug based on first heading or a short snippet; fallback to original base filename
+        var slug = GenerateSlugFromMarkdown(markdownText, System.IO.Path.GetFileNameWithoutExtension(markdownFileName));
+        var finalFileName = $"{slug}.md";
+
+        // Reset stream position for downstream consumers
+        convertedStream.Position = 0;
+        return (convertedStream, finalFileName);
+    }
+
+    private string GenerateSlugFromMarkdown(string markdown, string fallback)
+    {
+        if (!string.IsNullOrWhiteSpace(markdown))
+        {
+            using var reader = new StringReader(markdown);
+            string? line;
+            while ((line = reader.ReadLine()) != null)
+            {
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                var trimmed = line.Trim();
+                if (trimmed.StartsWith("#"))
+                {
+                    var title = trimmed.TrimStart('#').Trim();
+                    if (!string.IsNullOrWhiteSpace(title))
+                        return Slugify(title);
+                }
+            }
+
+            // No heading found; take first non-empty line and use first few words
+            reader.Dispose();
+            reader = new StringReader(markdown);
+            while ((line = reader.ReadLine()) != null)
+            {
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                var words = line.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                var snippet = string.Join(' ', words.Take(6));
+                if (!string.IsNullOrWhiteSpace(snippet))
+                    return Slugify(snippet);
+            }
+        }
+
+        return Slugify(fallback ?? "document");
+    }
+
+    private string Slugify(string input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return "document";
+        var normalized = input.Normalize(NormalizationForm.FormD);
+        var sb = new StringBuilder();
+        foreach (var ch in normalized)
+        {
+            var uc = CharUnicodeInfo.GetUnicodeCategory(ch);
+            if (uc == UnicodeCategory.NonSpacingMark) continue;
+            if (char.IsLetterOrDigit(ch) || ch == ' ' || ch == '-')
+                sb.Append(ch);
+        }
+
+        var cleaned = sb.ToString();
+        cleaned = Regex.Replace(cleaned, "\\s+", "-");
+        cleaned = Regex.Replace(cleaned, "-+", "-");
+        cleaned = cleaned.Trim('-').ToLowerInvariant();
+        if (string.IsNullOrEmpty(cleaned)) cleaned = "document";
+        if (cleaned.Length > 100) cleaned = cleaned.Substring(0, 100);
+        return cleaned;
     }
 
     private async Task<(MemoryStream, string)> ConvertPdfToMarkdownAsync(Stream pdfStream, string markdownFileName, string? requestId)

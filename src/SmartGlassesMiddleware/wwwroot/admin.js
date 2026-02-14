@@ -667,35 +667,37 @@ function createFileCard(file) {
     return div;
 }
 
-document.getElementById('upload-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const fileInput = document.getElementById('file-input');
-    const label = document.getElementById('file-label').value;
-    
-    const formData = new FormData();
-    formData.append('file', fileInput.files[0]);
-    formData.append('label', label);
-    
-    try {
-        const response = await fetch(`${API_BASE}/files`, {
-            method: 'POST',
-            body: formData
-        });
-        
-        if (response.ok) {
-            showMessage('File uploaded successfully');
-            e.target.reset();
-            // Force refresh files and all groups
-            await loadFiles(true);
-            await loadAllGroups(true);
-        } else {
-            const error = await response.json();
-            showMessage(error.detail || 'Error uploading file', 'error');
+// Auto-upload selected file from main Files tab
+const mainFileInput = document.getElementById('file-input');
+if (mainFileInput) {
+    mainFileInput.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            const response = await fetch(`${API_BASE}/files`, {
+                method: 'POST',
+                body: formData
+            });
+
+            if (response.ok) {
+                showMessage('File uploaded successfully', 'success');
+                mainFileInput.value = '';
+                await loadFiles(true);
+                await loadAllGroups(true);
+            } else {
+                let msg = 'Error uploading file';
+                try { const error = await response.json(); msg = error.detail || msg; } catch (e){}
+                showMessage(msg, 'error');
+            }
+        } catch (err) {
+            showMessage('Error uploading file: ' + err.message, 'error');
         }
-    } catch (error) {
-        showMessage('Error uploading file: ' + error.message, 'error');
-    }
-});
+    });
+}
 
 // Enter key handler for file label input
 document.getElementById('file-label')?.addEventListener('keypress', (e) => {
@@ -1771,10 +1773,9 @@ document.getElementById('group-form').addEventListener('submit', async (e) => {
             if (window.groupSelectedFiles && window.groupSelectedFiles.length > 0) {
                 console.log('[CREATE GROUP] Uploading', window.groupSelectedFiles.length, 'files...');
                 
-                for (const fileObj of window.groupSelectedFiles) {
+                    for (const fileObj of window.groupSelectedFiles) {
                     const formData = new FormData();
                     formData.append('file', fileObj.file);
-                    formData.append('label', fileObj.name); // Add required label
                     
                     try {
                         console.log('[CREATE GROUP] Uploading file:', fileObj.name);
@@ -1906,10 +1907,9 @@ document.getElementById('reminder-form')?.addEventListener('submit', async (e) =
             if (window.reminderSelectedFiles && window.reminderSelectedFiles.length > 0) {
                 console.log('[CREATE REMINDER] Uploading', window.reminderSelectedFiles.length, 'files...');
                 
-                for (const fileObj of window.reminderSelectedFiles) {
+                    for (const fileObj of window.reminderSelectedFiles) {
                     const formData = new FormData();
                     formData.append('file', fileObj.file);
-                    formData.append('label', fileObj.name);
                     
                     try {
                         console.log('[CREATE REMINDER] Uploading file:', fileObj.name);
