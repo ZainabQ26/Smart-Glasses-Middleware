@@ -11,6 +11,7 @@ public interface IRequestMonitoringService
 {
     Task<string> StartRequest(string requestType, string description, string? requestId = null);
     Task UpdateRequestStatus(string requestId, string status, string? details = null, int? progress = null);
+    Task AddActivity(string requestId, string activity, int? progress = null);
     Task CompleteRequest(string requestId, bool success, string? result = null, string? error = null);
     Task<List<RequestStatus>> GetRecentRequests(int count = 50);
 }
@@ -80,6 +81,13 @@ public class RequestMonitoringService : IRequestMonitoringService
             if (details != null)
             {
                 request.Details = details;
+                // Add activity to history for streaming
+                request.ActivityHistory.Add(new RequestActivity
+                {
+                    Timestamp = DateTime.UtcNow,
+                    Activity = details,
+                    Progress = progress
+                });
             }
             if (progress.HasValue)
             {
@@ -87,7 +95,39 @@ public class RequestMonitoringService : IRequestMonitoringService
             }
             request.LastUpdateTime = DateTime.UtcNow;
             await BroadcastUpdate(request);
-            _logger.LogInformation("Updated request {RequestId}: {Status}", requestId, status);
+            _logger.LogInformation("Updated request {RequestId}: {Status} - {Details}", requestId, status, details);
+        }
+    }
+
+    public async Task AddActivity(string requestId, string activity, int? progress = null)
+    {
+        if (string.IsNullOrWhiteSpace(requestId))
+        {
+            _logger.LogWarning("AddActivity called with null or empty requestId");
+            return;
+        }
+
+        if (_activeRequests.TryGetValue(requestId, out var request))
+        {
+            // Add activity to history
+            request.ActivityHistory.Add(new RequestActivity
+            {
+                Timestamp = DateTime.UtcNow,
+                Activity = activity,
+                Progress = progress
+            });
+            
+            // Update current details and progress
+            request.Details = activity;
+            if (progress.HasValue)
+            {
+                request.Progress = progress.Value;
+            }
+            request.LastUpdateTime = DateTime.UtcNow;
+            
+            // Broadcast detailed activity update (streaming)
+            await BroadcastActivityUpdate(requestId, activity, progress);
+            _logger.LogDebug("Added activity to request {RequestId}: {Activity}", requestId, activity);
         }
     }
 
@@ -212,6 +252,38 @@ public class RequestMonitoringService : IRequestMonitoringService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Error initiating SignalR broadcast for request {RequestId}", request.RequestId);
+        }
+        
+        await Task.CompletedTask;
+    }
+
+    private async Task BroadcastActivityUpdate(string requestId, string activity, int? progress)
+    {
+        try
+        {
+            // Use Task.Run to prevent blocking
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await _hubContext.Clients.All.SendAsync("ActivityUpdate", new
+                    {
+                        requestId,
+                        activity,
+                        progress,
+                        timestamp = DateTime.UtcNow
+                    });
+                    _logger.LogDebug("Broadcast activity update for {RequestId}: {Activity}", requestId, activity);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to broadcast activity update for {RequestId} via SignalR", requestId);
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error initiating activity broadcast for request {RequestId}", requestId);
         }
         
         await Task.CompletedTask;
