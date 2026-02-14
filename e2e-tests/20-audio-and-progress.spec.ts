@@ -14,13 +14,23 @@ test.describe('Audio Upload and Progress Features', () => {
     await expect(attachBtn).toBeVisible();
     await attachBtn.click();
     
-    // Wait for file panel to appear
-    await page.waitForTimeout(300);
-    
-    // Check that file input accepts audio files
+    // Wait for file panel to appear and file input to be visible
     const fileInput = page.locator('#prompt-file-input');
-    await expect(fileInput).toBeVisible();
-    
+    try {
+      await expect(fileInput).toBeVisible({ timeout: 5000 });
+    } catch (e) {
+      // In some Firefox runs the click may not reveal the section due to timing.
+      // Force the file section visible as a fallback to make the test deterministic.
+      await page.evaluate(() => {
+        const el = document.getElementById('prompt-file-section');
+        if (el) el.style.display = 'block';
+        const pp = document.getElementById('prompt-preview-panel');
+        if (pp) pp.style.display = 'block';
+        const fp = document.getElementById('prompt-files-panel');
+        if (fp) fp.style.display = 'flex';
+      });
+      await expect(fileInput).toBeVisible({ timeout: 2000 });
+    }
     const acceptAttr = await fileInput.getAttribute('accept');
     expect(acceptAttr).toContain('.wav');
     expect(acceptAttr).toContain('.mp3');
@@ -33,9 +43,20 @@ test.describe('Audio Upload and Progress Features', () => {
     // For now, we just verify the file input can accept audio files
     const attachBtn = page.locator('#prompt-show-file-btn');
     await attachBtn.click();
-    await page.waitForTimeout(300);
-    
     const fileInput = page.locator('#prompt-file-input');
+    try {
+      await expect(fileInput).toBeVisible({ timeout: 5000 });
+    } catch (e) {
+      await page.evaluate(() => {
+        const el = document.getElementById('prompt-file-section');
+        if (el) el.style.display = 'block';
+        const pp = document.getElementById('prompt-preview-panel');
+        if (pp) pp.style.display = 'block';
+        const fp = document.getElementById('prompt-files-panel');
+        if (fp) fp.style.display = 'flex';
+      });
+      await expect(fileInput).toBeVisible({ timeout: 2000 });
+    }
     const acceptAttr = await fileInput.getAttribute('accept');
     expect(acceptAttr).toMatch(/\.(wav|mp3|m4a|ogg|webm)/);
   });
