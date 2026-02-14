@@ -1622,6 +1622,25 @@
     </div>
 
     <script>
+        // Early shims to ensure tests can access these functions immediately on page load
+        // The real implementations in admin.js will overwrite these when loaded.
+        window.toggleSourceExpand = window.toggleSourceExpand || function() { /* noop until admin.js loads */ };
+        window.setSignalRIndicatorState = window.setSignalRIndicatorState || function(connected) {
+            const warning = document.getElementById('signalr-warning');
+            if (!warning) return;
+            try {
+                if (connected) {
+                    warning.style.display = 'none';
+                    warning.style.visibility = 'hidden';
+                    warning.style.opacity = '0';
+                } else {
+                    warning.textContent = 'Reconnecting to server...';
+                    warning.style.display = 'block';
+                    warning.style.visibility = 'visible';
+                    warning.style.opacity = '1';
+                }
+            } catch (e) { /* ignore */ }
+        };
         // Force reload with timestamp
         const timestamp = new Date().getTime();
         // Load shared toasts first (global showMessage)

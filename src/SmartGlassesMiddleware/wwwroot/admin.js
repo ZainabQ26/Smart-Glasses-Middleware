@@ -169,9 +169,9 @@ const state = {
     allGroups: [] // Cache of all groups for quick-add
 };
 
-let conversationHubConnection = null;
-let resourceHubConnection = null;
-let taskHubConnection = null;
+var conversationHubConnection = null;
+var resourceHubConnection = null;
+var taskHubConnection = null;
 
 // Track individual hub connection states; banner shows if either hub is disconnected
 // Default to `true` so the banner is hidden until a hub explicitly reports disconnected.
