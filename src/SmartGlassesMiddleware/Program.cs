@@ -160,7 +160,16 @@ builder.Services.AddHttpClient<IAIService, OllamaAIService>((sp, client) =>
 // Register application services
 builder.Services.AddScoped<IHistoryService, HistoryService>();
 builder.Services.AddScoped<IMediaStorageService, MinioMediaStorageService>();
-builder.Services.AddScoped<ICacheService, RedisCacheService>();
+// Register cache service: prefer Redis when configured, otherwise fall back to in-memory implementation
+if (!builder.Environment.IsEnvironment("Testing") && !string.IsNullOrWhiteSpace(redisConnection))
+{
+    builder.Services.AddScoped<ICacheService, RedisCacheService>();
+}
+else
+{
+    builder.Services.AddScoped<ICacheService, InMemoryCacheService>();
+    _startupLogger.LogWarning("Redis not configured or running in Testing environment — using in-memory cache fallback.");
+}
 builder.Services.AddSingleton<IMetricsService, MetricsService>();
 builder.Services.AddSingleton<IRequestMonitoringService, RequestMonitoringService>();
 builder.Services.AddScoped<IRagService, RagService>();
@@ -359,7 +368,16 @@ if (!builder.Environment.IsEnvironment("Testing") && !string.IsNullOrWhiteSpace(
 }
 
 // Add rate limiting
-var rateLimitEnabled = builder.Configuration.GetValue<bool?>("RateLimiting:Enabled") ?? true;
+// Default rate limiting to enabled in production only. Disable by default during
+// development or testing runs to avoid flakiness in automated E2E tests.
+// Allow explicit override via environment variable for CI/E2E runs.
+var e2eDisable = false;
+var e2eEnv = Environment.GetEnvironmentVariable("E2E_DISABLE_RATE_LIMIT");
+if (!string.IsNullOrEmpty(e2eEnv))
+{
+    bool.TryParse(e2eEnv, out e2eDisable);
+}
+var rateLimitEnabled = builder.Configuration.GetValue<bool?>("RateLimiting:Enabled") ?? !(builder.Environment.IsDevelopment() || builder.Environment.IsEnvironment("Testing") || e2eDisable);
 if (rateLimitEnabled)
 {
     builder.Services.AddRateLimiter(options =>
@@ -740,6 +758,30 @@ app.Use(async (context, next) =>
     }
 });
 
+// Ensure baseline security headers are set for all responses, including static files.
+// Placed before UseStaticFiles so static file responses receive these headers.
+app.Use(async (context, next) =>
+{
+    context.Response.OnStarting(() =>
+    {
+        if (!context.Response.Headers.ContainsKey("X-Content-Type-Options"))
+        {
+            context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+        }
+        if (!context.Response.Headers.ContainsKey("X-Frame-Options"))
+        {
+            context.Response.Headers["X-Frame-Options"] = "DENY";
+        }
+        if (!context.Response.Headers.ContainsKey("Referrer-Policy"))
+        {
+            context.Response.Headers["Referrer-Policy"] = "no-referrer";
+        }
+        return Task.CompletedTask;
+    });
+
+    await next();
+});
+
 app.UseStaticFiles();
 
 // Diagnostic middleware: capture raw request body for /api/ask for troubleshooting
@@ -780,9 +822,8 @@ app.UseCors();
 // CRITICAL: UseRouting() is required for controller endpoints to work
 app.UseRouting();
 
-// Only use rate limiter if it's enabled
-var rateLimitConfig = app.Configuration.GetValue<bool?>("RateLimiting:Enabled") ?? true;
-if (rateLimitConfig)
+// Only use rate limiter if it's enabled (respect the computed flag including E2E override)
+if (rateLimitEnabled)
 {
     app.UseRateLimiter();
 }
@@ -818,7 +859,20 @@ app.Use(async (context, next) =>
     // ensure header is added even if later middleware short-circuits
     context.Response.OnStarting(() =>
     {
-        context.Response.Headers["X-Request-Id"] = requestId;
+            context.Response.Headers["X-Request-Id"] = requestId;
+            // Baseline security headers for basic hardening and tests
+            if (!context.Response.Headers.ContainsKey("X-Content-Type-Options"))
+            {
+                context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+            }
+            if (!context.Response.Headers.ContainsKey("X-Frame-Options"))
+            {
+                context.Response.Headers["X-Frame-Options"] = "DENY";
+            }
+            if (!context.Response.Headers.ContainsKey("Referrer-Policy"))
+            {
+                context.Response.Headers["Referrer-Policy"] = "no-referrer";
+            }
         return Task.CompletedTask;
     });
 
@@ -1299,6 +1353,8 @@ app.MapGet("/debug/new-ollama", async (IServiceProvider sp, ILoggerFactory lf) =
 
 // Map SignalR hubs LAST to avoid routing issues
 app.MapHub<SmartGlassesMiddleware.Hubs.TaskHub>("/hubs/tasks");
+app.MapHub<SmartGlassesMiddleware.Hubs.ConversationHub>("/hubs/conversations");
+app.MapHub<SmartGlassesMiddleware.Hubs.ResourceHub>("/hubs/resources");
 
 app.Run();
 

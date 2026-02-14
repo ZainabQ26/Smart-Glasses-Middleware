@@ -36,15 +36,16 @@ async function fetchWithRetry(url, options = {}, retries = 3) {
     for (let i = 0; i < retries; i++) {
         try {
             console.log(`[API] Request: ${fetchOptions.method || 'GET'} ${url}${i > 0 ? ` (retry ${i})` : ''}`);
+
             const response = await fetch(bustUrl, fetchOptions);
             console.log(`[API] Response: ${response.status} ${response.statusText} for ${url}`);
-            
+
             if (!response.ok && response.status >= 500 && i < retries - 1) {
                 console.warn(`[API] Server error, retrying in ${(i + 1) * 500}ms...`);
                 await new Promise(resolve => setTimeout(resolve, (i + 1) * 500));
                 continue;
             }
-            
+
             return response;
         } catch (error) {
             console.error(`[API] Network error on attempt ${i + 1}:`, error);
@@ -55,6 +56,8 @@ async function fetchWithRetry(url, options = {}, retries = 3) {
             throw error;
         }
     }
+
+    throw new Error(`Failed to fetch ${url} after ${retries} attempts`);
 }
 
 // Helper to safely encode attached files array into a URL-safe JSON string
@@ -62,7 +65,9 @@ function encodeFilesData(msgFiles) {
     if (!Array.isArray(msgFiles) || msgFiles.length === 0) return '';
     try {
         return encodeURIComponent(JSON.stringify(msgFiles.map(f => (
-            typeof f === 'string' ? { name: f } : { name: f.name || f.fileName || 'Document', id: f.id || f.documentId }
+            typeof f === 'string'
+                ? { name: f }
+                : { name: f.name || f.fileName || f.FileName || 'Document', id: f.id || f.documentId }
         ))));
     } catch (e) {
         console.warn('Failed to encode files data', e);
@@ -78,6 +83,164 @@ const state = {
     reminders: { page: 1, pageSize: 20, hasMore: true, loading: false, data: [] },
     allGroups: [] // Cache of all groups for quick-add
 };
+
+let conversationHubConnection = null;
+let resourceHubConnection = null;
+
+// Track individual hub connection states; banner shows if either hub is disconnected
+// Default to `true` so the banner is hidden until a hub explicitly reports disconnected.
+let resourceHubConnected = true;
+let conversationHubConnected = true;
+
+async function initConversationHub() {
+    if (!window.signalR) {
+        console.warn('[SignalR] signalR client not loaded');
+        return;
+    }
+
+    try {
+        conversationHubConnection = new signalR.HubConnectionBuilder()
+            .withUrl('/hubs/conversations')
+            .withAutomaticReconnect()
+            .build();
+
+        conversationHubConnection.on('conversationUpdated', async (payload) => {
+            const convoId = payload?.conversationId || payload?.ConversationId;
+            if (convoId && activeConversationId && String(convoId) === String(activeConversationId)) {
+                await loadConversationIntoView(activeConversationId);
+            }
+        });
+
+        // Track reconnect events for the conversation hub and update banner state
+        conversationHubConnection.onreconnecting(() => setConversationHubState(false));
+        conversationHubConnection.onreconnected(() => setConversationHubState(true));
+        conversationHubConnection.onclose(() => setConversationHubState(false));
+
+        await conversationHubConnection.start();
+        setConversationHubState(true);
+        console.log('[SignalR] Conversation hub connected');
+
+        if (activeConversationId) {
+            await joinConversationHubGroup(activeConversationId);
+        }
+    } catch (err) {
+        console.warn('[SignalR] Failed to connect conversation hub:', err);
+        setConversationHubState(false);
+    }
+}
+
+function updateSignalRBanner() {
+    const warning = document.getElementById('signalr-warning');
+    if (!warning) return;
+    try {
+        // Show banner if either hub is disconnected
+        if (resourceHubConnected && conversationHubConnected) {
+            warning.style.setProperty('display', 'none', 'important');
+            warning.style.setProperty('visibility', 'hidden', 'important');
+            warning.style.setProperty('opacity', '0', 'important');
+        } else {
+            warning.textContent = 'Reconnecting to server...';
+            warning.style.setProperty('display', 'block', 'important');
+            warning.style.setProperty('visibility', 'visible', 'important');
+            warning.style.setProperty('opacity', '1', 'important');
+            warning.style.setProperty('position', 'fixed', 'important');
+            warning.style.setProperty('top', '0', 'important');
+            warning.style.setProperty('left', '0', 'important');
+            warning.style.setProperty('width', '100%', 'important');
+            warning.style.setProperty('z-index', '20000', 'important');
+        }
+    } catch (e) {
+        console.warn('[SignalR] Unable to toggle warning bar', e);
+    }
+}
+
+function setResourceHubState(connected) {
+    resourceHubConnected = !!connected;
+    updateSignalRBanner();
+}
+
+function setConversationHubState(connected) {
+    conversationHubConnected = !!connected;
+    updateSignalRBanner();
+}
+
+// Backwards-compatible wrapper used by tests and any callers that expect the old API
+function setSignalRIndicatorState(connected) {
+    // Backwards-compatible API used by tests and external callers.
+    // Toggle the banner immediately for deterministic behavior and update internal flags.
+    const warning = document.getElementById('signalr-warning');
+    try {
+        if (!warning) return;
+        if (connected) {
+            resourceHubConnected = true;
+            conversationHubConnected = true;
+            warning.style.display = 'none';
+            warning.style.visibility = 'hidden';
+            warning.style.opacity = '0';
+        } else {
+            resourceHubConnected = false;
+            conversationHubConnected = false;
+            warning.textContent = 'Reconnecting to server...';
+            warning.style.display = 'block';
+            warning.style.visibility = 'visible';
+            warning.style.opacity = '1';
+            warning.style.position = 'fixed';
+            warning.style.top = '0';
+            warning.style.left = '0';
+            warning.style.width = '100%';
+            warning.style.zIndex = '20000';
+        }
+    } catch (e) {
+        console.warn('[SignalR] Unable to toggle warning bar (compat wrapper)', e);
+    }
+}
+
+async function initResourceHub() {
+    if (!window.signalR) {
+        console.warn('[SignalR] signalR client not loaded');
+        return;
+    }
+
+    try {
+        resourceHubConnection = new signalR.HubConnectionBuilder()
+            .withUrl('/hubs/resources')
+            .withAutomaticReconnect()
+            .build();
+
+        resourceHubConnection.on('filesChanged', async () => {
+            await loadFiles(true);
+        });
+
+        resourceHubConnection.on('groupsChanged', async () => {
+            await loadGroups(true);
+            await loadAllGroups(true);
+        });
+
+        resourceHubConnection.on('conversationsChanged', async () => {
+            await loadPrompts(true);
+        });
+
+        resourceHubConnection.onreconnecting(() => setResourceHubState(false));
+        resourceHubConnection.onreconnected(() => setResourceHubState(true));
+        resourceHubConnection.onclose(() => setResourceHubState(false));
+
+        await resourceHubConnection.start();
+        setResourceHubState(true);
+        console.log('[SignalR] Resource hub connected');
+    } catch (err) {
+        console.warn('[SignalR] Failed to connect resource hub:', err);
+        setResourceHubState(false);
+    }
+}
+
+async function joinConversationHubGroup(conversationId) {
+    if (!conversationHubConnection || !conversationId) return;
+    try {
+        await conversationHubConnection.invoke('JoinConversation', String(conversationId));
+    } catch (err) {
+        console.warn('[SignalR] Failed to join conversation group:', err);
+    }
+}
 
 // Tab switching with forced refresh
 document.querySelectorAll('.tab').forEach(tab => {
@@ -111,11 +274,6 @@ function applyTheme(theme) {
     } else {
         document.body.classList.remove('dark');
     }
-    try {
-        localStorage.setItem(themeStorageKey, theme);
-    } catch {
-        // ignore storage errors
-    }
 }
 
 // Loading indicator
@@ -124,7 +282,7 @@ function showLoading(listId) {
     const loading = document.createElement('div');
     loading.className = 'loading-indicator';
     loading.id = `${listId}-loading`;
-    loading.innerHTML = '<p style="text-align: center; padding: 20px; color: #95a5a6;">Loading...</p>';
+    loading.innerHTML = '<p style="text-align: center; padding: 20px; color: #2f3a3f;">Loading...</p>';
     list.appendChild(loading);
 }
 
@@ -180,7 +338,7 @@ async function loadFiles(reset = false) {
             state.files.hasMore = pagination.hasNext || pagination.HasNext;
             state.files.page++;
         } else if (reset) {
-            list.innerHTML = '<div class="empty-state"><p>No files uploaded yet</p></div>';
+            list.innerHTML = '<div class="empty-state"><p>No uploads yet</p></div>';
         }
         
         state.files.loading = false;
@@ -259,10 +417,10 @@ async function loadPrompts(reset = false) {
                         <div style="display:block;">
                             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
                                 <span class="prompt-name" style="font-weight:600;color:#2c3e50;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%;">${displayName}</span>
-                                <span class="badge" style="background:#3498db;color:white;padding:2px 6px;border-radius:10px;font-size:11px;min-width:20px;text-align:center;">${messageCount}</span>
+                                <span class="badge" style="background:#0b63a6;color:white;padding:2px 6px;border-radius:10px;font-size:11px;min-width:20px;text-align:center;">${messageCount}</span>
                             </div>
-                            <div style="font-size:11px;color:#95a5a6;margin-bottom:4px;">${timestamp}</div>
-                            <div style="color:#666;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(String(lastMsg || 'No messages yet'))}</div>
+                            <div style="font-size:11px;color:#2f3a3f;margin-bottom:4px;">${timestamp}</div>
+                            <div style="color:#444;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(String(lastMsg || 'No messages yet'))}</div>
                         </div>
                     `;
 
@@ -411,7 +569,7 @@ async function previewFile(id, fileName) {
     // Store file info for download button
     currentPreviewFile = { id, fileName };
     
-    previewContent.innerHTML = '<p style="color: #95a5a6;">Loading preview...</p>';
+    previewContent.innerHTML = '<p style="color: #2f3a3f;">Loading preview...</p>';
     previewContainer.style.display = 'block';
     
     // Scroll to preview
@@ -452,7 +610,8 @@ function createPromptCard(prompt) {
     
     // Click to load prompt
     div.addEventListener('click', () => {
-        autoSaveCurrentConversation('switch');
+        // Don't auto-save when viewing a conversation (read-only operation)
+        // Auto-save will happen via input, send, new_chat, or unload events
         document.querySelectorAll('.sidebar-prompt-item').forEach(item => item.classList.remove('active'));
         div.classList.add('active');
         loadPromptIntoForm(id, name, promptText);
@@ -494,7 +653,7 @@ function loadPromptIntoForm(id, name, text) {
         const msgFiles = Array.isArray(msg.files) ? msg.files : [];
         const filesData = encodeFilesData(msgFiles);
         const filesTitle = msgFiles.length > 0
-            ? `${msgFiles.length} file(s) attached: ${msgFiles.map(f => (typeof f === 'string' ? f : f.name || f.fileName || 'Document')).join(', ')}`
+            ? `${msgFiles.length} file(s) attached: ${msgFiles.map(f => (typeof f === 'string' ? f : f.name || f.fileName || f.FileName || 'Document')).join(', ')}`
             : '';
         const msgSources = Array.isArray(msg.sources) ? msg.sources : [];
         const msgSourcesHtml = msgSources.length > 0 ? `
@@ -506,11 +665,11 @@ function loadPromptIntoForm(id, name, text) {
                     const page = source.pageNumber || source.PageNumber;
                     const label = page ? `${fileName} (p.${page})` : fileName;
                     const href = documentId ? `/api/documents/${documentId}/download` : '#';
-                    const linkStyle = documentId ? 'color: #3498db; text-decoration: underline;' : 'color: #95a5a6; text-decoration: none;';
+                    const linkStyle = documentId ? 'color: #0b63a6; text-decoration: underline;' : 'color: #2f3a3f; text-decoration: none;';
                     return `
                         <div style="display: flex; align-items: center; gap: 8px; font-size: 12px;">
                             <a href="${href}" target="_blank" style="${linkStyle}" onclick="${documentId ? '' : 'return false;'}">${escapeHtml(label)}</a>
-                            ${documentId ? `<button type=\"button\" onclick=\"previewDocumentFile('${documentId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')\" style=\"padding: 2px 6px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 11px;\">Preview</button>` : ''}
+                            ${documentId ? `<button type=\"button\" onclick=\"previewDocumentFile('${documentId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')\" style=\"padding: 2px 6px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 11px;\">Preview</button>` : ''}
                         </div>
                     `;
                 }).join('')}
@@ -519,11 +678,11 @@ function loadPromptIntoForm(id, name, text) {
 
         return `
             <div style="margin-bottom: 12px;">
-                <div style="color: ${msg.role === 'user' ? '#3498db' : '#27ae60'}; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
+                <div style="color: ${msg.role === 'user' ? '#0b63a6' : '#27ae60'}; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
                     <span>${msg.role === 'user' ? 'User' : 'Bot'}:</span>
-                    ${msgFiles.length > 0 ? `<button type="button" onclick="showAttachedFilesModal('${filesData}')" style="background: none; border: none; font-size: 16px; color: #3498db; cursor: pointer; padding: 0;" title="${escapeHtml(filesTitle)}">📎</button>` : ''}
+                    ${msgFiles.length > 0 ? `<button type="button" onclick="showAttachedFilesModal('${filesData}')" style="background: none; border: none; font-size: 16px; color: #0b63a6; cursor: pointer; padding: 0;" title="${escapeHtml(filesTitle)}">📎</button>` : ''}
                 </div>
-                <div style="color: #555; padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
+                <div style="color: #444; padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
                 ${msg.role === 'bot' ? msgSourcesHtml : ''}
             </div>
         `;
@@ -534,7 +693,7 @@ function loadPromptIntoForm(id, name, text) {
         if (typeof f === 'string') {
             return { name: f };
         }
-        return { name: f.name || f.fileName || 'Document', id: f.id || f.documentId };
+        return { name: f.name || f.fileName || f.FileName || 'Document', id: f.id || f.documentId };
     });
 
     const filesFromMessages = messages.flatMap(msg => {
@@ -543,7 +702,7 @@ function loadPromptIntoForm(id, name, text) {
             if (typeof f === 'string') {
                 return { name: f };
             }
-            return { name: f.name || f.fileName || 'Document', id: f.id || f.documentId };
+            return { name: f.name || f.fileName || f.FileName || 'Document', id: f.id || f.documentId };
         });
     });
 
@@ -564,9 +723,9 @@ function loadPromptIntoForm(id, name, text) {
                     const fileId = f.id || '';
                     const fileName = f.name || 'Document';
                     return `
-                        <div style="padding: 4px 0; color: #555; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                        <div style="padding: 4px 0; color: #444; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
                             <span>📎 ${escapeHtml(fileName)}</span>
-                            <button type="button" onclick="previewDocumentFile('${fileId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')" style="padding: 2px 8px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">Preview</button>
+                            <button type="button" onclick="previewDocumentFile('${fileId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')" style="padding: 2px 8px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">Preview</button>
                         </div>
                     `;
                 }).join('')}
@@ -597,7 +756,7 @@ function createNewPrompt() {
     // Reset response section
     const responseContent = document.getElementById('response-content');
     if (responseContent) {
-        responseContent.innerHTML = '<span style="color: #999;">Enter a message and click Send to get a response</span>';
+        responseContent.innerHTML = '<span style="color: #2f3a3f;">Enter a message and click Send to get a response</span>';
     }
     
     // Clear input
@@ -610,9 +769,10 @@ function createNewPrompt() {
 async function loadConversationIntoView(conversationId, title) {
     if (!conversationId) return;
     try {
+        await joinConversationHubGroup(conversationId);
         const responseContent = document.getElementById('response-content');
         if (responseContent) {
-            responseContent.innerHTML = '<span style="color: #999;">Loading conversation...</span>';
+            responseContent.innerHTML = '<span style="color: #2f3a3f;">Loading conversation...</span>';
         }
 
         const res = await fetchWithRetry(`/api/conversations/${conversationId}`);
@@ -626,7 +786,15 @@ async function loadConversationIntoView(conversationId, title) {
         currentConversationHistory = Array.isArray(messages)
             ? messages.map(m => ({
                 role: (m.role || m.Role || '').toLowerCase() === 'assistant' ? 'bot' : (m.role || m.Role || 'user').toLowerCase(),
-                content: m.content || m.Content || ''
+                content: m.content || m.Content || '',
+                files: Array.isArray(m.files)
+                    ? m.files
+                    : (Array.isArray(m.Files)
+                        ? m.Files
+                        : (Array.isArray(m.Attachments)
+                            ? m.Attachments
+                            : (Array.isArray(m.attachments) ? m.attachments : []))),
+                sources: Array.isArray(m.sources) ? m.sources : (Array.isArray(m.Sources) ? m.Sources : [])
             }))
             : [];
 
@@ -637,7 +805,7 @@ async function loadConversationIntoView(conversationId, title) {
 
         if (currentConversationHistory.length === 0) {
             if (responseContent) {
-                responseContent.innerHTML = '<span style="color: #999;">No messages yet</span>';
+                responseContent.innerHTML = '<span style="color: #2f3a3f;">No messages yet</span>';
             }
             return;
         }
@@ -645,19 +813,70 @@ async function loadConversationIntoView(conversationId, title) {
         const conversationHTML = currentConversationHistory.map(msg => {
             return `
                 <div style="margin-bottom: 12px;">
-                    <div style="color: ${msg.role === 'user' ? '#3498db' : '#27ae60'}; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
+                    <div style="color: ${msg.role === 'user' ? '#0b63a6' : '#27ae60'}; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
                         <span>${msg.role === 'user' ? 'User' : 'Bot'}:</span>
                     </div>
-                    <div style="color: #555; padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
+                    <div style="color: #444; padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
                 </div>
             `;
         }).join('');
+
+
+        // Build list of files used in this conversation (attachments + sources)
+        const filesFromMessages = currentConversationHistory.flatMap(msg => {
+            const list = [];
+            if (Array.isArray(msg.files)) {
+                msg.files.forEach(f => {
+                    if (!f) return;
+                    if (typeof f === 'string') list.push({ name: f });
+                    else list.push({ name: f.name || f.fileName || f.FileName || 'Document', id: f.id || f.documentId });
+                });
+            }
+            if (Array.isArray(msg.sources)) {
+                msg.sources.forEach(s => {
+                    if (!s) return;
+                    const name = s.fileName || s.FileName || s.name || 'Document';
+                    const id = s.documentId || s.DocumentId || s.id;
+                    const page = s.pageNumber || s.PageNumber;
+                    list.push({ name: page ? `${name} (p.${page})` : name, id });
+                });
+            }
+            return list;
+        });
+
+        const mergedFiles = filesFromMessages.reduce((acc, file) => {
+            const key = `${(file.name || '').toLowerCase()}::${file.id || ''}`;
+            if (!acc.seen.has(key)) {
+                acc.seen.add(key);
+                acc.items.push(file);
+            }
+            return acc;
+        }, { seen: new Set(), items: [] }).items;
+
+        const filesHTML = mergedFiles.length > 0 ? `
+            <div style="margin-top: 12px; padding: 12px; background: #f8f9fa; border-radius: 8px;">
+                <div style="font-weight: 600; color: #2c3e50; margin-bottom: 8px;">Files used in this conversation</div>
+                <div style="max-height: 200px; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; padding: 8px; background: white;">
+                    ${mergedFiles.map(f => {
+                        const fileId = f.id || '';
+                        const fileName = f.name || 'Document';
+                        return `
+                            <div style="padding: 6px 0; display:flex; align-items:center; justify-content:space-between; gap:8px;">
+                                <span>📎 ${escapeHtml(fileName)}</span>
+                                <button type="button" onclick="previewDocumentFile('${fileId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')" style="padding:2px 8px; background:#0b63a6; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px;">Preview</button>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            </div>
+        ` : '';
 
         if (responseContent) {
             responseContent.innerHTML = `
                 <div style="max-height: 500px; overflow-y: auto; padding: 15px; background: #f8f9fa; border-radius: 8px;">
                     ${conversationHTML}
                 </div>
+                ${filesHTML}
             `;
         }
     } catch (error) {
@@ -706,10 +925,22 @@ async function autoSaveCurrentConversation(reason) {
     const snapshotText = JSON.stringify(snapshot);
     if (snapshotText === lastAutoSavedSnapshot) return null;
 
+    // Don't auto-save if there are no messages (only files is not enough to save)
+    if (snapshot.messages.length === 0) {
+        console.log('[AUTO SAVE] Skipping save - no messages in conversation');
+        return null;
+    }
+
     autoSaveInFlight = true;
     try {
         const firstMessage = snapshot.messages.find(m => m.role === 'user');
-        const chatName = firstMessage ? firstMessage.content.substring(0, 50) : 'Untitled Chat';
+        // If no user message exists, skip auto-save to prevent "Untitled Chat"
+        if (!firstMessage) {
+            console.log('[AUTO SAVE] Skipping save - no user message found');
+            autoSaveInFlight = false;
+            return null;
+        }
+        const chatName = firstMessage.content.substring(0, 50);
         const payload = { name: chatName, promptText: snapshotText };
 
         const existingId = document.getElementById('prompt-id')?.value;
@@ -786,76 +1017,8 @@ async function autoSaveCurrentConversation(reason) {
 }
 
 function restoreDraftConversation() {
-    try {
-        const raw = localStorage.getItem(draftStorageKey);
-        if (!raw) return false;
-        const draft = JSON.parse(raw);
-        if (!draft || (!Array.isArray(draft.messages) && !Array.isArray(draft.files))) return false;
-
-        currentConversationHistory = Array.isArray(draft.messages) ? draft.messages : [];
-        promptSelectedFiles = Array.isArray(draft.files) ? draft.files.map(f => ({
-            name: f.name || 'Document',
-            documentId: f.id || f.documentId,
-            selected: false
-        })) : [];
-        window.promptSelectedFiles = promptSelectedFiles;
-        updatePromptFilesList();
-
-        if (currentConversationHistory.length > 0) {
-            const conversationHTML = currentConversationHistory.map(msg => {
-                const msgFiles = Array.isArray(msg.files) ? msg.files : [];
-                const filesData = encodeFilesData(msgFiles);
-                const filesTitle = msgFiles.length > 0
-                    ? `${msgFiles.length} file(s) attached: ${msgFiles.map(f => (typeof f === 'string' ? f : f.name || f.fileName || 'Document')).join(', ')}`
-                    : '';
-                const msgSources = Array.isArray(msg.sources) ? msg.sources : [];
-                const msgSourcesHtml = msgSources.length > 0 ? `
-                    <div style="margin-top: 8px; padding: 8px; background: #fff; border: 1px solid #dee2e6; border-radius: 4px;">
-                        <div style="font-weight: 600; color: #2c3e50; margin-bottom: 6px; font-size: 0.8rem;">Sources Used:</div>
-                        ${msgSources.map(source => {
-                            const documentId = source.documentId || source.DocumentId;
-                            const fileName = source.fileName || source.FileName || 'Document';
-                            const page = source.pageNumber || source.PageNumber;
-                            const label = page ? `${fileName} (p.${page})` : fileName;
-                            const href = documentId ? `/api/documents/${documentId}/download` : '#';
-                            const linkStyle = documentId ? 'color: #3498db; text-decoration: underline;' : 'color: #95a5a6; text-decoration: none;';
-                            return `
-                                <div style="display: flex; align-items: center; gap: 8px; font-size: 12px;">
-                                    <a href="${href}" target="_blank" style="${linkStyle}" onclick="${documentId ? '' : 'return false;'}">${escapeHtml(label)}</a>
-                                    ${documentId ? `<button type=\"button\" onclick=\"previewDocumentFile('${documentId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')\" style=\"padding: 2px 6px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 11px;\">Preview</button>` : ''}
-                                </div>
-                            `;
-                        }).join('')}
-                    </div>
-                ` : '';
-
-                return `
-                    <div style="margin-bottom: 12px;">
-                        <div style="color: ${msg.role === 'user' ? '#3498db' : '#27ae60'}; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
-                            <span>${msg.role === 'user' ? 'User' : 'Bot'}:</span>
-                            ${msgFiles.length > 0 ? `<button type=\"button\" onclick=\"showAttachedFilesModal('${filesData}')\" style=\"background: none; border: none; font-size: 16px; color: #3498db; cursor: pointer; padding: 0;\" title=\"${escapeHtml(filesTitle)}\">📎</button>` : ''}
-                        </div>
-                        <div style="color: #555; padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
-                        ${msg.role === 'bot' ? msgSourcesHtml : ''}
-                    </div>
-                `;
-            }).join('');
-
-            const responseContent = document.getElementById('response-content');
-            if (responseContent) {
-                responseContent.innerHTML = `
-                    <div style="max-height: 500px; overflow-y: auto; padding: 15px; background: #f8f9fa; border-radius: 8px;">
-                        ${conversationHTML}
-                    </div>
-                `;
-            }
-        }
-
-        return true;
-    } catch (error) {
-        console.warn('[AUTO SAVE] Failed to restore draft:', error);
-        return false;
-    }
+    // Browser storage draft restoration removed.
+    return false;
 }
 
 function closeAutoGroupView() {
@@ -864,7 +1027,7 @@ function closeAutoGroupView() {
     if (promptIdInput) promptIdInput.value = '';
     const responseContent = document.getElementById('response-content');
     if (responseContent) {
-        responseContent.innerHTML = '<span style="color: #999;">Enter a prompt and click Send to get a response</span>';
+        responseContent.innerHTML = '<span style="color: #2f3a3f;">Enter a prompt and click Send to get a response</span>';
     }
 }
 
@@ -877,14 +1040,14 @@ function updatePromptFilesList() {
     // Update paperclip icon color
     if (promptFilesIcon) {
         if (promptSelectedFiles.length === 0) {
-            promptFilesIcon.style.color = '#95a5a6'; // Gray when no files
+            promptFilesIcon.style.color = '#2f3a3f'; // Gray when no files
         } else {
-            promptFilesIcon.style.color = '#3498db'; // Blue when files present
+            promptFilesIcon.style.color = '#0b63a6'; // Blue when files present
         }
     }
     
     if (promptSelectedFiles.length === 0) {
-        filesList.innerHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No files to show</div>';
+        filesList.innerHTML = '<div style="color: #2f3a3f; text-align: center; padding: 20px; font-size: 14px;">No uploads to show</div>';
     } else {
         filesList.innerHTML = promptSelectedFiles.map((fileObj, index) => {
             const fileName = fileObj.file?.name || fileObj.name || 'Document';
@@ -895,7 +1058,7 @@ function updatePromptFilesList() {
                     <span onclick="togglePromptFileSelection(${index})" style="font-size: 14px; color: #333; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; user-select: none;">
                         ${escapeHtml(fileName)}
                     </span>
-                    <button type="button" onclick="event.stopPropagation(); previewDocumentFile('${fileId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')" style="padding: 4px 10px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                    <button type="button" onclick="event.stopPropagation(); previewDocumentFile('${fileId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')" style="padding: 4px 10px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">
                         Preview
                     </button>
                 </div>
@@ -903,6 +1066,7 @@ function updatePromptFilesList() {
         }).join('');
     }
 }
+
 
 function updateActiveGroupStyles() {
     document.querySelectorAll('[data-group-card="true"]').forEach(card => {
@@ -912,10 +1076,10 @@ function updateActiveGroupStyles() {
         const input = card.querySelector('input[data-group-id]');
 
         card.style.background = isActive ? '#eaf4ff' : '#f5f5f5';
-        card.style.border = isActive ? '2px solid #3498db' : '2px solid transparent';
+        card.style.border = isActive ? '2px solid #0b63a6' : '2px solid transparent';
         if (input) {
             input.style.background = isActive ? '#ffffff' : 'white';
-            input.style.borderColor = isActive ? '#3498db' : '#ddd';
+            input.style.borderColor = isActive ? '#0b63a6' : '#ddd';
         }
         if (badge) {
             badge.style.display = isActive ? 'inline-flex' : 'none';
@@ -1003,7 +1167,7 @@ async function restoreDraftConversation() {
                 const msgFiles = Array.isArray(msg.files) ? msg.files : [];
                 const filesData = encodeFilesData(msgFiles);
                 const filesTitle = msgFiles.length > 0
-                    ? `${msgFiles.length} file(s) attached: ${msgFiles.map(f => (typeof f === 'string' ? f : f.name || f.fileName || 'Document')).join(', ')}`
+                    ? `${msgFiles.length} file(s) attached: ${msgFiles.map(f => (typeof f === 'string' ? f : f.name || f.fileName || f.FileName || 'Document')).join(', ')}`
                     : '';
                 const msgSources = Array.isArray(msg.sources) ? msg.sources : [];
                 const msgSourcesHtml = msgSources.length > 0 ? `
@@ -1015,11 +1179,11 @@ async function restoreDraftConversation() {
                             const page = source.pageNumber || source.PageNumber;
                             const label = page ? `${fileName} (p.${page})` : fileName;
                             const href = documentId ? `/api/documents/${documentId}/download` : '#';
-                            const linkStyle = documentId ? 'color: #3498db; text-decoration: underline;' : 'color: #95a5a6; text-decoration: none;';
+                            const linkStyle = documentId ? 'color: #0b63a6; text-decoration: underline;' : 'color: #2f3a3f; text-decoration: none;';
                             return `
                                 <div style="display: flex; align-items: center; gap: 8px; font-size: 12px;">
                                     <a href="${href}" target="_blank" style="${linkStyle}" onclick="${documentId ? '' : 'return false;'}">${escapeHtml(label)}</a>
-                                    ${documentId ? `<button type=\"button\" onclick=\"previewDocumentFile('${documentId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')\" style=\"padding: 2px 6px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 11px;\">Preview</button>` : ''}
+                                    ${documentId ? `<button type=\"button\" onclick=\"previewDocumentFile('${documentId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')\" style=\"padding: 2px 6px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 11px;\">Preview</button>` : ''}
                                 </div>
                             `;
                         }).join('')}
@@ -1028,11 +1192,11 @@ async function restoreDraftConversation() {
 
                 return `
                     <div style="margin-bottom: 12px;">
-                        <div style="color: ${msg.role === 'user' ? '#3498db' : '#27ae60'}; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
+                        <div style="color: ${msg.role === 'user' ? '#0b63a6' : '#27ae60'}; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
                             <span>${msg.role === 'user' ? 'User' : 'Bot'}:</span>
-                            ${msgFiles.length > 0 ? `<button type=\"button\" onclick=\"showAttachedFilesModal('${filesData}')\" style=\"background: none; border: none; font-size: 16px; color: #3498db; cursor: pointer; padding: 0;\" title=\"${escapeHtml(filesTitle)}\">📎</button>` : ''}
+                            ${msgFiles.length > 0 ? `<button type=\"button\" onclick=\"showAttachedFilesModal('${filesData}')\" style=\"background: none; border: none; font-size: 16px; color: #0b63a6; cursor: pointer; padding: 0;\" title=\"${escapeHtml(filesTitle)}\">📎</button>` : ''}
                         </div>
-                        <div style="color: #555; padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
+                        <div style="color: #444; padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
                         ${msg.role === 'bot' ? msgSourcesHtml : ''}
                     </div>
 `;
@@ -1078,7 +1242,7 @@ function showPromptResponse(promptName, promptText) {
         <div style="padding: 10px; background: #f8f9fa; border-radius: 4px; font-size: 0.9rem; color: #555;">
             ${escapeHtml(promptText.substring(0, 200))}${promptText.length > 200 ? '...' : ''}
         </div>
-        <div style="margin-top: 10px; color: #999; font-size: 0.85rem;">
+        <div style="margin-top: 10px; color: #2f3a3f; font-size: 0.85rem;">
             Click "Track" to monitor this prompt's usage
         </div>
     `;
@@ -1086,7 +1250,7 @@ function showPromptResponse(promptName, promptText) {
 
 function hidePromptResponse() {
     const responseContent = document.getElementById('response-content');
-    responseContent.innerHTML = '<span style="color: #999;">Click Track to monitor prompt responses</span>';
+    responseContent.innerHTML = '<span style="color: #2f3a3f;">Click Track to monitor prompt responses</span>';
 }
 
 function trackPrompt() {
@@ -1100,7 +1264,7 @@ function trackPrompt() {
     
     responseContent.innerHTML = `
         <div style="text-align: center; padding: 20px;">
-            <div style="color: #3498db; font-size: 1.2rem; margin-bottom: 10px;">📊 Tracking Active</div>
+            <div style="color: #0b63a6; font-size: 1.2rem; margin-bottom: 10px;">📊 Tracking Active</div>
             <div style="color: #666; font-size: 0.9rem;">Monitoring prompt usage and responses...</div>
             <div style="margin-top: 15px; padding: 10px; background: #e8f5e9; border-radius: 4px; color: #2e7d32;">
                 ✓ Ready to track interactions
@@ -1854,21 +2018,90 @@ async function manageGroupResources(groupId, groupName) {
         
         const modalBody = document.getElementById('modal-content-body');
 
-        // Build files list HTML
+        // Build files list HTML - include files attached to the group AND files referenced by conversations in the group
         let filesListHTML = '';
-        if (groupFiles.length === 0) {
-            filesListHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No files attached yet</div>';
+
+        // Gather files referenced by conversations under this group
+        let convReferencedFiles = [];
+        try {
+            console.log('[MANAGE] Fetching conversations for group to collect referenced files...');
+            const convsRes = await fetchWithRetry(`/api/conversations?groupId=${groupId}&page=1&pageSize=1000`);
+            if (convsRes.ok) {
+                const convsJson = await convsRes.json().catch(() => null);
+                const convs = convsJson?.data || convsJson || [];
+                console.log('[MANAGE] Conversations fetched for file extraction:', convs.length);
+                // For each conversation, try to load messages (if provided inline) or fetch details
+                for (const c of convs) {
+                    const convoId = getProp(c, 'id');
+                    // If messages included, use them; otherwise fetch conversation detail
+                    let messages = getProp(c, 'messages') || getProp(c, 'Messages') || null;
+                    if (!messages) {
+                        try {
+                            const det = await fetchWithRetry(`/api/conversations/${convoId}`);
+                            if (det.ok) {
+                                const detJson = await det.json().catch(() => null);
+                                messages = detJson?.messages || detJson?.Messages || detJson || [];
+                            }
+                        } catch (e) {
+                            console.warn('[MANAGE] Failed to fetch conversation details for', convoId, e);
+                        }
+                    }
+
+                    if (Array.isArray(messages)) {
+                        messages.forEach(m => {
+                            if (Array.isArray(m.files)) {
+                                m.files.forEach(f => {
+                                    if (!f) return;
+                                    if (typeof f === 'string') convReferencedFiles.push({ name: f });
+                                    else convReferencedFiles.push({ name: f.name || f.fileName || f.FileName || 'Document', id: f.id || f.documentId });
+                                });
+                            }
+                            if (Array.isArray(m.sources)) {
+                                m.sources.forEach(s => {
+                                    if (!s) return;
+                                    const name = s.fileName || s.FileName || s.name || 'Document';
+                                    const id = s.documentId || s.DocumentId || s.id;
+                                    const page = s.pageNumber || s.PageNumber;
+                                    convReferencedFiles.push({ name: page ? `${name} (p.${page})` : name, id });
+                                });
+                            }
+                        });
+                    }
+                }
+            } else {
+                console.warn('[MANAGE] Failed to fetch conversations list for group file extraction', convsRes.status);
+            }
+        } catch (err) {
+            console.warn('[MANAGE] Error fetching convs for files:', err);
+        }
+
+        // Merge groupFiles with convReferencedFiles, dedupe by name+id
+        const combinedFiles = [];
+        const seen = new Set();
+        const pushFile = (f) => {
+            const key = `${(getProp(f, 'originalFileName') || getProp(f, 'fileName') || f.name || '').toLowerCase()}::${getProp(f, 'id') || f.id || f.documentId || ''}`;
+            if (!seen.has(key)) {
+                seen.add(key);
+                combinedFiles.push(f);
+            }
+        };
+
+        (groupFiles || []).forEach(f => pushFile(f));
+        convReferencedFiles.forEach(f => pushFile(f));
+
+        if (combinedFiles.length === 0) {
+            filesListHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No attachments yet</div>';
         } else {
-            filesListHTML = groupFiles.map(file => {
-                const fileName = getProp(file, 'originalFileName') || getProp(file, 'fileName') || 'Unknown';
-                const fileId = getProp(file, 'id');
+            filesListHTML = combinedFiles.map(file => {
+                const fileName = getProp(file, 'originalFileName') || getProp(file, 'fileName') || file.name || 'Unknown';
+                const fileId = getProp(file, 'id') || file.id || file.documentId || '';
                 return `
                     <div style="padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0;">
                         <span style="font-size: 14px; color: #333; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                            ${escapeHtml(fileName)}
+                            ${escapeHtml(String(fileName))}
                         </span>
-                        <button type="button" onclick="previewReminderFile('${fileId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')"
-                            style="padding: 4px 12px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">
+                        <button type="button" onclick="previewReminderFile('${fileId}', '${escapeHtml(String(fileName)).replace(/'/g, "\\'")}')"
+                            style="padding: 4px 12px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">
                             Preview
                         </button>
                     </div>
@@ -1964,7 +2197,7 @@ async function manageGroupResources(groupId, groupName) {
                     <button type="button" onclick="closeManageGroupModal()" style="background: none; border: none; font-size: 20px; color: #95a5a6; cursor: pointer; padding: 0; line-height: 1;">×</button>
                 </div>
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
-                    <div style="border: 2px solid #3498db; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; position: relative;">
+                    <div style="border: 2px solid #0b63a6; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; position: relative;">
                         <div style="font-weight: 600; color: #2c3e50; margin-bottom: 8px; font-size: 14px;">Files</div>
                         <div id="modal-files-list" style="flex: 1; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; background: white; max-height: 360px; min-height: 160px;">
                             ${filesListHTML}
@@ -2290,35 +2523,25 @@ async function previewReminderFile(fileId, fileName) {
         modalContent.innerHTML = `
             <div style="text-align: center; padding: 40px;">
                 <div style="font-size: 64px; margin-bottom: 20px;">📄</div>
-                <p style="color: #7f8c8d; font-size: 14px;">Preview not available for this file type.</p>
+                <p style="color: #2f3a3f; font-size: 14px;">Preview not available for this file type.</p>
                 <p style="color: #95a5a6; font-size: 12px; margin-top: 10px;">File: ${escapeHtml(fileName)}</p>
             </div>
         `;
     }
 }
 
-let documentsCache = null;
-
 async function resolveDocumentIdByName(fileName) {
     if (!fileName) return null;
-    if (!documentsCache) {
-        try {
-            const response = await fetch('/api/documents?page=1&pageSize=1000');
-            if (!response.ok) return null;
-            const data = await response.json();
-            const docs = data.documents || data.Documents || [];
-            documentsCache = docs.reduce((acc, doc) => {
-                if (doc.fileName) {
-                    acc[doc.fileName.toLowerCase()] = doc.id || doc.Id;
-                }
-                return acc;
-            }, {});
-        } catch {
-            return null;
-        }
+    try {
+        const response = await fetch('/api/documents?page=1&pageSize=1000');
+        if (!response.ok) return null;
+        const data = await response.json();
+        const docs = data.documents || data.Documents || [];
+        const match = docs.find(doc => (doc.fileName || doc.FileName || '').toLowerCase() === fileName.toLowerCase());
+        return match ? (match.id || match.Id) : null;
+    } catch {
+        return null;
     }
-
-    return documentsCache[fileName.toLowerCase()] || null;
 }
 
 // Preview a document stored in /api/documents
@@ -2373,7 +2596,7 @@ async function previewDocumentFile(documentId, fileName) {
         modalContent.innerHTML = `
             <div style="text-align: center; padding: 40px;">
                 <div style="font-size: 64px; margin-bottom: 20px;">📄</div>
-                <p style="color: #7f8c8d; font-size: 14px;">Preview not available for this file type.</p>
+                <p style="color: #2f3a3f; font-size: 14px;">Preview not available for this file type.</p>
                 <p style="color: #95a5a6; font-size: 12px; margin-top: 10px;">File: ${escapeHtml(safeName)}</p>
             </div>
         `;
@@ -2407,7 +2630,7 @@ function showAttachedFilesModal(encodedFiles) {
                 return `
                     <div style="padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #f0f0f0; gap: 10px;">
                         <span style="font-size: 14px; color: #333; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(fileName)}</span>
-                        <button type="button" onclick="previewDocumentFile('${fileId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')" style="padding: 4px 10px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                        <button type="button" onclick="previewDocumentFile('${fileId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')" style="padding: 4px 10px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">
                             Preview
                         </button>
                     </div>
@@ -2522,6 +2745,18 @@ async function init() {
     console.log('[INIT] Current time:', new Date().toISOString());
     console.log('[INIT] API Base:', API_BASE);
     
+    // Apply theme early so UI controls are available even if API health checks are slow
+    try {
+        const savedTheme = 'light';
+        applyTheme(savedTheme);
+        document.getElementById('theme-toggle')?.addEventListener('click', () => {
+            const nextTheme = document.body.classList.contains('dark') ? 'light' : 'dark';
+            applyTheme(nextTheme);
+        });
+    } catch (e) {
+        console.warn('[INIT] Failed to attach theme toggle early:', e);
+    }
+
     // Wait for API to be ready
     const apiReady = await waitForAPI();
     if (!apiReady) {
@@ -2531,13 +2766,7 @@ async function init() {
     }
     
     try {
-        // Apply saved theme
-        const savedTheme = localStorage.getItem(themeStorageKey) || 'light';
-        applyTheme(savedTheme);
-        document.getElementById('theme-toggle')?.addEventListener('click', () => {
-            const nextTheme = document.body.classList.contains('dark') ? 'light' : 'dark';
-            applyTheme(nextTheme);
-        });
+        // Other initialization assumes API is available
 
         // Setup preview modal event listeners
         document.getElementById('close-preview').addEventListener('click', () => {
@@ -2551,6 +2780,9 @@ async function init() {
                 showMessage('No file selected for download', 'error');
             }
         });
+
+        await initConversationHub();
+        await initResourceHub();
         
         // Setup prompts file management
         const promptFileInput = document.getElementById('prompt-file-input');
@@ -2606,9 +2838,9 @@ async function init() {
             updatePromptFilesList();
         });
         
-        // Handle file selection - show preview
+        // Handle file selection - show preview and auto-upload
         if (promptFileInput) {
-            promptFileInput.addEventListener('change', (e) => {
+            promptFileInput.addEventListener('change', async (e) => {
                 const file = e.target.files[0];
                 if (file) {
                     promptPreviewFile = file;
@@ -2634,74 +2866,119 @@ async function init() {
                         promptPreviewContent.innerHTML = `
                             <div style="text-align: center;">
                                 <div style="font-size: 64px; margin-bottom: 10px;">📄</div>
-                                <div style="color: #7f8c8d; font-size: 12px;">Preview not available</div>
+                                <div style="color: #2f3a3f; font-size: 12px;">Preview not available</div>
                             </div>
                         `;
+                    }
+                    
+                    // Auto-upload the file
+                    // Check if file already exists in list
+                    if (promptSelectedFiles.find(f => f.name === file.name)) {
+                        showMessage('File already uploaded', 'error');
+                        promptFileInput.value = '';
+                        return;
+                    }
+                    
+                    try {
+                        // Show progress bar
+                        if (promptUploadProgress) {
+                            promptUploadProgress.style.display = 'block';
+                        }
+                        const progressBar = document.getElementById('prompt-upload-progress-bar');
+                        if (progressBar) {
+                            progressBar.style.width = '0%';
+                        }
+                        
+                        // Upload file to server with progress tracking
+                        const formData = new FormData();
+                        formData.append('file', file);
+                        
+                        const xhr = new XMLHttpRequest();
+                        
+                        // Track upload progress
+                        xhr.upload.addEventListener('progress', (e) => {
+                            if (e.lengthComputable && progressBar) {
+                                const percentComplete = (e.loaded / e.total) * 100;
+                                progressBar.style.width = percentComplete + '%';
+                            }
+                        });
+                        
+                        // Handle upload completion
+                        const uploadPromise = new Promise((resolve, reject) => {
+                            xhr.addEventListener('load', () => {
+                                if (xhr.status >= 200 && xhr.status < 300) {
+                                    try {
+                                        const fileData = JSON.parse(xhr.responseText);
+                                        resolve(fileData);
+                                    } catch (e) {
+                                        reject(new Error('Invalid JSON response'));
+                                    }
+                                } else {
+                                    reject(new Error(`Upload failed: ${xhr.responseText}`));
+                                }
+                            });
+                            xhr.addEventListener('error', () => reject(new Error('Network error')));
+                            xhr.addEventListener('abort', () => reject(new Error('Upload cancelled')));
+                        });
+                        
+                        // Upload to Documents API so RAG can use the attachment
+                        let uploadGroupId = activePromptGroupId || null;
+                        if (!uploadGroupId && activeConversationId) {
+                            try {
+                                const conv = await (await fetch(`${API_BASE}/conversations/${activeConversationId}`)).json().catch(() => null);
+                                uploadGroupId = conv?.resourceGroupId || conv?.ResourceGroupId || null;
+                            } catch (err) {
+                                console.warn('[UPLOAD] Failed to resolve conversation group for file:', err);
+                            }
+                        }
+                        const uploadUrl = uploadGroupId
+                            ? `/api/documents/upload?groupIds=${encodeURIComponent(uploadGroupId)}`
+                            : '/api/documents/upload';
+                        xhr.open('POST', uploadUrl);
+                        xhr.send(formData);
+                        
+                        const fileData = await uploadPromise;
+                        const documentId = fileData.id || fileData.Id;
+                        
+                        // Add uploaded file to list with server ID
+                        promptSelectedFiles.push({
+                            file: file, 
+                            name: file.name, 
+                            selected: false,
+                            documentId: documentId
+                        });
+                        window.promptSelectedFiles = promptSelectedFiles;
+                        updatePromptFilesList();
+                        showMessage(`File "${file.name}" uploaded successfully`, 'success');
+                        
+                        // Clear preview
+                        promptPreviewFile = null;
+                        if (promptPreviewFilename) promptPreviewFilename.textContent = '';
+                        if (promptPreviewContent) promptPreviewContent.innerHTML = `<div style="font-size: 48px; color: #95a5a6;">📄</div>`;
+                        if (promptFileInput) promptFileInput.value = '';
+                        
+                        // Reload files list to show the new file (documents are listed via /api/documents)
+                        if (typeof loadFiles === 'function') {
+                            loadFiles(true);
+                        }
+                    } catch (error) {
+                        console.error('Error uploading file:', error);
+                        showMessage(`Failed to upload file: ${error.message}`, 'error');
+                        if (promptFileInput) promptFileInput.value = '';
+                    } finally {
+                        // Hide progress bar after a short delay
+                        setTimeout(() => {
+                            if (promptUploadProgress) {
+                                promptUploadProgress.style.display = 'none';
+                            }
+                        }, 1000);
                     }
                 }
             });
         }
         
-        // Upload button - uploads file to server and adds to list
-        document.getElementById('prompt-upload-btn')?.addEventListener('click', async () => {
-            if (!promptPreviewFile) {
-                showMessage('Please select a file first', 'error');
-                return;
-            }
-            
-            // Check if file already exists in list
-            if (promptSelectedFiles.find(f => f.name === promptPreviewFile.name)) {
-                showMessage('File already uploaded', 'error');
-                return;
-            }
-            
-            try {
-                setPromptUploadLoading(true);
-                // Upload file to server
-                const formData = new FormData();
-                formData.append('file', promptPreviewFile);
-                
-                const uploadRes = await fetch('/api/documents/upload', {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                if (!uploadRes.ok) {
-                    const errorText = await uploadRes.text();
-                    throw new Error(`Upload failed: ${errorText}`);
-                }
-                
-                const fileData = await uploadRes.json();
-                const documentId = fileData.id || fileData.Id;
-                
-                // Add uploaded file to list with server ID
-                promptSelectedFiles.push({
-                    file: promptPreviewFile, 
-                    name: promptPreviewFile.name, 
-                    selected: false,
-                    documentId: documentId
-                });
-                window.promptSelectedFiles = promptSelectedFiles;
-                updatePromptFilesList();
-                showMessage(`File "${promptPreviewFile.name}" uploaded successfully`, 'success');
-                
-                // Clear preview
-                promptPreviewFile = null;
-                if (promptPreviewFilename) promptPreviewFilename.textContent = '';
-                if (promptPreviewContent) promptPreviewContent.innerHTML = `<div style="font-size: 48px; color: #95a5a6;">📄</div>`;
-                if (promptFileInput) promptFileInput.value = '';
-                
-                // Reload files list to show the new file
-                if (typeof loadFiles === 'function') {
-                    loadFiles(true);
-                }
-            } catch (error) {
-                console.error('Error uploading file:', error);
-                showMessage(`Failed to upload file: ${error.message}`, 'error');
-            } finally {
-                setPromptUploadLoading(false);
-            }
-        });
+        // Global abort controller for cancelling requests
+        let currentRequestController = null;
         
         // Send button function - sends prompt to API
         const buildSourcesHtml = (sources) => {
@@ -2717,12 +2994,12 @@ async function init() {
                             const chunkText = source.chunkText || source.ChunkText || '';
                             const label = page ? `${fileName} (p.${page})` : fileName;
                             const href = documentId ? `/api/documents/${documentId}/download` : '#';
-                            const linkStyle = documentId ? 'color: #3498db; text-decoration: underline;' : 'color: #95a5a6; text-decoration: none;';
+                            const linkStyle = documentId ? 'color: #0b63a6; text-decoration: underline;' : 'color: #95a5a6; text-decoration: none;';
                             return `
                                 <div style="display: flex; flex-direction: column; gap: 4px;">
                                     <div style="display: flex; align-items: center; gap: 8px;">
                                         <a href="${href}" target="_blank" style="${linkStyle}" onclick="${documentId ? '' : 'return false;'}">${escapeHtml(label)}</a>
-                                        ${documentId ? `<button type=\"button\" onclick=\"previewDocumentFile('${documentId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')\" style=\"padding: 2px 8px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;\">Preview</button>` : ''}
+                                        ${documentId ? `<button type=\"button\" onclick=\"previewDocumentFile('${documentId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')\" style=\"padding: 2px 8px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;\">Preview</button>` : ''}
                                     </div>
                                     ${chunkText ? `<div style=\"font-size: 12px; color: #666; padding-left: 4px;\">${escapeHtml(chunkText)}</div>` : ''}
                                 </div>
@@ -2736,6 +3013,8 @@ async function init() {
         const sendPrompt = async () => {
             const promptText = document.getElementById('prompt-name')?.value;
             const responseContent = document.getElementById('response-content');
+            const sendBtn = document.getElementById('prompt-send-btn');
+            const cancelBtn = document.getElementById('prompt-cancel-btn');
             let lastQueryResult = null;
             
             if (!promptText || !promptText.trim()) {
@@ -2744,22 +3023,32 @@ async function init() {
             }
             
             try {
-                // Show loading state
+                // Show loading state and cancel button
                 responseContent.innerHTML = `
-                    <div style="text-align: center; padding: 20px; color: #3498db;">
+                    <div style="text-align: center; padding: 20px; color: #0b63a6;">
                         <div style="font-size: 1.2rem; margin-bottom: 10px;">⏳ Sending...</div>
                         <div style="font-size: 0.9rem; color: #666;">Processing your request...</div>
                     </div>
                 `;
+                
+                // Show cancel button, hide send button
+                if (sendBtn) sendBtn.style.display = 'none';
+                if (cancelBtn) cancelBtn.style.display = 'block';
                 
                 // Send query to documents endpoint. Use server-expected property names (Query/TopK)
                 const documentsUrl = '/api/documents/query';
                 const selectedFiles = promptSelectedFiles.some(f => f.selected)
                     ? promptSelectedFiles.filter(f => f.selected)
                     : promptSelectedFiles;
-                const documentIds = selectedFiles
-                    .map(f => f.documentId || f.id)
-                    .filter(Boolean);
+                const documentIds = [];
+                for (const f of selectedFiles) {
+                    let id = f.documentId || f.id;
+                    if (!id && f.name) {
+                        id = await resolveDocumentIdByName(f.name);
+                        if (id) f.documentId = id;
+                    }
+                    if (id) documentIds.push(id);
+                }
                 const includeAllGroups = document.getElementById('prompt-include-all')?.checked;
                 const payload = { Query: promptText, TopK: 5 };
                 if (documentIds.length > 0) {
@@ -2768,19 +3057,73 @@ async function init() {
                 if (activePromptGroupId && !includeAllGroups) {
                     payload.GroupIds = [activePromptGroupId];
                 }
+                if (activeConversationId) {
+                    payload.ConversationId = activeConversationId;
+                }
+                // Ensure any locally attached files are uploaded to the server first
+                if (promptSelectedFiles && promptSelectedFiles.length > 0) {
+                    for (let i = 0; i < promptSelectedFiles.length; i++) {
+                        const f = promptSelectedFiles[i];
+                        if (!f.documentId && f.file) {
+                            try {
+                                const fd = new FormData();
+                                fd.append('file', f.file);
+
+                                // Upload to Documents API so RAG can index and use the attachment
+                                let uploadGroupId = activePromptGroupId || null;
+                                if (!uploadGroupId && activeConversationId) {
+                                    const conv = await (await fetch(`${API_BASE}/conversations/${activeConversationId}`)).json().catch(() => null);
+                                    uploadGroupId = conv?.resourceGroupId || conv?.ResourceGroupId || null;
+                                }
+                                const uploadUrl = uploadGroupId
+                                    ? `/api/documents/upload?groupIds=${encodeURIComponent(uploadGroupId)}`
+                                    : '/api/documents/upload';
+                                const upRes = await fetch(uploadUrl, { method: 'POST', body: fd });
+                                if (upRes.ok) {
+                                    const fdJson = await upRes.json().catch(() => null);
+                                    const newId = fdJson?.id || fdJson?.Id;
+                                    if (newId) {
+                                        f.documentId = newId;
+                                        console.log('[SEND PROMPT] Uploaded attached file', f.name, '=>', newId);
+                                    }
+                                } else {
+                                    console.warn('[SEND PROMPT] Failed to upload attached file:', f.name);
+                                }
+                            } catch (upErr) {
+                                console.warn('[SEND PROMPT] Error uploading attached file:', upErr);
+                            }
+                        }
+                    }
+                    // sync window global
+                    window.promptSelectedFiles = promptSelectedFiles;
+                    updatePromptFilesList();
+                }
+
+                // Recompute selected files and documentIds after any uploads
+                const selectedFilesAfterUpload = promptSelectedFiles.some(f => f.selected)
+                    ? promptSelectedFiles.filter(f => f.selected)
+                    : promptSelectedFiles;
+                const documentIdsAfterUpload = selectedFilesAfterUpload
+                    .map(f => f.documentId || f.id)
+                    .filter(Boolean);
+                if (documentIdsAfterUpload.length > 0) {
+                    payload.DocumentIds = documentIdsAfterUpload;
+                }
+
                 console.log('[SEND PROMPT] Sending documents query to', documentsUrl, 'payload:', payload);
 
-                const controller = new AbortController();
-                const timeoutMs = 150000; // 150 seconds - longer than server timeout
-                const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+                currentRequestController = new AbortController();
+                const timeoutMs = 300000; // 300 seconds
+                const timeoutId = setTimeout(() => currentRequestController.abort(), timeoutMs);
 
                 const queryResponse = await fetch(documentsUrl, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
                     body: JSON.stringify(payload),
-                    signal: controller.signal
+                    signal: currentRequestController.signal
                 });
                 clearTimeout(timeoutId);
+                currentRequestController = null;
 
                 console.log('[SEND PROMPT] documents query status:', queryResponse.status, queryResponse.statusText);
                 let result;
@@ -2802,10 +3145,33 @@ async function init() {
 
                 const responseConversationId = result.conversationId || result.ConversationId;
                 if (responseConversationId) {
+                    activeConversationId = responseConversationId;
+                    await joinConversationHubGroup(responseConversationId);
                     // Server will persist group->conversation mapping. If we don't have an active group,
                     // ask the server for the conversation to determine the associated group and activate it.
                     if (!activePromptGroupId) {
                         await syncActiveGroupFromConversation(responseConversationId);
+                    }
+
+                    // Attach files to the conversation's group for persistence
+                    if (documentIdsAfterUpload && documentIdsAfterUpload.length > 0) {
+                        // Fetch conversation to determine its ResourceGroup and attach files to that group
+                        try {
+                            const convRes = await fetch(`${API_BASE}/conversations/${responseConversationId}`);
+                            const convJson = convRes.ok ? await convRes.json().catch(() => null) : null;
+                            const convGroupId = convJson?.resourceGroupId || convJson?.ResourceGroupId || null;
+                            if (convGroupId) {
+                                for (const fileId of documentIdsAfterUpload) {
+                                    try {
+                                        await fetch(`${API_BASE}/groups/${convGroupId}/files/${fileId}`, { method: 'POST' });
+                                    } catch (attachErr) {
+                                        console.warn('[SEND PROMPT] Failed to attach file to group:', attachErr);
+                                    }
+                                }
+                            }
+                        } catch (err) {
+                            console.warn('[SEND PROMPT] Failed to attach files to conversation group:', err);
+                        }
                     }
                 }
 
@@ -2821,6 +3187,7 @@ async function init() {
                 // Add to conversation history with files and sources
                 currentConversationHistory.push({role: 'user', content: promptText, files: attachedFiles});
                 currentConversationHistory.push({role: 'bot', content: answer, sources});
+
                 
                 // Display the full conversation history
                 const conversationHTML = currentConversationHistory.map(msg => {
@@ -2839,7 +3206,7 @@ async function init() {
                         <div class="conversation-message" style="margin-bottom: 12px;">
                             <div class="conversation-message-role ${msg.role === 'user' ? 'conversation-message-user' : 'conversation-message-bot'}" style="font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
                                 <span>${msg.role === 'user' ? 'User' : 'Bot'}:</span>
-                                ${msg.files && msg.files.length > 0 ? `<button type="button" onclick="showAttachedFilesModal('${filesData}')" style="background: none; border: none; font-size: 16px; color: #3498db; cursor: pointer; padding: 0;" title="${escapeHtml(filesTitle)}">📎</button>` : ''}
+                                ${msg.files && msg.files.length > 0 ? `<button type="button" onclick="showAttachedFilesModal('${filesData}')" style="background: none; border: none; font-size: 16px; color: #0b63a6; cursor: pointer; padding: 0;" title="${escapeHtml(filesTitle)}">📎</button>` : ''}
                             </div>
                             <div class="conversation-message-content" style="padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
                             ${msgSourcesHtml}
@@ -2857,50 +3224,59 @@ async function init() {
                 
                 showMessage('Response received successfully', 'success');
 
-                // Persist conversation snapshot to server so it survives reloads
-                try {
-                    await autoSaveCurrentConversation('send');
-                } catch (err) {
-                    console.warn('[SEND PROMPT] Auto-save after send failed:', err);
-                }
+                // Conversations are already persisted server-side via ConversationService
+                // No need to auto-save to ManagedPrompts (which are for reusable templates)
+                // try {
+                //     await autoSaveCurrentConversation('send');
+                // } catch (err) {
+                //     console.warn('[SEND PROMPT] Auto-save after send failed:', err);
+                // }
 
                 // Clear attached files after sending
                 promptSelectedFiles = [];
                 window.promptSelectedFiles = promptSelectedFiles;
                 updatePromptFilesList();
-                try {
-                    localStorage.removeItem(draftStorageKey);
-                } catch {
-                    // ignore
-                }
                 
             } catch (error) {
                 console.error('Error sending prompt:', error);
                 if (error.name === 'AbortError') {
                     responseContent.innerHTML = `
                         <div style="text-align: center; padding: 20px; color: #e67e22;">
-                            <div style="font-size: 1.2rem; margin-bottom: 10px;">⏱️ Timeout</div>
-                            <div style="font-size: 0.9rem;">The server took too long to respond. Try again.</div>
+                            <div style="font-size: 1.2rem; margin-bottom: 10px;">🚫 Cancelled</div>
+                            <div style="font-size: 0.9rem;">Request successfully cancelled.</div>
                         </div>
                     `;
-                    showMessage('Request timed out after 60 seconds', 'error');
-                    return;
-                }
-                const fallbackSources = lastQueryResult?.referencedSources || lastQueryResult?.ReferencedSources || lastQueryResult?.sources || lastQueryResult?.Sources || [];
-                const fallbackSourcesHtml = buildSourcesHtml(fallbackSources);
-                responseContent.innerHTML = `
-                    <div style="text-align: center; padding: 20px; color: #e74c3c;">
-                        <div style="font-size: 1.2rem; margin-bottom: 10px;">❌ Error</div>
-                        <div style="font-size: 0.9rem;">${escapeHtml(error.message)}</div>
-                    </div>
-                    ${fallbackSourcesHtml}
-                `;
-                showMessage(`Error: ${error.message}`, 'error');
+                    showMessage('Request successfully cancelled', 'info');
+                } else {
+                    const fallbackSources = lastQueryResult?.referencedSources || lastQueryResult?.ReferencedSources || lastQueryResult?.sources || lastQueryResult?.Sources || [];
+                    const fallbackSourcesHtml = buildSourcesHtml(fallbackSources);
+                    responseContent.innerHTML = `
+                        <div style="text-align: center; padding: 20px; color: #e74c3c;">
+                            <div style="font-size: 1.2rem; margin-bottom: 10px;">❌ Error</div>
+                            <div style="font-size: 0.9rem;">${escapeHtml(error.message)}</div>
+                        </div>
+                        ${fallbackSourcesHtml}
+                    `;
+                        showMessage(`Error: ${error.message}`, 'error');
+                    }
+                } finally {
+                // Reset buttons regardless of success or error
+                currentRequestController = null;
+                if (sendBtn) sendBtn.style.display = 'block';
+                if (cancelBtn) cancelBtn.style.display = 'none';
             }
         };
         
         // Send button click handler
         document.getElementById('prompt-send-btn')?.addEventListener('click', sendPrompt);
+        
+        // Cancel button click handler
+        document.getElementById('prompt-cancel-btn')?.addEventListener('click', () => {
+            if (currentRequestController) {
+                currentRequestController.abort();
+                showMessage('Cancelling request...', 'info');
+            }
+        });
         
         // Enter key handler for prompt text input
         document.getElementById('prompt-name')?.addEventListener('keypress', (e) => {
@@ -2910,9 +3286,11 @@ async function init() {
             }
         });
 
-        document.getElementById('prompt-name')?.addEventListener('input', () => {
-            autoSaveCurrentConversation('input');
-        });
+        // Conversations are already persisted server-side
+        // Auto-save to ManagedPrompts is unnecessary
+        // document.getElementById('prompt-name')?.addEventListener('input', () => {
+        //     autoSaveCurrentConversation('input');
+        // });
         
         // New Chat button - saves current conversation to Auto Groups
         document.getElementById('new-chat-btn')?.addEventListener('click', async () => {
@@ -2923,7 +3301,11 @@ async function init() {
             
             // Get the first user message as the name
             const firstMessage = currentConversationHistory.find(m => m.role === 'user');
-            const chatName = firstMessage ? firstMessage.content.substring(0, 50) : 'Untitled Chat';
+            if (!firstMessage) {
+                showMessage('No user messages to save', 'error');
+                return;
+            }
+            const chatName = firstMessage.content.substring(0, 50);
             
             // Get file details from uploaded files
             const fileDetails = promptSelectedFiles.map(f => ({
@@ -2938,8 +3320,9 @@ async function init() {
             });
             
             try {
-                await autoSaveCurrentConversation('new_chat');
-                showMessage('Conversation saved to Auto Groups', 'success');
+                // Conversations are already persisted server-side
+                // No need to save to ManagedPrompts
+                // await autoSaveCurrentConversation('new_chat');
                 
                 // Reset for new chat
                 currentConversationHistory = [];
@@ -2950,14 +3333,14 @@ async function init() {
                 const promptIdInput = document.getElementById('prompt-id');
                 if (promptIdInput) promptIdInput.value = '';
                 document.getElementById('prompt-name').value = '';
-                document.getElementById('response-content').innerHTML = '<span style="color: #999;">Enter a prompt and click Send to get a response</span>';
+                document.getElementById('response-content').innerHTML = '<span style="color: #2f3a3f;">Enter a prompt and click Send to get a response</span>';
                 
-                // Reload prompts list to show new Auto Group
+                // Reload prompts list to show conversations
                 loadPrompts(true);
                 
             } catch (error) {
-                console.error('Error saving conversation:', error);
-                showMessage('Failed to save conversation', 'error');
+                console.error('Error starting new conversation:', error);
+                showMessage('Failed to start new conversation', 'error');
             }
         });
         
@@ -2981,14 +3364,14 @@ async function init() {
                 if (groupSelectedFiles.length === 0) {
                     groupFilesIcon.style.color = '#95a5a6'; // Gray when no files
                 } else {
-                    groupFilesIcon.style.color = '#3498db'; // Blue when files present
+                    groupFilesIcon.style.color = '#0b63a6'; // Blue when files present
                 }
             }
             
             // Update files list in Files section with checkboxes (only show if files exist)
             if (groupFilesList) {
                 if (groupSelectedFiles.length === 0) {
-                    groupFilesList.innerHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No files attached yet</div>';
+                    groupFilesList.innerHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No attachments yet</div>';
                 } else {
                     groupFilesList.innerHTML = groupSelectedFiles.map((fileObj, index) => `
                         <div style="padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0; ${fileObj.selected ? 'background: #f0f0f0;' : ''}">
@@ -2996,7 +3379,7 @@ async function init() {
                             <span onclick="toggleGroupFileSelection(${index})" style="font-size: 14px; color: #333; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; user-select: none;">
                                 ${escapeHtml(fileObj.name)}
                             </span>
-                            <button type="button" onclick="event.stopPropagation(); previewGroupFile(${index})" style="padding: 4px 12px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">Preview</button>
+                            <button type="button" onclick="event.stopPropagation(); previewGroupFile(${index})" style="padding: 4px 12px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">Preview</button>
                         </div>
                     `).join('');
                 }
@@ -3008,7 +3391,7 @@ async function init() {
             // Update dropdown list
             if (groupFilesListDropdown) {
                 if (groupSelectedFiles.length === 0) {
-                    groupFilesListDropdown.innerHTML = '<div style="color: #95a5a6; text-align: center; padding: 10px;">No files attached</div>';
+                    groupFilesListDropdown.innerHTML = '<div style="color: #95a5a6; text-align: center; padding: 10px;">No attachments</div>';
                 } else {
                     groupFilesListDropdown.innerHTML = groupSelectedFiles.map((fileObj, index) => `
                         <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
@@ -3083,7 +3466,7 @@ async function init() {
                         groupPreviewContent.innerHTML = `
                             <div style="text-align: center;">
                                 <div style="font-size: 64px; margin-bottom: 10px;">📄</div>
-                                <div style="color: #7f8c8d; font-size: 12px;">Preview not available</div>
+                                <div style="color: #2f3a3f; font-size: 12px;">Preview not available</div>
                             </div>
                         `;
                     }
@@ -3190,7 +3573,7 @@ async function init() {
                 modalContent.innerHTML = `
                     <div style="text-align: center; padding: 40px;">
                         <div style="font-size: 64px; margin-bottom: 20px;">📄</div>
-                        <p style="color: #7f8c8d; font-size: 14px;">Preview not available for this file type.</p>
+                        <p style="color: #2f3a3f; font-size: 14px;">Preview not available for this file type.</p>
                         <p style="color: #95a5a6; font-size: 12px; margin-top: 10px;">File: ${escapeHtml(file.name)}</p>
                         <p style="color: #95a5a6; font-size: 12px;">Size: ${formatFileSize(file.size)}</p>
                     </div>
@@ -3245,13 +3628,13 @@ async function init() {
                 if (reminderSelectedFiles.length === 0) {
                     reminderFilesIcon.style.color = '#95a5a6';
                 } else {
-                    reminderFilesIcon.style.color = '#3498db';
+                    reminderFilesIcon.style.color = '#0b63a6';
                 }
             }
             
             if (reminderFilesList) {
                 if (reminderSelectedFiles.length === 0) {
-                    reminderFilesList.innerHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No files attached yet</div>';
+                    reminderFilesList.innerHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No attachments yet</div>';
                 } else {
                     reminderFilesList.innerHTML = reminderSelectedFiles.map((fileObj, index) => `
                         <div style="padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0; ${fileObj.selected ? 'background: #f0f0f0;' : ''}">
@@ -3315,7 +3698,7 @@ async function init() {
                         reminderPreviewContent.innerHTML = `
                             <div style="text-align: center;">
                                 <div style="font-size: 64px; margin-bottom: 10px;">📄</div>
-                                <div style="color: #7f8c8d; font-size: 12px;">Preview not available</div>
+                                <div style="color: #2f3a3f; font-size: 12px;">Preview not available</div>
                             </div>
                         `;
                     }
@@ -3384,17 +3767,21 @@ async function init() {
             groupsCount: state.groups.data.length
         }));
 
-        if (AUTO_SAVE_ENABLED) restoreDraftConversation();
+        // Draft restoration disabled since auto-save is disabled
+        // Conversations are persisted server-side, not in browser storage
+        // if (AUTO_SAVE_ENABLED) restoreDraftConversation();
 
-        window.addEventListener('beforeunload', () => {
-            autoSaveCurrentConversation('unload');
-        });
+        // Conversations are already persisted server-side via ConversationService
+        // No need to auto-save to ManagedPrompts on unload/hidden
+        // window.addEventListener('beforeunload', () => {
+        //     autoSaveCurrentConversation('unload');
+        // });
 
-        document.addEventListener('visibilitychange', () => {
-            if (document.hidden) {
-                autoSaveCurrentConversation('hidden');
-            }
-        });
+        // document.addEventListener('visibilitychange', () => {
+        //     if (document.hidden) {
+        //         autoSaveCurrentConversation('hidden');
+        //     }
+        // });
     } catch (error) {
         console.error('[INIT] Error during initialization:', error);
         showMessage('Error loading initial data: ' + error.message, 'error');

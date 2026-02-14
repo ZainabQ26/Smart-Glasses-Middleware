@@ -3,6 +3,8 @@ using Microsoft.EntityFrameworkCore;
 using SmartGlassesMiddleware.Data;
 using SmartGlassesMiddleware.Models;
 using SmartGlassesMiddleware.Services;
+using Microsoft.AspNetCore.SignalR;
+using SmartGlassesMiddleware.Hubs;
 
 namespace SmartGlassesMiddleware.Controllers;
 
@@ -20,6 +22,7 @@ public class AdminController : ControllerBase
     private readonly IRAGService _documentRagService;
     private readonly ILogger<AdminController> _logger;
     private readonly IRequestMonitoringService _monitoringService;
+    private readonly IHubContext<ResourceHub>? _resourceHub;
     private const int DefaultPageSize = 20;
     private const int MaxPageSize = 100;
 
@@ -30,7 +33,8 @@ public class AdminController : ControllerBase
         IRagService ragService,
         IRAGService documentRagService,
         ILogger<AdminController> logger,
-        IRequestMonitoringService monitoringService)
+        IRequestMonitoringService monitoringService,
+        IHubContext<ResourceHub>? resourceHub = null)
     {
         _context = context;
         _mediaStorageService = mediaStorageService;
@@ -39,6 +43,7 @@ public class AdminController : ControllerBase
         _documentRagService = documentRagService;
         _logger = logger;
         _monitoringService = monitoringService;
+        _resourceHub = resourceHub;
     }
 
     #region Files
@@ -207,6 +212,8 @@ public class AdminController : ControllerBase
             await _monitoringService.CompleteRequest(requestId, true, 
                 $"File uploaded successfully: {managedFile.FileName}");
 
+            await NotifyFilesChangedAsync();
+
             return CreatedAtAction(nameof(GetFiles), new { id = managedFile.Id }, new
             {
                 managedFile.Id,
@@ -269,6 +276,7 @@ public class AdminController : ControllerBase
 
             await _monitoringService.CompleteRequest(requestId, true, 
                 $"File deleted: {file.FileName}");
+            await NotifyFilesChangedAsync();
             return NoContent();
         }
         catch (Exception ex)
@@ -769,6 +777,8 @@ public class AdminController : ControllerBase
             await _monitoringService.CompleteRequest(requestId, true, 
                 $"Group created: {group.Name}");
 
+            await NotifyGroupsChangedAsync();
+
             return CreatedAtAction(nameof(GetGroups), new { id = group.Id }, new
             {
                 group.Id,
@@ -835,6 +845,8 @@ public class AdminController : ControllerBase
             await _monitoringService.CompleteRequest(requestId, true, 
                 $"Group updated: {group.Name}");
 
+            await NotifyGroupsChangedAsync();
+
             return Ok(new
             {
                 group.Id,
@@ -888,6 +900,7 @@ public class AdminController : ControllerBase
 
             await _monitoringService.CompleteRequest(requestId, true, 
                 $"Group deleted: {group.Name}");
+            await NotifyGroupsChangedAsync();
             return NoContent();
         }
         catch (Exception ex)
@@ -1034,6 +1047,9 @@ public class AdminController : ControllerBase
             // Invalidate cache
             await InvalidateAllCaches();
 
+            await NotifyGroupsChangedAsync();
+            await NotifyFilesChangedAsync();
+
             return Ok(new { message = "File added to group successfully" });
         }
         catch (Exception ex)
@@ -1077,6 +1093,9 @@ public class AdminController : ControllerBase
 
             // Invalidate cache
             await InvalidateAllCaches();
+
+            await NotifyGroupsChangedAsync();
+            await NotifyFilesChangedAsync();
 
             return NoContent();
         }
@@ -1142,6 +1161,8 @@ public class AdminController : ControllerBase
             // Invalidate cache
             await InvalidateAllCaches();
 
+            await NotifyGroupsChangedAsync();
+
             return Ok(new { message = "Prompt added to group successfully" });
         }
         catch (Exception ex)
@@ -1186,6 +1207,8 @@ public class AdminController : ControllerBase
             // Invalidate cache
             await InvalidateAllCaches();
 
+            await NotifyGroupsChangedAsync();
+
             return NoContent();
         }
         catch (Exception ex)
@@ -1203,6 +1226,20 @@ public class AdminController : ControllerBase
     #endregion
 
     #region Helper Methods
+
+    private Task NotifyFilesChangedAsync()
+    {
+        return _resourceHub != null
+            ? _resourceHub.Clients.All.SendAsync("filesChanged")
+            : Task.CompletedTask;
+    }
+
+    private Task NotifyGroupsChangedAsync()
+    {
+        return _resourceHub != null
+            ? _resourceHub.Clients.All.SendAsync("groupsChanged")
+            : Task.CompletedTask;
+    }
 
     /// <summary>
     /// Auto-delete a group if it has no files, prompts, or conversations

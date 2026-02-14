@@ -22,7 +22,7 @@ public class MonitoringController : ControllerBase
     /// </summary>
     [HttpGet("requests")]
     [ProducesResponseType(typeof(List<RequestStatus>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> GetRecentRequests([FromQuery] int count = 50)
+    public async Task<IActionResult> GetRecentRequests([FromQuery] int count = 200)
     {
         try
         {

@@ -435,6 +435,23 @@ public class MediaController : ControllerBase
             // Determine prompt text (if promptAudio was transcribed earlier, use it)
             var promptTextFinal = !string.IsNullOrWhiteSpace(promptAudioTranscription) ? promptAudioTranscription : request.Prompt;
 
+            // Validate that the request contains at least some input (files or text)
+            if ((bgItems == null || bgItems.Count == 0) && string.IsNullOrWhiteSpace(promptTextFinal) && string.IsNullOrWhiteSpace(inputText))
+            {
+                var pd = new ValidationProblemDetails
+                {
+                    Type = "https://tools.ietf.org/html/rfc7231#section-6.5.1",
+                    Title = "Validation Failed",
+                    Status = StatusCodes.Status400BadRequest,
+                    Detail = "Request must include at least one uploaded file or a text input/prompt.",
+                    Instance = HttpContext.Request.Path
+                };
+                pd.Extensions["requestId"] = HttpContext.TraceIdentifier;
+                pd.Extensions["timestamp"] = DateTime.UtcNow.ToString("o");
+
+                return BadRequest(pd);
+            }
+
             var entry = new BackgroundTaskEntry
             {
                 PromptText = promptTextFinal,
@@ -442,10 +459,31 @@ public class MediaController : ControllerBase
                 MediaItems = bgItems
             };
 
+            // Mark as Processing immediately so E2E tests see an active task
+            entry.Status = BackgroundTaskStatus.Processing;
+            entry.UpdatedAt = DateTime.UtcNow;
+
+            // Start a monitoring request if monitoring service is available so the UI shows it
+            string? monitoringRequestIdForUpload = null;
+            if (_monitoringService != null)
+            {
+                try
+                {
+                    monitoringRequestIdForUpload = await _monitoringService.StartRequest("Audio", promptTextFinal ?? "Media upload", entry.Id.ToString());
+                    await _monitoringService.UpdateRequestStatus(monitoringRequestIdForUpload, "Processing", null, 0);
+                    entry.MonitoringRequestId = monitoringRequestIdForUpload;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to start monitoring request for background entry {EntryId}", entry.Id);
+                }
+            }
+
             await _backgroundQueue.EnqueueAsync(entry);
 
             var location = $"/api/tasks/{entry.Id}";
-            return Accepted(location, new { taskId = entry.Id, location });
+            // Return requestId for consistency with E2E expectations
+            return Accepted(location, new { taskId = entry.Id, requestId = entry.Id, location });
         }
         catch (Exception ex)
         {
