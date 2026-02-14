@@ -135,6 +135,29 @@ public class AdminController : ControllerBase
             });
         }
 
+        // Server-side validation: disallow audio files on the generic files endpoint.
+        // Audio is allowed via prompt/media endpoints (e.g. /api/ask) but should not
+        // be saved through the admin `files` upload flow.
+        var disallowedAudioExtensions = new[] { ".wav", ".mp3", ".m4a", ".flac", ".aac" };
+        var fileExt = Path.GetExtension(request.File.FileName ?? string.Empty).ToLowerInvariant();
+        var fileContentType = (request.File.ContentType ?? string.Empty).ToLowerInvariant();
+        if (disallowedAudioExtensions.Contains(fileExt) || fileContentType.StartsWith("audio/"))
+        {
+            var pdAudio = new ValidationProblemDetails
+            {
+                Type = "https://tools.ietf.org/html/rfc7231#section-6.5.1",
+                Title = "Validation Failed",
+                Status = StatusCodes.Status400BadRequest,
+                Detail = "Audio files are not allowed on this endpoint. Use the prompt/media endpoints for audio uploads.",
+                Instance = HttpContext.Request.Path
+            };
+            pdAudio.Errors.Add("file", new[] { "Audio file uploads are not permitted via /api/admin/files" });
+            pdAudio.Extensions["requestId"] = HttpContext.TraceIdentifier;
+            pdAudio.Extensions["timestamp"] = DateTime.UtcNow.ToString("o");
+
+            return BadRequest(pdAudio);
+        }
+
         string? requestId = null;
         try
         {
