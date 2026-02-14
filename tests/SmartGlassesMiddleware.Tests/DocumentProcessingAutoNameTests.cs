@@ -26,8 +26,20 @@ namespace SmartGlassesMiddleware.Tests
             using var context = new ApplicationDbContext(options);
 
             var mockStorage = new Mock<IMediaStorageService>();
+            string capturedContent = null;
             mockStorage.Setup(s => s.UploadFileAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string>()))
-                .ReturnsAsync((string key, Stream st, string ct) => key);
+                .ReturnsAsync((string key, Stream st, string ct) =>
+                {
+                    try
+                    {
+                        st.Seek(0, SeekOrigin.Begin);
+                    }
+                    catch { }
+                    using var sr = new StreamReader(st, Encoding.UTF8, true, 1024, leaveOpen: true);
+                    var content = sr.ReadToEnd();
+                    capturedContent = content;
+                    return key;
+                });
 
             var logger = new NullLogger<DocumentProcessingService>();
             var config = new ConfigurationBuilder().AddInMemoryCollection().Build();
@@ -45,6 +57,10 @@ namespace SmartGlassesMiddleware.Tests
             Assert.Equal("my-fancy-title.md", meta.FileName);
             // Ensure storage key used contains the generated file name
             Assert.Contains(meta.FileName, meta.StorageKey);
+            // Ensure the uploaded content (markdown) contains the heading and body text
+            Assert.False(string.IsNullOrEmpty(capturedContent), "Uploaded content should not be empty");
+            Assert.Contains("My Fancy Title", capturedContent);
+            Assert.Contains("This is the content of the document.", capturedContent);
         }
     }
 }
