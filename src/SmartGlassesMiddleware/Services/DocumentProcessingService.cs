@@ -1,13 +1,6 @@
 using iText.Kernel.Pdf;
 using iText.Kernel.Pdf.Canvas.Parser;
 using iText.Kernel.Pdf.Canvas.Parser.Listener;
-using iText.Layout;
-using iText.Layout.Element;
-using iText.Layout.Properties;
-using iText.Kernel.Geom;
-using iText.Kernel.Font;
-using iText.IO.Font.Constants;
-using iText.IO.Image;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 using SmartGlassesMiddleware.Models;
@@ -17,7 +10,10 @@ using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using Tesseract;
 using System.Text;
+using System.Xml;
+using System.Xml.Linq;
 using Microsoft.EntityFrameworkCore;
+using Markdig;
 
 namespace SmartGlassesMiddleware.Services;
 
@@ -59,49 +55,49 @@ public class DocumentProcessingService : IDocumentProcessingService
         
         if (requestId != null && _monitoringService != null)
         {
-            await _monitoringService.UpdateRequestStatus(requestId, "Processing", $"Converting {fileName} to PDF", 10);
+            await _monitoringService.UpdateRequestStatus(requestId, "Processing", $"Converting {fileName} to Markdown", 10);
         }
 
-        // Convert to PDF and get the converted stream
-        MemoryStream pdfStream;
-        string pdfFileName;
+        // Convert to Markdown and get the converted stream
+        MemoryStream markdownStream;
+        string markdownFileName;
         
         try
         {
             fileStream.Position = 0;
-            (pdfStream, pdfFileName) = await ConvertToPdfAsync(fileStream, fileName, documentType, requestId);
+            (markdownStream, markdownFileName) = await ConvertToMarkdownAsync(fileStream, fileName, documentType, requestId);
             
             if (requestId != null && _monitoringService != null)
             {
-                await _monitoringService.UpdateRequestStatus(requestId, "Processing", "Uploading converted PDF", 40);
+                await _monitoringService.UpdateRequestStatus(requestId, "Processing", "Uploading converted Markdown", 40);
             }
 
-            // Store only the converted PDF
-            var storageKey = $"documents/{documentId}/{pdfFileName}";
-            pdfStream.Position = 0;
-            await _storageService.UploadFileAsync(storageKey, pdfStream, "application/pdf");
+            // Store only the converted Markdown
+            var storageKey = $"documents/{documentId}/{markdownFileName}";
+            markdownStream.Position = 0;
+            await _storageService.UploadFileAsync(storageKey, markdownStream, "text/markdown");
 
             var metadata = new DocumentMetadata
             {
                 Id = documentId,
-                FileName = pdfFileName,
+                FileName = markdownFileName,
                 OriginalFileName = fileName,
-                ContentType = "application/pdf",
+                ContentType = "text/markdown",
                 StorageKey = storageKey,
                 UploadedAt = DateTime.UtcNow,
-                FileSize = pdfStream.Length,
-                DocumentType = "pdf",
+                FileSize = markdownStream.Length,
+                DocumentType = "markdown",
                 IsProcessed = false
             };
 
             if (requestId != null && _monitoringService != null)
             {
-                await _monitoringService.UpdateRequestStatus(requestId, "Processing", "Extracting text from PDF", 60);
+                await _monitoringService.UpdateRequestStatus(requestId, "Processing", "Extracting text from Markdown", 60);
             }
 
-            // Extract text and create chunks from the PDF
-            pdfStream.Position = 0;
-            var chunks = await ExtractFromPdfAsync(pdfStream, metadata.Id, requestId);
+            // Extract text and create chunks from the Markdown
+            markdownStream.Position = 0;
+            var chunks = await ExtractFromMarkdownAsync(markdownStream, metadata.Id, requestId);
 
             metadata.TotalPages = chunks.Any() ? chunks.Max(c => c.PageNumber) : 0;
             metadata.IsProcessed = true;
@@ -143,49 +139,89 @@ public class DocumentProcessingService : IDocumentProcessingService
         }
     }
 
-    private async Task<(MemoryStream pdfStream, string pdfFileName)> ConvertToPdfAsync(Stream inputStream, string fileName, string documentType, string? requestId)
+    private async Task<(MemoryStream markdownStream, string markdownFileName)> ConvertToMarkdownAsync(Stream inputStream, string fileName, string documentType, string? requestId)
     {
         var baseFileName = System.IO.Path.GetFileNameWithoutExtension(fileName);
-        var pdfFileName = $"{baseFileName}.pdf";
+        var markdownFileName = $"{baseFileName}.md";
 
         switch (documentType)
         {
             case "pdf":
-                // Already a PDF, just copy it
-                var ms = new MemoryStream();
-                inputStream.Position = 0;
-                await inputStream.CopyToAsync(ms);
-                return (ms, pdfFileName);
+                return await ConvertPdfToMarkdownAsync(inputStream, markdownFileName, requestId);
 
             case "docx":
-                return await ConvertDocxToPdfAsync(inputStream, pdfFileName, requestId);
+                return await ConvertDocxToMarkdownAsync(inputStream, markdownFileName, requestId);
 
             case "txt":
-                return await ConvertTextToPdfAsync(inputStream, pdfFileName, requestId);
+                return await ConvertTextToMarkdownAsync(inputStream, markdownFileName, requestId);
+
+            case "xml":
+                return await ConvertXmlToMarkdownAsync(inputStream, markdownFileName, requestId);
 
             case "image":
-                return await ConvertImageToPdfAsync(inputStream, pdfFileName, requestId);
+                return await ConvertImageToMarkdownAsync(inputStream, markdownFileName, requestId);
 
             default:
                 throw new NotSupportedException($"Document type {documentType} is not supported");
         }
     }
 
-    private async Task<(MemoryStream, string)> ConvertDocxToPdfAsync(Stream docxStream, string pdfFileName, string? requestId)
+    private async Task<(MemoryStream, string)> ConvertPdfToMarkdownAsync(Stream pdfStream, string markdownFileName, string? requestId)
     {
         if (requestId != null && _monitoringService != null)
         {
-            await _monitoringService.UpdateRequestStatus(requestId, "Processing", "Converting DOCX to PDF", 20);
+            await _monitoringService.UpdateRequestStatus(requestId, "Processing", "Converting PDF to Markdown", 20);
         }
 
-        var pdfStream = new MemoryStream();
-        using (var pdfWriter = new PdfWriter(pdfStream, new WriterProperties().SetPdfVersion(PdfVersion.PDF_1_7)))
-        {
-            pdfWriter.SetCloseStream(false);
-            using var pdfDocument = new PdfDocument(pdfWriter);
-            using var document = new iText.Layout.Document(pdfDocument);
+        var markdown = new StringBuilder();
+        markdown.AppendLine($"# {System.IO.Path.GetFileNameWithoutExtension(markdownFileName)}");
+        markdown.AppendLine();
 
-            // Extract text from DOCX
+        try
+        {
+            using var pdfReader = new PdfReader(pdfStream);
+            using var pdfDocument = new PdfDocument(pdfReader);
+            var totalPages = pdfDocument.GetNumberOfPages();
+
+            for (int pageNum = 1; pageNum <= totalPages; pageNum++)
+            {
+                var page = pdfDocument.GetPage(pageNum);
+                var strategy = new LocationTextExtractionStrategy();
+                string pageText = PdfTextExtractor.GetTextFromPage(page, strategy);
+
+                if (totalPages > 1)
+                {
+                    markdown.AppendLine($"## Page {pageNum}");
+                    markdown.AppendLine();
+                }
+
+                markdown.AppendLine(pageText);
+                markdown.AppendLine();
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error converting PDF to Markdown");
+            throw;
+        }
+
+        var ms = new MemoryStream(Encoding.UTF8.GetBytes(markdown.ToString()));
+        return (ms, markdownFileName);
+    }
+
+    private async Task<(MemoryStream, string)> ConvertDocxToMarkdownAsync(Stream docxStream, string markdownFileName, string? requestId)
+    {
+        if (requestId != null && _monitoringService != null)
+        {
+            await _monitoringService.UpdateRequestStatus(requestId, "Processing", "Converting DOCX to Markdown", 20);
+        }
+
+        var markdown = new StringBuilder();
+        markdown.AppendLine($"# {System.IO.Path.GetFileNameWithoutExtension(markdownFileName)}");
+        markdown.AppendLine();
+
+        try
+        {
             using var doc = WordprocessingDocument.Open(docxStream, false);
             var body = doc.MainDocumentPart?.Document?.Body;
 
@@ -196,49 +232,124 @@ public class DocumentProcessingService : IDocumentProcessingService
                     var text = paragraph.InnerText;
                     if (!string.IsNullOrWhiteSpace(text))
                     {
-                        document.Add(new iText.Layout.Element.Paragraph(text));
+                        // Check if it's a heading based on style
+                        var pPr = paragraph.Elements<ParagraphProperties>().FirstOrDefault();
+                        var styleId = pPr?.ParagraphStyleId?.Val?.Value;
+                        
+                        if (styleId != null && styleId.StartsWith("Heading"))
+                        {
+                            var level = styleId.Length > 7 ? int.Parse(styleId.Substring(7)) : 1;
+                            markdown.AppendLine($"{new string('#', Math.Min(level, 6))} {text}");
+                        }
+                        else
+                        {
+                            markdown.AppendLine(text);
+                        }
+                        markdown.AppendLine();
                     }
                 }
             }
         }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error converting DOCX to Markdown");
+            throw;
+        }
 
-        pdfStream.Position = 0;
-        return (pdfStream, pdfFileName);
+        var ms = new MemoryStream(Encoding.UTF8.GetBytes(markdown.ToString()));
+        return (ms, markdownFileName);
     }
 
-    private async Task<(MemoryStream, string)> ConvertTextToPdfAsync(Stream textStream, string pdfFileName, string? requestId)
+    private async Task<(MemoryStream, string)> ConvertTextToMarkdownAsync(Stream textStream, string markdownFileName, string? requestId)
     {
         if (requestId != null && _monitoringService != null)
         {
-            await _monitoringService.UpdateRequestStatus(requestId, "Processing", "Converting text to PDF", 20);
+            await _monitoringService.UpdateRequestStatus(requestId, "Processing", "Converting text to Markdown", 20);
         }
 
-        var pdfStream = new MemoryStream();
-        using (var pdfWriter = new PdfWriter(pdfStream, new WriterProperties().SetPdfVersion(PdfVersion.PDF_1_7)))
-        {
-            pdfWriter.SetCloseStream(false);
-            using var pdfDocument = new PdfDocument(pdfWriter);
-            using var document = new iText.Layout.Document(pdfDocument);
+        var markdown = new StringBuilder();
+        markdown.AppendLine($"# {System.IO.Path.GetFileNameWithoutExtension(markdownFileName)}");
+        markdown.AppendLine();
 
-            using var reader = new StreamReader(textStream);
-            var text = await reader.ReadToEndAsync();
-            
-            // Split text into paragraphs and add to PDF
-            var paragraphs = text.Split(new[] { "\n\n", "\r\n\r\n" }, StringSplitOptions.None);
-            foreach (var para in paragraphs)
-            {
-                if (!string.IsNullOrWhiteSpace(para))
-                {
-                    document.Add(new iText.Layout.Element.Paragraph(para.Trim()));
-                }
-            }
-        }
+        using var reader = new StreamReader(textStream);
+        var text = await reader.ReadToEndAsync();
+        markdown.AppendLine(text);
 
-        pdfStream.Position = 0;
-        return (pdfStream, pdfFileName);
+        var ms = new MemoryStream(Encoding.UTF8.GetBytes(markdown.ToString()));
+        return (ms, markdownFileName);
     }
 
-    private async Task<(MemoryStream, string)> ConvertImageToPdfAsync(Stream imageStream, string pdfFileName, string? requestId)
+    private async Task<(MemoryStream, string)> ConvertXmlToMarkdownAsync(Stream xmlStream, string markdownFileName, string? requestId)
+    {
+        if (requestId != null && _monitoringService != null)
+        {
+            await _monitoringService.UpdateRequestStatus(requestId, "Processing", "Converting XML to Markdown", 20);
+        }
+
+        var markdown = new StringBuilder();
+        markdown.AppendLine($"# {System.IO.Path.GetFileNameWithoutExtension(markdownFileName)}");
+        markdown.AppendLine();
+
+        try
+        {
+            using var reader = new StreamReader(xmlStream);
+            var xmlContent = await reader.ReadToEndAsync();
+            
+            // Parse XML and convert to readable markdown
+            var xdoc = XDocument.Parse(xmlContent);
+            
+            markdown.AppendLine("## XML Content");
+            markdown.AppendLine();
+            markdown.AppendLine("```xml");
+            markdown.AppendLine(xdoc.ToString());
+            markdown.AppendLine("```");
+            markdown.AppendLine();
+            
+            // Also extract text content for better searchability
+            markdown.AppendLine("## Text Content");
+            markdown.AppendLine();
+            ExtractXmlText(xdoc.Root, markdown, 0);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error converting XML to Markdown");
+            // Fallback: treat as plain text
+            xmlStream.Position = 0;
+            using var reader = new StreamReader(xmlStream);
+            var content = await reader.ReadToEndAsync();
+            markdown.AppendLine("```xml");
+            markdown.AppendLine(content);
+            markdown.AppendLine("```");
+        }
+
+        var ms = new MemoryStream(Encoding.UTF8.GetBytes(markdown.ToString()));
+        return (ms, markdownFileName);
+    }
+
+    private void ExtractXmlText(XElement? element, StringBuilder markdown, int level)
+    {
+        if (element == null) return;
+
+        var indent = new string(' ', level * 2);
+        
+        // Add element name as heading or list item
+        if (!string.IsNullOrWhiteSpace(element.Value) && !element.HasElements)
+        {
+            markdown.AppendLine($"{indent}- **{element.Name.LocalName}**: {element.Value.Trim()}");
+        }
+        else if (element.HasElements)
+        {
+            markdown.AppendLine($"{indent}- **{element.Name.LocalName}**");
+        }
+
+        // Process child elements
+        foreach (var child in element.Elements())
+        {
+            ExtractXmlText(child, markdown, level + 1);
+        }
+    }
+
+    private async Task<(MemoryStream, string)> ConvertImageToMarkdownAsync(Stream imageStream, string markdownFileName, string? requestId)
     {
         if (requestId != null && _monitoringService != null)
         {
@@ -260,40 +371,28 @@ public class DocumentProcessingService : IDocumentProcessingService
         // Perform OCR on the cropped image
         var ocrText = await PerformOcrOnImageAsync(croppedImage);
 
-        // Create PDF with image and OCR text
-        var pdfStream = new MemoryStream();
-        using (var pdfWriter = new PdfWriter(pdfStream, new WriterProperties().SetPdfVersion(PdfVersion.PDF_1_7)))
+        // Create Markdown with embedded image and OCR text
+        var markdown = new StringBuilder();
+        markdown.AppendLine($"# {System.IO.Path.GetFileNameWithoutExtension(markdownFileName)}");
+        markdown.AppendLine();
+        markdown.AppendLine("## Image Content");
+        markdown.AppendLine();
+        
+        if (!string.IsNullOrWhiteSpace(ocrText))
         {
-            pdfWriter.SetCloseStream(false);
-            using var pdfDocument = new PdfDocument(pdfWriter);
-            using var document = new iText.Layout.Document(pdfDocument);
-
-            // Add the image to PDF
-            using var imageMemStream = new MemoryStream();
-            await croppedImage.SaveAsPngAsync(imageMemStream);
-            imageMemStream.Position = 0;
-            
-            var imageData = ImageDataFactory.Create(imageMemStream.ToArray());
-            var pdfImage = new iText.Layout.Element.Image(imageData);
-            
-            // Scale image to fit page
-            var pageSize = pdfDocument.GetDefaultPageSize();
-            pdfImage.ScaleToFit(pageSize.GetWidth() - 72, pageSize.GetHeight() - 72);
-            pdfImage.SetHorizontalAlignment(HorizontalAlignment.CENTER);
-            
-            document.Add(pdfImage);
-
-            // Add OCR text as invisible overlay for searchability
-            if (!string.IsNullOrWhiteSpace(ocrText))
-            {
-                document.Add(new iText.Layout.Element.Paragraph(ocrText)
-                    .SetFontSize(0.1f) // Very small font
-                    .SetOpacity(0)); // Invisible
-            }
+            markdown.AppendLine("### Extracted Text (OCR)");
+            markdown.AppendLine();
+            markdown.AppendLine(ocrText);
+            markdown.AppendLine();
+        }
+        else
+        {
+            markdown.AppendLine("*No text extracted from image*");
+            markdown.AppendLine();
         }
 
-        pdfStream.Position = 0;
-        return (pdfStream, pdfFileName);
+        var ms = new MemoryStream(Encoding.UTF8.GetBytes(markdown.ToString()));
+        return (ms, markdownFileName);
     }
 
     private SixLabors.ImageSharp.Image<Rgb24> CropToPaper(SixLabors.ImageSharp.Image<Rgb24> image)
@@ -388,6 +487,29 @@ public class DocumentProcessingService : IDocumentProcessingService
         }
     }
 
+    private async Task<List<DocumentChunk>> ExtractFromMarkdownAsync(Stream markdownStream, Guid documentId, string? requestId)
+    {
+        var chunks = new List<DocumentChunk>();
+        var chunkIndex = 0;
+
+        try
+        {
+            using var reader = new StreamReader(markdownStream);
+            var markdownText = await reader.ReadToEndAsync();
+
+            // Create chunks from markdown text
+            var pageChunks = CreateTextChunks(markdownText, 1, documentId, ref chunkIndex);
+            chunks.AddRange(pageChunks);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error extracting text from Markdown");
+            throw;
+        }
+
+        return chunks;
+    }
+
     public async Task<List<DocumentChunk>> ExtractChunksAsync(Guid documentId)
     {
         return await _context.DocumentChunks
@@ -419,8 +541,8 @@ public class DocumentProcessingService : IDocumentProcessingService
         using var stream = await _storageService.DownloadFileAsync(metadata.StorageKey);
         stream.Position = 0;
 
-        // Re-extract from the stored PDF
-        var chunks = await ExtractFromPdfAsync(stream, metadata.Id, null);
+        // Re-extract from the stored Markdown
+        var chunks = await ExtractFromMarkdownAsync(stream, metadata.Id, null);
 
         metadata.TotalPages = chunks.Any() ? chunks.Max(c => c.PageNumber) : 0;
         metadata.IsProcessed = true;
@@ -440,47 +562,11 @@ public class DocumentProcessingService : IDocumentProcessingService
             ".pdf" => "pdf",
             ".docx" => "docx",
             ".txt" => "txt",
+            ".xml" => "xml",
             ".jpg" or ".jpeg" or ".png" or ".bmp" or ".tiff" or ".gif" => "image",
-            _ => contentType.StartsWith("image/") ? "image" : "unknown"
+            _ => contentType.StartsWith("image/") ? "image" : 
+                 contentType.Contains("xml") ? "xml" : "unknown"
         };
-    }
-
-    private async Task<List<DocumentChunk>> ExtractFromPdfAsync(Stream pdfStream, Guid documentId, string? requestId)
-    {
-        var chunks = new List<DocumentChunk>();
-        var chunkIndex = 0;
-
-        try
-        {
-            using var pdfReader = new PdfReader(pdfStream);
-            using var pdfDocument = new PdfDocument(pdfReader);
-            var totalPages = pdfDocument.GetNumberOfPages();
-
-            for (int pageNum = 1; pageNum <= totalPages; pageNum++)
-            {
-                if (requestId != null && _monitoringService != null && pageNum % 5 == 0)
-                {
-                    var progress = 60 + (int)((pageNum / (double)totalPages) * 25);
-                    await _monitoringService.UpdateRequestStatus(requestId, "Processing", 
-                        $"Extracting text: page {pageNum}/{totalPages}", progress);
-                }
-
-                var page = pdfDocument.GetPage(pageNum);
-                var strategy = new LocationTextExtractionStrategy();
-                string pageText = PdfTextExtractor.GetTextFromPage(page, strategy);
-
-                // Create chunks from page text
-                var pageChunks = CreateTextChunks(pageText, pageNum, documentId, ref chunkIndex);
-                chunks.AddRange(pageChunks);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error extracting text from PDF");
-            throw;
-        }
-
-        return chunks;
     }
 
     private List<DocumentChunk> CreateTextChunks(string text, int pageNumber, Guid documentId, ref int chunkIndex)
