@@ -1075,6 +1075,54 @@
             border: 1px solid #e0e0e0;
         }
 
+        .progress-bar-container {
+            margin: 10px 0;
+            background: #e0e0e0;
+            border-radius: 4px;
+            height: 24px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #0b63a6, #1e88e5);
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .progress-text {
+            margin: 5px 0;
+            font-size: 13px;
+            color: #2c3e50;
+        }
+
+        .activity-history {
+            margin-top: 10px;
+            padding: 8px;
+            background: white;
+            border-radius: 4px;
+            border: 1px solid #e0e0e0;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+
+        .activity-item {
+            padding: 4px 0;
+            font-size: 12px;
+            color: #666;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .activity-item:last-child {
+            border-bottom: none;
+        }
+
         .response-header {
             display: flex;
             justify-content: space-between;
