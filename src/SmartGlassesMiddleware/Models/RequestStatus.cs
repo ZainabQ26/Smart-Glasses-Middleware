@@ -1,8 +1,11 @@
+using System.ComponentModel.DataAnnotations.Schema;
+
 namespace SmartGlassesMiddleware.Models;
 
 /// <summary>
 /// Represents a single activity/step in a request's progress
 /// </summary>
+[NotMapped]
 public class RequestActivity
 {
     public DateTime Timestamp { get; set; }
@@ -30,6 +33,7 @@ public class RequestStatus
     /// <summary>
     /// History of activities performed during request processing (not persisted to DB, only for real-time streaming)
     /// </summary>
+    [NotMapped]
     public List<RequestActivity> ActivityHistory { get; set; } = new();
     
     public DateTime StartTime { get; set; }
