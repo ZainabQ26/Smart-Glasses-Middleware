@@ -119,13 +119,13 @@ test.describe('Admin Page', () => {
   test('should have responsive layout', async ({ page }) => {
     // Test different viewport sizes
     await page.setViewportSize({ width: 1920, height: 1080 });
-    await expect(page.locator('text=Files')).toBeVisible();
-    
+    await expect(page.locator('button[data-tab="files"]')).toBeVisible();
+
     await page.setViewportSize({ width: 768, height: 1024 });
-    await expect(page.locator('text=Files')).toBeVisible();
-    
+    await expect(page.locator('button[data-tab="files"]')).toBeVisible();
+
     await page.setViewportSize({ width: 375, height: 667 });
-    await expect(page.locator('text=Files')).toBeVisible();
+    await expect(page.locator('button[data-tab="files"]')).toBeVisible();
   });
 
   test('should not have console errors on load', async ({ page }) => {

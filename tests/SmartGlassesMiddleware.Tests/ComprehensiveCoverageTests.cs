@@ -30,8 +30,15 @@ public class DocumentProcessingServiceEnhancedTests
         _context = new ApplicationDbContext(options);
         _mockLogger = new Mock<ILogger<DocumentProcessingService>>();
         _mockStorageService = new Mock<IMediaStorageService>();
+        var mockMonitoringService = new Mock<IRequestMonitoringService>();
+        var mockConfiguration = new Mock<IConfiguration>();
 
-        _service = new DocumentProcessingService(_mockLogger.Object, _mockStorageService.Object, _context);
+        _service = new DocumentProcessingService(
+            _mockLogger.Object, 
+            _mockStorageService.Object, 
+            _context,
+            mockMonitoringService.Object,
+            mockConfiguration.Object);
     }
 
     [Fact]

@@ -1,5 +1,49 @@
 const API_BASE = '/api/admin';
+const ADMIN_DEBUG = !!window.__ADMIN_DEBUG__;
 const themeStorageKey = 'uiTheme';
+
+// In-memory cache for API responses (no browser storage)
+const apiCache = {
+    data: new Map(),
+    ttl: 30000, // 30 seconds TTL
+    
+    get(key) {
+        const item = this.data.get(key);
+        if (!item) return null;
+        
+        if (Date.now() > item.expiry) {
+            this.data.delete(key);
+            return null;
+        }
+        
+        return item.value;
+    },
+    
+    set(key, value, customTtl = null) {
+        this.data.set(key, {
+            value,
+            expiry: Date.now() + (customTtl || this.ttl)
+        });
+    },
+    
+    invalidate(pattern) {
+        if (pattern) {
+            // Invalidate keys matching pattern
+            for (const key of this.data.keys()) {
+                if (key.includes(pattern)) {
+                    this.data.delete(key);
+                }
+            }
+        } else {
+            // Clear all
+            this.data.clear();
+        }
+    },
+    
+    clear() {
+        this.data.clear();
+    }
+};
 
 // Helper function to get property with case-insensitive fallback
 function getProp(obj, propName) {
@@ -14,50 +58,95 @@ function getProp(obj, propName) {
     return undefined;
 }
 
-// Enhanced fetch with retry logic and cache busting
-async function fetchWithRetry(url, options = {}, retries = 3) {
-    // Add cache busting parameter and no-cache headers
-    const cacheBuster = `_=${Date.now()}_${Math.random().toString(36).substring(7)}`;
-    const separator = url.includes('?') ? '&' : '?';
-    const bustUrl = `${url}${separator}${cacheBuster}`;
+// Enhanced fetch with retry logic, caching, and deduplication
+const pendingRequests = new Map();
+
+async function fetchWithRetry(url, options = {}, retries = 2) {
+    const method = options.method || 'GET';
+    const cacheKey = `${method}:${url}`;
     
-    // Force no-cache headers
+    // For GET requests, check cache first
+    if (method === 'GET') {
+        const cached = apiCache.get(cacheKey);
+        if (cached) {
+            console.log(`[API] Cache hit: ${url}`);
+            return new Response(JSON.stringify(cached), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' }
+            });
+        }
+        
+        // Check if request is already pending (deduplication)
+        if (pendingRequests.has(cacheKey)) {
+            console.log(`[API] Deduplicating request: ${url}`);
+            // Return a fresh clone of the underlying response so each caller
+            // can consume the body independently (avoids "Body is disturbed or locked").
+            const underlying = pendingRequests.get(cacheKey);
+            return underlying.then(res => res.clone());
+        }
+    }
+    
+    // Add cache busting parameter only for non-cached requests
+    const cacheBuster = `_=${Date.now()}`;
+    const separator = url.includes('?') ? '&' : '?';
+    const bustUrl = method === 'GET' ? `${url}${separator}${cacheBuster}` : url;
+    
     const fetchOptions = {
         ...options,
         headers: {
             ...options.headers,
-            'Cache-Control': 'no-cache, no-store, must-revalidate',
-            'Pragma': 'no-cache',
-            'Expires': '0'
-        },
-        cache: 'no-store'
+            'Content-Type': options.headers?.['Content-Type'] || 'application/json'
+        }
     };
     
-    for (let i = 0; i < retries; i++) {
-        try {
-            console.log(`[API] Request: ${fetchOptions.method || 'GET'} ${url}${i > 0 ? ` (retry ${i})` : ''}`);
+    // Create the fetch promise
+    const fetchPromise = (async () => {
+        for (let i = 0; i < retries; i++) {
+            try {
+                console.log(`[API] Request: ${method} ${url}${i > 0 ? ` (retry ${i})` : ''}`);
 
-            const response = await fetch(bustUrl, fetchOptions);
-            console.log(`[API] Response: ${response.status} ${response.statusText} for ${url}`);
+                const response = await fetch(bustUrl, fetchOptions);
+                console.log(`[API] Response: ${response.status} ${response.statusText} for ${url}`);
 
-            if (!response.ok && response.status >= 500 && i < retries - 1) {
-                console.warn(`[API] Server error, retrying in ${(i + 1) * 500}ms...`);
-                await new Promise(resolve => setTimeout(resolve, (i + 1) * 500));
-                continue;
+                // Clone response for caching
+                if (response.ok && method === 'GET') {
+                    const clone = response.clone();
+                    clone.json().then(data => {
+                        apiCache.set(cacheKey, data);
+                    }).catch(() => {
+                        // Ignore cache errors
+                    });
+                }
+
+                if (!response.ok && response.status >= 500 && i < retries - 1) {
+                    console.warn(`[API] Server error, retrying in ${(i + 1) * 500}ms...`);
+                    await new Promise(resolve => setTimeout(resolve, (i + 1) * 500));
+                    continue;
+                }
+
+                return response;
+            } catch (error) {
+                console.error(`[API] Network error on attempt ${i + 1}:`, error);
+                if (i < retries - 1) {
+                    await new Promise(resolve => setTimeout(resolve, (i + 1) * 500));
+                    continue;
+                }
+                throw error;
             }
-
-            return response;
-        } catch (error) {
-            console.error(`[API] Network error on attempt ${i + 1}:`, error);
-            if (i < retries - 1) {
-                await new Promise(resolve => setTimeout(resolve, (i + 1) * 500));
-                continue;
-            }
-            throw error;
         }
-    }
 
-    throw new Error(`Failed to fetch ${url} after ${retries} attempts`);
+        throw new Error(`Failed to fetch ${url} after ${retries} attempts`);
+    })();
+    
+    // Store pending request for deduplication
+    if (method === 'GET') {
+        pendingRequests.set(cacheKey, fetchPromise);
+        fetchPromise.finally(() => {
+            pendingRequests.delete(cacheKey);
+        });
+    }
+    
+    return fetchPromise;
 }
 
 // Helper to safely encode attached files array into a URL-safe JSON string
@@ -84,8 +173,9 @@ const state = {
     allGroups: [] // Cache of all groups for quick-add
 };
 
-let conversationHubConnection = null;
-let resourceHubConnection = null;
+var conversationHubConnection = null;
+var resourceHubConnection = null;
+var taskHubConnection = null;
 
 // Track individual hub connection states; banner shows if either hub is disconnected
 // Default to `true` so the banner is hidden until a hub explicitly reports disconnected.
@@ -208,15 +298,21 @@ async function initResourceHub() {
             .build();
 
         resourceHubConnection.on('filesChanged', async () => {
+            apiCache.invalidate('files');
+            apiCache.invalidate('batch');
             await loadFiles(true);
         });
 
         resourceHubConnection.on('groupsChanged', async () => {
+            apiCache.invalidate('groups');
+            apiCache.invalidate('batch');
             await loadGroups(true);
             await loadAllGroups(true);
         });
 
         resourceHubConnection.on('conversationsChanged', async () => {
+            apiCache.invalidate('prompts');
+            apiCache.invalidate('batch');
             await loadPrompts(true);
         });
 
@@ -231,6 +327,80 @@ async function initResourceHub() {
         console.warn('[SignalR] Failed to connect resource hub:', err);
         setResourceHubState(false);
     }
+}
+
+// Track active requests for progress display
+const activeRequests = new Map();
+const requestActivities = new Map();
+
+async function initTaskHub() {
+    if (!window.signalR) {
+        console.warn('[SignalR] signalR client not loaded');
+        return;
+    }
+
+    try {
+        taskHubConnection = new signalR.HubConnectionBuilder()
+            .withUrl('/hubs/tasks')
+            .withAutomaticReconnect()
+            .build();
+
+        // Handle request status updates
+        taskHubConnection.on('RequestUpdate', (request) => {
+            console.log('[TaskHub] Request update:', request);
+            activeRequests.set(request.requestId, request);
+            updateProgressDisplay(request);
+        });
+
+        // Handle detailed activity updates
+        taskHubConnection.on('ActivityUpdate', (activity) => {
+            console.log('[TaskHub] Activity update:', activity);
+            if (!requestActivities.has(activity.requestId)) {
+                requestActivities.set(activity.requestId, []);
+            }
+            requestActivities.get(activity.requestId).push({
+                timestamp: activity.timestamp || new Date().toISOString(),
+                activity: activity.activity,
+                progress: activity.progress
+            });
+            updateActivityDisplay(activity.requestId);
+        });
+
+        await taskHubConnection.start();
+        console.log('[SignalR] Task hub connected');
+    } catch (err) {
+        console.warn('[SignalR] Failed to connect task hub:', err);
+    }
+}
+
+function updateProgressDisplay(request) {
+    // Find any active progress bars and update them
+    const progressBars = document.querySelectorAll('[data-request-id="' + request.requestId + '"]');
+    progressBars.forEach(bar => {
+        if (bar.classList.contains('progress-bar')) {
+            bar.style.width = (request.progress || 0) + '%';
+            bar.setAttribute('aria-valuenow', request.progress || 0);
+        }
+        if (bar.classList.contains('progress-text')) {
+            bar.textContent = request.details || request.status || '';
+        }
+        if (bar.classList.contains('progress-percentage')) {
+            bar.textContent = (request.progress || 0) + '%';
+        }
+    });
+}
+
+function updateActivityDisplay(requestId) {
+    const activityList = document.getElementById('activity-history-' + requestId);
+    if (!activityList) return;
+
+    const activities = requestActivities.get(requestId) || [];
+    activityList.innerHTML = activities.slice(-5).reverse().map(act => `
+        <div class="activity-item" style="padding: 4px 0; font-size: 12px; color: #666;">
+            <span style="font-weight: 500;">${act.activity}</span>
+            ${act.progress ? `<span style="float: right;">${act.progress}%</span>` : ''}
+        </div>
+    `).join('');
 }
 
 async function joinConversationHubGroup(conversationId) {
@@ -497,35 +667,37 @@ function createFileCard(file) {
     return div;
 }
 
-document.getElementById('upload-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const fileInput = document.getElementById('file-input');
-    const label = document.getElementById('file-label').value;
-    
-    const formData = new FormData();
-    formData.append('file', fileInput.files[0]);
-    formData.append('label', label);
-    
-    try {
-        const response = await fetch(`${API_BASE}/files`, {
-            method: 'POST',
-            body: formData
-        });
-        
-        if (response.ok) {
-            showMessage('File uploaded successfully');
-            e.target.reset();
-            // Force refresh files and all groups
-            await loadFiles(true);
-            await loadAllGroups(true);
-        } else {
-            const error = await response.json();
-            showMessage(error.detail || 'Error uploading file', 'error');
+// Auto-upload selected file from main Files tab
+const mainFileInput = document.getElementById('file-input');
+if (mainFileInput) {
+    mainFileInput.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            const response = await fetch(`${API_BASE}/files`, {
+                method: 'POST',
+                body: formData
+            });
+
+            if (response.ok) {
+                showMessage('File uploaded successfully', 'success');
+                mainFileInput.value = '';
+                await loadFiles(true);
+                await loadAllGroups(true);
+            } else {
+                let msg = 'Error uploading file';
+                try { const error = await response.json(); msg = error.detail || msg; } catch (e){}
+                showMessage(msg, 'error');
+            }
+        } catch (err) {
+            showMessage('Error uploading file: ' + err.message, 'error');
         }
-    } catch (error) {
-        showMessage('Error uploading file: ' + error.message, 'error');
-    }
-});
+    });
+}
 
 // Enter key handler for file label input
 document.getElementById('file-label')?.addEventListener('keypress', (e) => {
@@ -1601,10 +1773,9 @@ document.getElementById('group-form').addEventListener('submit', async (e) => {
             if (window.groupSelectedFiles && window.groupSelectedFiles.length > 0) {
                 console.log('[CREATE GROUP] Uploading', window.groupSelectedFiles.length, 'files...');
                 
-                for (const fileObj of window.groupSelectedFiles) {
+                    for (const fileObj of window.groupSelectedFiles) {
                     const formData = new FormData();
                     formData.append('file', fileObj.file);
-                    formData.append('label', fileObj.name); // Add required label
                     
                     try {
                         console.log('[CREATE GROUP] Uploading file:', fileObj.name);
@@ -1736,10 +1907,9 @@ document.getElementById('reminder-form')?.addEventListener('submit', async (e) =
             if (window.reminderSelectedFiles && window.reminderSelectedFiles.length > 0) {
                 console.log('[CREATE REMINDER] Uploading', window.reminderSelectedFiles.length, 'files...');
                 
-                for (const fileObj of window.reminderSelectedFiles) {
+                    for (const fileObj of window.reminderSelectedFiles) {
                     const formData = new FormData();
                     formData.append('file', fileObj.file);
-                    formData.append('label', fileObj.name);
                     
                     try {
                         console.log('[CREATE REMINDER] Uploading file:', fileObj.name);
@@ -1954,48 +2124,44 @@ async function manageGroupResources(groupId, groupName) {
         let allPrompts = [];
         
         try {
-            console.log('[MANAGE] Fetching all files and prompts for manage resources...');
-            console.log('[MANAGE] Fetching from:', `${API_BASE}/files?page=1&pageSize=1000`);
-            console.log('[MANAGE] Fetching from:', `${API_BASE}/prompts?page=1&pageSize=1000`);
+            console.log('[MANAGE] Fetching batch data for manage resources...');
             
-            const [filesRes, promptsRes] = await Promise.all([
-                fetchWithRetry(`${API_BASE}/files?page=1&pageSize=1000`),
-                fetchWithRetry(`${API_BASE}/prompts?page=1&pageSize=1000`)
-            ]);
+            // Use new batch endpoint - single call instead of 2 separate calls
+            const batchRes = await fetchWithRetry(`${API_BASE}/batch?includeFiles=true&includePrompts=true&includeGroups=false&maxItems=1000`);
             
-            console.log('[MANAGE] Files response status:', filesRes.status);
-            console.log('[MANAGE] Prompts response status:', promptsRes.status);
+            console.log('[MANAGE] Batch response status:', batchRes.status);
             
-            if (filesRes.ok) {
-                const filesResult = await filesRes.json();
-                console.log('[MANAGE] Files response:', filesResult);
-                // Handle both lowercase 'data' and uppercase 'Data' from API
-                allFiles = filesResult.data || filesResult.Data || [];
-                console.log('[MANAGE] Fetched files count:', allFiles.length);
+            if (batchRes.ok) {
+                const batchResult = await batchRes.json();
+                console.log('[MANAGE] Batch response:', batchResult);
+                
+                // Handle files
+                if (batchResult.files) {
+                    allFiles = batchResult.files.data || batchResult.files.Data || [];
+                    console.log('[MANAGE] Fetched files count:', allFiles.length);
+                }
+                
+                // Handle prompts
+                if (batchResult.prompts) {
+                    allPrompts = batchResult.prompts.data || batchResult.prompts.Data || [];
+                    console.log('[MANAGE] Fetched prompts count:', allPrompts.length);
+                }
+                
                 if (allFiles.length > 0) {
-                    console.log('[MANAGE] First file:', allFiles[0]);
+                    console.log('[MANAGE] Sample file:', allFiles[0]);
                 }
-            } else {
-                const errorText = await filesRes.text();
-                console.error('[MANAGE] Failed to load files:', filesRes.status, errorText);
-            }
-            
-            if (promptsRes.ok) {
-                const promptsResult = await promptsRes.json();
-                console.log('[MANAGE] Prompts response:', promptsResult);
-                // Handle both lowercase 'data' and uppercase 'Data' from API
-                allPrompts = promptsResult.data || promptsResult.Data || [];
-                console.log('[MANAGE] Fetched prompts count:', allPrompts.length);
                 if (allPrompts.length > 0) {
-                    console.log('[MANAGE] First prompt:', allPrompts[0]);
+                    console.log('[MANAGE] Sample prompt:', allPrompts[0]);
                 }
             } else {
-                const errorText = await promptsRes.text();
-                console.error('[MANAGE] Failed to load prompts:', promptsRes.status, errorText);
+                console.error('[MANAGE] Batch request failed:', batchRes.status);
+                showMessage('Failed to load resources', 'error');
+                return;
             }
         } catch (fetchError) {
             console.error('[MANAGE] Error fetching resources:', fetchError);
             showMessage('Error loading resources: ' + fetchError.message, 'error');
+            return;
         }
         
         console.log('[MANAGE] Final counts - Files:', allFiles.length, 'Prompts:', allPrompts.length);
@@ -2781,14 +2947,52 @@ async function init() {
             }
         });
 
-        await initConversationHub();
-        await initResourceHub();
+        // Start hub initialization in background so UI handlers attach immediately
+        initConversationHub();
+        initResourceHub();
+        initTaskHub();
         
         // Setup prompts file management
         const promptFileInput = document.getElementById('prompt-file-input');
         const promptFilesList = document.getElementById('prompt-files-list');
         const promptFilesIcon = document.getElementById('prompt-files-icon');
         const promptFileSection = document.getElementById('prompt-file-section');
+        // Observe style/class changes to resist transient re-hides (kept in production as a small mitigation).
+        try {
+                if (promptFileSection) {
+                    if (ADMIN_DEBUG) console.log('promptFileSection initial computed display:', window.getComputedStyle(promptFileSection).display);
+                    // Track last explicit show time so we can resist transient hides from other inits
+                    let _lastPromptShowTs = 0;
+                    const _promptObserver = new MutationObserver((mutations) => {
+                        for (const m of mutations) {
+                            if (m.type === 'attributes') {
+                                const computed = window.getComputedStyle(promptFileSection).display;
+                                if (ADMIN_DEBUG) console.log('promptFileSection attribute change:', m.attributeName, 'style=', promptFileSection.style.cssText, 'computed=', computed);
+                                // If the section was just shown and something immediately hid it, re-show briefly
+                                try {
+                                    const now = Date.now();
+                                    if (computed === 'none' && _lastPromptShowTs && (now - _lastPromptShowTs) < 1000) {
+                                        if (ADMIN_DEBUG) console.log('promptFileSection was re-hidden soon after show; forcing visible');
+                                        promptFileSection.style.setProperty('display', 'block', 'important');
+                                        promptFileSection.style.setProperty('visibility', 'visible', 'important');
+                                        promptFileSection.style.setProperty('opacity', '1', 'important');
+                                        const previewPanel = document.getElementById('prompt-preview-panel');
+                                        const filesPanel = document.getElementById('prompt-files-panel');
+                                        if (previewPanel) previewPanel.style.setProperty('display', 'block', 'important');
+                                        if (filesPanel) filesPanel.style.setProperty('display', 'flex', 'important');
+                                    }
+                                } catch (e) { /* ignore */ }
+                            }
+                        }
+                    });
+                    _promptObserver.observe(promptFileSection, { attributes: true, attributeFilter: ['style', 'class'] });
+
+                    // Expose helper to update last-show timestamp from other handlers
+                    promptFileSection._markShown = () => { _lastPromptShowTs = Date.now(); };
+                }
+        } catch (e) {
+            if (ADMIN_DEBUG) console.warn('Failed to attach MutationObserver to promptFileSection', e);
+        }
         const promptPreviewContent = document.getElementById('prompt-preview-content');
         const promptPreviewFilename = document.getElementById('prompt-preview-filename');
         const promptUploadProgress = document.getElementById('prompt-upload-progress');
@@ -2813,26 +3017,101 @@ async function init() {
         
         // Show file section when clicking "add file+" button
         document.getElementById('prompt-show-file-btn')?.addEventListener('click', () => {
-            const isCurrentlyHidden = promptFileSection.style.display === 'none' || !promptFileSection.style.display;
+            if (ADMIN_DEBUG) console.log('prompt-show-file-btn clicked');
+            // Prefer a global shim if present (ensures reliability across browsers/load timing)
+            if (typeof window.togglePromptFileSection === 'function') {
+                if (ADMIN_DEBUG) console.log('calling window.togglePromptFileSection()');
+                try { window.togglePromptFileSection(); return; } catch (e) { /* fallback below */ }
+            }
+            // Fallback: toggle using computed style for robustness
+            const computed = window.getComputedStyle(promptFileSection);
+            const isCurrentlyHidden = computed ? computed.display === 'none' : (promptFileSection.style.display === 'none' || !promptFileSection.style.display);
+            
             if (isCurrentlyHidden) {
-                promptFileSection.style.display = 'block';
-                document.getElementById('prompt-preview-panel').style.display = 'block';
-                document.getElementById('prompt-files-panel').style.display = 'flex';
+                promptFileSection.style.setProperty('display', 'block', 'important');
+                promptFileSection.style.setProperty('visibility', 'visible', 'important');
+                promptFileSection.style.setProperty('opacity', '1', 'important');
+                const previewPanel = document.getElementById('prompt-preview-panel');
+                const filesPanel = document.getElementById('prompt-files-panel');
+                if (previewPanel) previewPanel.style.setProperty('display', 'block', 'important');
+                if (filesPanel) filesPanel.style.setProperty('display', 'flex', 'important');
+                if (ADMIN_DEBUG) console.log('promptFileSection toggled -> shown (computed):', window.getComputedStyle(promptFileSection).display, 'visibility:', window.getComputedStyle(promptFileSection).visibility);
+                try { if (promptFileSection && typeof promptFileSection._markShown === 'function') promptFileSection._markShown(); } catch(e){}
+                // Ensure the actual file input is visible even if tab-content remains hidden due to timing
+                try {
+                    const inputEl = document.getElementById('prompt-file-input');
+                    if (inputEl) {
+                        const tabContent = inputEl.closest('.tab-content');
+                        if (tabContent && window.getComputedStyle(tabContent).display === 'none') {
+                            if (!inputEl.__originalParent) {
+                                inputEl.__originalParent = inputEl.parentNode;
+                                inputEl.__originalNext = inputEl.nextSibling;
+                            }
+                            document.body.appendChild(inputEl);
+                            inputEl.style.setProperty('position', 'absolute', 'important');
+                            inputEl.style.setProperty('left', '10px', 'important');
+                            inputEl.style.setProperty('top', '80px', 'important');
+                            inputEl.style.setProperty('z-index', '10000', 'important');
+                        }
+                    }
+                } catch(e) { if (ADMIN_DEBUG) console.warn('ensureFileInputVisible failed', e); }
             } else {
-                promptFileSection.style.display = 'none';
+                promptFileSection.style.setProperty('display', 'none', 'important');
+                promptFileSection.style.setProperty('visibility', 'hidden', 'important');
+                promptFileSection.style.setProperty('opacity', '0', 'important');
+                if (ADMIN_DEBUG) console.log('promptFileSection toggled -> hidden (computed):', window.getComputedStyle(promptFileSection).display, 'visibility:', window.getComputedStyle(promptFileSection).visibility);
+                // Try to restore file input to its original parent when hiding
+                try {
+                    const inputEl = document.getElementById('prompt-file-input');
+                    if (inputEl && inputEl.__originalParent) {
+                        inputEl.__originalParent.insertBefore(inputEl, inputEl.__originalNext || null);
+                        inputEl.style.removeProperty('position');
+                        inputEl.style.removeProperty('left');
+                        inputEl.style.removeProperty('top');
+                        inputEl.style.removeProperty('z-index');
+                        delete inputEl.__originalParent;
+                        delete inputEl.__originalNext;
+                    }
+                } catch(e) { /* noop */ }
             }
         });
         
         // Show only Files panel when clicking paperclip in Prompts
         promptFilesIcon?.addEventListener('click', () => {
+            if (ADMIN_DEBUG) console.log('promptFilesIcon clicked (paperclip)');
+            // Prefer global shim when available
+            if (typeof window.showPromptFilesPanel === 'function') {
+                if (ADMIN_DEBUG) console.log('calling window.showPromptFilesPanel()');
+                try { window.showPromptFilesPanel(); return; } catch (e) { /* fallback below */ }
+            }
             const filesPanel = document.getElementById('prompt-files-panel');
-            
             // Hide preview panel, show only files panel
-            document.getElementById('prompt-preview-panel').style.display = 'none';
-            filesPanel.style.display = 'flex';
+            document.getElementById('prompt-preview-panel').style.setProperty('display', 'none', 'important');
+            filesPanel.style.setProperty('display', 'flex', 'important');
             filesPanel.setAttribute('data-context', 'prompts');
-            
-            promptFileSection.style.display = 'block';
+
+            promptFileSection.style.setProperty('display', 'block', 'important');
+            promptFileSection.style.setProperty('visibility', 'visible', 'important');
+            promptFileSection.style.setProperty('opacity', '1', 'important');
+            if (ADMIN_DEBUG) console.log('promptFilesIcon flow set promptFileSection display:block (computed):', window.getComputedStyle(promptFileSection).display, 'visibility:', window.getComputedStyle(promptFileSection).visibility);
+            // Ensure file input is visible even if parent tab not active yet
+            try {
+                const inputEl = document.getElementById('prompt-file-input');
+                if (inputEl) {
+                    const tabContent = inputEl.closest('.tab-content');
+                    if (tabContent && window.getComputedStyle(tabContent).display === 'none') {
+                        if (!inputEl.__originalParent) {
+                            inputEl.__originalParent = inputEl.parentNode;
+                            inputEl.__originalNext = inputEl.nextSibling;
+                        }
+                        document.body.appendChild(inputEl);
+                        inputEl.style.setProperty('position', 'absolute', 'important');
+                        inputEl.style.setProperty('left', '10px', 'important');
+                        inputEl.style.setProperty('top', '80px', 'important');
+                        inputEl.style.setProperty('z-index', '10000', 'important');
+                    }
+                }
+            } catch(e) { if (ADMIN_DEBUG) console.warn('ensureFileInputVisible(paperclip) failed', e); }
             
             // Update files list after showing the panel
             updatePromptFilesList();
@@ -2862,6 +3141,19 @@ async function init() {
                             promptPreviewContent.innerHTML = `<embed src="${e.target.result}" type="application/pdf" width="100%" height="200px" style="border-radius: 4px;">`;
                         };
                         reader.readAsDataURL(file);
+                    } else if (['wav', 'mp3', 'm4a', 'ogg', 'webm'].includes(ext)) {
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            promptPreviewContent.innerHTML = `
+                                <div style="text-align: center;">
+                                    <div style="font-size: 64px; margin-bottom: 10px;">🎤</div>
+                                    <audio controls style="width: 100%; margin-top: 10px;">
+                                        <source src="${e.target.result}" type="audio/${ext}">
+                                    </audio>
+                                </div>
+                            `;
+                        };
+                        reader.readAsDataURL(file);
                     } else {
                         promptPreviewContent.innerHTML = `
                             <div style="text-align: center;">
@@ -2889,7 +3181,91 @@ async function init() {
                             progressBar.style.width = '0%';
                         }
                         
-                        // Upload file to server with progress tracking
+                        // Check if this is an audio file - handle via transcription API
+                        if (['wav', 'mp3', 'm4a', 'ogg', 'webm'].includes(ext)) {
+                            // Read file as base64 for transcription API
+                            const reader = new FileReader();
+                            reader.onload = async function(e) {
+                                try {
+                                    const base64Audio = e.target.result.split(',')[1]; // Remove data:audio/...;base64, prefix
+                                    
+                                    // Show transcribing status
+                                    if (promptPreviewContent) {
+                                        promptPreviewContent.innerHTML = `
+                                            <div style="text-align: center;">
+                                                <div style="font-size: 48px; margin-bottom: 10px;">🎤</div>
+                                                <div style="color: #2c3e50; font-weight: 500;">Transcribing audio...</div>
+                                                <div style="margin-top: 10px;">
+                                                    <div style="width: 100%; height: 6px; background: #e0e0e0; border-radius: 3px; overflow: hidden;">
+                                                        <div id="audio-transcribe-progress" style="width: 0%; height: 100%; background: linear-gradient(90deg, #0b63a6, #6bb9f0, #0b63a6); animation: promptUploadMove 1.2s linear infinite;"></div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        `;
+                                    }
+                                    
+                                    // Call transcription API
+                                    const response = await fetch('/api/transcribe', {
+                                        method: 'POST',
+                                        headers: {
+                                            'Content-Type': 'application/json'
+                                        },
+                                        body: JSON.stringify({
+                                            audioBase64: base64Audio
+                                        })
+                                    });
+                                    
+                                    if (!response.ok) {
+                                        throw new Error('Transcription failed');
+                                    }
+                                    
+                                    const result = await response.json();
+                                    const transcription = result.transcription || '';
+                                    
+                                    // Hide progress bar
+                                    if (promptUploadProgress) {
+                                        promptUploadProgress.style.display = 'none';
+                                    }
+                                    
+                                    // Show transcription result
+                                    if (promptPreviewContent) {
+                                        promptPreviewContent.innerHTML = `
+                                            <div style="text-align: left; padding: 10px;">
+                                                <div style="font-size: 14px; color: #2c3e50; margin-bottom: 10px; font-weight: 600;">
+                                                    ✓ Transcription Complete
+                                                </div>
+                                                <div style="background: #f8f9fa; padding: 10px; border-radius: 4px; max-height: 150px; overflow-y: auto; font-size: 13px; line-height: 1.5;">
+                                                    ${transcription || 'No text detected'}
+                                                </div>
+                                            </div>
+                                        `;
+                                    }
+                                    
+                                    // Add transcription to prompt input
+                                    const promptInput = document.getElementById('prompt-name');
+                                    if (promptInput && transcription) {
+                                        const currentText = promptInput.value.trim();
+                                        promptInput.value = currentText ? `${currentText}\n\n[Audio]: ${transcription}` : transcription;
+                                    }
+                                    
+                                    showMessage('Audio transcribed successfully!', 'success');
+                                    
+                                    // Clear file input
+                                    promptFileInput.value = '';
+                                    
+                                } catch (error) {
+                                    console.error('Transcription error:', error);
+                                    showMessage('Audio transcription failed: ' + error.message, 'error');
+                                    if (promptUploadProgress) {
+                                        promptUploadProgress.style.display = 'none';
+                                    }
+                                }
+                            };
+                            reader.readAsDataURL(file);
+                            return; // Skip regular upload for audio files
+                        }
+                        
+                        // Regular file upload (documents, images, etc.)
                         const formData = new FormData();
                         formData.append('file', file);
                         
@@ -2985,29 +3361,65 @@ async function init() {
             if (!sources || sources.length === 0) return '';
             return `
                 <div style="margin-top: 15px; padding: 10px; background: white; border: 1px solid #dee2e6; border-radius: 4px;">
-                    <div style="font-weight: 600; color: #2c3e50; margin-bottom: 8px; font-size: 0.9rem;">Sources Used:</div>
+                    <div style="font-weight: 600; color: #2c3e50; margin-bottom: 8px; font-size: 0.9rem;">
+                        Sources Used (${sources.length}):
+                    </div>
                     <div style="display: flex; flex-direction: column; gap: 6px;">
-                        ${sources.map(source => {
+                        ${sources.map((source, index) => {
                             const documentId = source.documentId || source.DocumentId;
                             const fileName = source.fileName || source.FileName || 'Document';
+                            const documentType = source.documentType || source.DocumentType || 'unknown';
                             const page = source.pageNumber || source.PageNumber;
                             const chunkText = source.chunkText || source.ChunkText || '';
                             const label = page ? `${fileName} (p.${page})` : fileName;
                             const href = documentId ? `/api/documents/${documentId}/download` : '#';
                             const linkStyle = documentId ? 'color: #0b63a6; text-decoration: underline;' : 'color: #95a5a6; text-decoration: none;';
+                            const sourceId = 'source-' + Date.now() + '-' + index;
+                            
+                            // Determine file type icon
+                            const typeIcon = documentType === 'pdf' ? '📄' : 
+                                           documentType === 'markdown' ? '📝' :
+                                           documentType === 'image' ? '🖼️' : 
+                                           documentType === 'docx' ? '📘' :
+                                           documentType === 'xml' ? '🔖' : '📋';
+                            
                             return `
-                                <div style="display: flex; flex-direction: column; gap: 4px;">
-                                    <div style="display: flex; align-items: center; gap: 8px;">
-                                        <a href="${href}" target="_blank" style="${linkStyle}" onclick="${documentId ? '' : 'return false;'}">${escapeHtml(label)}</a>
-                                        ${documentId ? `<button type=\"button\" onclick=\"previewDocumentFile('${documentId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')\" style=\"padding: 2px 8px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;\">Preview</button>` : ''}
+                                <div style="border: 1px solid #e0e0e0; border-radius: 4px; padding: 8px; background: #fafafa;">
+                                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                                        <div style="display: flex; align-items: center; gap: 8px; flex: 1;">
+                                            <span style="font-size: 18px;">${typeIcon}</span>
+                                            <div style="display: flex; flex-direction: column; gap: 2px;">
+                                                <a href="${href}" target="_blank" style="${linkStyle} font-weight: 500;" onclick="${documentId ? '' : 'return false;'}">${escapeHtml(label)}</a>
+                                                <span style="font-size: 11px; color: #999;">Type: ${escapeHtml(documentType)}</span>
+                                            </div>
+                                        </div>
+                                        <div style="display: flex; gap: 4px;">
+                                            ${documentId ? `<button type="button" onclick="previewDocumentFile('${documentId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}'); return false;" style="padding: 4px 10px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">Preview</button>` : ''}
+                                            ${chunkText ? `<button type="button" onclick="toggleSourceExpand('${sourceId}'); return false;" style="padding: 4px 10px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;" data-testid="expand-source-${index}">Expand</button>` : ''}
+                                        </div>
                                     </div>
-                                    ${chunkText ? `<div style=\"font-size: 12px; color: #666; padding-left: 4px;\">${escapeHtml(chunkText)}</div>` : ''}
+                                    ${chunkText ? `<div id="${sourceId}" style="display: none; margin-top: 8px; padding: 8px; background: white; border-left: 3px solid #0b63a6; border-radius: 2px; font-size: 12px; color: #666; line-height: 1.4;">${escapeHtml(chunkText)}</div>` : ''}
                                 </div>
                             `;
                         }).join('')}
                     </div>
                 </div>
             `;
+        };
+        
+        // Toggle source expansion
+        window.toggleSourceExpand = function(sourceId) {
+            const element = document.getElementById(sourceId);
+            if (element) {
+                const isHidden = element.style.display === 'none';
+                element.style.display = isHidden ? 'block' : 'none';
+                
+                // Update button text
+                const button = document.querySelector(`[onclick*="${sourceId}"]`);
+                if (button) {
+                    button.textContent = isHidden ? 'Collapse' : 'Expand';
+                }
+            }
         };
 
         const sendPrompt = async () => {
@@ -3023,13 +3435,29 @@ async function init() {
             }
             
             try {
-                // Show loading state and cancel button
+                // Generate a request ID for tracking
+                const requestId = 'prompt-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+                
+                // Show progress bar instead of hourglass
                 responseContent.innerHTML = `
-                    <div style="text-align: center; padding: 20px; color: #0b63a6;">
-                        <div style="font-size: 1.2rem; margin-bottom: 10px;">⏳ Sending...</div>
-                        <div style="font-size: 0.9rem; color: #666;">Processing your request...</div>
+                    <div style="padding: 15px;">
+                        <div class="progress-text" data-request-id="${requestId}" data-testid="progress-status">Initializing...</div>
+                        <div class="progress-bar-container">
+                            <div class="progress-bar" data-request-id="${requestId}" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" style="width: 0%">
+                                <span class="progress-percentage" data-request-id="${requestId}">0%</span>
+                            </div>
+                        </div>
+                        <div class="activity-history" id="activity-history-${requestId}" style="display: none;">
+                            <!-- Activity items will be inserted here -->
+                        </div>
                     </div>
                 `;
+                
+                // Show activity history after a short delay
+                setTimeout(() => {
+                    const activityHistory = document.getElementById('activity-history-' + requestId);
+                    if (activityHistory) activityHistory.style.display = 'block';
+                }, 500);
                 
                 // Show cancel button, hide send button
                 if (sendBtn) sendBtn.style.display = 'none';
