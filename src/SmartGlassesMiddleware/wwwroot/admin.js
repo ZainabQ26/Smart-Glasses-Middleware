@@ -1,6 +1,49 @@
 const API_BASE = '/api/admin';
 const themeStorageKey = 'uiTheme';
 
+// In-memory cache for API responses (no browser storage)
+const apiCache = {
+    data: new Map(),
+    ttl: 30000, // 30 seconds TTL
+    
+    get(key) {
+        const item = this.data.get(key);
+        if (!item) return null;
+        
+        if (Date.now() > item.expiry) {
+            this.data.delete(key);
+            return null;
+        }
+        
+        return item.value;
+    },
+    
+    set(key, value, customTtl = null) {
+        this.data.set(key, {
+            value,
+            expiry: Date.now() + (customTtl || this.ttl)
+        });
+    },
+    
+    invalidate(pattern) {
+        if (pattern) {
+            // Invalidate keys matching pattern
+            for (const key of this.data.keys()) {
+                if (key.includes(pattern)) {
+                    this.data.delete(key);
+                }
+            }
+        } else {
+            // Clear all
+            this.data.clear();
+        }
+    },
+    
+    clear() {
+        this.data.clear();
+    }
+};
+
 // Helper function to get property with case-insensitive fallback
 function getProp(obj, propName) {
     if (!obj) return undefined;
@@ -14,50 +57,92 @@ function getProp(obj, propName) {
     return undefined;
 }
 
-// Enhanced fetch with retry logic and cache busting
-async function fetchWithRetry(url, options = {}, retries = 3) {
-    // Add cache busting parameter and no-cache headers
-    const cacheBuster = `_=${Date.now()}_${Math.random().toString(36).substring(7)}`;
-    const separator = url.includes('?') ? '&' : '?';
-    const bustUrl = `${url}${separator}${cacheBuster}`;
+// Enhanced fetch with retry logic, caching, and deduplication
+const pendingRequests = new Map();
+
+async function fetchWithRetry(url, options = {}, retries = 2) {
+    const method = options.method || 'GET';
+    const cacheKey = `${method}:${url}`;
     
-    // Force no-cache headers
+    // For GET requests, check cache first
+    if (method === 'GET') {
+        const cached = apiCache.get(cacheKey);
+        if (cached) {
+            console.log(`[API] Cache hit: ${url}`);
+            return new Response(JSON.stringify(cached), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' }
+            });
+        }
+        
+        // Check if request is already pending (deduplication)
+        if (pendingRequests.has(cacheKey)) {
+            console.log(`[API] Deduplicating request: ${url}`);
+            return pendingRequests.get(cacheKey);
+        }
+    }
+    
+    // Add cache busting parameter only for non-cached requests
+    const cacheBuster = `_=${Date.now()}`;
+    const separator = url.includes('?') ? '&' : '?';
+    const bustUrl = method === 'GET' ? `${url}${separator}${cacheBuster}` : url;
+    
     const fetchOptions = {
         ...options,
         headers: {
             ...options.headers,
-            'Cache-Control': 'no-cache, no-store, must-revalidate',
-            'Pragma': 'no-cache',
-            'Expires': '0'
-        },
-        cache: 'no-store'
+            'Content-Type': options.headers?.['Content-Type'] || 'application/json'
+        }
     };
     
-    for (let i = 0; i < retries; i++) {
-        try {
-            console.log(`[API] Request: ${fetchOptions.method || 'GET'} ${url}${i > 0 ? ` (retry ${i})` : ''}`);
+    // Create the fetch promise
+    const fetchPromise = (async () => {
+        for (let i = 0; i < retries; i++) {
+            try {
+                console.log(`[API] Request: ${method} ${url}${i > 0 ? ` (retry ${i})` : ''}`);
 
-            const response = await fetch(bustUrl, fetchOptions);
-            console.log(`[API] Response: ${response.status} ${response.statusText} for ${url}`);
+                const response = await fetch(bustUrl, fetchOptions);
+                console.log(`[API] Response: ${response.status} ${response.statusText} for ${url}`);
 
-            if (!response.ok && response.status >= 500 && i < retries - 1) {
-                console.warn(`[API] Server error, retrying in ${(i + 1) * 500}ms...`);
-                await new Promise(resolve => setTimeout(resolve, (i + 1) * 500));
-                continue;
+                // Clone response for caching
+                if (response.ok && method === 'GET') {
+                    const clone = response.clone();
+                    clone.json().then(data => {
+                        apiCache.set(cacheKey, data);
+                    }).catch(() => {
+                        // Ignore cache errors
+                    });
+                }
+
+                if (!response.ok && response.status >= 500 && i < retries - 1) {
+                    console.warn(`[API] Server error, retrying in ${(i + 1) * 500}ms...`);
+                    await new Promise(resolve => setTimeout(resolve, (i + 1) * 500));
+                    continue;
+                }
+
+                return response;
+            } catch (error) {
+                console.error(`[API] Network error on attempt ${i + 1}:`, error);
+                if (i < retries - 1) {
+                    await new Promise(resolve => setTimeout(resolve, (i + 1) * 500));
+                    continue;
+                }
+                throw error;
             }
-
-            return response;
-        } catch (error) {
-            console.error(`[API] Network error on attempt ${i + 1}:`, error);
-            if (i < retries - 1) {
-                await new Promise(resolve => setTimeout(resolve, (i + 1) * 500));
-                continue;
-            }
-            throw error;
         }
-    }
 
-    throw new Error(`Failed to fetch ${url} after ${retries} attempts`);
+        throw new Error(`Failed to fetch ${url} after ${retries} attempts`);
+    })();
+    
+    // Store pending request for deduplication
+    if (method === 'GET') {
+        pendingRequests.set(cacheKey, fetchPromise);
+        fetchPromise.finally(() => {
+            pendingRequests.delete(cacheKey);
+        });
+    }
+    
+    return fetchPromise;
 }
 
 // Helper to safely encode attached files array into a URL-safe JSON string
@@ -209,15 +294,21 @@ async function initResourceHub() {
             .build();
 
         resourceHubConnection.on('filesChanged', async () => {
+            apiCache.invalidate('files');
+            apiCache.invalidate('batch');
             await loadFiles(true);
         });
 
         resourceHubConnection.on('groupsChanged', async () => {
+            apiCache.invalidate('groups');
+            apiCache.invalidate('batch');
             await loadGroups(true);
             await loadAllGroups(true);
         });
 
         resourceHubConnection.on('conversationsChanged', async () => {
+            apiCache.invalidate('prompts');
+            apiCache.invalidate('batch');
             await loadPrompts(true);
         });
 
@@ -2029,48 +2120,44 @@ async function manageGroupResources(groupId, groupName) {
         let allPrompts = [];
         
         try {
-            console.log('[MANAGE] Fetching all files and prompts for manage resources...');
-            console.log('[MANAGE] Fetching from:', `${API_BASE}/files?page=1&pageSize=1000`);
-            console.log('[MANAGE] Fetching from:', `${API_BASE}/prompts?page=1&pageSize=1000`);
+            console.log('[MANAGE] Fetching batch data for manage resources...');
             
-            const [filesRes, promptsRes] = await Promise.all([
-                fetchWithRetry(`${API_BASE}/files?page=1&pageSize=1000`),
-                fetchWithRetry(`${API_BASE}/prompts?page=1&pageSize=1000`)
-            ]);
+            // Use new batch endpoint - single call instead of 2 separate calls
+            const batchRes = await fetchWithRetry(`${API_BASE}/batch?includeFiles=true&includePrompts=true&includeGroups=false&maxItems=1000`);
             
-            console.log('[MANAGE] Files response status:', filesRes.status);
-            console.log('[MANAGE] Prompts response status:', promptsRes.status);
+            console.log('[MANAGE] Batch response status:', batchRes.status);
             
-            if (filesRes.ok) {
-                const filesResult = await filesRes.json();
-                console.log('[MANAGE] Files response:', filesResult);
-                // Handle both lowercase 'data' and uppercase 'Data' from API
-                allFiles = filesResult.data || filesResult.Data || [];
-                console.log('[MANAGE] Fetched files count:', allFiles.length);
+            if (batchRes.ok) {
+                const batchResult = await batchRes.json();
+                console.log('[MANAGE] Batch response:', batchResult);
+                
+                // Handle files
+                if (batchResult.files) {
+                    allFiles = batchResult.files.data || batchResult.files.Data || [];
+                    console.log('[MANAGE] Fetched files count:', allFiles.length);
+                }
+                
+                // Handle prompts
+                if (batchResult.prompts) {
+                    allPrompts = batchResult.prompts.data || batchResult.prompts.Data || [];
+                    console.log('[MANAGE] Fetched prompts count:', allPrompts.length);
+                }
+                
                 if (allFiles.length > 0) {
-                    console.log('[MANAGE] First file:', allFiles[0]);
+                    console.log('[MANAGE] Sample file:', allFiles[0]);
                 }
-            } else {
-                const errorText = await filesRes.text();
-                console.error('[MANAGE] Failed to load files:', filesRes.status, errorText);
-            }
-            
-            if (promptsRes.ok) {
-                const promptsResult = await promptsRes.json();
-                console.log('[MANAGE] Prompts response:', promptsResult);
-                // Handle both lowercase 'data' and uppercase 'Data' from API
-                allPrompts = promptsResult.data || promptsResult.Data || [];
-                console.log('[MANAGE] Fetched prompts count:', allPrompts.length);
                 if (allPrompts.length > 0) {
-                    console.log('[MANAGE] First prompt:', allPrompts[0]);
+                    console.log('[MANAGE] Sample prompt:', allPrompts[0]);
                 }
             } else {
-                const errorText = await promptsRes.text();
-                console.error('[MANAGE] Failed to load prompts:', promptsRes.status, errorText);
+                console.error('[MANAGE] Batch request failed:', batchRes.status);
+                showMessage('Failed to load resources', 'error');
+                return;
             }
         } catch (fetchError) {
             console.error('[MANAGE] Error fetching resources:', fetchError);
             showMessage('Error loading resources: ' + fetchError.message, 'error');
+            return;
         }
         
         console.log('[MANAGE] Final counts - Files:', allFiles.length, 'Prompts:', allPrompts.length);
