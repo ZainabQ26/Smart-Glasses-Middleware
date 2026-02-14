@@ -3,10 +3,22 @@ scripts\start_and_rebuild.ps1
 PowerShell helper to build the app image, recreate the container, wait for health, and open admin UI.
 #>
 
+param(
+    [switch]$E2E
+)
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 Push-Location (Join-Path $PSScriptRoot '..')
+
+if ($E2E) {
+    Write-Host "E2E mode enabled — setting E2E_MODE=true for docker compose"
+    $env:E2E_MODE = 'true'
+} else {
+    # ensure default is defined so docker-compose variable expansion is deterministic
+    if (-not $env:E2E_MODE) { $env:E2E_MODE = 'false' }
+}
 
 Write-Host "Building 'app' image..."
 Write-Host "Ensuring dependent images are available (pulling when needed)..."
