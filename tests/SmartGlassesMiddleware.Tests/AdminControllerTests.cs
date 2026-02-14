@@ -198,6 +198,23 @@ public class AdminControllerTests
     }
 
     [Fact]
+    public async Task UploadFile_Returns_BadRequest_When_Audio_File()
+    {
+        // Arrange
+        var controller = CreateController();
+        var file = CreateMockFormFile("test.wav", "audio content", "audio/wav");
+        var request = new FileUploadRequest { File = file, Label = "AudioTest" };
+
+        // Act
+        var result = await controller.UploadFile(request);
+
+        // Assert
+        var badRequestResult = Assert.IsType<BadRequestObjectResult>(result);
+        var problemDetails = Assert.IsType<ValidationProblemDetails>(badRequestResult.Value);
+        Assert.Contains("Audio", problemDetails.Detail ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task UploadFile_Returns_Existing_File_When_Duplicate_Hash()
     {
         // Arrange
