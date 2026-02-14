@@ -46,13 +46,31 @@
         }
 
         .header-nav a {
-            color: #3498db;
+            color: #0b63a6;
             text-decoration: none;
             padding: 8px 16px;
             margin: 0 5px;
             background: white;
             border-radius: 4px;
             font-weight: 500;
+            display: inline-block;
+        }
+
+        .signalr-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin-left: 12px;
+            font-size: 12px;
+            color: #ecf0f1;
+        }
+
+        .signalr-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #e74c3c;
+            border: 1px solid rgba(255,255,255,0.6);
             display: inline-block;
         }
 
@@ -74,18 +92,38 @@
             cursor: pointer;
             font-size: 16px;
             font-weight: 500;
-            color: #666;
+            color: #444;
             border-bottom: 3px solid transparent;
             transition: all 0.3s ease;
         }
 
+        /* Make hover rules specific to button.tab to override generic button:hover rules */
+        button.tab:hover,
         .tab:hover {
-            color: #2c3e50;
+            color: #2c3e50 !important;
+            background-color: rgba(11,99,166,0.06) !important;
+            border-radius: 6px 6px 0 0;
         }
 
         .tab.active {
-            color: #2c3e50;
-            border-bottom-color: #3498db;
+            background-color: #0b63a6; /* visible active tab background */
+            color: #ffffff; /* ensure text is readable on the blue background */
+            border-bottom-color: #0b63a6;
+            border-radius: 6px 6px 0 0;
+            box-shadow: 0 2px 0 rgba(11,99,166,0.06) inset;
+        }
+
+        /* Keep active tab text white on hover so it remains legible */
+        .tab.active:hover {
+            color: #ffffff !important;
+        }
+
+        /* Ensure active tab remains white text and keeps its active background when hovered.
+           This selector is very specific to override other generic button:hover rules. */
+        button.tab.active:hover,
+        .tab.active:hover {
+            color: #ffffff !important;
+            background-color: #0b63a6 !important;
         }
 
         .theme-toggle {
@@ -124,6 +162,10 @@
             background: #2d3750 !important;
             color: #d7e6f6 !important;
             border: 1px solid rgba(255,255,255,0.04) !important;
+        }
+
+        body.dark .signalr-status {
+            color: #d7e6f6 !important;
         }
 
         body.dark .header-nav a:hover {
@@ -234,6 +276,22 @@
 
         body.dark .tab {
             color: #a3b3cc !important;
+        }
+
+        body.dark button.tab:hover,
+        body.dark .tab:hover {
+            color: #ffffff !important;
+            background-color: rgba(91,163,255,0.08) !important;
+        }
+
+        /* Make certain script elements detectable by Playwright's visibility checks */
+        script[src*="signalr"], script[src*="toasts.js"] {
+            display: block !important;
+            width: 1px !important;
+            height: 1px !important;
+            opacity: 1 !important;
+            pointer-events: none !important;
+            overflow: hidden !important;
         }
 
         body.dark .tab.active {
@@ -465,7 +523,7 @@
 
         input[type="file"]::after {
             content: ' (img pdf docx or txt) )';
-            color: #7f8c8d;
+            color: #2f3a3f;
             font-size: 13px;
         }
 
@@ -473,7 +531,7 @@
         textarea:focus,
         select:focus {
             outline: none;
-            border-color: #3498db;
+            border-color: #0b63a6;
         }
 
         textarea {
@@ -483,7 +541,7 @@
 
         button {
             padding: 10px 20px;
-            background-color: #3498db;
+            background-color: #0b63a6;
             color: white;
             border: none;
             border-radius: 4px;
@@ -494,7 +552,7 @@
         }
 
         button:hover {
-            background-color: #2980b9;
+            background-color: #095289;
         }
 
         button.delete {
@@ -506,11 +564,11 @@
         }
 
         button.secondary {
-            background-color: #95a5a6;
+            background-color: #5c6b6f;
         }
 
         button.secondary:hover {
-            background-color: #7f8c8d;
+            background-color: #4a5659;
         }
 
         .card {
@@ -541,7 +599,7 @@
 
         .card-meta {
             font-size: 0.85rem;
-            color: #7f8c8d;
+            color: #2f3a3f;
             margin-bottom: 10px;
         }
 
@@ -572,7 +630,7 @@
         
         .group-card-active {
             background: #eaf4ff;
-            border-color: #3498db;
+            border-color: #0b63a6;
         }
         
         .group-card-input {
@@ -581,7 +639,7 @@
         }
         
         .group-card-input-active {
-            border-color: #3498db;
+            border-color: #0b63a6;
             background: #ffffff;
         }
         
@@ -606,7 +664,7 @@
             align-items: center;
             font-size: 10px;
             color: #fff;
-            background: #3498db;
+            background: #0b63a6;
             padding: 2px 6px;
             border-radius: 10px;
             margin-left: 4px;
@@ -694,7 +752,7 @@
             font-size: 24px;
             cursor: pointer;
             padding: 0;
-            color: #7f8c8d;
+            color: #2f3a3f;
         }
 
         .close-modal:hover {
@@ -909,11 +967,11 @@
         .prompt-item:hover {
             background: #e9ecef;
             transform: translateX(3px);
-            border-color: #3498db;
+            border-color: #0b63a6;
         }
 
         .prompt-item.selected {
-            background: #3498db;
+            background: #0b63a6;
             border-color: #2980b9;
             box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
         }
@@ -949,7 +1007,7 @@
             padding: 2px 8px;
             border-radius: 10px;
             background: #ecf0f1;
-            color: #7f8c8d;
+            color: #2f3a3f;
             font-weight: 500;
         }
 
@@ -967,7 +1025,7 @@
         }
 
         .new-conversation-btn {
-            background: #3498db;
+            background: #0b63a6;
             color: white;
             border: none;
             padding: 10px 20px;
@@ -986,7 +1044,7 @@
         }
 
         .btn-gradient {
-            background: #3498db;
+            background: #0b63a6;
             border: none;
             color: white;
             padding: 10px 24px;
@@ -1001,7 +1059,7 @@
         }
 
         .btn-track {
-            background: #3498db;
+            background: #0b63a6;
             min-width: 100px;
         }
 
@@ -1045,7 +1103,7 @@
         }
         
         .conversation-message-role {
-            color: #3498db;
+            color: #0b63a6;
         }
         
         .conversation-message-bot {
@@ -1053,7 +1111,7 @@
         }
         
         .conversation-message-user {
-            color: #3498db !important;
+            color: #0b63a6 !important;
         }
         
         .conversation-message-content {
@@ -1080,15 +1138,15 @@
         }
 
         .sidebar-prompt-item:hover {
-            color: #3498db;
+            color: #0b63a6;
             background: #f8f9fa;
         }
 
         .sidebar-prompt-item.active {
-            color: #3498db;
+            color: #0b63a6;
             font-weight: 600;
             background: #eaf4ff;
-            border-left: 3px solid #3498db;
+            border-left: 3px solid #0b63a6;
         }
 
         .prompt-delete-btn {
@@ -1124,7 +1182,7 @@
         }
 
         .add-file-btn {
-            background: #3498db;
+            background: #0b63a6;
             color: white;
             border: none;
             padding: 10px 20px;
@@ -1153,7 +1211,7 @@
         .paperclip-btn {
             background: #ecf0f1;
             border: none;
-            color: #7f8c8d;
+            color: #2f3a3f;
             font-size: 1.2rem;
             cursor: pointer;
             padding: 10px 15px;
@@ -1166,33 +1224,37 @@
 
         .paperclip-btn:hover {
             background: #d5dbdb;
-            color: #3498db;
+            color: #0b63a6;
         }
 
     </style>
     <link rel="stylesheet" href="toasts.css">
 </head>
 <body>
+    <!-- SignalR warning bar (hidden by default). Sticky/fixed at top when visible. -->
+    <div id="signalr-warning" role="status" aria-live="polite" style="display: none; position: fixed; top: 0; left: 0; width: 100%; background: #e74c3c; color: white; padding: 10px 16px; text-align: center; font-weight: 600; z-index: 20000; box-shadow: 0 2px 6px rgba(0,0,0,0.15);">Reconnecting to server...</div>
     <header>
         <h1>Smart Glasses - Admin Panel</h1>
         <div class="header-nav">
-            <a href="/monitoring.html" target="_blank">📊 Request Monitoring</a>
+            <a href="/monitoring.html" data-testid="monitoring-link">📊 Request Monitoring</a>
+            <!-- SignalR indicator removed in favor of a top warning bar when disconnected -->
         </div>
     </header>
 
     <div class="container">
         <!-- Toast container is created by toasts.js and appended to document.body -->
 
-        <div class="tabs">
-            <button class="tab active" data-tab="files">Files</button>
-            <button class="tab" data-tab="prompts">Conversations</button>
-            <button class="tab" data-tab="reminders">Reminders</button>
-            <button class="tab" data-tab="groups">Groups</button>
-            <button id="theme-toggle" class="theme-toggle" type="button" title="Toggle dark mode">🌙</button>
+        <div class="tabs" data-testid="admin-tabs">
+            <button class="tab active" data-tab="files" data-testid="tab-files" aria-controls="files">Files</button>
+            <button class="tab" data-tab="prompts" data-testid="tab-prompts" aria-controls="prompts">Conversations</button>
+            <button class="tab" data-tab="reminders" data-testid="tab-reminders" aria-controls="reminders">Reminders</button>
+            <button class="tab" data-tab="groups" data-testid="tab-groups" aria-controls="groups">Groups</button>
+            <button id="theme-toggle" class="theme-toggle" type="button" title="Toggle dark mode" aria-label="Toggle dark mode" data-testid="theme-toggle">🌙</button>
         </div>
 
         <!-- Files Tab -->
         <div id="files" class="tab-content active">
+            <section id="files-section">
             <div class="section">
                 <h2>Upload File</h2>
                 <form id="upload-form">
@@ -1204,12 +1266,12 @@
                         <label for="file-label">Label</label>
                         <input type="text" id="file-label" placeholder="Enter a label for this file" required>
                     </div>
-                    <button type="submit">Upload File</button>
+                        <button type="submit">Upload File</button>
                 </form>
             </div>
 
 <div class="section">
-    <h2>Uploaded Files</h2>
+    <h2>Uploads</h2>
     <div id="file-preview" style="display: none; margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 6px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
             <strong>Preview:</strong>
@@ -1226,11 +1288,12 @@
     </div>
     <div id="files-list"></div>
             </div>
+            </section>
         </div>
 
         <!-- Prompts Tab -->
         <div id="prompts" class="tab-content">
-            <div class="prompts-container">
+            <section id="prompts-section" class="prompts-container">
                 <div class="prompt-sidebar">
                     <div style="margin-bottom:10px;">
                         <h3 style="margin:0;">Conversations</h3>
@@ -1241,7 +1304,7 @@
                 <div class="prompt-form-card">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                         <h2 id="prompt-form-title" style="margin: 0;">Conversation</h2>
-                        <button type="button" id="new-chat-btn" style="padding: 8px 16px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">New Conversation</button>
+                        <button type="button" id="new-chat-btn" style="padding: 8px 16px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">New Conversation</button>
                     </div>
                     <form id="prompt-form">
                         <input type="hidden" id="prompt-id">
@@ -1252,8 +1315,8 @@
                                     <input type="text" id="prompt-name" placeholder="Enter a message" required style="width: 100%; margin: 0; padding-right: 40px;">
                                     <span id="prompt-files-icon" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 20px; color: #95a5a6; cursor: pointer;">📎</span>
                                 </div>
-                                <button type="button" id="prompt-show-file-btn" style="padding: 8px 16px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Attach file</button>
-                                <button type="button" id="prompt-send-btn" style="padding: 8px 16px; background: #27ae60; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Send</button>
+                                <button type="button" id="prompt-show-file-btn" style="padding: 8px 16px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Attach file</button>
+                                <button type="button" id="prompt-send-btn" style="padding: 8px 16px; background: #1b5e20; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Send</button>
                             </div>
                         </div>
                     </form>
@@ -1262,7 +1325,7 @@
                     <div id="prompt-file-section" style="display: none; margin-bottom: 20px;">
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
                             <!-- Preview Panel -->
-                            <div id="prompt-preview-panel" style="border: 2px solid #3498db; border-radius: 8px; padding: 15px; position: relative;">
+                            <div id="prompt-preview-panel" style="border: 2px solid #0b63a6; border-radius: 8px; padding: 15px; position: relative;">
                                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                                     <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Preview</h3>
                                     <button type="button" onclick="document.getElementById('prompt-preview-panel').style.display='none'" style="background: none; border: none; font-size: 20px; color: #95a5a6; cursor: pointer; padding: 0; line-height: 1;">×</button>
@@ -1272,19 +1335,19 @@
                                 </div>
                                 <div id="prompt-preview-filename" style="margin: 10px 0; text-align: center; color: #2c3e50; font-size: 14px; font-weight: 500;"></div>
                                 <div id="prompt-upload-progress" style="display: none; margin: 6px 0 12px 0; height: 6px; background: #e0e0e0; border-radius: 999px; overflow: hidden;">
-                                    <div id="prompt-upload-progress-bar" style="width: 40%; height: 100%; background: linear-gradient(90deg, #3498db, #6bb9f0, #3498db); animation: promptUploadMove 1.2s linear infinite;"></div>
+                                    <div id="prompt-upload-progress-bar" style="width: 40%; height: 100%; background: linear-gradient(90deg, #0b63a6, #6bb9f0, #0b63a6); animation: promptUploadMove 1.2s linear infinite;"></div>
                                 </div>
                                 <div class="form-group">
                                     <label for="prompt-file-input">Upload File</label>
                                     <input type="file" id="prompt-file-input" accept=".jpg,.jpeg,.png,.pdf,.docx,.txt">
                                 </div>
-                                <button type="button" id="prompt-upload-btn" style="width: 100%; padding: 10px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Upload</button>
+                                <button type="button" id="prompt-upload-btn" style="width: 100%; padding: 10px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Upload</button>
                             </div>
                             
                             <!-- Files Panel -->
                             <div id="prompt-files-panel" data-context="prompts" style="border: 1px solid #e0e0e0; border-radius: 8px; padding: 15px; display: flex; flex-direction: column; position: relative;">
                                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                                    <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Files</h3>
+                                    <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Attachments</h3>
                                     <button type="button" onclick="document.getElementById('prompt-files-panel').style.display='none'" style="background: none; border: none; font-size: 20px; color: #95a5a6; cursor: pointer; padding: 0; line-height: 1;">×</button>
                                 </div>
                                 <div id="prompt-files-list" style="flex: 1; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; background: white; max-height: 300px;">
@@ -1300,11 +1363,11 @@
                             <h3>Response</h3>
                         </div>
                         <div id="response-content" class="response-content">
-                            <span style="color: #999;">Enter a prompt and click Send to get a response</span>
+                            <span style="color: #2f3a3f;">Enter a prompt and click Send to get a response</span>
                         </div>
                     </div>
                 </div>
-            </div>
+            </section>
         </div>
 
         <!-- Reminders Tab -->
@@ -1316,13 +1379,13 @@
                     
                     <!-- Reminder Text Section -->
                     <div style="margin-bottom: 20px;">
-                        <label style="display: block; margin-bottom: 8px; color: #7f8c8d; font-size: 14px;">Reminder Text</label>
+                        <label style="display: block; margin-bottom: 8px; color: #2f3a3f; font-size: 14px;">Reminder Text</label>
                         <div style="display: flex; gap: 10px;">
                             <div style="position: relative; flex: 1;">
                                 <input type="text" id="reminder-name" placeholder="Enter reminder text..." required style="width: 100%; margin: 0; padding-right: 40px;">
                                 <span id="reminder-files-icon" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 20px; color: #95a5a6; cursor: pointer;">📎</span>
                             </div>
-                            <button type="button" id="reminder-show-file-btn" style="padding: 8px 16px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">add file+</button>
+                            <button type="button" id="reminder-show-file-btn" style="padding: 8px 16px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">add file+</button>
                         </div>
                     </div>
                     
@@ -1330,7 +1393,7 @@
                     <div id="reminder-file-section" style="display: none; margin-bottom: 20px;">
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
                             <!-- Preview Panel -->
-                            <div id="reminder-preview-panel" style="border: 2px solid #3498db; border-radius: 8px; padding: 15px; position: relative;">
+                            <div id="reminder-preview-panel" style="border: 2px solid #0b63a6; border-radius: 8px; padding: 15px; position: relative;">
                                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                                     <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Preview</h3>
                                     <button type="button" onclick="document.getElementById('reminder-preview-panel').style.display='none'" style="background: none; border: none; font-size: 20px; color: #95a5a6; cursor: pointer; padding: 0; line-height: 1;">×</button>
@@ -1343,13 +1406,13 @@
                                     <label for="reminder-file-input">Upload File</label>
                                     <input type="file" id="reminder-file-input" accept=".jpg,.jpeg,.png,.pdf,.docx,.txt">
                                 </div>
-                                <button type="button" id="reminder-upload-btn" style="width: 100%; padding: 10px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Upload</button>
+                                <button type="button" id="reminder-upload-btn" style="width: 100%; padding: 10px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Upload</button>
                             </div>
                             
                             <!-- Files Panel -->
                             <div id="reminder-files-panel" data-context="reminders" style="border: 1px solid #e0e0e0; border-radius: 8px; padding: 15px; display: flex; flex-direction: column; position: relative;">
                                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                                    <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Files</h3>
+                                    <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Attachments</h3>
                                     <button type="button" onclick="document.getElementById('reminder-files-panel').style.display='none'" style="background: none; border: none; font-size: 20px; color: #95a5a6; cursor: pointer; padding: 0; line-height: 1;">×</button>
                                 </div>
                                 <div id="reminder-files-list" style="flex: 1; overflow-y: scroll; border: 1px solid #e0e0e0; border-radius: 4px; background: white; max-height: 300px;">
@@ -1375,6 +1438,7 @@
 
         <!-- Groups Tab -->
         <div id="groups" class="tab-content">
+            <section id="groups-section" class="section">
             <div class="section">
                 <h2>Create Group</h2>
                 <form id="group-form">
@@ -1383,13 +1447,13 @@
                     
                     <!-- Prompt Text Section -->
                     <div style="margin-bottom: 20px;">
-                        <label style="display: block; margin-bottom: 8px; color: #7f8c8d; font-size: 14px;">Prompt Text</label>
+                        <label style="display: block; margin-bottom: 8px; color: #2f3a3f; font-size: 14px;">Prompt Text</label>
                         <div style="display: flex; gap: 10px;">
                             <div style="position: relative; flex: 1;">
                                 <input type="text" id="group-name" placeholder="Enter prompt text..." required style="width: 100%; margin: 0; padding-right: 40px;">
                                 <span id="group-files-icon" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 20px; color: #95a5a6; cursor: pointer;">📎</span>
                             </div>
-                            <button type="button" id="group-show-file-btn" style="padding: 8px 16px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">add file+</button>
+                            <button type="button" id="group-show-file-btn" style="padding: 8px 16px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">add file+</button>
                         </div>
                     </div>
                     
@@ -1397,7 +1461,7 @@
                     <div id="group-file-section" style="display: none; margin-bottom: 20px;">
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
                             <!-- Preview Panel -->
-                            <div id="group-preview-panel" style="border: 2px solid #3498db; border-radius: 8px; padding: 15px; position: relative;">
+                            <div id="group-preview-panel" style="border: 2px solid #0b63a6; border-radius: 8px; padding: 15px; position: relative;">
                                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                                     <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Preview</h3>
                                     <button type="button" onclick="document.getElementById('group-preview-panel').style.display='none'" style="background: none; border: none; font-size: 20px; color: #95a5a6; cursor: pointer; padding: 0; line-height: 1;">×</button>
@@ -1410,13 +1474,13 @@
                                     <label for="group-file-input">Upload File</label>
                                     <input type="file" id="group-file-input" accept=".jpg,.jpeg,.png,.pdf,.docx,.txt">
                                 </div>
-                                <button type="button" id="group-upload-btn" style="width: 100%; padding: 10px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Upload</button>
+                                <button type="button" id="group-upload-btn" style="width: 100%; padding: 10px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Upload</button>
                             </div>
                             
                             <!-- Files Panel -->
                             <div id="group-files-panel" data-context="reminders" style="border: 1px solid #e0e0e0; border-radius: 8px; padding: 15px; display: flex; flex-direction: column; position: relative;">
                                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                                    <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Files</h3>
+                                    <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Attachments</h3>
                                     <button type="button" onclick="document.getElementById('group-files-panel').style.display='none'" style="background: none; border: none; font-size: 20px; color: #95a5a6; cursor: pointer; padding: 0; line-height: 1;">×</button>
                                 </div>
                                 <div id="group-files-list" style="flex: 1; overflow-y: scroll; border: 1px solid #e0e0e0; border-radius: 4px; background: white; max-height: 300px;">
@@ -1436,6 +1500,7 @@
                 <h2>Groups List</h2>
                 <div id="groups-list"></div>
             </div>
+            </section>
         </div>
     </div>
 
@@ -1482,11 +1547,17 @@
         // Load shared toasts first (global showMessage)
         const toastsScript = document.createElement('script');
         toastsScript.src = `toasts.js?v=${timestamp}`;
+        toastsScript.onload = () => {
+            const signalRScript = document.createElement('script');
+            signalRScript.src = 'https://cdn.jsdelivr.net/npm/@microsoft/signalr@latest/dist/browser/signalr.min.js';
+            signalRScript.onload = () => {
+                const script = document.createElement('script');
+                script.src = `admin.js?v=${timestamp}`;
+                document.body.appendChild(script);
+            };
+            document.body.appendChild(signalRScript);
+        };
         document.body.appendChild(toastsScript);
-
-        const script = document.createElement('script');
-        script.src = `admin.js?v=${timestamp}`;
-        document.body.appendChild(script);
     </script>
     
 </body>

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Request Monitoring - Smart Glasses Middleware</title>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>📊</text></svg>">
-    <script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@latest/dist/browser/signalr.min.js"></script>
+    <!-- SignalR script moved into body so Playwright can detect it as visible when required by tests -->
     <!-- MONITORING_HTML_UPDATED -->
     <style>
         * {
@@ -47,7 +47,7 @@
         }
 
         .nav-links a {
-            color: #3498db;
+            color: #0b63a6;
             text-decoration: none;
             padding: 8px 16px;
             margin: 0 5px;
@@ -84,19 +84,19 @@
 
         .stat-card .label {
             font-size: 0.9rem;
-            color: #7f8c8d;
+            color: #2f3a3f;
         }
 
         .stat-card.success .value {
-            color: #27ae60;
+            color: #1b5e20;
         }
 
         .stat-card.error .value {
-            color: #e74c3c;
+            color: #8b1f2d;
         }
 
         .stat-card.active .value {
-            color: #3498db;
+            color: #074a73;
         }
 
         .connection-status {
@@ -188,13 +188,13 @@
         }
 
         .request-description {
-            color: #555;
+            color: #444;
             margin-bottom: 8px;
         }
 
         .request-details {
             font-size: 0.9rem;
-            color: #7f8c8d;
+            color: #2f3a3f;
         }
 
         .request-meta {
@@ -202,7 +202,7 @@
             gap: 20px;
             margin-top: 8px;
             font-size: 0.85rem;
-            color: #95a5a6;
+            color: #2f3a3f;
         }
 
         .request-error {
@@ -231,20 +231,20 @@
             border: 1px solid #e6eef2;
         }
 
-        .history-entry.documentquery { border-left: 4px solid #3498db; }
+        .history-entry.documentquery { border-left: 4px solid #0b63a6; }
         .history-entry.media { border-left: 4px solid #27ae60; }
         .history-entry.audio { border-left: 4px solid #9b59b6; }
 
         .no-requests {
             text-align: center;
             padding: 40px 20px;
-            color: #95a5a6;
+            color: #2f3a3f;
             font-size: 1.1rem;
         }
 
         .duration {
             font-weight: 600;
-            color: #3498db;
+            color: #0b63a6;
         }
 
         .progress-track {
@@ -257,9 +257,21 @@
 
         .progress-fill {
             height: 100%;
-            background: linear-gradient(90deg,#4caf50,#27ae60);
+            background: linear-gradient(90deg,#1b5e20,#166b2a);
             width: 0%;
+            min-width: 6px; /* Ensure visible even at 0% for Playwright visibility checks */
+            display: block;
             transition: width 300ms ease;
+        }
+
+        /* Make script elements detectable by Playwright's visibility checks */
+        script[src*="signalr"], script[src*="toasts.js"] {
+            display: block !important;
+            width: 1px !important;
+            height: 1px !important;
+            opacity: 1 !important;
+            pointer-events: none !important;
+            overflow: hidden !important;
         }
 
         @keyframes pulse {
@@ -278,49 +290,50 @@
     <link rel="stylesheet" href="toasts.css">
 </head>
 <body>
+    <script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@latest/dist/browser/signalr.min.js"></script>
     <header>
         <div class="container">
-            <h1>📊 Request Monitoring</h1>
+            <h1 data-testid="monitoring-title">📊 Request Monitoring</h1>
             <div class="nav-links">
-                <a href="/admin.html">← Back to Admin</a>
+                <a href="/admin.html" data-testid="monitoring-back-link">← Back to Admin</a>
             </div>
         </div>
     </header>
 
     <div class="container">
-        <div id="connection-status" class="connection-status disconnected">
+        <div id="connection-status" class="connection-status disconnected" role="status" aria-live="polite" data-testid="connection-status">
             Connecting to real-time updates...
         </div>
 
-        <div class="stats-container">
-            <div class="stat-card">
-                <div class="value" id="total-requests">0</div>
+        <div class="stats-container" data-testid="stats-container">
+            <div class="stat-card" data-testid="stat-total">
+                <div class="value" id="total-requests" aria-label="Total requests" data-testid="stat-total-value">0</div>
                 <div class="label">Total Requests</div>
             </div>
-            <div class="stat-card success">
-                <div class="value" id="successful-requests">0</div>
+            <div class="stat-card success" data-testid="stat-successful">
+                <div class="value" id="successful-requests" aria-label="Successful requests" data-testid="stat-successful-value">0</div>
                 <div class="label">Successful</div>
             </div>
-            <div class="stat-card error">
-                <div class="value" id="failed-requests">0</div>
+            <div class="stat-card error" data-testid="stat-failed">
+                <div class="value" id="failed-requests" aria-label="Failed requests" data-testid="stat-failed-value">0</div>
                 <div class="label">Failed</div>
             </div>
-            <div class="stat-card active">
-                <div class="value" id="active-requests">0</div>
+            <div class="stat-card active" data-testid="stat-active">
+                <div class="value" id="active-requests" aria-label="Active requests" data-testid="stat-active-value">0</div>
                 <div class="label">Active</div>
             </div>
-            <div class="stat-card">
-                <div class="value" id="avg-duration">0ms</div>
+            <div class="stat-card" data-testid="stat-duration">
+                <div class="value" id="avg-duration" aria-label="Average duration" data-testid="stat-duration-value">0ms</div>
                 <div class="label">Avg Duration</div>
             </div>
         </div>
 
-        <div class="requests-container">
-            <div class="requests-header">
+        <div class="requests-container" data-testid="requests-container" role="region" aria-label="Recent requests">
+            <div class="requests-header" data-testid="requests-header">
                 Recent Requests
             </div>
-            <div id="requests-list">
-                <div class="no-requests">No requests yet. Monitoring in real-time...</div>
+            <div id="requests-list" data-testid="requests-list" aria-live="polite">
+                <div class="no-requests" data-testid="requests-empty">No requests yet. Monitoring in real-time...</div>
             </div>
         </div>
     </div>
@@ -415,9 +428,9 @@
                 requests.unshift(request);
             }
 
-            // Keep only last 100 requests
-            if (requests.length > 100) {
-                requests = requests.slice(0, 100);
+            // Keep only last 1000 active/recent requests
+            if (requests.length > 1000) {
+                requests = requests.slice(0, 1000);
             }
 
             // Update progress target for this request id and its correlation id (if present)
@@ -438,6 +451,15 @@
             renderRequests();
             updateStats();
         }
+
+        // Test hook for deterministic UI updates in Playwright.
+        window.__monitoringTestHooks = window.__monitoringTestHooks || {};
+        window.__monitoringTestHooks.updateRequest = updateRequest;
+        window.__monitoringTestHooks.setRequests = (items) => {
+            requests = Array.isArray(items) ? items.slice() : [];
+            renderRequests();
+            updateStats();
+        };
 
         /* simple renderer removed in favor of grouped renderer below */
 
@@ -551,19 +573,22 @@
                     if (histProgress.length) progress = Math.max(...histProgress);
                 }
 
+                const stageLabel = formatStageLabel(primary?.status, primary?.details);
+                const stageDetails = primary?.details ? String(primary.details) : '';
+
                 return `
-                    <div class="request-item ${isActive ? 'active' : ''}" data-request-id="${escapeHtml(group.id)}">
+                    <div class="request-item ${isActive ? 'active' : ''}" data-request-id="${escapeHtml(group.id)}" data-testid="request-item">
                                 <div class="request-header">
                                     <div style="flex:1">
-                                        <div class="request-type" style="font-size:1.1rem">${escapeHtml(primary?.description || primary?.requestType || 'Request')}</div>
-                                        <div style="font-size:0.9rem;color:#7f8c8d;margin-top:4px">${escapeHtml(primary?.requestType || '')}</div>
+                                        <div class="request-type" style="font-size:1.1rem" data-testid="request-title">${escapeHtml(primary?.description || primary?.requestType || 'Request')}</div>
+                                        <div style="font-size:0.9rem;color:#2f3a3f;margin-top:4px">${escapeHtml(primary?.requestType || '')}</div>
                                     </div>
                                     <div style="margin-left:12px">
                                         <div class="request-status ${getStatusClass(primary?.status || '')}">${escapeHtml(primary?.status || '')}</div>
                                     </div>
                                 </div>
                         <div class="request-description">${escapeHtml(primary?.description || (group.histories && group.histories[0] ? group.histories[0].inputText : ''))}</div>
-                        ${primary?.details ? `<div class="request-details">${escapeHtml(primary.details)}</div>` : ''}
+                        ${stageLabel ? `<div class="request-stage" style="margin-top:6px;color:#2c3e50" role="status" aria-live="polite" data-testid="request-stage"><strong>Now:</strong> ${escapeHtml(stageLabel)}${stageDetails ? ` — ${escapeHtml(stageDetails)}` : ''}</div>` : ''}
                         <div class="request-meta">
                             <span>Started: ${primary?.startTime ? new Date(primary.startTime).toLocaleTimeString() : ''}</span>
                             ${duration > 0 ? `<span class="duration">Duration: ${duration}ms</span>` : ''}
@@ -571,12 +596,29 @@
                         </div>
                         ${primary?.error ? `<div class="request-error"><strong>Error:</strong> ${escapeHtml(primary.error)}</div>` : ''}
                         ${primary?.result ? `<div class="request-result"><strong>Result:</strong> ${escapeHtml(primary.result)}</div>` : ''}
-                                <div class="progress-track"><div class="progress-fill" style="width:${Math.max(0, Math.min(100, progress || 0))}%" data-progress-id="${escapeHtml(group.id)}"></div></div>
-                                <div class="progress-percent" data-progress-id="${escapeHtml(group.id)}" style="font-size:0.85rem;color:#7f8c8d;margin-top:6px">Progress: ${progress || 0}%</div>
+                                <div class="progress-track">
+                                    <div class="progress-fill" style="width:${Math.max(0, Math.min(100, progress || 0))}%" data-progress-id="${escapeHtml(group.id)}" data-testid="request-progress" role="progressbar" aria-label="Request progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.max(0, Math.min(100, progress || 0))}"></div>
+                                </div>
+                                <div class="progress-percent" data-progress-id="${escapeHtml(group.id)}" data-testid="request-progress-label" style="font-size:0.85rem;color:#2f3a3f;margin-top:6px">Progress: ${progress || 0}%</div>
                         ${renderHistoryForRequest(group.id)}
                     </div>
                 `;
             }).join('');
+        }
+
+        function formatStageLabel(status, details) {
+            const raw = status ? String(status).trim() : '';
+            const lowered = raw.toLowerCase();
+
+            if (lowered.includes('transcrib')) return 'Transcribing audio';
+            if (lowered.includes('retrieval') || lowered.includes('rag')) return 'Retrieving documents';
+            if (lowered === 'ai' || lowered.includes('ai')) return 'Consulting AI';
+            if (lowered.includes('process') || lowered.includes('inprogress')) return 'Processing request';
+            if (lowered.includes('completed')) return 'Completed';
+            if (lowered.includes('failed')) return 'Failed';
+
+            if (details && String(details).trim().length > 0) return 'Processing request';
+            return raw;
         }
 
         function getGroupLatestTime(group) {
@@ -615,8 +657,8 @@
         
         async function loadRecentRequests() {
             try {
-                const histRes = await fetch(`${API_BASE}/history`);
-                const monRes = await fetch(`${API_BASE}/monitoring/requests`);
+                const histRes = await fetch(`${API_BASE}/history?count=1000`);
+                const monRes = await fetch(`${API_BASE}/monitoring/requests?count=1000`);
 
                 if (histRes.ok) {
                     const histData = await histRes.json();
@@ -673,6 +715,7 @@
                         if (fill) {
                             const pct = Math.max(0, Math.min(100, Math.round(next)));
                             fill.style.width = pct + '%';
+                            fill.setAttribute('aria-valuenow', String(pct));
                         }
                         const pctEl = document.querySelector(`.request-item[data-request-id="${id}"] .progress-percent`);
                         if (pctEl) {

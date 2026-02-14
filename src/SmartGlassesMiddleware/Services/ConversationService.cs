@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using SmartGlassesMiddleware.Hubs;
+using Microsoft.AspNetCore.SignalR;
 using SmartGlassesMiddleware.Data;
 using SmartGlassesMiddleware.Models;
 
@@ -9,7 +11,7 @@ public interface IConversationService
     Task<Conversation> CreateConversationAsync(string? title = null, Guid? groupId = null);
     Task<Conversation?> GetConversationAsync(Guid conversationId);
     Task<List<Conversation>> GetActiveConversationsAsync(Guid? groupId = null);
-    Task<ChatMessage> AddMessageAsync(Guid conversationId, string role, string content, string? model = null);
+    Task<ChatMessage> AddMessageAsync(Guid conversationId, string role, string content, string? model = null, List<Guid>? documentIds = null);
     Task<List<ChatMessage>> GetRecentMessagesAsync(Guid conversationId, int count = 10);
     Task<Conversation> DetectOrCreateConversationAsync(string userMessage, Guid? groupId = null);
     Task<string> SummarizeConversationAsync(Guid conversationId);
@@ -25,6 +27,8 @@ public class ConversationService : IConversationService
     private readonly ILogger<ConversationService> _logger;
     private readonly IConfiguration _configuration;
     private readonly IServiceProvider _serviceProvider;
+    private readonly IHubContext<SmartGlassesMiddleware.Hubs.ConversationHub>? _conversationHub;
+    private readonly IHubContext<SmartGlassesMiddleware.Hubs.ResourceHub>? _resourceHub;
     private readonly double _tokensPerChar;
     private const int MaxTopicLength = 50;
     private const int MaxFallbackTitleLength = 50;
@@ -33,12 +37,16 @@ public class ConversationService : IConversationService
         ApplicationDbContext context,
         ILogger<ConversationService> logger,
         IConfiguration configuration,
-        IServiceProvider serviceProvider)
+        IServiceProvider serviceProvider,
+        IHubContext<SmartGlassesMiddleware.Hubs.ConversationHub>? conversationHub = null,
+        IHubContext<SmartGlassesMiddleware.Hubs.ResourceHub>? resourceHub = null)
     {
         _context = context;
         _logger = logger;
         _configuration = configuration;
         _serviceProvider = serviceProvider;
+        _conversationHub = conversationHub;
+        _resourceHub = resourceHub;
         _tokensPerChar = configuration.GetValue<double?>("RAG:ApproximateTokensPerChar") ?? 0.25;
     }
 
@@ -58,6 +66,18 @@ public class ConversationService : IConversationService
         await _context.SaveChangesAsync();
 
         _logger.LogInformation("Created conversation {ConversationId} with title: {Title}", conversation.Id, conversation.Title);
+
+        if (_resourceHub != null)
+        {
+            try
+            {
+                await _resourceHub.Clients.All.SendAsync("conversationsChanged");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to broadcast conversationsChanged after create");
+            }
+        }
         return conversation;
     }
 
@@ -113,7 +133,7 @@ public class ConversationService : IConversationService
         return conversations;
     }
 
-    public async Task<ChatMessage> AddMessageAsync(Guid conversationId, string role, string content, string? model = null)
+    public async Task<ChatMessage> AddMessageAsync(Guid conversationId, string role, string content, string? model = null, List<Guid>? documentIds = null)
     {
         var conversation = await _context.Conversations.FindAsync(conversationId);
         if (conversation == null)
@@ -134,10 +154,36 @@ public class ConversationService : IConversationService
 
         _context.ChatMessages.Add(message);
 
+        if (documentIds != null && documentIds.Count > 0)
+        {
+            foreach (var docId in documentIds.Distinct())
+            {
+                var attachment = new ChatMessageAttachment
+                {
+                    ChatMessageId = message.Id,
+                    DocumentMetadataId = docId
+                };
+                _context.ChatMessageAttachments.Add(attachment);
+            }
+        }
+
         // Update conversation timestamp
         conversation.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
+
+        if (_conversationHub != null)
+        {
+            try
+            {
+                await _conversationHub.Clients.Group(conversationId.ToString())
+                    .SendAsync("conversationUpdated", new { conversationId, messageId = message.Id });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to broadcast conversation update for {ConversationId}", conversationId);
+            }
+        }
 
         _logger.LogDebug("Added {Role} message to conversation {ConversationId}", role, conversationId);
         return message;
@@ -412,6 +458,7 @@ Recent conversation:
 New message: {newMessage}
 
 Does this new message change the topic significantly? Respond with 'YES' or 'NO', followed by a brief topic label (max 3 words) if YES.
+Do not use generic labels like 'topic shift' or 'topic change'—use a concise label derived from the new message.
 Format: YES|topic label OR NO";
 
                 var (_, aiResponse, _) = await ai.ProcessRequestAsync(prompt);
@@ -423,6 +470,15 @@ Format: YES|topic label OR NO";
                         // Extract topic label
                         var parts = response.Split('|');
                         var newTopic = parts.Length > 1 ? parts[1].Trim() : newMessage.Substring(0, Math.Min(MaxFallbackTitleLength, newMessage.Length));
+                        var normalizedTopic = newTopic.Trim().ToLowerInvariant();
+                        var isGenericTopic = normalizedTopic == "topic shift"
+                            || normalizedTopic == "topic change"
+                            || normalizedTopic == "topic switch"
+                            || normalizedTopic == "new topic";
+                        if (isGenericTopic)
+                        {
+                            newTopic = newMessage.Substring(0, Math.Min(MaxFallbackTitleLength, newMessage.Length));
+                        }
                         
                         // Normalize topic length
                         newTopic = newTopic.Length > MaxTopicLength ? newTopic.Substring(0, MaxTopicLength) : newTopic;
@@ -445,6 +501,18 @@ Format: YES|topic label OR NO";
                             await _context.SaveChangesAsync();
                         }
 
+
+                            if (_resourceHub != null)
+                            {
+                                try
+                                {
+                                    await _resourceHub.Clients.All.SendAsync("conversationsChanged");
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogWarning(ex, "Failed to broadcast conversationsChanged after message");
+                                }
+                            }
                         // Create new conversation in the new topic group
                         var newConversation = await CreateConversationAsync(newTopic, existingGroup.Id);
                         

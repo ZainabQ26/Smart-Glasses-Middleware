@@ -35,24 +35,8 @@ public class BackgroundTaskQueue : IBackgroundTaskQueue
         var json = JsonSerializer.Serialize(entry, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
         await _db.StringSetAsync(key, json);
         await _db.ListRightPushAsync(QueueKey, entry.Id.ToString());
-        // Start a monitoring request for this background task if monitoring is available
-        try
-        {
-            if (_monitoringService != null)
-            {
-                var monId = await _monitoringService.StartRequest("Background", $"Background task queued: {entry.Id}");
-                entry.MonitoringRequestId = monId;
-                await _monitoringService.UpdateRequestStatus(monId, "Queued", details: $"TaskId: {entry.Id}");
-
-                // Persist the monitoring id back to Redis storage for the task
-                var updatedJson = JsonSerializer.Serialize(entry, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
-                await _db.StringSetAsync(key, updatedJson);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to start monitoring for background task {Id}", entry.Id);
-        }
+        var queueLen = await _db.ListLengthAsync(QueueKey);
+        // Monitoring is handled by the caller (MediaController), so we don't create a duplicate entry here
     }
 
     public async ValueTask<BackgroundTaskEntry?> DequeueAsync(CancellationToken cancellationToken)

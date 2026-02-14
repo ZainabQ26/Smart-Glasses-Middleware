@@ -180,8 +180,23 @@ public class DocumentsController : ControllerBase
             conversation ??= await _conversationService.DetectOrCreateConversationAsync(request.Query, groupId);
             _logger.LogInformation("Using conversation {ConversationId} for query", conversation.Id);
 
+                // Detect topic change and possibly switch to a new conversation automatically
+                try
+                {
+                    var (topicChanged, newConversation) = await _conversationService.DetectTopicChangeAsync(conversation.Id, request.Query);
+                    if (topicChanged && newConversation != null)
+                    {
+                        _logger.LogInformation("Auto-switching conversation due to topic change: {NewId}", newConversation.Id);
+                        conversation = newConversation;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Topic change detection threw an exception for conversation {ConversationId}", conversation.Id);
+                }
+
             // Add user message to conversation
-            await _conversationService.AddMessageAsync(conversation.Id, "user", request.Query);
+                await _conversationService.AddMessageAsync(conversation.Id, "user", request.Query, null, request.DocumentIds);
 
             _logger.LogInformation("Calling RAG service QueryDocumentsWithConversationAsync...");
             var result = await _ragService.QueryDocumentsWithConversationAsync(
