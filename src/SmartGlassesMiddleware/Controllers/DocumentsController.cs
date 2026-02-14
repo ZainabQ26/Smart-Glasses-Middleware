@@ -66,10 +66,13 @@ public class DocumentsController : ControllerBase
         if (file.Length > _maxFileSize)
             return BadRequest($"File size exceeds maximum allowed size of {_maxFileSize / 1024 / 1024}MB");
 
+        // Start monitoring
+        var requestId = await _monitoringService.StartRequest("DocumentUpload", $"Uploading {file.FileName}");
+
         try
         {
             using var stream = file.OpenReadStream();
-            var document = await _processingService.ProcessDocumentAsync(stream, file.FileName, file.ContentType);
+            var document = await _processingService.ProcessDocumentAsync(stream, file.FileName, file.ContentType, requestId);
 
             // Add to groups if specified
             if (groupIds != null && groupIds.Any())
@@ -96,6 +99,7 @@ public class DocumentsController : ControllerBase
             // Generate embeddings for the document chunks (with retry logic)
             try
             {
+                await _monitoringService.UpdateRequestStatus(requestId, "Processing", "Generating embeddings", 95);
                 await _ragService.GenerateEmbeddingsAsync(document.Id);
             }
             catch (Exception ex)
@@ -103,6 +107,8 @@ public class DocumentsController : ControllerBase
                 _logger.LogError(ex, "Error generating embeddings for document {DocumentId}, will retry later", document.Id);
                 // Don't fail the upload, background service will retry
             }
+
+            await _monitoringService.CompleteRequest(requestId, true, $"Document {document.FileName} processed successfully");
 
             return Ok(new
             {
@@ -113,12 +119,14 @@ public class DocumentsController : ControllerBase
                 document.IsProcessed,
                 document.ProcessedAt,
                 ChunkCount = document.Chunks.Count,
-                Groups = document.DocumentGroups.Select(dg => dg.ResourceGroupId).ToList()
+                Groups = document.DocumentGroups.Select(dg => dg.ResourceGroupId).ToList(),
+                RequestId = requestId
             });
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error uploading document");
+            await _monitoringService.CompleteRequest(requestId, false, error: ex.Message);
             return StatusCode(500, new { error = "Failed to process document", details = ex.Message });
         }
     }

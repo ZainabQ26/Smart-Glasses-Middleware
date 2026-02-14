@@ -27,6 +27,201 @@
         }
       }
     },
+    "/api/admin/batch": {
+      "get": {
+        "summary": "Get files, prompts, and groups in a single batch request (optimized)",
+        "description": "Efficiently fetches multiple resource types in one API call. This endpoint reduces network overhead by consolidating what would normally require 3 separate API calls into a single request. Supports selective inclusion and configurable item limits. Responses are cached for 30 seconds to improve performance.",
+        "tags": ["Admin"],
+        "operationId": "getBatch",
+        "parameters": [
+          {
+            "name": "includeFiles",
+            "in": "query",
+            "description": "Include files in the response",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true
+            }
+          },
+          {
+            "name": "includePrompts",
+            "in": "query",
+            "description": "Include prompts/conversations in the response",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true
+            }
+          },
+          {
+            "name": "includeGroups",
+            "in": "query",
+            "description": "Include resource groups in the response",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true
+            }
+          },
+          {
+            "name": "maxItems",
+            "in": "query",
+            "description": "Maximum number of items to return per resource type",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 1000,
+              "minimum": 1,
+              "maximum": 1000
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Batch data retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "files": {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": { "type": "string", "format": "uuid" },
+                              "fileName": { "type": "string" },
+                              "label": { "type": "string" },
+                              "contentType": { "type": "string" },
+                              "fileSize": { "type": "integer" },
+                              "uploadedAt": { "type": "string", "format": "date-time" },
+                              "groups": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": { "type": "string", "format": "uuid" },
+                                    "name": { "type": "string" }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "count": { "type": "integer" }
+                      }
+                    },
+                    "prompts": {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": { "type": "string", "format": "uuid" },
+                              "title": { "type": "string" },
+                              "resourceGroupId": { "type": "string", "format": "uuid" },
+                              "createdAt": { "type": "string", "format": "date-time" },
+                              "messageCount": { "type": "integer" }
+                            }
+                          }
+                        },
+                        "count": { "type": "integer" }
+                      }
+                    },
+                    "groups": {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": { "type": "string", "format": "uuid" },
+                              "name": { "type": "string" },
+                              "description": { "type": "string" },
+                              "createdAt": { "type": "string", "format": "date-time" },
+                              "fileCount": { "type": "integer" },
+                              "conversationCount": { "type": "integer" }
+                            }
+                          }
+                        },
+                        "count": { "type": "integer" }
+                      }
+                    }
+                  }
+                },
+                "examples": {
+                  "allResources": {
+                    "summary": "All resources included",
+                    "value": {
+                      "files": {
+                        "data": [
+                          {
+                            "id": "550e8400-e29b-41d4-a716-446655440000",
+                            "fileName": "document.pdf",
+                            "label": "Important Document",
+                            "contentType": "application/pdf",
+                            "fileSize": 1024000,
+                            "uploadedAt": "2024-01-15T10:30:00Z",
+                            "groups": []
+                          }
+                        ],
+                        "count": 1
+                      },
+                      "prompts": {
+                        "data": [
+                          {
+                            "id": "660e8400-e29b-41d4-a716-446655440000",
+                            "title": "My Conversation",
+                            "resourceGroupId": "770e8400-e29b-41d4-a716-446655440000",
+                            "createdAt": "2024-01-15T10:35:00Z",
+                            "messageCount": 5
+                          }
+                        ],
+                        "count": 1
+                      },
+                      "groups": {
+                        "data": [
+                          {
+                            "id": "770e8400-e29b-41d4-a716-446655440000",
+                            "name": "Project Files",
+                            "description": "Files for the current project",
+                            "createdAt": "2024-01-15T10:00:00Z",
+                            "fileCount": 3,
+                            "conversationCount": 2
+                          }
+                        ],
+                        "count": 1
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string" },
+                    "details": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/admin/files/{id}": {
       "delete": {
         "tags": [

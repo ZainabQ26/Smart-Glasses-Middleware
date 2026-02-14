@@ -12,28 +12,19 @@ namespace SmartGlassesMiddleware.Controllers;
 [Route("api/transcribe")]
 public class AudioController : ControllerBase
 {
-    private readonly IMediaStorageService _mediaStorageService;
     private readonly ITranscriptionService _transcriptionService;
     private readonly IHistoryService _historyService;
-    private readonly IRagService _ragService;
-    private readonly ApplicationDbContext _context;
     private readonly ILogger<AudioController> _logger;
     private readonly IRequestMonitoringService? _monitoringService;
 
         public AudioController(
-        IMediaStorageService mediaStorageService,
         ITranscriptionService transcriptionService,
         IHistoryService historyService,
-        IRagService ragService,
-        ApplicationDbContext context,
         ILogger<AudioController> logger,
         IRequestMonitoringService? monitoringService = null)
     {
-        _mediaStorageService = mediaStorageService;
         _transcriptionService = transcriptionService;
         _historyService = historyService;
-        _ragService = ragService;
-        _context = context;
         _logger = logger;
         _monitoringService = monitoringService;
     }
@@ -42,7 +33,7 @@ public class AudioController : ControllerBase
     /// Transcribes audio from base64-encoded data
     /// </summary>
     /// <param name="request">Audio request containing base64-encoded audio data</param>
-    /// <returns>Transcription result with storage key and request ID</returns>
+    /// <returns>Transcription result with request ID</returns>
     /// <response code="200">Audio successfully transcribed</response>
     /// <response code="400">Invalid audio data or request format</response>
     /// <response code="500">Internal server error during processing</response>
@@ -52,6 +43,7 @@ public class AudioController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult> ProcessAudio([FromBody] AudioRequest request)
     {
+        string? monitoringRequestId = null;
         try
         {
             if (string.IsNullOrWhiteSpace(request.AudioBase64))
@@ -71,6 +63,13 @@ public class AudioController : ControllerBase
                 return BadRequest(pd);
             }
 
+            // Start monitoring
+            if (_monitoringService != null)
+            {
+                monitoringRequestId = await _monitoringService.StartRequest("Audio", "Audio transcription request");
+                await _monitoringService.UpdateRequestStatus(monitoringRequestId, "Processing", "Validating audio data", 10);
+            }
+
             // Validate base64 format
             byte[] audioBytes;
             try
@@ -79,6 +78,11 @@ public class AudioController : ControllerBase
 
                 if (audioBytes.Length == 0)
                 {
+                    if (monitoringRequestId != null && _monitoringService != null)
+                    {
+                        await _monitoringService.CompleteRequest(monitoringRequestId, false, error: "Audio data is empty");
+                    }
+                    
                     var pd = new ValidationProblemDetails
                     {
                         Type = "https://tools.ietf.org/html/rfc7231#section-6.5.1",
@@ -96,6 +100,11 @@ public class AudioController : ControllerBase
             }
             catch (FormatException)
             {
+                if (monitoringRequestId != null && _monitoringService != null)
+                {
+                    await _monitoringService.CompleteRequest(monitoringRequestId, false, error: "Invalid base64 format");
+                }
+                
                 var pd = new ValidationProblemDetails
                 {
                     Type = "https://tools.ietf.org/html/rfc7231#section-6.5.1",
@@ -111,88 +120,80 @@ public class AudioController : ControllerBase
                 return BadRequest(pd);
             }
 
-            // Store audio in MinIO
-            using var audioStream = new MemoryStream(audioBytes);
-            var fileName = $"audio_{DateTime.UtcNow:yyyyMMddHHmmss}.wav";
-            var storageKey = await _mediaStorageService.UploadMediaAsync(
-                audioStream,
-                fileName,
-                "audio/wav");
-
-            // Download and transcribe
+            // Transcribe directly from memory stream (DO NOT STORE AUDIO FILE)
             string? transcription = null;
-            string? monitoringRequestId = null;
             try
             {
-                if (_monitoringService != null)
+                if (_monitoringService != null && monitoringRequestId != null)
                 {
-                    monitoringRequestId = await _monitoringService.StartRequest("Audio", "Audio transcription request");
-                    await _monitoringService.UpdateRequestStatus(monitoringRequestId, "Processing");
+                    await _monitoringService.UpdateRequestStatus(monitoringRequestId, "Processing", "Transcribing audio", 30);
                 }
-                using var downloaded = await _mediaStorageService.DownloadMediaAsync(storageKey);
-                transcription = await _transcriptionService.TranscribeAsync(downloaded, fileName, "audio/wav");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Transcription failed for {Key}", storageKey);
-            }
-
-            // Create ManagedFile record and process for RAG indexing
-            try
-            {
-                var managedFile = new ManagedFile
+                
+                using var audioStream = new MemoryStream(audioBytes);
+                var fileName = $"audio_{DateTime.UtcNow:yyyyMMddHHmmss}.wav";
+                transcription = await _transcriptionService.TranscribeAsync(audioStream, fileName, "audio/wav");
+                
+                if (_monitoringService != null && monitoringRequestId != null)
                 {
-                    Id = Guid.NewGuid(),
-                    FileName = fileName,
-                    Label = $"Audio transcription: {fileName}",
-                    ContentType = "audio/wav",
-                    StorageKey = storageKey,
-                    UploadedAt = DateTime.UtcNow,
-                    FileSize = audioBytes.Length
-                };
-                _context.ManagedFiles.Add(managedFile);
-                await _context.SaveChangesAsync();
-
-                await _ragService.ProcessFileForRagAsync(
-                    managedFile.Id,
-                    fileName,
-                    "audio/wav",
-                    storageKey,
-                    transcription);
-                _logger.LogInformation("Audio file {FileName} processed for RAG with ID {FileId}", fileName, managedFile.Id);
+                    await _monitoringService.UpdateRequestStatus(monitoringRequestId, "Processing", "Transcription completed", 70);
+                }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to process audio file for RAG, but upload succeeded");
+                _logger.LogWarning(ex, "Transcription failed");
+                if (monitoringRequestId != null && _monitoringService != null)
+                {
+                    await _monitoringService.CompleteRequest(monitoringRequestId, false, error: "Transcription failed");
+                }
+                throw;
             }
 
-            // Save transcription to history
+            // Save only the transcription text to history (no audio file storage)
             try
             {
+                if (_monitoringService != null && monitoringRequestId != null)
+                {
+                    await _monitoringService.UpdateRequestStatus(monitoringRequestId, "Processing", "Saving transcription", 90);
+                }
+                
                 var history = new RequestHistory
                 {
-                    RequestType = "Audio",
+                    RequestType = "AudioTranscription",
                     InputText = transcription ?? string.Empty,
-                    MediaStorageKey = storageKey
+                    MediaStorageKey = null // No audio file stored
                 };
                 if (!string.IsNullOrWhiteSpace(monitoringRequestId)) history.CorrelationId = monitoringRequestId;
                 history = await _historyService.SaveRequestAsync(history);
+                
                 if (!string.IsNullOrWhiteSpace(monitoringRequestId) && _monitoringService != null)
                 {
-                    await _monitoringService.CompleteRequest(monitoringRequestId, true, result: history.Id.ToString());
+                    var preview = !string.IsNullOrEmpty(transcription) && transcription.Length > 50 
+                        ? transcription.Substring(0, 50) + "..."
+                        : transcription ?? "";
+                    await _monitoringService.CompleteRequest(monitoringRequestId, true, result: $"Transcribed: {preview}");
                 }
 
-                return Ok(new { storageKey, transcription, requestId = history.Id });
+                return Ok(new { 
+                    transcription, 
+                    requestId = history.Id,
+                    monitoringRequestId,
+                    message = "Audio transcribed successfully. Audio file was not stored, only the transcription text."
+                });
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to save history for audio {Key}", storageKey);
-                return Ok(new { storageKey, transcription });
+                _logger.LogWarning(ex, "Failed to save transcription history");
+                return Ok(new { transcription, message = "Transcription succeeded but history save failed" });
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing audio request");
+
+            if (monitoringRequestId != null && _monitoringService != null)
+            {
+                await _monitoringService.CompleteRequest(monitoringRequestId, false, error: ex.Message);
+            }
 
             var pd = new ProblemDetails
             {
