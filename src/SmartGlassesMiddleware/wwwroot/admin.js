@@ -86,6 +86,7 @@ const state = {
 
 let conversationHubConnection = null;
 let resourceHubConnection = null;
+let taskHubConnection = null;
 
 // Track individual hub connection states; banner shows if either hub is disconnected
 // Default to `true` so the banner is hidden until a hub explicitly reports disconnected.
@@ -231,6 +232,80 @@ async function initResourceHub() {
         console.warn('[SignalR] Failed to connect resource hub:', err);
         setResourceHubState(false);
     }
+}
+
+// Track active requests for progress display
+const activeRequests = new Map();
+const requestActivities = new Map();
+
+async function initTaskHub() {
+    if (!window.signalR) {
+        console.warn('[SignalR] signalR client not loaded');
+        return;
+    }
+
+    try {
+        taskHubConnection = new signalR.HubConnectionBuilder()
+            .withUrl('/hubs/tasks')
+            .withAutomaticReconnect()
+            .build();
+
+        // Handle request status updates
+        taskHubConnection.on('RequestUpdate', (request) => {
+            console.log('[TaskHub] Request update:', request);
+            activeRequests.set(request.requestId, request);
+            updateProgressDisplay(request);
+        });
+
+        // Handle detailed activity updates
+        taskHubConnection.on('ActivityUpdate', (activity) => {
+            console.log('[TaskHub] Activity update:', activity);
+            if (!requestActivities.has(activity.requestId)) {
+                requestActivities.set(activity.requestId, []);
+            }
+            requestActivities.get(activity.requestId).push({
+                timestamp: activity.timestamp || new Date().toISOString(),
+                activity: activity.activity,
+                progress: activity.progress
+            });
+            updateActivityDisplay(activity.requestId);
+        });
+
+        await taskHubConnection.start();
+        console.log('[SignalR] Task hub connected');
+    } catch (err) {
+        console.warn('[SignalR] Failed to connect task hub:', err);
+    }
+}
+
+function updateProgressDisplay(request) {
+    // Find any active progress bars and update them
+    const progressBars = document.querySelectorAll('[data-request-id="' + request.requestId + '"]');
+    progressBars.forEach(bar => {
+        if (bar.classList.contains('progress-bar')) {
+            bar.style.width = (request.progress || 0) + '%';
+            bar.setAttribute('aria-valuenow', request.progress || 0);
+        }
+        if (bar.classList.contains('progress-text')) {
+            bar.textContent = request.details || request.status || '';
+        }
+        if (bar.classList.contains('progress-percentage')) {
+            bar.textContent = (request.progress || 0) + '%';
+        }
+    });
+}
+
+function updateActivityDisplay(requestId) {
+    const activityList = document.getElementById('activity-history-' + requestId);
+    if (!activityList) return;
+
+    const activities = requestActivities.get(requestId) || [];
+    activityList.innerHTML = activities.slice(-5).reverse().map(act => `
+        <div class="activity-item" style="padding: 4px 0; font-size: 12px; color: #666;">
+            <span style="font-weight: 500;">${act.activity}</span>
+            ${act.progress ? `<span style="float: right;">${act.progress}%</span>` : ''}
+        </div>
+    `).join('');
 }
 
 async function joinConversationHubGroup(conversationId) {
@@ -2783,6 +2858,7 @@ async function init() {
 
         await initConversationHub();
         await initResourceHub();
+        await initTaskHub();
         
         // Setup prompts file management
         const promptFileInput = document.getElementById('prompt-file-input');
@@ -3082,29 +3158,65 @@ async function init() {
             if (!sources || sources.length === 0) return '';
             return `
                 <div style="margin-top: 15px; padding: 10px; background: white; border: 1px solid #dee2e6; border-radius: 4px;">
-                    <div style="font-weight: 600; color: #2c3e50; margin-bottom: 8px; font-size: 0.9rem;">Sources Used:</div>
+                    <div style="font-weight: 600; color: #2c3e50; margin-bottom: 8px; font-size: 0.9rem;">
+                        Sources Used (${sources.length}):
+                    </div>
                     <div style="display: flex; flex-direction: column; gap: 6px;">
-                        ${sources.map(source => {
+                        ${sources.map((source, index) => {
                             const documentId = source.documentId || source.DocumentId;
                             const fileName = source.fileName || source.FileName || 'Document';
+                            const documentType = source.documentType || source.DocumentType || 'unknown';
                             const page = source.pageNumber || source.PageNumber;
                             const chunkText = source.chunkText || source.ChunkText || '';
                             const label = page ? `${fileName} (p.${page})` : fileName;
                             const href = documentId ? `/api/documents/${documentId}/download` : '#';
                             const linkStyle = documentId ? 'color: #0b63a6; text-decoration: underline;' : 'color: #95a5a6; text-decoration: none;';
+                            const sourceId = 'source-' + Date.now() + '-' + index;
+                            
+                            // Determine file type icon
+                            const typeIcon = documentType === 'pdf' ? '📄' : 
+                                           documentType === 'markdown' ? '📝' :
+                                           documentType === 'image' ? '🖼️' : 
+                                           documentType === 'docx' ? '📘' :
+                                           documentType === 'xml' ? '🔖' : '📋';
+                            
                             return `
-                                <div style="display: flex; flex-direction: column; gap: 4px;">
-                                    <div style="display: flex; align-items: center; gap: 8px;">
-                                        <a href="${href}" target="_blank" style="${linkStyle}" onclick="${documentId ? '' : 'return false;'}">${escapeHtml(label)}</a>
-                                        ${documentId ? `<button type=\"button\" onclick=\"previewDocumentFile('${documentId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')\" style=\"padding: 2px 8px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;\">Preview</button>` : ''}
+                                <div style="border: 1px solid #e0e0e0; border-radius: 4px; padding: 8px; background: #fafafa;">
+                                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                                        <div style="display: flex; align-items: center; gap: 8px; flex: 1;">
+                                            <span style="font-size: 18px;">${typeIcon}</span>
+                                            <div style="display: flex; flex-direction: column; gap: 2px;">
+                                                <a href="${href}" target="_blank" style="${linkStyle} font-weight: 500;" onclick="${documentId ? '' : 'return false;'}">${escapeHtml(label)}</a>
+                                                <span style="font-size: 11px; color: #999;">Type: ${escapeHtml(documentType)}</span>
+                                            </div>
+                                        </div>
+                                        <div style="display: flex; gap: 4px;">
+                                            ${documentId ? `<button type="button" onclick="previewDocumentFile('${documentId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}'); return false;" style="padding: 4px 10px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">Preview</button>` : ''}
+                                            ${chunkText ? `<button type="button" onclick="toggleSourceExpand('${sourceId}'); return false;" style="padding: 4px 10px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;" data-testid="expand-source-${index}">Expand</button>` : ''}
+                                        </div>
                                     </div>
-                                    ${chunkText ? `<div style=\"font-size: 12px; color: #666; padding-left: 4px;\">${escapeHtml(chunkText)}</div>` : ''}
+                                    ${chunkText ? `<div id="${sourceId}" style="display: none; margin-top: 8px; padding: 8px; background: white; border-left: 3px solid #0b63a6; border-radius: 2px; font-size: 12px; color: #666; line-height: 1.4;">${escapeHtml(chunkText)}</div>` : ''}
                                 </div>
                             `;
                         }).join('')}
                     </div>
                 </div>
             `;
+        };
+        
+        // Toggle source expansion
+        window.toggleSourceExpand = function(sourceId) {
+            const element = document.getElementById(sourceId);
+            if (element) {
+                const isHidden = element.style.display === 'none';
+                element.style.display = isHidden ? 'block' : 'none';
+                
+                // Update button text
+                const button = document.querySelector(`[onclick*="${sourceId}"]`);
+                if (button) {
+                    button.textContent = isHidden ? 'Collapse' : 'Expand';
+                }
+            }
         };
 
         const sendPrompt = async () => {
@@ -3120,13 +3232,29 @@ async function init() {
             }
             
             try {
-                // Show loading state and cancel button
+                // Generate a request ID for tracking
+                const requestId = 'prompt-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+                
+                // Show progress bar instead of hourglass
                 responseContent.innerHTML = `
-                    <div style="text-align: center; padding: 20px; color: #0b63a6;">
-                        <div style="font-size: 1.2rem; margin-bottom: 10px;">⏳ Sending...</div>
-                        <div style="font-size: 0.9rem; color: #666;">Processing your request...</div>
+                    <div style="padding: 15px;">
+                        <div class="progress-text" data-request-id="${requestId}" data-testid="progress-status">Initializing...</div>
+                        <div class="progress-bar-container">
+                            <div class="progress-bar" data-request-id="${requestId}" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" style="width: 0%">
+                                <span class="progress-percentage" data-request-id="${requestId}">0%</span>
+                            </div>
+                        </div>
+                        <div class="activity-history" id="activity-history-${requestId}" style="display: none;">
+                            <!-- Activity items will be inserted here -->
+                        </div>
                     </div>
                 `;
+                
+                // Show activity history after a short delay
+                setTimeout(() => {
+                    const activityHistory = document.getElementById('activity-history-' + requestId);
+                    if (activityHistory) activityHistory.style.display = 'block';
+                }, 500);
                 
                 // Show cancel button, hide send button
                 if (sendBtn) sendBtn.style.display = 'none';
