@@ -1365,4 +1365,106 @@ public class AdminController : ControllerBase
     }
 
     #endregion
+
+    #region Batch Operations
+
+    /// <summary>
+    /// Get files, prompts, and groups in a single batch request for efficiency
+    /// </summary>
+    [HttpGet("batch")]
+    public async Task<ActionResult<object>> GetBatch(
+        [FromQuery] bool includeFiles = true,
+        [FromQuery] bool includePrompts = true,
+        [FromQuery] bool includeGroups = true,
+        [FromQuery] int maxItems = 1000)
+    {
+        try
+        {
+            var result = new Dictionary<string, object>();
+
+            if (includeFiles)
+            {
+                var files = await _context.ManagedFiles
+                    .Include(f => f.FileGroups)
+                    .ThenInclude(fg => fg.ResourceGroup)
+                    .OrderByDescending(f => f.UploadedAt)
+                    .Take(maxItems)
+                    .Select(f => new
+                    {
+                        f.Id,
+                        f.FileName,
+                        f.Label,
+                        f.ContentType,
+                        f.StorageKey,
+                        f.UploadedAt,
+                        f.FileSize,
+                        Groups = f.FileGroups.Select(fg => new { fg.ResourceGroup.Id, fg.ResourceGroup.Name })
+                    })
+                    .ToListAsync();
+
+                result["files"] = new
+                {
+                    data = files,
+                    count = files.Count
+                };
+            }
+
+            if (includePrompts)
+            {
+                var conversations = await _context.Conversations
+                    .OrderByDescending(c => c.CreatedAt)
+                    .Take(maxItems)
+                    .Select(c => new
+                    {
+                        c.Id,
+                        c.Title,
+                        c.ResourceGroupId,
+                        c.CreatedAt,
+                        c.UpdatedAt,
+                        MessageCount = c.Messages.Count
+                    })
+                    .ToListAsync();
+
+                result["prompts"] = new
+                {
+                    data = conversations,
+                    count = conversations.Count
+                };
+            }
+
+            if (includeGroups)
+            {
+                var groups = await _context.ResourceGroups
+                    .Include(g => g.FileGroups)
+                    .Include(g => g.Conversations)
+                    .OrderByDescending(g => g.CreatedAt)
+                    .Take(maxItems)
+                    .Select(g => new
+                    {
+                        g.Id,
+                        g.Name,
+                        g.Description,
+                        g.CreatedAt,
+                        FileCount = g.FileGroups.Count,
+                        ConversationCount = g.Conversations.Count
+                    })
+                    .ToListAsync();
+
+                result["groups"] = new
+                {
+                    data = groups,
+                    count = groups.Count
+                };
+            }
+
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching batch data");
+            return StatusCode(500, new { error = "Failed to fetch batch data", details = ex.Message });
+        }
+    }
+
+    #endregion
 }
