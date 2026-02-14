@@ -1,4 +1,5 @@
 const API_BASE = '/api/admin';
+const ADMIN_DEBUG = !!window.__ADMIN_DEBUG__;
 const themeStorageKey = 'uiTheme';
 
 // In-memory cache for API responses (no browser storage)
@@ -78,7 +79,10 @@ async function fetchWithRetry(url, options = {}, retries = 2) {
         // Check if request is already pending (deduplication)
         if (pendingRequests.has(cacheKey)) {
             console.log(`[API] Deduplicating request: ${url}`);
-            return pendingRequests.get(cacheKey);
+            // Return a fresh clone of the underlying response so each caller
+            // can consume the body independently (avoids "Body is disturbed or locked").
+            const underlying = pendingRequests.get(cacheKey);
+            return underlying.then(res => res.clone());
         }
     }
     
@@ -2943,15 +2947,52 @@ async function init() {
             }
         });
 
-        await initConversationHub();
-        await initResourceHub();
-        await initTaskHub();
+        // Start hub initialization in background so UI handlers attach immediately
+        initConversationHub();
+        initResourceHub();
+        initTaskHub();
         
         // Setup prompts file management
         const promptFileInput = document.getElementById('prompt-file-input');
         const promptFilesList = document.getElementById('prompt-files-list');
         const promptFilesIcon = document.getElementById('prompt-files-icon');
         const promptFileSection = document.getElementById('prompt-file-section');
+        // Observe style/class changes to resist transient re-hides (kept in production as a small mitigation).
+        try {
+                if (promptFileSection) {
+                    if (ADMIN_DEBUG) console.log('promptFileSection initial computed display:', window.getComputedStyle(promptFileSection).display);
+                    // Track last explicit show time so we can resist transient hides from other inits
+                    let _lastPromptShowTs = 0;
+                    const _promptObserver = new MutationObserver((mutations) => {
+                        for (const m of mutations) {
+                            if (m.type === 'attributes') {
+                                const computed = window.getComputedStyle(promptFileSection).display;
+                                if (ADMIN_DEBUG) console.log('promptFileSection attribute change:', m.attributeName, 'style=', promptFileSection.style.cssText, 'computed=', computed);
+                                // If the section was just shown and something immediately hid it, re-show briefly
+                                try {
+                                    const now = Date.now();
+                                    if (computed === 'none' && _lastPromptShowTs && (now - _lastPromptShowTs) < 1000) {
+                                        if (ADMIN_DEBUG) console.log('promptFileSection was re-hidden soon after show; forcing visible');
+                                        promptFileSection.style.setProperty('display', 'block', 'important');
+                                        promptFileSection.style.setProperty('visibility', 'visible', 'important');
+                                        promptFileSection.style.setProperty('opacity', '1', 'important');
+                                        const previewPanel = document.getElementById('prompt-preview-panel');
+                                        const filesPanel = document.getElementById('prompt-files-panel');
+                                        if (previewPanel) previewPanel.style.setProperty('display', 'block', 'important');
+                                        if (filesPanel) filesPanel.style.setProperty('display', 'flex', 'important');
+                                    }
+                                } catch (e) { /* ignore */ }
+                            }
+                        }
+                    });
+                    _promptObserver.observe(promptFileSection, { attributes: true, attributeFilter: ['style', 'class'] });
+
+                    // Expose helper to update last-show timestamp from other handlers
+                    promptFileSection._markShown = () => { _lastPromptShowTs = Date.now(); };
+                }
+        } catch (e) {
+            if (ADMIN_DEBUG) console.warn('Failed to attach MutationObserver to promptFileSection', e);
+        }
         const promptPreviewContent = document.getElementById('prompt-preview-content');
         const promptPreviewFilename = document.getElementById('prompt-preview-filename');
         const promptUploadProgress = document.getElementById('prompt-upload-progress');
@@ -2976,26 +3017,101 @@ async function init() {
         
         // Show file section when clicking "add file+" button
         document.getElementById('prompt-show-file-btn')?.addEventListener('click', () => {
-            const isCurrentlyHidden = promptFileSection.style.display === 'none' || !promptFileSection.style.display;
+            if (ADMIN_DEBUG) console.log('prompt-show-file-btn clicked');
+            // Prefer a global shim if present (ensures reliability across browsers/load timing)
+            if (typeof window.togglePromptFileSection === 'function') {
+                if (ADMIN_DEBUG) console.log('calling window.togglePromptFileSection()');
+                try { window.togglePromptFileSection(); return; } catch (e) { /* fallback below */ }
+            }
+            // Fallback: toggle using computed style for robustness
+            const computed = window.getComputedStyle(promptFileSection);
+            const isCurrentlyHidden = computed ? computed.display === 'none' : (promptFileSection.style.display === 'none' || !promptFileSection.style.display);
+            
             if (isCurrentlyHidden) {
-                promptFileSection.style.display = 'block';
-                document.getElementById('prompt-preview-panel').style.display = 'block';
-                document.getElementById('prompt-files-panel').style.display = 'flex';
+                promptFileSection.style.setProperty('display', 'block', 'important');
+                promptFileSection.style.setProperty('visibility', 'visible', 'important');
+                promptFileSection.style.setProperty('opacity', '1', 'important');
+                const previewPanel = document.getElementById('prompt-preview-panel');
+                const filesPanel = document.getElementById('prompt-files-panel');
+                if (previewPanel) previewPanel.style.setProperty('display', 'block', 'important');
+                if (filesPanel) filesPanel.style.setProperty('display', 'flex', 'important');
+                if (ADMIN_DEBUG) console.log('promptFileSection toggled -> shown (computed):', window.getComputedStyle(promptFileSection).display, 'visibility:', window.getComputedStyle(promptFileSection).visibility);
+                try { if (promptFileSection && typeof promptFileSection._markShown === 'function') promptFileSection._markShown(); } catch(e){}
+                // Ensure the actual file input is visible even if tab-content remains hidden due to timing
+                try {
+                    const inputEl = document.getElementById('prompt-file-input');
+                    if (inputEl) {
+                        const tabContent = inputEl.closest('.tab-content');
+                        if (tabContent && window.getComputedStyle(tabContent).display === 'none') {
+                            if (!inputEl.__originalParent) {
+                                inputEl.__originalParent = inputEl.parentNode;
+                                inputEl.__originalNext = inputEl.nextSibling;
+                            }
+                            document.body.appendChild(inputEl);
+                            inputEl.style.setProperty('position', 'absolute', 'important');
+                            inputEl.style.setProperty('left', '10px', 'important');
+                            inputEl.style.setProperty('top', '80px', 'important');
+                            inputEl.style.setProperty('z-index', '10000', 'important');
+                        }
+                    }
+                } catch(e) { if (ADMIN_DEBUG) console.warn('ensureFileInputVisible failed', e); }
             } else {
-                promptFileSection.style.display = 'none';
+                promptFileSection.style.setProperty('display', 'none', 'important');
+                promptFileSection.style.setProperty('visibility', 'hidden', 'important');
+                promptFileSection.style.setProperty('opacity', '0', 'important');
+                if (ADMIN_DEBUG) console.log('promptFileSection toggled -> hidden (computed):', window.getComputedStyle(promptFileSection).display, 'visibility:', window.getComputedStyle(promptFileSection).visibility);
+                // Try to restore file input to its original parent when hiding
+                try {
+                    const inputEl = document.getElementById('prompt-file-input');
+                    if (inputEl && inputEl.__originalParent) {
+                        inputEl.__originalParent.insertBefore(inputEl, inputEl.__originalNext || null);
+                        inputEl.style.removeProperty('position');
+                        inputEl.style.removeProperty('left');
+                        inputEl.style.removeProperty('top');
+                        inputEl.style.removeProperty('z-index');
+                        delete inputEl.__originalParent;
+                        delete inputEl.__originalNext;
+                    }
+                } catch(e) { /* noop */ }
             }
         });
         
         // Show only Files panel when clicking paperclip in Prompts
         promptFilesIcon?.addEventListener('click', () => {
+            if (ADMIN_DEBUG) console.log('promptFilesIcon clicked (paperclip)');
+            // Prefer global shim when available
+            if (typeof window.showPromptFilesPanel === 'function') {
+                if (ADMIN_DEBUG) console.log('calling window.showPromptFilesPanel()');
+                try { window.showPromptFilesPanel(); return; } catch (e) { /* fallback below */ }
+            }
             const filesPanel = document.getElementById('prompt-files-panel');
-            
             // Hide preview panel, show only files panel
-            document.getElementById('prompt-preview-panel').style.display = 'none';
-            filesPanel.style.display = 'flex';
+            document.getElementById('prompt-preview-panel').style.setProperty('display', 'none', 'important');
+            filesPanel.style.setProperty('display', 'flex', 'important');
             filesPanel.setAttribute('data-context', 'prompts');
-            
-            promptFileSection.style.display = 'block';
+
+            promptFileSection.style.setProperty('display', 'block', 'important');
+            promptFileSection.style.setProperty('visibility', 'visible', 'important');
+            promptFileSection.style.setProperty('opacity', '1', 'important');
+            if (ADMIN_DEBUG) console.log('promptFilesIcon flow set promptFileSection display:block (computed):', window.getComputedStyle(promptFileSection).display, 'visibility:', window.getComputedStyle(promptFileSection).visibility);
+            // Ensure file input is visible even if parent tab not active yet
+            try {
+                const inputEl = document.getElementById('prompt-file-input');
+                if (inputEl) {
+                    const tabContent = inputEl.closest('.tab-content');
+                    if (tabContent && window.getComputedStyle(tabContent).display === 'none') {
+                        if (!inputEl.__originalParent) {
+                            inputEl.__originalParent = inputEl.parentNode;
+                            inputEl.__originalNext = inputEl.nextSibling;
+                        }
+                        document.body.appendChild(inputEl);
+                        inputEl.style.setProperty('position', 'absolute', 'important');
+                        inputEl.style.setProperty('left', '10px', 'important');
+                        inputEl.style.setProperty('top', '80px', 'important');
+                        inputEl.style.setProperty('z-index', '10000', 'important');
+                    }
+                }
+            } catch(e) { if (ADMIN_DEBUG) console.warn('ensureFileInputVisible(paperclip) failed', e); }
             
             // Update files list after showing the panel
             updatePromptFilesList();
