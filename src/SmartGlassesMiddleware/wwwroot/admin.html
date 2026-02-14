@@ -1393,9 +1393,9 @@
                             <div style="display: flex; gap: 10px;">
                                 <div style="position: relative; flex: 1;">
                                     <input type="text" id="prompt-name" placeholder="Enter a message" required style="width: 100%; margin: 0; padding-right: 40px;">
-                                    <span id="prompt-files-icon" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 20px; color: #95a5a6; cursor: pointer;">📎</span>
+                                    <span id="prompt-files-icon" onclick="window.showPromptFilesPanel && window.showPromptFilesPanel()" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 20px; color: #95a5a6; cursor: pointer;">📎</span>
                                 </div>
-                                <button type="button" id="prompt-show-file-btn" style="padding: 8px 16px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Attach file</button>
+                                <button type="button" id="prompt-show-file-btn" onclick="window.togglePromptFileSection && window.togglePromptFileSection()" style="padding: 8px 16px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Attach file</button>
                                 <button type="button" id="prompt-send-btn" style="padding: 8px 16px; background: #1b5e20; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Send</button>
                             </div>
                         </div>
@@ -1641,6 +1641,50 @@
                 }
             } catch (e) { /* ignore */ }
         };
+        // Ensure prompt file section can be toggled reliably before admin.js loads
+        window.togglePromptFileSection = window.togglePromptFileSection || function() {
+            try {
+                const section = document.getElementById('prompt-file-section');
+                const preview = document.getElementById('prompt-preview-panel');
+                const files = document.getElementById('prompt-files-panel');
+                const isHidden = window.getComputedStyle(section || document.createElement('div')).display === 'none';
+                if (isHidden) {
+                    if (section) section.style.display = 'block';
+                    if (preview) preview.style.display = 'block';
+                    if (files) files.style.display = 'flex';
+                    try { if (section && typeof section._markShown === 'function') section._markShown(); } catch(e){}
+                } else {
+                    if (section) section.style.display = 'none';
+                }
+            } catch (e) {
+                // noop
+            }
+        };
+        window.showPromptFilesPanel = window.showPromptFilesPanel || function() {
+            try {
+                const section = document.getElementById('prompt-file-section');
+                const preview = document.getElementById('prompt-preview-panel');
+                const files = document.getElementById('prompt-files-panel');
+                if (section) section.style.display = 'block';
+                if (preview) preview.style.display = 'none';
+                if (files) files.style.display = 'flex';
+                try { if (section && typeof section._markShown === 'function') section._markShown(); } catch(e){}
+            } catch (e) { /* noop */ }
+        };
+        // Lightweight tab switching shim so tests can switch tabs before admin.js initializes
+        (function() {
+            try {
+                document.querySelectorAll('.tab').forEach(tab => {
+                    tab.addEventListener('click', () => {
+                        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                        tab.classList.add('active');
+                        const target = document.getElementById(tab.dataset.tab);
+                        if (target) target.classList.add('active');
+                    });
+                });
+            } catch (e) { /* noop */ }
+        })();
         // Force reload with timestamp
         const timestamp = new Date().getTime();
         // Load shared toasts first (global showMessage)
