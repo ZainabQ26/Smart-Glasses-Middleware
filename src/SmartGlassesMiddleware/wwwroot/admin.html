@@ -810,6 +810,38 @@
             60%, 100% { content: '...'; }
         }
 
+        /* Skeleton loader for lazy loading */
+        .skeleton {
+            background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+            background-size: 200% 100%;
+            animation: loading 1.5s ease-in-out infinite;
+            border-radius: 4px;
+        }
+
+        @keyframes loading {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+        .skeleton-card {
+            height: 120px;
+            margin-bottom: 15px;
+        }
+
+        /* Lazy image loading */
+        .lazy-image {
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .lazy-image.loaded {
+            opacity: 1;
+        }
+
+        img[loading="lazy"] {
+            background: #f0f0f0;
+        }
+
         .scroll-to-load {
             text-align: center;
             padding: 15px;

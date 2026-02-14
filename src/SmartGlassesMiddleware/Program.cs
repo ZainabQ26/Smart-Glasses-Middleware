@@ -62,6 +62,33 @@ builder.Services.Configure<ApiBehaviorOptions>(options =>
 });
 builder.Services.AddOpenApi();
 
+// Add response compression for better performance
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.Providers.Add<Microsoft.AspNetCore.ResponseCompression.BrotliCompressionProvider>();
+    options.Providers.Add<Microsoft.AspNetCore.ResponseCompression.GzipCompressionProvider>();
+    options.MimeTypes = Microsoft.AspNetCore.ResponseCompression.ResponseCompressionDefaults.MimeTypes.Concat(new[]
+    {
+        "application/json",
+        "application/javascript",
+        "text/javascript",
+        "text/json",
+        "image/svg+xml"
+    });
+});
+
+// Configure compression levels
+builder.Services.Configure<Microsoft.AspNetCore.ResponseCompression.BrotliCompressionProviderOptions>(options =>
+{
+    options.Level = System.IO.Compression.CompressionLevel.Fastest;
+});
+
+builder.Services.Configure<Microsoft.AspNetCore.ResponseCompression.GzipCompressionProviderOptions>(options =>
+{
+    options.Level = System.IO.Compression.CompressionLevel.Fastest;
+});
+
 // Enable detailed HTTP request/response logging (bodies limited to reasonable size)
 builder.Services.AddHttpLogging(options =>
 {
@@ -356,8 +383,23 @@ if (!builder.Environment.IsEnvironment("Testing") && !string.IsNullOrWhiteSpace(
 }
 builder.Services.AddHostedService<DocumentProcessingBackgroundService>();
 
-// Add SignalR for real-time notifications
-builder.Services.AddSignalR();
+// Add SignalR for real-time notifications with WebSocket optimizations
+builder.Services.AddSignalR(options =>
+{
+    // Enable detailed errors in development
+    options.EnableDetailedErrors = builder.Environment.IsDevelopment();
+    
+    // Keep connections alive with heartbeat
+    options.KeepAliveInterval = TimeSpan.FromSeconds(15);
+    options.ClientTimeoutInterval = TimeSpan.FromSeconds(30);
+    
+    // Optimize message size
+    options.MaximumReceiveMessageSize = 1024 * 1024; // 1 MB
+    
+    // Enable parallel invocations for better throughput
+    options.MaximumParallelInvocationsPerClient = 10;
+});
+
 // Add Redis pub/sub bridge to forward messages to SignalR clients (only if Redis is configured)
 if (!builder.Environment.IsEnvironment("Testing") && !string.IsNullOrWhiteSpace(redisConnection))
 {
@@ -729,6 +771,9 @@ using (var scope = app.Services.CreateScope())
 }
 
 // Add request logging middleware FIRST to track all requests
+// Enable response compression for better performance
+app.UseResponseCompression();
+
 // Enable built-in HTTP logging so we can see headers and bodies
 app.UseHttpLogging();
 
