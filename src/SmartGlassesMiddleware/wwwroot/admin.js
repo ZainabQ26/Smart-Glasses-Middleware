@@ -2862,6 +2862,19 @@ async function init() {
                             promptPreviewContent.innerHTML = `<embed src="${e.target.result}" type="application/pdf" width="100%" height="200px" style="border-radius: 4px;">`;
                         };
                         reader.readAsDataURL(file);
+                    } else if (['wav', 'mp3', 'm4a', 'ogg', 'webm'].includes(ext)) {
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            promptPreviewContent.innerHTML = `
+                                <div style="text-align: center;">
+                                    <div style="font-size: 64px; margin-bottom: 10px;">🎤</div>
+                                    <audio controls style="width: 100%; margin-top: 10px;">
+                                        <source src="${e.target.result}" type="audio/${ext}">
+                                    </audio>
+                                </div>
+                            `;
+                        };
+                        reader.readAsDataURL(file);
                     } else {
                         promptPreviewContent.innerHTML = `
                             <div style="text-align: center;">
@@ -2889,7 +2902,91 @@ async function init() {
                             progressBar.style.width = '0%';
                         }
                         
-                        // Upload file to server with progress tracking
+                        // Check if this is an audio file - handle via transcription API
+                        if (['wav', 'mp3', 'm4a', 'ogg', 'webm'].includes(ext)) {
+                            // Read file as base64 for transcription API
+                            const reader = new FileReader();
+                            reader.onload = async function(e) {
+                                try {
+                                    const base64Audio = e.target.result.split(',')[1]; // Remove data:audio/...;base64, prefix
+                                    
+                                    // Show transcribing status
+                                    if (promptPreviewContent) {
+                                        promptPreviewContent.innerHTML = `
+                                            <div style="text-align: center;">
+                                                <div style="font-size: 48px; margin-bottom: 10px;">🎤</div>
+                                                <div style="color: #2c3e50; font-weight: 500;">Transcribing audio...</div>
+                                                <div style="margin-top: 10px;">
+                                                    <div style="width: 100%; height: 6px; background: #e0e0e0; border-radius: 3px; overflow: hidden;">
+                                                        <div id="audio-transcribe-progress" style="width: 0%; height: 100%; background: linear-gradient(90deg, #0b63a6, #6bb9f0, #0b63a6); animation: promptUploadMove 1.2s linear infinite;"></div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        `;
+                                    }
+                                    
+                                    // Call transcription API
+                                    const response = await fetch('/api/transcribe', {
+                                        method: 'POST',
+                                        headers: {
+                                            'Content-Type': 'application/json'
+                                        },
+                                        body: JSON.stringify({
+                                            audioBase64: base64Audio
+                                        })
+                                    });
+                                    
+                                    if (!response.ok) {
+                                        throw new Error('Transcription failed');
+                                    }
+                                    
+                                    const result = await response.json();
+                                    const transcription = result.transcription || '';
+                                    
+                                    // Hide progress bar
+                                    if (promptUploadProgress) {
+                                        promptUploadProgress.style.display = 'none';
+                                    }
+                                    
+                                    // Show transcription result
+                                    if (promptPreviewContent) {
+                                        promptPreviewContent.innerHTML = `
+                                            <div style="text-align: left; padding: 10px;">
+                                                <div style="font-size: 14px; color: #2c3e50; margin-bottom: 10px; font-weight: 600;">
+                                                    ✓ Transcription Complete
+                                                </div>
+                                                <div style="background: #f8f9fa; padding: 10px; border-radius: 4px; max-height: 150px; overflow-y: auto; font-size: 13px; line-height: 1.5;">
+                                                    ${transcription || 'No text detected'}
+                                                </div>
+                                            </div>
+                                        `;
+                                    }
+                                    
+                                    // Add transcription to prompt input
+                                    const promptInput = document.getElementById('prompt-name');
+                                    if (promptInput && transcription) {
+                                        const currentText = promptInput.value.trim();
+                                        promptInput.value = currentText ? `${currentText}\n\n[Audio]: ${transcription}` : transcription;
+                                    }
+                                    
+                                    showMessage('Audio transcribed successfully!', 'success');
+                                    
+                                    // Clear file input
+                                    promptFileInput.value = '';
+                                    
+                                } catch (error) {
+                                    console.error('Transcription error:', error);
+                                    showMessage('Audio transcription failed: ' + error.message, 'error');
+                                    if (promptUploadProgress) {
+                                        promptUploadProgress.style.display = 'none';
+                                    }
+                                }
+                            };
+                            reader.readAsDataURL(file);
+                            return; // Skip regular upload for audio files
+                        }
+                        
+                        // Regular file upload (documents, images, etc.)
                         const formData = new FormData();
                         formData.append('file', file);
                         
