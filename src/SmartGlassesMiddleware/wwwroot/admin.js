@@ -187,7 +187,12 @@ function renderMarkdown(text) {
                 headerIds: false,
                 mangle: false
             });
-            return marked.parse(text);
+            const rawHtml = marked.parse(text);
+            // Sanitize the HTML to prevent XSS attacks
+            if (typeof DOMPurify !== 'undefined') {
+                return DOMPurify.sanitize(rawHtml);
+            }
+            return rawHtml;
         } catch (e) {
             console.warn('Failed to parse markdown:', e);
             return `<pre style="text-align: left; max-height: 400px; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(text)}</pre>`;
