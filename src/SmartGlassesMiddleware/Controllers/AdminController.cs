@@ -331,8 +331,34 @@ public class AdminController : ControllerBase
         try
         {
             var stream = await _mediaStorageService.DownloadMediaAsync(file.StorageKey);
+            stream.Position = 0;
+            var contentType = string.IsNullOrWhiteSpace(file.ContentType)
+                ? "application/octet-stream"
+                : file.ContentType;
+
+            if (contentType == "application/octet-stream")
+            {
+                var ext = Path.GetExtension(file.FileName ?? string.Empty)?.ToLowerInvariant() ?? string.Empty;
+                contentType = ext switch
+                {
+                    ".pdf" => "application/pdf",
+                    ".txt" => "text/plain",
+                    ".md" => "text/markdown",
+                    ".json" => "application/json",
+                    ".xml" => "application/xml",
+                    ".csv" => "text/csv",
+                    ".jpg" or ".jpeg" => "image/jpeg",
+                    ".png" => "image/png",
+                    ".gif" => "image/gif",
+                    ".webp" => "image/webp",
+                    ".bmp" => "image/bmp",
+                    ".svg" => "image/svg+xml",
+                    _ => contentType
+                };
+            }
+
             // Return file inline (for preview in browser)
-            return File(stream, file.ContentType);
+            return File(stream, contentType);
         }
         catch (Exception ex)
         {
@@ -356,8 +382,34 @@ public class AdminController : ControllerBase
         try
         {
             var stream = await _mediaStorageService.DownloadMediaAsync(file.StorageKey);
+            stream.Position = 0;
+            var contentType = string.IsNullOrWhiteSpace(file.ContentType)
+                ? "application/octet-stream"
+                : file.ContentType;
+
+            if (contentType == "application/octet-stream")
+            {
+                var ext = Path.GetExtension(file.FileName ?? string.Empty)?.ToLowerInvariant() ?? string.Empty;
+                contentType = ext switch
+                {
+                    ".pdf" => "application/pdf",
+                    ".txt" => "text/plain",
+                    ".md" => "text/markdown",
+                    ".json" => "application/json",
+                    ".xml" => "application/xml",
+                    ".csv" => "text/csv",
+                    ".jpg" or ".jpeg" => "image/jpeg",
+                    ".png" => "image/png",
+                    ".gif" => "image/gif",
+                    ".webp" => "image/webp",
+                    ".bmp" => "image/bmp",
+                    ".svg" => "image/svg+xml",
+                    _ => contentType
+                };
+            }
+
             // Force download with filename
-            return File(stream, file.ContentType, file.FileName);
+            return File(stream, contentType, file.FileName);
         }
         catch (Exception ex)
         {
@@ -697,6 +749,8 @@ public class AdminController : ControllerBase
             .ThenInclude(fg => fg.ManagedFile)
             .Include(g => g.PromptGroups)
             .ThenInclude(pg => pg.ManagedPrompt)
+            .Include(g => g.DocumentGroups)
+            .ThenInclude(dg => dg.DocumentMetadata)
             .Include(g => g.Conversations)
             .OrderByDescending(g => g.CreatedAt)
             .Skip((page - 1) * pageSize)
@@ -719,6 +773,13 @@ public class AdminController : ControllerBase
                 {
                     pg.ManagedPrompt.Id,
                     pg.ManagedPrompt.Name
+                }).ToList(),
+                Documents = g.DocumentGroups.Select(dg => new
+                {
+                    dg.DocumentMetadata.Id,
+                    dg.DocumentMetadata.FileName,
+                    dg.DocumentMetadata.OriginalFileName,
+                    dg.DocumentMetadata.ContentType
                 }).ToList(),
                 Conversations = g.Conversations.Select(c => new
                 {
