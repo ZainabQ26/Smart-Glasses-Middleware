@@ -4,6 +4,8 @@ using SmartGlassesMiddleware.Models;
 using SmartGlassesMiddleware.Data;
 using Microsoft.EntityFrameworkCore;
 using System.Linq;
+using Microsoft.AspNetCore.SignalR;
+using SmartGlassesMiddleware.Hubs;
 
 namespace SmartGlassesMiddleware.Controllers;
 
@@ -15,17 +17,25 @@ public class ConversationsController : ControllerBase
     private readonly IConversationService _conversationService;
     private readonly IRAGService _ragService;
     private readonly ApplicationDbContext _context;
+    private readonly ICacheService _cacheService;
+    private readonly IHubContext<ResourceHub>? _resourceHub;
+    private const int DefaultPageSize = 20;
+    private const int MaxPageSize = 100;
 
     public ConversationsController(
         ILogger<ConversationsController> logger,
         IConversationService conversationService,
         IRAGService ragService,
-        ApplicationDbContext context)
+        ApplicationDbContext context,
+        ICacheService cacheService,
+        IHubContext<ResourceHub>? resourceHub = null)
     {
         _logger = logger;
         _conversationService = conversationService;
         _ragService = ragService;
         _context = context;
+        _cacheService = cacheService;
+        _resourceHub = resourceHub;
     }
 
     /// <summary>
@@ -154,6 +164,33 @@ public class ConversationsController : ControllerBase
     }
 
     /// <summary>
+    /// Update conversation metadata (title)
+    /// </summary>
+    [HttpPut("{id}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> UpdateConversation(Guid id, [FromBody] UpdateConversationRequest request)
+    {
+        if (request == null || string.IsNullOrWhiteSpace(request.Title))
+            return BadRequest(new { error = "Title is required" });
+
+        var conversation = await _context.Conversations.FindAsync(id);
+        if (conversation == null)
+            return NotFound(new { error = "Conversation not found" });
+
+        conversation.Title = request.Title.Trim();
+        conversation.UpdatedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+
+        await InvalidateGroupsCache();
+        await NotifyGroupsChangedAsync();
+        await NotifyConversationsChangedAsync();
+
+        return Ok(new { conversation.Id, conversation.Title, conversation.UpdatedAt });
+    }
+
+    /// <summary>
     /// Query documents with conversation context
     /// </summary>
     [HttpPost("{id}/query")]
@@ -262,6 +299,33 @@ public class ConversationsController : ControllerBase
     }
 
     /// <summary>
+    /// Update the resource group associated with a conversation
+    /// </summary>
+    [HttpPut("{id}/group")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> UpdateConversationGroup(Guid id, [FromBody] UpdateConversationGroupRequest request)
+    {
+        if (request == null || !request.ResourceGroupId.HasValue || request.ResourceGroupId.Value == Guid.Empty)
+            return BadRequest(new { error = "ResourceGroupId is required" });
+
+        var conversation = await _context.Conversations.FindAsync(id);
+        if (conversation == null)
+            return NotFound(new { error = "Conversation not found" });
+
+        var group = await _context.ResourceGroups.FindAsync(request.ResourceGroupId.Value);
+        if (group == null)
+            return NotFound(new { error = "Resource group not found" });
+
+        conversation.ResourceGroupId = request.ResourceGroupId.Value;
+        conversation.UpdatedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+
+        return Ok(new { conversation.Id, conversation.ResourceGroupId });
+    }
+
+    /// <summary>
     /// Permanently delete a conversation and its messages from the database.
     /// </summary>
     [HttpDelete("{id}")]
@@ -280,8 +344,47 @@ public class ConversationsController : ControllerBase
 
         await _context.SaveChangesAsync();
 
+        await InvalidateGroupsCache();
+        await NotifyGroupsChangedAsync();
+        await NotifyConversationsChangedAsync();
+
         _logger.LogInformation("Permanently deleted conversation {ConversationId}", id);
         return NoContent();
+    }
+
+    private Task NotifyGroupsChangedAsync()
+    {
+        return _resourceHub != null
+            ? _resourceHub.Clients.All.SendAsync("groupsChanged")
+            : Task.CompletedTask;
+    }
+
+    private Task NotifyConversationsChangedAsync()
+    {
+        return _resourceHub != null
+            ? _resourceHub.Clients.All.SendAsync("conversationsChanged")
+            : Task.CompletedTask;
+    }
+
+    private async Task InvalidateGroupsCache()
+    {
+        try
+        {
+            var totalCount = await _context.ResourceGroups.CountAsync();
+            var totalPages = (int)Math.Ceiling(totalCount / (double)DefaultPageSize);
+
+            var tasks = new List<Task>();
+            for (int page = 1; page <= totalPages + 1; page++)
+            {
+                tasks.Add(_cacheService.RemoveAsync($"admin:groups:page:{page}:size:{DefaultPageSize}"));
+                tasks.Add(_cacheService.RemoveAsync($"admin:groups:page:{page}:size:{MaxPageSize}"));
+            }
+            await Task.WhenAll(tasks);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error invalidating groups cache");
+        }
     }
 }
 
@@ -305,4 +408,14 @@ public class ConversationQueryRequest
     public int? TopK { get; set; }
     public List<Guid>? GroupIds { get; set; }
     public string? Model { get; set; }
+}
+
+public class UpdateConversationRequest
+{
+    public string? Title { get; set; }
+}
+
+public class UpdateConversationGroupRequest
+{
+    public Guid? ResourceGroupId { get; set; }
 }

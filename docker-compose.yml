@@ -95,8 +95,8 @@ services:
       - AI__OllamaEndpoint=${OLLAMA_ENDPOINT:-http://ollama:11434}
       - AI__OllamaModel=llama2:latest
       - AI__OllamaEmbeddingModel=${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
-      - AI__OllamaTimeoutSeconds=${OLLAMA_TIMEOUT_SECONDS:-30}
-      - AI__OllamaEmbeddingTimeoutSeconds=${OLLAMA_EMBEDDING_TIMEOUT_SECONDS:-30}
+      - AI__OllamaTimeoutSeconds=${OLLAMA_TIMEOUT_SECONDS:-180}
+      - AI__OllamaEmbeddingTimeoutSeconds=${OLLAMA_EMBEDDING_TIMEOUT_SECONDS:-180}
       - AI__UseAdvancedModel=false
       - AI__AdvancedModelEndpoint=${AI_ADVANCED_ENDPOINT:-}
       - AI__AdvancedModelName=${AI_ADVANCED_MODEL_NAME:-gpt-4}
@@ -111,7 +111,7 @@ services:
       - BackgroundTasks__RetentionSeconds=${BACKGROUND_TASKS_RETENTION_SECONDS:-60}
       - BackgroundTasks__CleanupIntervalMinutes=${BACKGROUND_TASKS_CLEANUP_INTERVAL_MINUTES:-5}
       - ServiceTimeouts__TranscriptionTimeoutSeconds=${TRANSCRIPTION_TIMEOUT_SECONDS:-30}
-      - ServiceTimeouts__AIServiceTimeoutSeconds=${AI_SERVICE_TIMEOUT_SECONDS:-60}
+      - ServiceTimeouts__AIServiceTimeoutSeconds=${AI_SERVICE_TIMEOUT_SECONDS:-180}
       - RateLimiting__Enabled=${RATE_LIMITING_ENABLED:-false}
       - RateLimiting__RequestsPerMinute=${RATE_LIMITING_REQUESTS_PER_MINUTE:-1000}
       - Metrics__ApiKey=${METRICS_API_KEY:-}
@@ -126,6 +126,7 @@ services:
       - RAG__EmbeddingMaxConcurrency=${RAG_EMBEDDING_MAX_CONCURRENCY:-5}
       - RAG__UseVectorDB=${RAG_USE_VECTOR_DB:-true}
       - RAG__VectorSimilarityThreshold=${RAG_VECTOR_SIMILARITY_THRESHOLD:-0.7}
+      - RAG__QueryTimeoutSeconds=${RAG_QUERY_TIMEOUT_SECONDS:-180}
       - Logging__LogLevel__Default=${LOG_LEVEL_DEFAULT:-Information}
       - Logging__LogLevel__Microsoft.AspNetCore=${LOG_LEVEL_ASPNETCORE:-Warning}
       - Logging__LogLevel__SmartGlassesMiddleware=${LOG_LEVEL_APP:-Information}

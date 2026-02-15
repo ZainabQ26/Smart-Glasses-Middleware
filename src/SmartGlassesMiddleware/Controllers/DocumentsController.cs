@@ -3,6 +3,8 @@ using SmartGlassesMiddleware.Services;
 using SmartGlassesMiddleware.Models;
 using Microsoft.EntityFrameworkCore;
 using SmartGlassesMiddleware.Data;
+using Microsoft.AspNetCore.SignalR;
+using SmartGlassesMiddleware.Hubs;
 
 namespace SmartGlassesMiddleware.Controllers;
 
@@ -21,6 +23,10 @@ public class DocumentsController : ControllerBase
     private readonly IMediaStorageService _mediaStorageService;
     private readonly IConversationService _conversationService;
     private readonly IGroupConversationMappingService? _groupConversationMappingService;
+    private readonly ICacheService _cacheService;
+    private readonly IHubContext<ResourceHub>? _resourceHub;
+    private const int DefaultPageSize = 20;
+    private const int MaxPageSize = 100;
     private readonly long _maxFileSize;
 
     public DocumentsController(
@@ -34,7 +40,9 @@ public class DocumentsController : ControllerBase
         IHistoryService historyService,
         IMediaStorageService mediaStorageService,
         IConversationService conversationService,
-        IGroupConversationMappingService? groupConversationMappingService = null)
+        IGroupConversationMappingService? groupConversationMappingService = null,
+        ICacheService? cacheService = null,
+        IHubContext<ResourceHub>? resourceHub = null)
     {
         _logger = logger;
         _processingService = processingService;
@@ -47,6 +55,8 @@ public class DocumentsController : ControllerBase
         _mediaStorageService = mediaStorageService;
         _conversationService = conversationService;
         _groupConversationMappingService = groupConversationMappingService;
+        _cacheService = cacheService ?? throw new ArgumentNullException(nameof(cacheService));
+        _resourceHub = resourceHub;
         var maxFileSizeMB = configuration.GetValue<int?>("RAG:MaxFileSizeMB") ?? 50;
         _maxFileSize = maxFileSizeMB * 1024 * 1024;
     }
@@ -94,6 +104,9 @@ public class DocumentsController : ControllerBase
                     }
                 }
                 await _context.SaveChangesAsync();
+
+                await InvalidateGroupsCache();
+                await NotifyGroupsChangedAsync();
             }
 
             // Generate embeddings for the document chunks (with retry logic)
@@ -447,13 +460,21 @@ public class DocumentsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteDocument(Guid documentId)
     {
-        var document = await _context.DocumentMetadatas.FindAsync(documentId);
+        var document = await _context.DocumentMetadatas
+            .Include(d => d.DocumentGroups)
+            .FirstOrDefaultAsync(d => d.Id == documentId);
 
         if (document == null)
             return NotFound();
 
         _context.DocumentMetadatas.Remove(document);
         await _context.SaveChangesAsync();
+
+        if (document.DocumentGroups.Any())
+        {
+            await InvalidateGroupsCache();
+            await NotifyGroupsChangedAsync();
+        }
 
         return NoContent();
     }
@@ -538,6 +559,9 @@ public class DocumentsController : ControllerBase
 
             await _context.SaveChangesAsync();
 
+            await InvalidateGroupsCache();
+            await NotifyGroupsChangedAsync();
+
             // Optionally regenerate embeddings if requested
             if (request.RegenerateEmbeddings)
             {
@@ -555,6 +579,34 @@ public class DocumentsController : ControllerBase
         {
             _logger.LogError(ex, "Error moving document {DocumentId}", id);
             return StatusCode(500, new { error = "Failed to move document", details = ex.Message });
+        }
+    }
+
+    private Task NotifyGroupsChangedAsync()
+    {
+        return _resourceHub != null
+            ? _resourceHub.Clients.All.SendAsync("groupsChanged")
+            : Task.CompletedTask;
+    }
+
+    private async Task InvalidateGroupsCache()
+    {
+        try
+        {
+            var totalCount = await _context.ResourceGroups.CountAsync();
+            var totalPages = (int)Math.Ceiling(totalCount / (double)DefaultPageSize);
+
+            var tasks = new List<Task>();
+            for (int page = 1; page <= totalPages + 1; page++)
+            {
+                tasks.Add(_cacheService.RemoveAsync($"admin:groups:page:{page}:size:{DefaultPageSize}"));
+                tasks.Add(_cacheService.RemoveAsync($"admin:groups:page:{page}:size:{MaxPageSize}"));
+            }
+            await Task.WhenAll(tasks);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error invalidating groups cache");
         }
     }
 }
