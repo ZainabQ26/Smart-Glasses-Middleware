@@ -3504,6 +3504,23 @@ async function init() {
                             `;
                         };
                         reader.readAsDataURL(file);
+                    } else if (ext === 'md') {
+                        // Render markdown files
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            const text = e.target.result;
+                            const renderedHtml = renderMarkdown(text);
+                            promptPreviewContent.innerHTML = `<div style="text-align: left; max-height: 200px; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 12px;">${renderedHtml}</div>`;
+                        };
+                        reader.readAsText(file);
+                    } else if (['txt', 'json', 'xml', 'csv'].includes(ext)) {
+                        // Show text files as plain text
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            const text = e.target.result;
+                            promptPreviewContent.innerHTML = `<pre style="text-align: left; max-height: 200px; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 11px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(text)}</pre>`;
+                        };
+                        reader.readAsText(file);
                     } else {
                         promptPreviewContent.innerHTML = `
                             <div style="text-align: center;">
@@ -4223,7 +4240,7 @@ async function init() {
             updateGroupFilesList();
         });
         
-        // Handle file selection - show preview
+        // Handle file selection - show preview and auto-upload
         if (groupFileInput) {
             groupFileInput.addEventListener('change', (e) => {
                 const file = e.target.files[0];
@@ -4245,6 +4262,23 @@ async function init() {
                             groupPreviewContent.innerHTML = `<embed src="${e.target.result}" type="application/pdf" width="100%" height="200px" style="border-radius: 4px;">`;
                         };
                         reader.readAsDataURL(file);
+                    } else if (ext === 'md') {
+                        // Render markdown files
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            const text = e.target.result;
+                            const renderedHtml = renderMarkdown(text);
+                            groupPreviewContent.innerHTML = `<div style="text-align: left; max-height: 200px; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 12px;">${renderedHtml}</div>`;
+                        };
+                        reader.readAsText(file);
+                    } else if (['txt', 'json', 'xml', 'csv'].includes(ext)) {
+                        // Show text files as plain text
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            const text = e.target.result;
+                            groupPreviewContent.innerHTML = `<pre style="text-align: left; max-height: 200px; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 11px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(text)}</pre>`;
+                        };
+                        reader.readAsText(file);
                     } else {
                         groupPreviewContent.innerHTML = `
                             <div style="text-align: center;">
@@ -4253,6 +4287,17 @@ async function init() {
                             </div>
                         `;
                     }
+                    
+                    // Auto-upload the file to the list
+                    if (!groupSelectedFiles.find(f => f.name === file.name)) {
+                        groupSelectedFiles.push({file: file, name: file.name, selected: false});
+                        window.groupSelectedFiles = groupSelectedFiles;
+                        updateGroupFilesList();
+                        showMessage('File added to list', 'success');
+                    }
+                    
+                    // Clear the input
+                    if (groupFileInput) groupFileInput.value = '';
                 }
             });
         }
@@ -4456,7 +4501,7 @@ async function init() {
             updateReminderFilesList();
         });
         
-        // Handle file selection - show preview
+        // Handle file selection - show preview and auto-upload
         if (reminderFileInput) {
             reminderFileInput.addEventListener('change', (e) => {
                 const file = e.target.files[0];
@@ -4477,6 +4522,23 @@ async function init() {
                             reminderPreviewContent.innerHTML = `<embed src="${e.target.result}" type="application/pdf" width="100%" height="200px" style="border-radius: 4px;">`;
                         };
                         reader.readAsDataURL(file);
+                    } else if (ext === 'md') {
+                        // Render markdown files
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            const text = e.target.result;
+                            const renderedHtml = renderMarkdown(text);
+                            reminderPreviewContent.innerHTML = `<div style="text-align: left; max-height: 200px; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 12px;">${renderedHtml}</div>`;
+                        };
+                        reader.readAsText(file);
+                    } else if (['txt', 'json', 'xml', 'csv'].includes(ext)) {
+                        // Show text files as plain text
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            const text = e.target.result;
+                            reminderPreviewContent.innerHTML = `<pre style="text-align: left; max-height: 200px; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 11px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(text)}</pre>`;
+                        };
+                        reader.readAsText(file);
                     } else {
                         reminderPreviewContent.innerHTML = `
                             <div style="text-align: center;">
@@ -4485,6 +4547,16 @@ async function init() {
                             </div>
                         `;
                     }
+                    
+                    // Auto-upload the file to the list
+                    if (!reminderSelectedFiles.find(f => f.name === file.name)) {
+                        reminderSelectedFiles.push({file: file, name: file.name, selected: false});
+                        updateReminderFilesList();
+                        showMessage('File added to list', 'success');
+                    }
+                    
+                    // Clear the input
+                    reminderFileInput.value = '';
                 }
             });
         }
