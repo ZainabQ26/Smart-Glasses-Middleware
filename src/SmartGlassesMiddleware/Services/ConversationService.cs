@@ -120,6 +120,7 @@ public class ConversationService : IConversationService
         var convoIds = conversations.Select(c => c.Id).ToList();
         var messages = await _context.ChatMessages
             .Where(m => convoIds.Contains(m.ConversationId))
+            .Include(m => m.Attachments)
             .OrderBy(m => m.Timestamp)
             .ToListAsync();
 

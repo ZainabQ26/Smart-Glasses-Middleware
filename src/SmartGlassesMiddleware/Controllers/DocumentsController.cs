@@ -414,6 +414,28 @@ public class DocumentsController : ControllerBase
             ? "application/octet-stream"
             : document.ContentType;
 
+        if (contentType == "application/octet-stream")
+        {
+            var name = document.FileName ?? document.OriginalFileName ?? string.Empty;
+            var ext = Path.GetExtension(name)?.ToLowerInvariant() ?? string.Empty;
+            contentType = ext switch
+            {
+                ".pdf" => "application/pdf",
+                ".txt" => "text/plain",
+                ".md" => "text/markdown",
+                ".json" => "application/json",
+                ".xml" => "application/xml",
+                ".csv" => "text/csv",
+                ".jpg" or ".jpeg" => "image/jpeg",
+                ".png" => "image/png",
+                ".gif" => "image/gif",
+                ".webp" => "image/webp",
+                ".bmp" => "image/bmp",
+                ".svg" => "image/svg+xml",
+                _ => contentType
+            };
+        }
+
         return File(stream, contentType);
     }
 

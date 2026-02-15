@@ -149,15 +149,38 @@ async function fetchWithRetry(url, options = {}, retries = 2) {
     return fetchPromise;
 }
 
+// Helper to normalize attached file data into a consistent shape
+function normalizeFileMeta(file) {
+    if (!file) return null;
+    if (typeof file === 'string') return { name: file };
+
+    const name = file.name
+        || file.fileName
+        || file.FileName
+        || file.OriginalFileName
+        || file.originalFileName
+        || 'Document';
+    const id = file.id
+        || file.documentId
+        || file.DocumentId
+        || file.Id
+        || file.DocumentMetadataId
+        || file.documentMetadataId
+        || '';
+
+    return { name, id };
+}
+
+function normalizeFileList(files) {
+    if (!Array.isArray(files) || files.length === 0) return [];
+    return files.map(normalizeFileMeta).filter(Boolean);
+}
+
 // Helper to safely encode attached files array into a URL-safe JSON string
 function encodeFilesData(msgFiles) {
     if (!Array.isArray(msgFiles) || msgFiles.length === 0) return '';
     try {
-        return encodeURIComponent(JSON.stringify(msgFiles.map(f => (
-            typeof f === 'string'
-                ? { name: f }
-                : { name: f.name || f.fileName || f.FileName || 'Document', id: f.id || f.documentId }
-        ))));
+        return encodeURIComponent(JSON.stringify(normalizeFileList(msgFiles)));
     } catch (e) {
         console.warn('Failed to encode files data', e);
         return '';
@@ -566,6 +589,22 @@ async function loadPrompts(reset = false) {
                     // derive messages info when present
                     const messagesArr = getProp(item, 'messages') || getProp(item, 'Messages') || getProp(item, 'MessagesList') || [];
                     const messageCount = Array.isArray(messagesArr) ? messagesArr.length : (getProp(item, 'messageCount') || getProp(item, 'MessageCount') || 0);
+                    const attachmentCountRaw = getProp(item, 'attachmentCount') || getProp(item, 'AttachmentCount');
+                    const attachmentCount = attachmentCountRaw !== undefined && attachmentCountRaw !== null
+                        ? Number(attachmentCountRaw)
+                        : null;
+                    let fileCount = Number.isFinite(attachmentCount) ? attachmentCount : 0;
+
+                    if (!Number.isFinite(attachmentCount) && Array.isArray(messagesArr)) {
+                        fileCount = messagesArr.reduce((sum, msg) => {
+                            const rawFiles = Array.isArray(msg.files) ? msg.files
+                                : (Array.isArray(msg.Files) ? msg.Files
+                                    : (Array.isArray(msg.Attachments)
+                                        ? msg.Attachments
+                                        : (Array.isArray(msg.attachments) ? msg.attachments : [])));
+                            return sum + normalizeFileList(rawFiles).length;
+                        }, 0);
+                    }
                     const lastMsg = (Array.isArray(messagesArr) && messagesArr.length > 0)
                         ? (messagesArr[messagesArr.length - 1].content || messagesArr[messagesArr.length - 1].text || messagesArr[messagesArr.length - 1].message || '')
                         : (getProp(item, 'lastMessage') || getProp(item, 'snippet') || getProp(item, 'description') || '');
@@ -587,7 +626,10 @@ async function loadPrompts(reset = false) {
                         <div style="display:block;">
                             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
                                 <span class="prompt-name" style="font-weight:600;color:#2c3e50;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%;">${displayName}</span>
-                                <span class="badge" style="background:#0b63a6;color:white;padding:2px 6px;border-radius:10px;font-size:11px;min-width:20px;text-align:center;">${messageCount}</span>
+                                <div style="display:flex;gap:6px;align-items:center;">
+                                    <span class="badge" data-conversation-files="${id}" title="${fileCount} file(s) attached" style="background:#0b63a6;color:white;padding:2px 6px;border-radius:10px;font-size:11px;min-width:20px;text-align:center;">${fileCount}</span>
+                                    <button type="button" class="conversation-delete-btn" title="Delete conversation" aria-label="Delete conversation" style="border:none;background:#e74c3c;color:white;width:20px;height:20px;border-radius:50%;cursor:pointer;font-size:14px;line-height:20px;padding:0;">×</button>
+                                </div>
                             </div>
                             <div style="font-size:11px;color:#2f3a3f;margin-bottom:4px;">${timestamp}</div>
                             <div style="color:#444;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(String(lastMsg || 'No messages yet'))}</div>
@@ -603,12 +645,23 @@ async function loadPrompts(reset = false) {
                         showMessage('Conversation selected');
                     });
 
+                    div.querySelector('.conversation-delete-btn')?.addEventListener('click', async (e) => {
+                        e.stopPropagation();
+                        await deleteConversation(id, title);
+                    });
+
                     fragment.appendChild(div);
                 } catch (err) {
                     console.error('Error creating sidebar item', err);
                 }
             });
             if (list) list.appendChild(fragment);
+
+            try {
+                refreshConversationFileCounts(items);
+            } catch (e) {
+                console.warn('Failed to refresh conversation file counts', e);
+            }
 
             state.prompts.hasMore = pagination.hasNext || pagination.HasNext || false;
             state.prompts.page++;
@@ -665,6 +718,44 @@ function createFileCard(file) {
     });
     
     return div;
+}
+
+async function refreshConversationFileCounts(items) {
+    if (!Array.isArray(items) || items.length === 0) return;
+
+    const updates = items.map(async (item) => {
+        const id = getProp(item, 'id') || getProp(item, 'Id');
+        if (!id) return;
+
+        try {
+            const res = await fetchWithRetry(`/api/conversations/${id}`);
+            if (!res.ok) return;
+            const convo = await res.json().catch(() => null);
+            const messages = (convo && (convo.messages || convo.Messages)) || [];
+            let totalFiles = 0;
+
+            if (Array.isArray(messages)) {
+                totalFiles = messages.reduce((sum, msg) => {
+                    const rawFiles = Array.isArray(msg.files) ? msg.files
+                        : (Array.isArray(msg.Files) ? msg.Files
+                            : (Array.isArray(msg.Attachments)
+                                ? msg.Attachments
+                                : (Array.isArray(msg.attachments) ? msg.attachments : [])));
+                    return sum + normalizeFileList(rawFiles).length;
+                }, 0);
+            }
+
+            const badge = document.querySelector(`[data-conversation-files="${id}"]`);
+            if (badge) {
+                badge.textContent = String(totalFiles);
+                badge.setAttribute('title', `${totalFiles} file(s) attached`);
+            }
+        } catch (e) {
+            console.warn('Failed to refresh file count for conversation', id, e);
+        }
+    });
+
+    await Promise.allSettled(updates);
 }
 
 // Auto-upload selected file from main Files tab
@@ -751,12 +842,61 @@ async function previewFile(id, fileName) {
     const previewUrl = `${API_BASE}/files/${id}/preview?v=${cacheBuster}`;
     const ext = fileName.split('.').pop().toLowerCase();
     
+    if (previewContent?.dataset?.blobUrl) {
+        try {
+            URL.revokeObjectURL(previewContent.dataset.blobUrl);
+        } catch (e) {
+            console.warn('Failed to revoke preview blob URL', e);
+        }
+        delete previewContent.dataset.blobUrl;
+    }
+
     if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) {
         const img = new Image();
-
-        hideLoading('prompts-list');
-        state.prompts.loading = false;
-        showMessage('Error loading prompts: ' + error.message, 'error');
+        img.onload = function() {
+            previewContent.innerHTML = `<img src="${previewUrl}" alt="${escapeHtml(fileName)}" style="max-width: 100%; max-height: 400px; border-radius: 4px;">`;
+        };
+        img.onerror = function() {
+            previewContent.innerHTML = '<p style="color: #e74c3c;">Failed to load image preview.</p>';
+        };
+        img.src = previewUrl;
+    } else if (ext === 'pdf') {
+        try {
+            const response = await fetch(previewUrl);
+            if (!response.ok) throw new Error('Failed to load PDF');
+            const buffer = await response.arrayBuffer();
+            const header = new TextDecoder().decode(new Uint8Array(buffer.slice(0, 4)));
+            if (header !== '%PDF') {
+                const text = new TextDecoder().decode(buffer);
+                previewContent.innerHTML = `<pre style="text-align: left; max-height: 400px; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(text)}</pre>`;
+            } else {
+                const blobUrl = URL.createObjectURL(new Blob([buffer], { type: 'application/pdf' }));
+                previewContent.dataset.blobUrl = blobUrl;
+                previewContent.innerHTML = `<embed src="${blobUrl}" type="application/pdf" width="100%" height="400px" style="border-radius: 4px;">`;
+            }
+        } catch (error) {
+            previewContent.innerHTML = '<p style="color: #e74c3c;">Failed to load file.</p>';
+        }
+    } else if (['txt', 'json', 'xml', 'csv', 'md'].includes(ext)) {
+        try {
+            const response = await fetch(previewUrl);
+            if (response.ok) {
+                const text = await response.text();
+                previewContent.innerHTML = `<pre style="text-align: left; max-height: 400px; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(text)}</pre>`;
+            } else {
+                previewContent.innerHTML = '<p style="color: #e74c3c;">Failed to load file preview.</p>';
+            }
+        } catch (error) {
+            previewContent.innerHTML = '<p style="color: #e74c3c;">Failed to load file preview.</p>';
+        }
+    } else {
+        previewContent.innerHTML = `
+            <div style="text-align: center; padding: 20px;">
+                <div style="font-size: 48px; margin-bottom: 10px;">📄</div>
+                <p style="color: #2f3a3f;">Preview not available for this file type.</p>
+                <p style="color: #95a5a6; font-size: 12px;">File: ${escapeHtml(fileName)}</p>
+            </div>
+        `;
     }
 }
 
@@ -956,18 +1096,22 @@ async function loadConversationIntoView(conversationId, title) {
         const messages = (conversation && (conversation.messages || conversation.Messages)) || [];
 
         currentConversationHistory = Array.isArray(messages)
-            ? messages.map(m => ({
-                role: (m.role || m.Role || '').toLowerCase() === 'assistant' ? 'bot' : (m.role || m.Role || 'user').toLowerCase(),
-                content: m.content || m.Content || '',
-                files: Array.isArray(m.files)
+            ? messages.map(m => {
+                const rawFiles = Array.isArray(m.files)
                     ? m.files
                     : (Array.isArray(m.Files)
                         ? m.Files
                         : (Array.isArray(m.Attachments)
                             ? m.Attachments
-                            : (Array.isArray(m.attachments) ? m.attachments : []))),
-                sources: Array.isArray(m.sources) ? m.sources : (Array.isArray(m.Sources) ? m.Sources : [])
-            }))
+                            : (Array.isArray(m.attachments) ? m.attachments : [])));
+
+                return {
+                    role: (m.role || m.Role || '').toLowerCase() === 'assistant' ? 'bot' : (m.role || m.Role || 'user').toLowerCase(),
+                    content: m.content || m.Content || '',
+                    files: normalizeFileList(rawFiles),
+                    sources: Array.isArray(m.sources) ? m.sources : (Array.isArray(m.Sources) ? m.Sources : [])
+                };
+            })
             : [];
 
         const promptIdInput = document.getElementById('prompt-id');
@@ -982,11 +1126,16 @@ async function loadConversationIntoView(conversationId, title) {
             return;
         }
 
-        const conversationHTML = currentConversationHistory.map(msg => {
+        const conversationHTML = currentConversationHistory.map((msg, index) => {
+            const closeBtn = (index === 0 && msg.role === 'user')
+                ? `<button type="button" onclick="closeAutoGroupView()" title="Close" aria-label="Close" style="border:none;background:#95a5a6;color:white;width:20px;height:20px;border-radius:50%;cursor:pointer;font-size:14px;line-height:20px;padding:0;">×</button>`
+                : '';
+
             return `
                 <div style="margin-bottom: 12px;">
                     <div style="color: ${msg.role === 'user' ? '#0b63a6' : '#27ae60'}; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
                         <span>${msg.role === 'user' ? 'User' : 'Bot'}:</span>
+                        ${closeBtn}
                     </div>
                     <div style="color: #444; padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
                 </div>
@@ -997,13 +1146,7 @@ async function loadConversationIntoView(conversationId, title) {
         // Build list of files used in this conversation (attachments + sources)
         const filesFromMessages = currentConversationHistory.flatMap(msg => {
             const list = [];
-            if (Array.isArray(msg.files)) {
-                msg.files.forEach(f => {
-                    if (!f) return;
-                    if (typeof f === 'string') list.push({ name: f });
-                    else list.push({ name: f.name || f.fileName || f.FileName || 'Document', id: f.id || f.documentId });
-                });
-            }
+            normalizeFileList(msg.files).forEach(f => list.push(f));
             if (Array.isArray(msg.sources)) {
                 msg.sources.forEach(s => {
                     if (!s) return;
@@ -1239,6 +1382,25 @@ function updatePromptFilesList() {
     }
 }
 
+window.togglePromptFileSelection = function(index) {
+    if (!promptSelectedFiles[index]) return;
+    promptSelectedFiles[index].selected = !promptSelectedFiles[index].selected;
+    window.promptSelectedFiles = promptSelectedFiles;
+    updatePromptFilesList();
+};
+
+window.deleteSelectedPromptFiles = function() {
+    const selectedCount = promptSelectedFiles.filter(f => f.selected).length;
+    if (selectedCount === 0) {
+        showMessage('No files selected', 'info');
+        return;
+    }
+
+    promptSelectedFiles = promptSelectedFiles.filter(f => !f.selected);
+    window.promptSelectedFiles = promptSelectedFiles;
+    updatePromptFilesList();
+};
+
 
 function updateActiveGroupStyles() {
     document.querySelectorAll('[data-group-card="true"]').forEach(card => {
@@ -1403,6 +1565,38 @@ async function deletePrompt(id) {
     }
 }
 
+async function deleteConversation(id, title) {
+    if (!id) return;
+    const name = title || 'this conversation';
+    if (!confirm(`Delete ${name}? This will permanently remove its messages.`)) return;
+
+    try {
+        const response = await fetch(`/api/conversations/${id}`, { method: 'DELETE' });
+        if (response.ok || response.status === 204) {
+            if (activeConversationId && String(activeConversationId) === String(id)) {
+                activeConversationId = null;
+                closeAutoGroupView();
+            }
+            try {
+                const item = document.querySelector(`.sidebar-prompt-item[data-conversation-id="${id}"]`);
+                if (item) item.remove();
+            } catch (e) {
+                console.warn('Failed to remove conversation item from list', e);
+            }
+            showMessage('Conversation deleted successfully');
+            apiCache.invalidate('/api/conversations');
+            await loadPrompts(true);
+            await loadGroups(true);
+            await loadAllGroups(true);
+        } else {
+            const error = await response.json().catch(() => null);
+            showMessage((error && (error.detail || error.error)) || 'Error deleting conversation', 'error');
+        }
+    } catch (error) {
+        showMessage('Error deleting conversation: ' + (error?.message || error), 'error');
+    }
+}
+
 // Prompt response tracking functions
 function showPromptResponse(promptName, promptText) {
     const responseContent = document.getElementById('response-content');
@@ -1506,10 +1700,16 @@ async function loadGroups(reset = false) {
         
         // Check for and delete empty groups
         const emptyGroups = groupsData.filter(group => {
+            const description = getProp(group, 'description') || getProp(group, 'Description') || '';
+            if (description && description.toLowerCase() === 'reminder') {
+                return false;
+            }
+
             const files = getProp(group, 'files') || [];
+            const documents = getProp(group, 'documents') || getProp(group, 'Documents') || [];
             const prompts = getProp(group, 'prompts') || [];
             const conversations = getProp(group, 'conversations') || [];
-            const fileCount = Array.isArray(files) ? files.length : 0;
+            const fileCount = (Array.isArray(files) ? files.length : 0) + (Array.isArray(documents) ? documents.length : 0);
             const promptCount = Array.isArray(prompts) ? prompts.length : 0;
             const conversationCount = Array.isArray(conversations) ? conversations.length : 0;
             return fileCount === 0 && promptCount === 0 && conversationCount === 0;
@@ -1645,7 +1845,8 @@ function createReminderCard(reminder) {
     const name = getProp(reminder, 'name') || 'Untitled';
     
     const files = getProp(reminder, 'files') || [];
-    const fileCount = Array.isArray(files) ? files.length : 0;
+    const documents = getProp(reminder, 'documents') || getProp(reminder, 'Documents') || [];
+    const fileCount = (Array.isArray(files) ? files.length : 0) + (Array.isArray(documents) ? documents.length : 0);
 
     div.dataset.reminderId = id;
     div.style.cssText = 'background: #f5f5f5; padding: 12px; border-radius: 6px; margin-bottom: 10px; position: relative; border: 2px solid transparent;';
@@ -1678,6 +1879,11 @@ function createReminderCard(reminder) {
             showMessage('Error deleting reminder: ' + error.message, 'error');
         }
     });
+
+    // Attach event listener to paperclip to open preview modal
+    div.querySelector('.reminder-item-paperclip').addEventListener('click', () => {
+        manageGroupResources(id, name);
+    });
     
     return div;
 }
@@ -1685,7 +1891,8 @@ function createReminderCard(reminder) {
 function createGroupCard(group) {
     const div = document.createElement('div');
     const id = getProp(group, 'id');
-    const name = getProp(group, 'name') || 'Untitled';
+    const rawName = getProp(group, 'name') || '';
+    const name = String(rawName).trim() || 'Untitled';
     const description = getProp(group, 'description') || getProp(group, 'Description') || '';
     const isActive = !!activePromptGroupId && String(activePromptGroupId) === String(id);
     
@@ -1696,9 +1903,10 @@ function createGroupCard(group) {
     
     // Get counts for files, conversations, and reminders
     const files = getProp(group, 'files') || [];
+    const documents = getProp(group, 'documents') || getProp(group, 'Documents') || [];
     const conversations = getProp(group, 'conversations') || [];
     const reminders = getProp(group, 'reminders') || [];
-    const fileCount = Array.isArray(files) ? files.length : 0;
+    const fileCount = (Array.isArray(files) ? files.length : 0) + (Array.isArray(documents) ? documents.length : 0);
     const conversationCount = Array.isArray(conversations) ? conversations.length : 0;
     const reminderCount = Array.isArray(reminders) ? reminders.length : 0;
 
@@ -1779,6 +1987,7 @@ document.getElementById('group-form').addEventListener('submit', async (e) => {
                     
                     try {
                         console.log('[CREATE GROUP] Uploading file:', fileObj.name);
+                        formData.append('label', fileObj.name || fileObj.file?.name || 'Document');
                         const uploadRes = await fetch(`${API_BASE}/files`, {
                             method: 'POST',
                             body: formData
@@ -1913,6 +2122,7 @@ document.getElementById('reminder-form')?.addEventListener('submit', async (e) =
                     
                     try {
                         console.log('[CREATE REMINDER] Uploading file:', fileObj.name);
+                        formData.append('label', fileObj.name || fileObj.file?.name || 'Document');
                         const uploadRes = await fetch(`${API_BASE}/files`, {
                             method: 'POST',
                             body: formData
@@ -2015,23 +2225,28 @@ async function deleteGroup(id) {
 
     try {
         // 1) Fetch all conversations for this group (includes active conversations)
-        const convRes = await fetch(`${API_BASE}/conversations?groupId=${encodeURIComponent(id)}`);
+        const convRes = await fetch(`/api/conversations?groupId=${encodeURIComponent(id)}`);
         if (!convRes.ok) {
             showMessage('Failed to load conversations for group', 'error');
             return;
         }
 
         const convJson = await convRes.json();
-        const conversations = convJson || [];
+        const conversations = Array.isArray(convJson)
+            ? convJson
+            : (convJson?.data || convJson?.Data || []);
 
         // 2) Permanently delete each conversation via the permanent delete API
         if (conversations.length > 0) {
             showMessage(`Deleting ${conversations.length} conversations...`);
-            const deletePromises = conversations.map(c =>
-                fetch(`${API_BASE}/conversations/${c.id}`, { method: 'DELETE' })
-                    .then(r => ({ ok: r.ok, status: r.status, id: c.id }))
-                    .catch(e => ({ ok: false, error: e.message, id: c.id }))
-            );
+            const deletePromises = conversations
+                .map(c => c?.id || c?.Id)
+                .filter(Boolean)
+                .map(conversationId =>
+                    fetch(`/api/conversations/${conversationId}`, { method: 'DELETE' })
+                        .then(r => ({ ok: r.ok, status: r.status, id: conversationId }))
+                        .catch(e => ({ ok: false, error: e.message, id: conversationId }))
+                );
 
             const results = await Promise.all(deletePromises);
             const failed = results.filter(r => !r.ok);
@@ -2172,10 +2387,12 @@ async function manageGroupResources(groupId, groupName) {
         
         // Use getProp to access files and prompts arrays with case-insensitive fallback
         const groupFiles = getProp(currentGroup, 'files') || [];
+        const groupDocuments = getProp(currentGroup, 'documents') || getProp(currentGroup, 'Documents') || [];
         const groupPrompts = getProp(currentGroup, 'prompts') || [];
         const groupConversations = getProp(currentGroup, 'conversations') || [];
         const groupReminders = getProp(currentGroup, 'reminders') || [];
         const groupFileIds = new Set(groupFiles.map(f => getProp(f, 'id')));
+        const groupDocumentIds = new Set(groupDocuments.map(d => getProp(d, 'id')));
         const groupPromptIds = new Set(groupPrompts.map(p => getProp(p, 'id')));
         
         console.log('[MANAGE] Group files:', groupFiles);
@@ -2199,29 +2416,36 @@ async function manageGroupResources(groupId, groupName) {
                 // For each conversation, try to load messages (if provided inline) or fetch details
                 for (const c of convs) {
                     const convoId = getProp(c, 'id');
-                    // If messages included, use them; otherwise fetch conversation detail
-                    let messages = getProp(c, 'messages') || getProp(c, 'Messages') || null;
-                    if (!messages) {
-                        try {
-                            const det = await fetchWithRetry(`/api/conversations/${convoId}`);
-                            if (det.ok) {
-                                const detJson = await det.json().catch(() => null);
-                                messages = detJson?.messages || detJson?.Messages || detJson || [];
-                            }
-                        } catch (e) {
-                            console.warn('[MANAGE] Failed to fetch conversation details for', convoId, e);
+                    let messages = null;
+                    try {
+                        const det = await fetchWithRetry(`/api/conversations/${convoId}`);
+                        if (det.ok) {
+                            const detJson = await det.json().catch(() => null);
+                            messages = detJson?.messages || detJson?.Messages || detJson || [];
                         }
+                    } catch (e) {
+                        console.warn('[MANAGE] Failed to fetch conversation details for', convoId, e);
                     }
 
                     if (Array.isArray(messages)) {
                         messages.forEach(m => {
-                            if (Array.isArray(m.files)) {
-                                m.files.forEach(f => {
-                                    if (!f) return;
-                                    if (typeof f === 'string') convReferencedFiles.push({ name: f });
-                                    else convReferencedFiles.push({ name: f.name || f.fileName || f.FileName || 'Document', id: f.id || f.documentId });
-                                });
-                            }
+                            const msgFiles = Array.isArray(m.files)
+                                ? m.files
+                                : (Array.isArray(m.Attachments)
+                                    ? m.Attachments
+                                    : (Array.isArray(m.attachments) ? m.attachments : []));
+
+                            msgFiles.forEach(f => {
+                                if (!f) return;
+                                if (typeof f === 'string') {
+                                    convReferencedFiles.push({ name: f });
+                                } else {
+                                    const name = f.name || f.fileName || f.FileName || f.OriginalFileName || 'Document';
+                                    const id = f.id || f.documentId || f.DocumentId || f.DocumentMetadataId;
+                                    convReferencedFiles.push({ name, id });
+                                }
+                            });
+
                             if (Array.isArray(m.sources)) {
                                 m.sources.forEach(s => {
                                     if (!s) return;
@@ -2245,28 +2469,47 @@ async function manageGroupResources(groupId, groupName) {
         const combinedFiles = [];
         const seen = new Set();
         const pushFile = (f) => {
-            const key = `${(getProp(f, 'originalFileName') || getProp(f, 'fileName') || f.name || '').toLowerCase()}::${getProp(f, 'id') || f.id || f.documentId || ''}`;
+            const name = getProp(f, 'originalFileName') || getProp(f, 'fileName') || f.name || 'Document';
+            const id = getProp(f, 'id') || f.id || f.documentId || '';
+            const isDocument = !!f.isDocument;
+            const key = `${String(name).toLowerCase()}::${id}::${isDocument ? 'doc' : 'file'}`;
             if (!seen.has(key)) {
                 seen.add(key);
-                combinedFiles.push(f);
+                combinedFiles.push({ name, id, isDocument });
             }
         };
 
-        (groupFiles || []).forEach(f => pushFile(f));
-        convReferencedFiles.forEach(f => pushFile(f));
+        (groupFiles || []).forEach(f => pushFile({
+            id: getProp(f, 'id'),
+            name: getProp(f, 'originalFileName') || getProp(f, 'fileName') || 'Document',
+            isDocument: false
+        }));
+
+        (groupDocuments || []).forEach(d => pushFile({
+            id: getProp(d, 'id'),
+            name: getProp(d, 'originalFileName') || getProp(d, 'fileName') || 'Document',
+            isDocument: true
+        }));
+
+        convReferencedFiles.forEach(f => pushFile({
+            id: f.id || f.documentId || '',
+            name: f.name || 'Document',
+            isDocument: true
+        }));
 
         if (combinedFiles.length === 0) {
             filesListHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No attachments yet</div>';
         } else {
             filesListHTML = combinedFiles.map(file => {
-                const fileName = getProp(file, 'originalFileName') || getProp(file, 'fileName') || file.name || 'Unknown';
-                const fileId = getProp(file, 'id') || file.id || file.documentId || '';
+                const fileName = file.name || 'Unknown';
+                const fileId = file.id || '';
+                const previewFn = file.isDocument ? 'previewDocumentFile' : 'previewReminderFile';
                 return `
                     <div style="padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0;">
                         <span style="font-size: 14px; color: #333; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
                             ${escapeHtml(String(fileName))}
                         </span>
-                        <button type="button" onclick="previewReminderFile('${fileId}', '${escapeHtml(String(fileName)).replace(/'/g, "\\'")}')"
+                        <button type="button" onclick="${previewFn}('${fileId}', '${escapeHtml(String(fileName)).replace(/'/g, "\\'")}')"
                             style="padding: 4px 12px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">
                             Preview
                         </button>
@@ -2672,7 +2915,22 @@ async function previewReminderFile(fileId, fileName) {
         };
         img.src = previewUrl;
     } else if (ext === 'pdf') {
-        modalContent.innerHTML = `<embed src="${previewUrl}" type="application/pdf" width="100%" height="55vh" style="border-radius: 4px; min-height: 400px;">`;
+        try {
+            const response = await fetch(previewUrl);
+            if (!response.ok) throw new Error('Failed to load PDF');
+            const buffer = await response.arrayBuffer();
+            const header = new TextDecoder().decode(new Uint8Array(buffer.slice(0, 4)));
+            if (header !== '%PDF') {
+                const text = new TextDecoder().decode(buffer);
+                modalContent.innerHTML = `<pre style="text-align: left; max-height: 55vh; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(text)}</pre>`;
+            } else {
+                const blobUrl = URL.createObjectURL(new Blob([buffer], { type: 'application/pdf' }));
+                modalContent.dataset.blobUrl = blobUrl;
+                modalContent.innerHTML = `<embed src="${blobUrl}" type="application/pdf" width="100%" height="55vh" style="border-radius: 4px; min-height: 400px;">`;
+            }
+        } catch (error) {
+            modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load file.</p>';
+        }
     } else if (['txt', 'json', 'xml', 'csv', 'md'].includes(ext)) {
         try {
             const response = await fetch(previewUrl);
@@ -2745,7 +3003,22 @@ async function previewDocumentFile(documentId, fileName) {
         };
         img.src = previewUrl;
     } else if (ext === 'pdf') {
-        modalContent.innerHTML = `<embed src="${previewUrl}" type="application/pdf" width="100%" height="55vh" style="border-radius: 4px; min-height: 400px;">`;
+        try {
+            const response = await fetch(previewUrl);
+            if (!response.ok) throw new Error('Failed to load PDF');
+            const buffer = await response.arrayBuffer();
+            const header = new TextDecoder().decode(new Uint8Array(buffer.slice(0, 4)));
+            if (header !== '%PDF') {
+                const text = new TextDecoder().decode(buffer);
+                modalContent.innerHTML = `<pre style="text-align: left; max-height: 55vh; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(text)}</pre>`;
+            } else {
+                const blobUrl = URL.createObjectURL(new Blob([buffer], { type: 'application/pdf' }));
+                modalContent.dataset.blobUrl = blobUrl;
+                modalContent.innerHTML = `<embed src="${blobUrl}" type="application/pdf" width="100%" height="55vh" style="border-radius: 4px; min-height: 400px;">`;
+            }
+        } catch (error) {
+            modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load file.</p>';
+        }
     } else if (['txt', 'json', 'xml', 'csv', 'md'].includes(ext)) {
         try {
             const response = await fetch(previewUrl);
@@ -2809,6 +3082,16 @@ function showAttachedFilesModal(encodedFiles) {
 }
 
 function closeReminderFilePreviewModal() {
+    try {
+        const modalContent = document.getElementById('reminder-file-preview-content');
+        const blobUrl = modalContent?.dataset?.blobUrl;
+        if (blobUrl) {
+            URL.revokeObjectURL(blobUrl);
+            delete modalContent.dataset.blobUrl;
+        }
+    } catch (e) {
+        console.warn('Failed to revoke preview blob URL', e);
+    }
     document.getElementById('reminder-file-preview-modal').style.display = 'none';
 }
 
@@ -3307,10 +3590,10 @@ async function init() {
                                 console.warn('[UPLOAD] Failed to resolve conversation group for file:', err);
                             }
                         }
-                        const uploadUrl = uploadGroupId
-                            ? `/api/documents/upload?groupIds=${encodeURIComponent(uploadGroupId)}`
-                            : '/api/documents/upload';
-                        xhr.open('POST', uploadUrl);
+                        if (uploadGroupId) {
+                            formData.append('groupIds', uploadGroupId);
+                        }
+                        xhr.open('POST', '/api/documents/upload');
                         xhr.send(formData);
                         
                         const fileData = await uploadPromise;
@@ -3503,10 +3786,10 @@ async function init() {
                                     const conv = await (await fetch(`${API_BASE}/conversations/${activeConversationId}`)).json().catch(() => null);
                                     uploadGroupId = conv?.resourceGroupId || conv?.ResourceGroupId || null;
                                 }
-                                const uploadUrl = uploadGroupId
-                                    ? `/api/documents/upload?groupIds=${encodeURIComponent(uploadGroupId)}`
-                                    : '/api/documents/upload';
-                                const upRes = await fetch(uploadUrl, { method: 'POST', body: fd });
+                                if (uploadGroupId) {
+                                    fd.append('groupIds', uploadGroupId);
+                                }
+                                const upRes = await fetch('/api/documents/upload', { method: 'POST', body: fd });
                                 if (upRes.ok) {
                                     const fdJson = await upRes.json().catch(() => null);
                                     const newId = fdJson?.id || fdJson?.Id;
@@ -3651,6 +3934,11 @@ async function init() {
                 document.getElementById('prompt-name').value = '';
                 
                 showMessage('Response received successfully', 'success');
+
+                apiCache.invalidate('/api/conversations');
+                await loadPrompts(true);
+                await loadGroups(true);
+                await loadAllGroups(true);
 
                 // Conversations are already persisted server-side via ConversationService
                 // No need to auto-save to ManagedPrompts (which are for reusable templates)

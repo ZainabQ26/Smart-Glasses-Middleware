@@ -799,6 +799,24 @@ app.UseResponseCompression();
 // Enable built-in HTTP logging so we can see headers and bodies
 app.UseHttpLogging();
 
+static string GetFrameOptionsForPath(PathString path)
+{
+    var value = path.Value ?? string.Empty;
+    var lowered = value.ToLowerInvariant();
+
+    if (lowered.StartsWith("/api/admin/files/") && lowered.EndsWith("/preview"))
+    {
+        return "SAMEORIGIN";
+    }
+
+    if (lowered.StartsWith("/api/documents/") && lowered.EndsWith("/download"))
+    {
+        return "SAMEORIGIN";
+    }
+
+    return "DENY";
+}
+
 // Add request logging middleware FIRST to track all requests
 app.Use(async (context, next) =>
 {
@@ -837,7 +855,7 @@ app.Use(async (context, next) =>
         }
         if (!context.Response.Headers.ContainsKey("X-Frame-Options"))
         {
-            context.Response.Headers["X-Frame-Options"] = "DENY";
+            context.Response.Headers["X-Frame-Options"] = GetFrameOptionsForPath(context.Request.Path);
         }
         if (!context.Response.Headers.ContainsKey("Referrer-Policy"))
         {
@@ -934,7 +952,7 @@ app.Use(async (context, next) =>
             }
             if (!context.Response.Headers.ContainsKey("X-Frame-Options"))
             {
-                context.Response.Headers["X-Frame-Options"] = "DENY";
+                context.Response.Headers["X-Frame-Options"] = GetFrameOptionsForPath(context.Request.Path);
             }
             if (!context.Response.Headers.ContainsKey("Referrer-Policy"))
             {
