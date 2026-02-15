@@ -176,6 +176,27 @@ function normalizeFileList(files) {
     return files.map(normalizeFileMeta).filter(Boolean);
 }
 
+// Helper to render markdown as HTML
+function renderMarkdown(text) {
+    if (typeof marked !== 'undefined' && marked.parse) {
+        try {
+            // Configure marked for security
+            marked.setOptions({
+                breaks: true,
+                gfm: true,
+                headerIds: false,
+                mangle: false
+            });
+            return marked.parse(text);
+        } catch (e) {
+            console.warn('Failed to parse markdown:', e);
+            return `<pre style="text-align: left; max-height: 400px; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(text)}</pre>`;
+        }
+    }
+    // Fallback if marked is not loaded
+    return `<pre style="text-align: left; max-height: 400px; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(text)}</pre>`;
+}
+
 // Helper to safely encode attached files array into a URL-safe JSON string
 function encodeFilesData(msgFiles) {
     if (!Array.isArray(msgFiles) || msgFiles.length === 0) return '';
@@ -767,6 +788,8 @@ if (mainFileInput) {
 
         const formData = new FormData();
         formData.append('file', file);
+        // Auto-generate label from filename
+        formData.append('label', file.name || 'Untitled');
 
         try {
             const response = await fetch(`${API_BASE}/files`, {
@@ -877,12 +900,25 @@ async function previewFile(id, fileName) {
         } catch (error) {
             previewContent.innerHTML = '<p style="color: #e74c3c;">Failed to load file.</p>';
         }
-    } else if (['txt', 'json', 'xml', 'csv', 'md'].includes(ext)) {
+    } else if (['txt', 'json', 'xml', 'csv'].includes(ext)) {
         try {
             const response = await fetch(previewUrl);
             if (response.ok) {
                 const text = await response.text();
                 previewContent.innerHTML = `<pre style="text-align: left; max-height: 400px; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(text)}</pre>`;
+            } else {
+                previewContent.innerHTML = '<p style="color: #e74c3c;">Failed to load file preview.</p>';
+            }
+        } catch (error) {
+            previewContent.innerHTML = '<p style="color: #e74c3c;">Failed to load file preview.</p>';
+        }
+    } else if (ext === 'md') {
+        try {
+            const response = await fetch(previewUrl);
+            if (response.ok) {
+                const text = await response.text();
+                const renderedHtml = renderMarkdown(text);
+                previewContent.innerHTML = `<div style="text-align: left; max-height: 400px; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 14px;">${renderedHtml}</div>`;
             } else {
                 previewContent.innerHTML = '<p style="color: #e74c3c;">Failed to load file preview.</p>';
             }
@@ -2931,12 +2967,25 @@ async function previewReminderFile(fileId, fileName) {
         } catch (error) {
             modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load file.</p>';
         }
-    } else if (['txt', 'json', 'xml', 'csv', 'md'].includes(ext)) {
+    } else if (['txt', 'json', 'xml', 'csv'].includes(ext)) {
         try {
             const response = await fetch(previewUrl);
             if (response.ok) {
                 const text = await response.text();
                 modalContent.innerHTML = `<pre style="text-align: left; max-height: 55vh; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(text)}</pre>`;
+            } else {
+                modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load file.</p>';
+            }
+        } catch (error) {
+            modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load file.</p>';
+        }
+    } else if (ext === 'md') {
+        try {
+            const response = await fetch(previewUrl);
+            if (response.ok) {
+                const text = await response.text();
+                const renderedHtml = renderMarkdown(text);
+                modalContent.innerHTML = `<div style="text-align: left; max-height: 55vh; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 14px;">${renderedHtml}</div>`;
             } else {
                 modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load file.</p>';
             }
@@ -3019,12 +3068,25 @@ async function previewDocumentFile(documentId, fileName) {
         } catch (error) {
             modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load file.</p>';
         }
-    } else if (['txt', 'json', 'xml', 'csv', 'md'].includes(ext)) {
+    } else if (['txt', 'json', 'xml', 'csv'].includes(ext)) {
         try {
             const response = await fetch(previewUrl);
             if (response.ok) {
                 const text = await response.text();
                 modalContent.innerHTML = `<pre style="text-align: left; max-height: 55vh; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(text)}</pre>`;
+            } else {
+                modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load file.</p>';
+            }
+        } catch (error) {
+            modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load file.</p>';
+        }
+    } else if (ext === 'md') {
+        try {
+            const response = await fetch(previewUrl);
+            if (response.ok) {
+                const text = await response.text();
+                const renderedHtml = renderMarkdown(text);
+                modalContent.innerHTML = `<div style="text-align: left; max-height: 55vh; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 14px;">${renderedHtml}</div>`;
             } else {
                 modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load file.</p>';
             }
