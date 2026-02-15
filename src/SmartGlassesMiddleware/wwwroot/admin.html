@@ -1685,14 +1685,19 @@
         const toastsScript = document.createElement('script');
         toastsScript.src = `toasts.js?v=${timestamp}`;
         toastsScript.onload = () => {
-            const signalRScript = document.createElement('script');
-            signalRScript.src = 'https://cdn.jsdelivr.net/npm/@microsoft/signalr@latest/dist/browser/signalr.min.js';
-            signalRScript.onload = () => {
-                const script = document.createElement('script');
-                script.src = `admin.js?v=${timestamp}`;
-                document.body.appendChild(script);
+            const markedScript = document.createElement('script');
+            markedScript.src = 'https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js';
+            markedScript.onload = () => {
+                const signalRScript = document.createElement('script');
+                signalRScript.src = 'https://cdn.jsdelivr.net/npm/@microsoft/signalr@latest/dist/browser/signalr.min.js';
+                signalRScript.onload = () => {
+                    const script = document.createElement('script');
+                    script.src = `admin.js?v=${timestamp}`;
+                    document.body.appendChild(script);
+                };
+                document.body.appendChild(signalRScript);
             };
-            document.body.appendChild(signalRScript);
+            document.body.appendChild(markedScript);
         };
         document.body.appendChild(toastsScript);
     </script>
