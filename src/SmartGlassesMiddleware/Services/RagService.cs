@@ -1419,24 +1419,20 @@ Answer:";
         if (!x.HasValue || !y.HasValue)
             return null;
 
-        // Assuming standard US Letter page dimensions (612x792 points)
-        const double pageWidth = 612;
-        const double pageHeight = 792;
-
         // Determine horizontal position
         string horizontal;
-        if (x.Value < pageWidth / 3)
+        if (x.Value < PdfConstants.PageWidth / 3)
             horizontal = "left";
-        else if (x.Value < 2 * pageWidth / 3)
+        else if (x.Value < 2 * PdfConstants.PageWidth / 3)
             horizontal = "center";
         else
             horizontal = "right";
 
         // Determine vertical position (Y is from bottom in PDF coordinates)
         string vertical;
-        if (y.Value < pageHeight / 3)
+        if (y.Value < PdfConstants.PageHeight / 3)
             vertical = "bottom";
-        else if (y.Value < 2 * pageHeight / 3)
+        else if (y.Value < 2 * PdfConstants.PageHeight / 3)
             vertical = "middle";
         else
             vertical = "top";
