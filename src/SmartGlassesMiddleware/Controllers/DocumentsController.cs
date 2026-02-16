@@ -483,7 +483,7 @@ public class DocumentsController : ControllerBase
     /// Find the location of specific text within a document
     /// </summary>
     [HttpPost("{documentId}/find-location")]
-    [ProducesResponseType(typeof(List<TextLocation>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(FindLocationResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> FindTextLocation(Guid documentId, [FromBody] FindLocationRequest request)
     {
@@ -522,7 +522,7 @@ public class DocumentsController : ControllerBase
             }
         }
 
-        return Ok(new
+        return Ok(new FindLocationResponse
         {
             DocumentId = documentId,
             DocumentName = document.FileName,
@@ -724,23 +724,4 @@ public class HighlightRequest
 {
     public List<Guid>? ChunkIds { get; set; }
     public string? SearchText { get; set; }
-}
-
-public class FindLocationRequest
-{
-    public string SearchText { get; set; } = string.Empty;
-}
-
-public class TextLocation
-{
-    public Guid DocumentId { get; set; }
-    public string DocumentName { get; set; } = string.Empty;
-    public Guid ChunkId { get; set; }
-    public int PageNumber { get; set; }
-    public double? X { get; set; }
-    public double? Y { get; set; }
-    public double? Width { get; set; }
-    public double? Height { get; set; }
-    public string Position { get; set; } = string.Empty; // e.g., "bottom right of page 2"
-    public string ContextText { get; set; } = string.Empty;
 }
