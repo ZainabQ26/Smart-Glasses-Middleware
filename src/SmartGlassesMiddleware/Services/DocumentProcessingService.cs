@@ -14,6 +14,8 @@ using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using Tesseract;
+using QuestPDF.Fluent;
+using QuestPDF.Helpers;
 using System.Text;
 using System.Xml;
 using System.Xml.Linq;
@@ -310,30 +312,66 @@ public class DocumentProcessingService : IDocumentProcessingService
             await _monitoringService.UpdateRequestStatus(requestId, "Processing", "Converting text to PDF", 20);
         }
 
+        // Try iText first (existing behavior). If it fails due to iText/BouncyCastle adapter issues,
+        // fall back to QuestPDF to produce a simple text-based PDF.
         var outputStream = new MemoryStream();
-        
+
         try
         {
             using var reader = new StreamReader(textStream);
             var text = await reader.ReadToEndAsync();
 
-            using var writer = new PdfWriter(outputStream);
-            writer.SetCloseStream(false);
-            using var pdf = new PdfDocument(writer);
-            using var document = new iText.Layout.Document(pdf);
+            // Try iText writer (wrap in try/catch to fallback)
+            try
+            {
+                using var writer = new PdfWriter(outputStream);
+                writer.SetCloseStream(false);
+                using var pdf = new PdfDocument(writer);
+                using var document = new iText.Layout.Document(pdf);
 
-            // Add text content
-            document.Add(new iText.Layout.Element.Paragraph(text));
-            document.Close();
+                document.Add(new iText.Layout.Element.Paragraph(text));
+                document.Close();
+
+                outputStream.Position = 0;
+                return outputStream;
+            }
+            catch (Exception itexEx)
+            {
+                _logger.LogWarning(itexEx, "iText text->PDF conversion failed, falling back to QuestPDF");
+                // Reset stream and fallback
+                outputStream = new MemoryStream();
+
+                try
+                {
+                    // Use QuestPDF to generate a simple PDF with the text content
+                    QuestPDF.Fluent.Document.Create(container =>
+                    {
+                        container.Page(page =>
+                        {
+                            page.Size(QuestPDF.Helpers.PageSizes.A4);
+                            page.Margin(20);
+                            page.Content().Column(column =>
+                            {
+                                column.Item().PaddingBottom(5).Text(text).FontSize(10);
+                            });
+                        });
+                    }).GeneratePdf(outputStream);
+
+                    outputStream.Position = 0;
+                    return outputStream;
+                }
+                catch (Exception qex)
+                {
+                    _logger.LogError(qex, "QuestPDF fallback also failed");
+                    throw; // let outer catch handle
+                }
+            }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error converting text to PDF");
             throw;
         }
-
-        outputStream.Position = 0;
-        return outputStream;
     }
 
     private async Task<MemoryStream> ConvertXmlToPdfAsync(Stream xmlStream, string pdfFileName, string? requestId)
