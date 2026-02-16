@@ -132,6 +132,7 @@ public class DocumentsController : ControllerBase
                 document.IsProcessed,
                 document.ProcessedAt,
                 ChunkCount = document.Chunks.Count,
+                ManagedFileId = document.ManagedFileId,
                 Groups = document.DocumentGroups.Select(dg => dg.ResourceGroupId).ToList(),
                 RequestId = requestId
             });
@@ -396,6 +397,7 @@ public class DocumentsController : ControllerBase
             document.FileSize,
             document.UploadedAt,
             document.IsProcessed,
+            ManagedFileId = document.ManagedFileId,
             document.ProcessedAt,
             Chunks = document.Chunks.Select(c => new
             {

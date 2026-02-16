@@ -14,6 +14,8 @@ using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using Tesseract;
+using PdfSharpCore.Drawing;
+using PdfSharpDoc = PdfSharpCore.Pdf.PdfDocument;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using System.Text;
@@ -335,43 +337,101 @@ public class DocumentProcessingService : IDocumentProcessingService
                 outputStream.Position = 0;
                 return outputStream;
             }
-            catch (Exception itexEx)
-            {
-                _logger.LogWarning(itexEx, "iText text->PDF conversion failed, falling back to QuestPDF");
-                // Reset stream and fallback
-                outputStream = new MemoryStream();
-
-                try
+                catch (Exception itexEx)
                 {
-                    // Use QuestPDF to generate a simple PDF with the text content
-                    QuestPDF.Fluent.Document.Create(container =>
+                    _logger.LogWarning(itexEx, "iText text->PDF conversion failed, falling back to QuestPDF then PdfSharpCore");
+                    // Reset stream and try QuestPDF first (uses Skia native libs which are included), then PdfSharpCore as last resort
+                    outputStream = new MemoryStream();
+
+                    try
                     {
-                        container.Page(page =>
+                        // Use QuestPDF to generate a simple PDF with the text content
+                        QuestPDF.Fluent.Document.Create(container =>
                         {
-                            page.Size(QuestPDF.Helpers.PageSizes.A4);
-                            page.Margin(20);
-                            page.Content().Column(column =>
+                            container.Page(page =>
                             {
-                                column.Item().PaddingBottom(5).Text(text).FontSize(10);
+                                page.Size(QuestPDF.Helpers.PageSizes.A4);
+                                page.Margin(20);
+                                page.Content().Column(column =>
+                                {
+                                    column.Item().PaddingBottom(5).Text(text).FontSize(10);
+                                });
                             });
-                        });
-                    }).GeneratePdf(outputStream);
+                        }).GeneratePdf(outputStream);
 
-                    outputStream.Position = 0;
-                    return outputStream;
+                        outputStream.Position = 0;
+                        return outputStream;
+                    }
+                    catch (Exception qex)
+                    {
+                        _logger.LogWarning(qex, "QuestPDF fallback failed, trying PdfSharpCore fallback");
+                        // Reset stream and fallback to PdfSharpCore
+                        outputStream = new MemoryStream();
+
+                        try
+                        {
+                            using var doc = new PdfSharpDoc();
+                            var page = doc.AddPage();
+                            page.Size = PdfSharpCore.PageSize.A4;
+                            using var gfx = XGraphics.FromPdfPage(page);
+
+                            var font = new XFont("Arial", 11);
+                            var layoutRect = new XRect(40, 40, page.Width - 80, page.Height - 80);
+
+                            // Basic word-wrapping by measuring lines
+                            var lines = WrapText(gfx, text, font, layoutRect.Width);
+                            double y = layoutRect.Y;
+                            var lineHeight = gfx.MeasureString("Ay", font).Height;
+                            foreach (var line in lines)
+                            {
+                                gfx.DrawString(line, font, XBrushes.Black, new XRect(layoutRect.X, y, layoutRect.Width, lineHeight), XStringFormats.TopLeft);
+                                y += lineHeight;
+                                if (y > layoutRect.Y + layoutRect.Height - lineHeight) break; // avoid overflow
+                            }
+
+                            doc.Save(outputStream);
+                            outputStream.Position = 0;
+                            return outputStream;
+                        }
+                        catch (Exception pex)
+                        {
+                            _logger.LogError(pex, "PdfSharpCore fallback also failed");
+                            throw; // let outer catch handle
+                        }
+                    }
                 }
-                catch (Exception qex)
-                {
-                    _logger.LogError(qex, "QuestPDF fallback also failed");
-                    throw; // let outer catch handle
-                }
-            }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error converting text to PDF");
             throw;
         }
+    }
+
+    // Helper to wrap text into lines fitting the given width
+    private static List<string> WrapText(XGraphics gfx, string text, XFont font, double maxWidth)
+    {
+        var words = text.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+        var lines = new List<string>();
+        var sb = new StringBuilder();
+        foreach (var w in words)
+        {
+            var candidate = sb.Length == 0 ? w : sb + " " + w;
+            var size = gfx.MeasureString(candidate, font);
+            if (size.Width > maxWidth && sb.Length > 0)
+            {
+                lines.Add(sb.ToString());
+                sb.Clear();
+                sb.Append(w);
+            }
+            else
+            {
+                if (sb.Length > 0) sb.Append(' ');
+                sb.Append(w);
+            }
+        }
+        if (sb.Length > 0) lines.Add(sb.ToString());
+        return lines;
     }
 
     private async Task<MemoryStream> ConvertXmlToPdfAsync(Stream xmlStream, string pdfFileName, string? requestId)
