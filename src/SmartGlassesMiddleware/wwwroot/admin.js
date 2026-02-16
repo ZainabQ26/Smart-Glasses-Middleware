@@ -1830,7 +1830,8 @@ async function loadGroups(reset = false) {
     showLoading('groups-list');
     
     try {
-        const response = await fetchWithRetry(`${API_BASE}/groups?page=${state.groups.page}&pageSize=${state.groups.pageSize}`);
+        const cacheBust = reset ? `&cb=${Date.now()}` : '';
+        const response = await fetchWithRetry(`${API_BASE}/groups?page=${state.groups.page}&pageSize=${state.groups.pageSize}${cacheBust}`);
         
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -2069,7 +2070,7 @@ function createGroupCard(group) {
             <button type="button" class="group-item-delete" data-group-id="${id}" style="padding: 8px 16px; background: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-size: 14px;">Delete</button>
         </div>
         <div class="group-card-meta" style="display: flex; gap: 8px; padding-left: 12px; font-size: 12px;">
-            <span title="${fileCount} file(s)"><span aria-hidden="true">📄</span> <span aria-label="${fileCount} files">${fileCount} files</span></span>
+            <span title="${fileCount} file(s)" data-group-file-count-title="${id}"><span aria-hidden="true">📄</span> <span aria-label="${fileCount} files" data-group-file-count="${id}">${fileCount} files</span></span>
             <span title="${conversationCount} conversation(s)"><span aria-hidden="true">🗨️</span> <span aria-label="${conversationCount} conversations">${conversationCount} conversations</span></span>
             <span title="${reminderCount} reminder(s)"><span aria-hidden="true">⏰</span> <span aria-label="${reminderCount} reminders">${reminderCount} reminders</span></span>
         </div>
@@ -2230,7 +2231,7 @@ document.getElementById('reminder-form')?.addEventListener('submit', async (e) =
                         name: name,
                         resourceGroupId: activePromptGroupId
                     };
-                    const convRes = await fetch(`${API_BASE}/conversations`, {
+                    const convRes = await fetch(`/api/conversations`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(conversationData)
@@ -2305,6 +2306,22 @@ document.getElementById('reminder-form')?.addEventListener('submit', async (e) =
                 const reminderFileSection = document.getElementById('reminder-file-section');
                 if (reminderFileSection) {
                     reminderFileSection.style.display = 'none';
+                }
+                const reminderPreviewPanel = document.getElementById('reminder-preview-panel');
+                if (reminderPreviewPanel) {
+                    reminderPreviewPanel.style.display = 'block';
+                }
+                const reminderPreviewContent = document.getElementById('reminder-preview-content');
+                if (reminderPreviewContent) {
+                    reminderPreviewContent.innerHTML = '<div style="font-size: 48px; color: #95a5a6; margin-bottom: 10px;">📄</div>';
+                }
+                const reminderPreviewFilename = document.getElementById('reminder-preview-filename');
+                if (reminderPreviewFilename) {
+                    reminderPreviewFilename.textContent = '';
+                }
+                const reminderFileInput = document.getElementById('reminder-file-input');
+                if (reminderFileInput) {
+                    reminderFileInput.value = '';
                 }
             } else {
                 console.log('[CREATE REMINDER] No files to upload');
@@ -2642,6 +2659,18 @@ async function manageGroupResources(groupId, groupName) {
             name: f.name || 'Document',
             isDocument: true
         }));
+
+        // Sync group card file count with the modal's combined list
+        const groupIdKey = String(groupId);
+        const countEl = document.querySelector(`[data-group-file-count="${groupIdKey}"]`);
+        const countTitleEl = document.querySelector(`[data-group-file-count-title="${groupIdKey}"]`);
+        if (countEl) {
+            countEl.textContent = `${combinedFiles.length} files`;
+            countEl.setAttribute('aria-label', `${combinedFiles.length} files`);
+        }
+        if (countTitleEl) {
+            countTitleEl.setAttribute('title', `${combinedFiles.length} file(s)`);
+        }
 
         if (combinedFiles.length === 0) {
             filesListHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No attachments yet</div>';
@@ -3773,7 +3802,7 @@ async function init() {
                         let uploadGroupId = activePromptGroupId || null;
                         if (!uploadGroupId && activeConversationId) {
                             try {
-                                const conv = await (await fetch(`${API_BASE}/conversations/${activeConversationId}`)).json().catch(() => null);
+                                const conv = await (await fetch(`/api/conversations/${activeConversationId}`)).json().catch(() => null);
                                 uploadGroupId = conv?.resourceGroupId || conv?.ResourceGroupId || null;
                             } catch (err) {
                                 console.warn('[UPLOAD] Failed to resolve conversation group for file:', err);
@@ -3974,7 +4003,7 @@ async function init() {
                                 // Upload to Documents API so RAG can index and use the attachment
                                 let uploadGroupId = activePromptGroupId || null;
                                 if (!uploadGroupId && activeConversationId) {
-                                    const conv = await (await fetch(`${API_BASE}/conversations/${activeConversationId}`)).json().catch(() => null);
+                                    const conv = await (await fetch(`/api/conversations/${activeConversationId}`)).json().catch(() => null);
                                     uploadGroupId = conv?.resourceGroupId || conv?.ResourceGroupId || null;
                                 }
                                 if (uploadGroupId) {
@@ -4063,7 +4092,7 @@ async function init() {
                     if (documentIdsAfterUpload && documentIdsAfterUpload.length > 0) {
                         // Fetch conversation to determine its ResourceGroup and attach files to that group
                         try {
-                            const convRes = await fetch(`${API_BASE}/conversations/${responseConversationId}`);
+                            const convRes = await fetch(`/api/conversations/${responseConversationId}`);
                             const convJson = convRes.ok ? await convRes.json().catch(() => null) : null;
                             const convGroupId = convJson?.resourceGroupId || convJson?.ResourceGroupId || null;
                             if (convGroupId) {
@@ -4578,6 +4607,7 @@ async function init() {
         // Setup reminder file management (separate from groups)
         // reminderSelectedFiles is now declared at top level (line 673)
         let reminderPreviewFile = null;
+        let reminderPreviewToken = 0;
         const reminderFileInput = document.getElementById('reminder-file-input');
         const reminderFilesList = document.getElementById('reminder-files-list');
         const reminderFilesIcon = document.getElementById('reminder-files-icon');
@@ -4609,6 +4639,8 @@ async function init() {
                     `).join('');
                 }
             }
+
+            window.reminderSelectedFiles = reminderSelectedFiles;
         }
         window.updateReminderFilesList = updateReminderFilesList;
         
@@ -4642,18 +4674,21 @@ async function init() {
                 const file = e.target.files[0];
                 if (file) {
                     reminderPreviewFile = file;
+                    const currentPreviewToken = ++reminderPreviewToken;
                     reminderPreviewFilename.textContent = file.name;
                     
                     const ext = file.name.split('.').pop().toLowerCase();
                     if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) {
                         const reader = new FileReader();
                         reader.onload = function(e) {
+                            if (currentPreviewToken !== reminderPreviewToken) return;
                             reminderPreviewContent.innerHTML = `<img src="${e.target.result}" style="max-width: 100%; max-height: 200px; border-radius: 4px; object-fit: contain;">`;
                         };
                         reader.readAsDataURL(file);
                     } else if (ext === 'pdf') {
                         const reader = new FileReader();
                         reader.onload = function(e) {
+                            if (currentPreviewToken !== reminderPreviewToken) return;
                             reminderPreviewContent.innerHTML = `<embed src="${e.target.result}" type="application/pdf" width="100%" height="200px" style="border-radius: 4px;">`;
                         };
                         reader.readAsDataURL(file);
@@ -4661,6 +4696,7 @@ async function init() {
                         // Render markdown files
                         const reader = new FileReader();
                         reader.onload = function(e) {
+                            if (currentPreviewToken !== reminderPreviewToken) return;
                             const text = e.target.result;
                             const renderedHtml = renderMarkdown(text);
                             reminderPreviewContent.innerHTML = `<div style="text-align: left; max-height: 200px; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 12px;">${renderedHtml}</div>`;
@@ -4670,6 +4706,7 @@ async function init() {
                         // Show text files as plain text
                         const reader = new FileReader();
                         reader.onload = function(e) {
+                            if (currentPreviewToken !== reminderPreviewToken) return;
                             const text = e.target.result;
                             reminderPreviewContent.innerHTML = `<pre style="text-align: left; max-height: 200px; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 11px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(text)}</pre>`;
                         };
@@ -4689,6 +4726,12 @@ async function init() {
                         updateReminderFilesList();
                         showMessage('File added to list', 'success');
                     }
+
+                    // Clear preview after adding to list
+                    reminderPreviewFile = null;
+                    reminderPreviewToken = 0;
+                    reminderPreviewFilename.textContent = '';
+                    reminderPreviewContent.innerHTML = '<div style="font-size: 48px; color: #95a5a6; margin-bottom: 10px;">📄</div>';
                     
                     // Clear the input
                     reminderFileInput.value = '';
@@ -4704,6 +4747,7 @@ async function init() {
                     updateReminderFilesList();
                 }
                 reminderPreviewFile = null;
+                reminderPreviewToken = 0;
                 reminderFileInput.value = '';
                 reminderPreviewFilename.textContent = '';
                 reminderPreviewContent.innerHTML = '<div style="font-size: 48px; color: #95a5a6; margin-bottom: 10px;">📄</div>';
@@ -4727,6 +4771,13 @@ async function init() {
             }
             reminderSelectedFiles = reminderSelectedFiles.filter(fileObj => !fileObj.selected);
             updateReminderFilesList();
+
+            if (reminderSelectedFiles.length === 0) {
+                reminderPreviewFile = null;
+                reminderPreviewToken = 0;
+                if (reminderPreviewFilename) reminderPreviewFilename.textContent = '';
+                if (reminderPreviewContent) reminderPreviewContent.innerHTML = '<div style="font-size: 48px; color: #95a5a6; margin-bottom: 10px;">📄</div>';
+            }
         };
         
         // Load initial data with reset=true to ensure fresh load

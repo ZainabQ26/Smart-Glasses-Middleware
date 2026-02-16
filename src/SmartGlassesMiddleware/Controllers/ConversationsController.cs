@@ -335,7 +335,7 @@ public class ConversationsController : ControllerBase
     {
         var conversation = await _context.Conversations.FindAsync(id);
         if (conversation == null)
-            return NotFound();
+            return NoContent();
 
         // Remove associated messages then the conversation row
         var messages = _context.ChatMessages.Where(m => m.ConversationId == id);
