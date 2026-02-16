@@ -962,12 +962,8 @@ public class AdminController : ControllerBase
         var group = await _context.ResourceGroups.FindAsync(id);
         if (group == null)
         {
-            return NotFound(new ProblemDetails
-            {
-                Title = "Not Found",
-                Detail = $"Group with ID {id} not found",
-                Status = StatusCodes.Status404NotFound
-            });
+            // Idempotent delete to avoid UI errors on duplicate clicks or race conditions
+            return NoContent();
         }
 
         string? requestId = null;

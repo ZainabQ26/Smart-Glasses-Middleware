@@ -176,6 +176,32 @@ function normalizeFileList(files) {
     return files.map(normalizeFileMeta).filter(Boolean);
 }
 
+// Helper to render markdown as HTML
+function renderMarkdown(text) {
+    if (typeof marked !== 'undefined' && marked.parse) {
+        try {
+            // Configure marked for security
+            marked.setOptions({
+                breaks: true,
+                gfm: true,
+                headerIds: false,
+                mangle: false
+            });
+            const rawHtml = marked.parse(text);
+            // Sanitize the HTML to prevent XSS attacks
+            if (typeof DOMPurify !== 'undefined') {
+                return DOMPurify.sanitize(rawHtml);
+            }
+            return rawHtml;
+        } catch (e) {
+            console.warn('Failed to parse markdown:', e);
+            return `<pre style="text-align: left; max-height: 400px; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(text)}</pre>`;
+        }
+    }
+    // Fallback if marked is not loaded
+    return `<pre style="text-align: left; max-height: 400px; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(text)}</pre>`;
+}
+
 // Helper to safely encode attached files array into a URL-safe JSON string
 function encodeFilesData(msgFiles) {
     if (!Array.isArray(msgFiles) || msgFiles.length === 0) return '';
@@ -624,9 +650,11 @@ async function loadPrompts(reset = false) {
                     
                     div.innerHTML = `
                         <div style="display:block;">
-                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-                                <span class="prompt-name" style="font-weight:600;color:#2c3e50;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%;">${displayName}</span>
+                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;gap:6px;">
+                                <input class="prompt-name-input" value="${displayName}" data-conversation-id="${id}" readonly
+                                    style="font-weight:600;color:#2c3e50;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:65%;border:1px solid transparent;background:transparent;padding:0;margin:0;outline:none;" />
                                 <div style="display:flex;gap:6px;align-items:center;">
+                                    <button type="button" class="conversation-edit-btn" title="Rename conversation" aria-label="Rename conversation" style="border:none;background:#e0e0e0;color:#2c3e50;padding:2px 6px;border-radius:10px;cursor:pointer;font-size:11px;">Edit</button>
                                     <span class="badge" data-conversation-files="${id}" title="${fileCount} file(s) attached" style="background:#0b63a6;color:white;padding:2px 6px;border-radius:10px;font-size:11px;min-width:20px;text-align:center;">${fileCount}</span>
                                     <button type="button" class="conversation-delete-btn" title="Delete conversation" aria-label="Delete conversation" style="border:none;background:#e74c3c;color:white;width:20px;height:20px;border-radius:50%;cursor:pointer;font-size:14px;line-height:20px;padding:0;">×</button>
                                 </div>
@@ -643,6 +671,62 @@ async function loadPrompts(reset = false) {
                         await syncActiveGroupFromConversation(id);
                         await loadConversationIntoView(id, title);
                         showMessage('Conversation selected');
+                    });
+
+                    const nameInput = div.querySelector('.prompt-name-input');
+                    const editBtn = div.querySelector('.conversation-edit-btn');
+
+                    const finishEdit = async (save) => {
+                        if (!nameInput) return;
+                        const original = nameInput.dataset.originalTitle || displayName;
+                        const next = nameInput.value.trim();
+                        nameInput.readOnly = true;
+                        nameInput.style.borderColor = 'transparent';
+                        nameInput.style.background = 'transparent';
+                        if (!save || next === '' || next === original) {
+                            nameInput.value = original;
+                            nameInput.dataset.originalTitle = original;
+                            return;
+                        }
+                        const ok = await updateConversationTitle(id, next, original);
+                        if (!ok) {
+                            nameInput.value = original;
+                        } else {
+                            nameInput.dataset.originalTitle = next;
+                            if (activeConversationId === id) {
+                                const promptTitle = document.getElementById('prompt-form-title');
+                                if (promptTitle) promptTitle.textContent = next;
+                            }
+                        }
+                    };
+
+                    editBtn?.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        if (!nameInput) return;
+                        nameInput.dataset.originalTitle = nameInput.value;
+                        nameInput.readOnly = false;
+                        nameInput.style.borderColor = '#0b63a6';
+                        nameInput.style.background = '#ffffff';
+                        nameInput.focus();
+                        nameInput.select();
+                    });
+
+                    nameInput?.addEventListener('click', (e) => {
+                        if (!nameInput.readOnly) e.stopPropagation();
+                    });
+
+                    nameInput?.addEventListener('keydown', async (e) => {
+                        if (e.key === 'Enter') {
+                            e.preventDefault();
+                            await finishEdit(true);
+                        } else if (e.key === 'Escape') {
+                            e.preventDefault();
+                            await finishEdit(false);
+                        }
+                    });
+
+                    nameInput?.addEventListener('blur', async () => {
+                        await finishEdit(true);
                     });
 
                     div.querySelector('.conversation-delete-btn')?.addEventListener('click', async (e) => {
@@ -767,6 +851,8 @@ if (mainFileInput) {
 
         const formData = new FormData();
         formData.append('file', file);
+        // Auto-generate label from filename
+        formData.append('label', file.name || 'Untitled');
 
         try {
             const response = await fetch(`${API_BASE}/files`, {
@@ -877,12 +963,25 @@ async function previewFile(id, fileName) {
         } catch (error) {
             previewContent.innerHTML = '<p style="color: #e74c3c;">Failed to load file.</p>';
         }
-    } else if (['txt', 'json', 'xml', 'csv', 'md'].includes(ext)) {
+    } else if (['txt', 'json', 'xml', 'csv'].includes(ext)) {
         try {
             const response = await fetch(previewUrl);
             if (response.ok) {
                 const text = await response.text();
                 previewContent.innerHTML = `<pre style="text-align: left; max-height: 400px; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(text)}</pre>`;
+            } else {
+                previewContent.innerHTML = '<p style="color: #e74c3c;">Failed to load file preview.</p>';
+            }
+        } catch (error) {
+            previewContent.innerHTML = '<p style="color: #e74c3c;">Failed to load file preview.</p>';
+        }
+    } else if (ext === 'md') {
+        try {
+            const response = await fetch(previewUrl);
+            if (response.ok) {
+                const text = await response.text();
+                const renderedHtml = renderMarkdown(text);
+                previewContent.innerHTML = `<div style="text-align: left; max-height: 400px; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 14px;">${renderedHtml}</div>`;
             } else {
                 previewContent.innerHTML = '<p style="color: #e74c3c;">Failed to load file preview.</p>';
             }
@@ -1064,6 +1163,8 @@ function createNewPrompt() {
     
     // Reset conversation history
     currentConversationHistory = [];
+    activePromptGroupId = null;
+    updateActiveGroupStyles();
     
     // Reset response section
     const responseContent = document.getElementById('response-content');
@@ -1577,14 +1678,10 @@ async function deleteConversation(id, title) {
                 activeConversationId = null;
                 closeAutoGroupView();
             }
-            try {
-                const item = document.querySelector(`.sidebar-prompt-item[data-conversation-id="${id}"]`);
-                if (item) item.remove();
-            } catch (e) {
-                console.warn('Failed to remove conversation item from list', e);
-            }
+            removeConversationFromUI(id);
             showMessage('Conversation deleted successfully');
             apiCache.invalidate('/api/conversations');
+            apiCache.invalidate('/api/admin/groups');
             await loadPrompts(true);
             await loadGroups(true);
             await loadAllGroups(true);
@@ -1594,6 +1691,54 @@ async function deleteConversation(id, title) {
         }
     } catch (error) {
         showMessage('Error deleting conversation: ' + (error?.message || error), 'error');
+    }
+}
+
+function removeConversationFromUI(id) {
+    if (!id) return;
+    try {
+        const item = document.querySelector(`.sidebar-prompt-item[data-conversation-id="${id}"]`);
+        if (item) item.remove();
+    } catch (e) {
+        console.warn('Failed to remove conversation item from list', e);
+    }
+
+    try {
+        const modalRow = document.querySelector(`[data-modal-conversation-id="${id}"]`);
+        if (modalRow) modalRow.remove();
+    } catch (e) {
+        console.warn('Failed to remove conversation item from modal', e);
+    }
+
+    try {
+        if (Array.isArray(state.prompts.data)) {
+            state.prompts.data = state.prompts.data.filter(c => String(getProp(c, 'id') || getProp(c, 'Id')) !== String(id));
+        }
+    } catch (e) {
+        console.warn('Failed to update prompts state after delete', e);
+    }
+}
+
+async function updateConversationTitle(id, newTitle, originalTitle) {
+    if (!id || !newTitle) return false;
+    try {
+        const response = await fetch(`/api/conversations/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: newTitle })
+        });
+        if (response.ok) {
+            showMessage('Conversation renamed');
+            apiCache.invalidate('/api/conversations');
+            apiCache.invalidate('/api/admin/groups');
+            return true;
+        }
+        const error = await response.json().catch(() => null);
+        showMessage((error && (error.detail || error.error)) || 'Error renaming conversation', 'error');
+        return false;
+    } catch (error) {
+        showMessage('Error renaming conversation: ' + (error?.message || error), 'error');
+        return false;
     }
 }
 
@@ -1685,7 +1830,8 @@ async function loadGroups(reset = false) {
     showLoading('groups-list');
     
     try {
-        const response = await fetchWithRetry(`${API_BASE}/groups?page=${state.groups.page}&pageSize=${state.groups.pageSize}`);
+        const cacheBust = reset ? `&cb=${Date.now()}` : '';
+        const response = await fetchWithRetry(`${API_BASE}/groups?page=${state.groups.page}&pageSize=${state.groups.pageSize}${cacheBust}`);
         
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -1924,7 +2070,7 @@ function createGroupCard(group) {
             <button type="button" class="group-item-delete" data-group-id="${id}" style="padding: 8px 16px; background: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-size: 14px;">Delete</button>
         </div>
         <div class="group-card-meta" style="display: flex; gap: 8px; padding-left: 12px; font-size: 12px;">
-            <span title="${fileCount} file(s)"><span aria-hidden="true">📄</span> <span aria-label="${fileCount} files">${fileCount} files</span></span>
+            <span title="${fileCount} file(s)" data-group-file-count-title="${id}"><span aria-hidden="true">📄</span> <span aria-label="${fileCount} files" data-group-file-count="${id}">${fileCount} files</span></span>
             <span title="${conversationCount} conversation(s)"><span aria-hidden="true">🗨️</span> <span aria-label="${conversationCount} conversations">${conversationCount} conversations</span></span>
             <span title="${reminderCount} reminder(s)"><span aria-hidden="true">⏰</span> <span aria-label="${reminderCount} reminders">${reminderCount} reminders</span></span>
         </div>
@@ -2085,7 +2231,7 @@ document.getElementById('reminder-form')?.addEventListener('submit', async (e) =
                         name: name,
                         resourceGroupId: activePromptGroupId
                     };
-                    const convRes = await fetch(`${API_BASE}/conversations`, {
+                    const convRes = await fetch(`/api/conversations`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(conversationData)
@@ -2161,6 +2307,22 @@ document.getElementById('reminder-form')?.addEventListener('submit', async (e) =
                 if (reminderFileSection) {
                     reminderFileSection.style.display = 'none';
                 }
+                const reminderPreviewPanel = document.getElementById('reminder-preview-panel');
+                if (reminderPreviewPanel) {
+                    reminderPreviewPanel.style.display = 'block';
+                }
+                const reminderPreviewContent = document.getElementById('reminder-preview-content');
+                if (reminderPreviewContent) {
+                    reminderPreviewContent.innerHTML = '<div style="font-size: 48px; color: #95a5a6; margin-bottom: 10px;">📄</div>';
+                }
+                const reminderPreviewFilename = document.getElementById('reminder-preview-filename');
+                if (reminderPreviewFilename) {
+                    reminderPreviewFilename.textContent = '';
+                }
+                const reminderFileInput = document.getElementById('reminder-file-input');
+                if (reminderFileInput) {
+                    reminderFileInput.value = '';
+                }
             } else {
                 console.log('[CREATE REMINDER] No files to upload');
             }
@@ -2168,6 +2330,7 @@ document.getElementById('reminder-form')?.addEventListener('submit', async (e) =
             showMessage(id ? 'Reminder updated successfully' : 'Reminder created successfully');
             document.getElementById('reminder-form').reset();
             document.getElementById('reminder-id').value = '';
+            apiCache.invalidate('/api/admin/groups');
             await loadReminders(true);
         } else {
             const error = await response.json();
@@ -2497,6 +2660,18 @@ async function manageGroupResources(groupId, groupName) {
             isDocument: true
         }));
 
+        // Sync group card file count with the modal's combined list
+        const groupIdKey = String(groupId);
+        const countEl = document.querySelector(`[data-group-file-count="${groupIdKey}"]`);
+        const countTitleEl = document.querySelector(`[data-group-file-count-title="${groupIdKey}"]`);
+        if (countEl) {
+            countEl.textContent = `${combinedFiles.length} files`;
+            countEl.setAttribute('aria-label', `${combinedFiles.length} files`);
+        }
+        if (countTitleEl) {
+            countTitleEl.setAttribute('title', `${combinedFiles.length} file(s)`);
+        }
+
         if (combinedFiles.length === 0) {
             filesListHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No attachments yet</div>';
         } else {
@@ -2539,7 +2714,7 @@ async function manageGroupResources(groupId, groupName) {
                 }
                 
                 return `
-                    <div style="padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0;">
+                    <div data-modal-conversation-id="${convoId}" style="padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0;">
                         <div style="flex: 1; overflow: hidden;">
                             <div style="font-size: 14px; color: #333; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
                                 ${escapeHtml(convoTitle)}
@@ -2931,12 +3106,25 @@ async function previewReminderFile(fileId, fileName) {
         } catch (error) {
             modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load file.</p>';
         }
-    } else if (['txt', 'json', 'xml', 'csv', 'md'].includes(ext)) {
+    } else if (['txt', 'json', 'xml', 'csv'].includes(ext)) {
         try {
             const response = await fetch(previewUrl);
             if (response.ok) {
                 const text = await response.text();
                 modalContent.innerHTML = `<pre style="text-align: left; max-height: 55vh; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(text)}</pre>`;
+            } else {
+                modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load file.</p>';
+            }
+        } catch (error) {
+            modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load file.</p>';
+        }
+    } else if (ext === 'md') {
+        try {
+            const response = await fetch(previewUrl);
+            if (response.ok) {
+                const text = await response.text();
+                const renderedHtml = renderMarkdown(text);
+                modalContent.innerHTML = `<div style="text-align: left; max-height: 55vh; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 14px;">${renderedHtml}</div>`;
             } else {
                 modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load file.</p>';
             }
@@ -3019,12 +3207,25 @@ async function previewDocumentFile(documentId, fileName) {
         } catch (error) {
             modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load file.</p>';
         }
-    } else if (['txt', 'json', 'xml', 'csv', 'md'].includes(ext)) {
+    } else if (['txt', 'json', 'xml', 'csv'].includes(ext)) {
         try {
             const response = await fetch(previewUrl);
             if (response.ok) {
                 const text = await response.text();
                 modalContent.innerHTML = `<pre style="text-align: left; max-height: 55vh; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(text)}</pre>`;
+            } else {
+                modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load file.</p>';
+            }
+        } catch (error) {
+            modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load file.</p>';
+        }
+    } else if (ext === 'md') {
+        try {
+            const response = await fetch(previewUrl);
+            if (response.ok) {
+                const text = await response.text();
+                const renderedHtml = renderMarkdown(text);
+                modalContent.innerHTML = `<div style="text-align: left; max-height: 55vh; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 14px;">${renderedHtml}</div>`;
             } else {
                 modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load file.</p>';
             }
@@ -3437,6 +3638,23 @@ async function init() {
                             `;
                         };
                         reader.readAsDataURL(file);
+                    } else if (ext === 'md') {
+                        // Render markdown files
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            const text = e.target.result;
+                            const renderedHtml = renderMarkdown(text);
+                            promptPreviewContent.innerHTML = `<div style="text-align: left; max-height: 200px; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 12px;">${renderedHtml}</div>`;
+                        };
+                        reader.readAsText(file);
+                    } else if (['txt', 'json', 'xml', 'csv'].includes(ext)) {
+                        // Show text files as plain text
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            const text = e.target.result;
+                            promptPreviewContent.innerHTML = `<pre style="text-align: left; max-height: 200px; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 11px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(text)}</pre>`;
+                        };
+                        reader.readAsText(file);
                     } else {
                         promptPreviewContent.innerHTML = `
                             <div style="text-align: center;">
@@ -3584,7 +3802,7 @@ async function init() {
                         let uploadGroupId = activePromptGroupId || null;
                         if (!uploadGroupId && activeConversationId) {
                             try {
-                                const conv = await (await fetch(`${API_BASE}/conversations/${activeConversationId}`)).json().catch(() => null);
+                                const conv = await (await fetch(`/api/conversations/${activeConversationId}`)).json().catch(() => null);
                                 uploadGroupId = conv?.resourceGroupId || conv?.ResourceGroupId || null;
                             } catch (err) {
                                 console.warn('[UPLOAD] Failed to resolve conversation group for file:', err);
@@ -3638,6 +3856,8 @@ async function init() {
         
         // Global abort controller for cancelling requests
         let currentRequestController = null;
+        let currentRequestAbortReason = null;
+        let currentRequestTimeoutMs = null;
         
         // Send button function - sends prompt to API
         const buildSourcesHtml = (sources) => {
@@ -3783,7 +4003,7 @@ async function init() {
                                 // Upload to Documents API so RAG can index and use the attachment
                                 let uploadGroupId = activePromptGroupId || null;
                                 if (!uploadGroupId && activeConversationId) {
-                                    const conv = await (await fetch(`${API_BASE}/conversations/${activeConversationId}`)).json().catch(() => null);
+                                    const conv = await (await fetch(`/api/conversations/${activeConversationId}`)).json().catch(() => null);
                                     uploadGroupId = conv?.resourceGroupId || conv?.ResourceGroupId || null;
                                 }
                                 if (uploadGroupId) {
@@ -3824,8 +4044,12 @@ async function init() {
                 console.log('[SEND PROMPT] Sending documents query to', documentsUrl, 'payload:', payload);
 
                 currentRequestController = new AbortController();
-                const timeoutMs = 300000; // 300 seconds
-                const timeoutId = setTimeout(() => currentRequestController.abort(), timeoutMs);
+                currentRequestAbortReason = null;
+                currentRequestTimeoutMs = 300000; // 300 seconds
+                const timeoutId = setTimeout(() => {
+                    currentRequestAbortReason = 'timeout';
+                    try { currentRequestController.abort(); } catch (e) { /* noop */ }
+                }, currentRequestTimeoutMs);
 
                 const queryResponse = await fetch(documentsUrl, {
                     method: 'POST',
@@ -3868,7 +4092,7 @@ async function init() {
                     if (documentIdsAfterUpload && documentIdsAfterUpload.length > 0) {
                         // Fetch conversation to determine its ResourceGroup and attach files to that group
                         try {
-                            const convRes = await fetch(`${API_BASE}/conversations/${responseConversationId}`);
+                            const convRes = await fetch(`/api/conversations/${responseConversationId}`);
                             const convJson = convRes.ok ? await convRes.json().catch(() => null) : null;
                             const convGroupId = convJson?.resourceGroupId || convJson?.ResourceGroupId || null;
                             if (convGroupId) {
@@ -3882,6 +4106,24 @@ async function init() {
                             }
                         } catch (err) {
                             console.warn('[SEND PROMPT] Failed to attach files to conversation group:', err);
+                        }
+                    }
+
+                    // Ensure the conversation stays linked to the active group (for group history)
+                    if (activePromptGroupId) {
+                        try {
+                            const convRes = await fetch(`/api/conversations/${responseConversationId}`);
+                            const convJson = convRes.ok ? await convRes.json().catch(() => null) : null;
+                            const convGroupId = convJson?.resourceGroupId || convJson?.ResourceGroupId || null;
+                            if (!convGroupId || String(convGroupId) !== String(activePromptGroupId)) {
+                                await fetch(`/api/conversations/${responseConversationId}/group`, {
+                                    method: 'PUT',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ resourceGroupId: activePromptGroupId })
+                                });
+                            }
+                        } catch (err) {
+                            console.warn('[SEND PROMPT] Failed to link conversation to active group:', err);
                         }
                     }
                 }
@@ -3956,13 +4198,14 @@ async function init() {
             } catch (error) {
                 console.error('Error sending prompt:', error);
                 if (error.name === 'AbortError') {
+                    const timedOut = currentRequestAbortReason === 'timeout';
                     responseContent.innerHTML = `
-                        <div style="text-align: center; padding: 20px; color: #e67e22;">
-                            <div style="font-size: 1.2rem; margin-bottom: 10px;">🚫 Cancelled</div>
-                            <div style="font-size: 0.9rem;">Request successfully cancelled.</div>
+                        <div style="text-align: center; padding: 20px; color: ${timedOut ? '#e74c3c' : '#e67e22'};">
+                            <div style="font-size: 1.2rem; margin-bottom: 10px;">${timedOut ? '⏱️ Timed out' : '🚫 Cancelled'}</div>
+                            <div style="font-size: 0.9rem;">${timedOut ? `Request timed out after ${Math.round((currentRequestTimeoutMs || 0) / 1000)}s. Please try again or shorten the request.` : 'Request successfully cancelled.'}</div>
                         </div>
                     `;
-                    showMessage('Request successfully cancelled', 'info');
+                    showMessage(timedOut ? 'Request timed out' : 'Request successfully cancelled', timedOut ? 'error' : 'info');
                 } else {
                     const fallbackSources = lastQueryResult?.referencedSources || lastQueryResult?.ReferencedSources || lastQueryResult?.sources || lastQueryResult?.Sources || [];
                     const fallbackSourcesHtml = buildSourcesHtml(fallbackSources);
@@ -3978,6 +4221,8 @@ async function init() {
                 } finally {
                 // Reset buttons regardless of success or error
                 currentRequestController = null;
+                currentRequestAbortReason = null;
+                currentRequestTimeoutMs = null;
                 if (sendBtn) sendBtn.style.display = 'block';
                 if (cancelBtn) cancelBtn.style.display = 'none';
             }
@@ -3989,6 +4234,7 @@ async function init() {
         // Cancel button click handler
         document.getElementById('prompt-cancel-btn')?.addEventListener('click', () => {
             if (currentRequestController) {
+                currentRequestAbortReason = 'cancel';
                 currentRequestController.abort();
                 showMessage('Cancelling request...', 'info');
             }
@@ -4045,6 +4291,8 @@ async function init() {
                 promptSelectedFiles = [];
                 window.promptSelectedFiles = promptSelectedFiles;
                 updatePromptFilesList();
+                activePromptGroupId = null;
+                updateActiveGroupStyles();
                 
                 const promptIdInput = document.getElementById('prompt-id');
                 if (promptIdInput) promptIdInput.value = '';
@@ -4156,7 +4404,7 @@ async function init() {
             updateGroupFilesList();
         });
         
-        // Handle file selection - show preview
+        // Handle file selection - show preview and auto-upload
         if (groupFileInput) {
             groupFileInput.addEventListener('change', (e) => {
                 const file = e.target.files[0];
@@ -4178,6 +4426,23 @@ async function init() {
                             groupPreviewContent.innerHTML = `<embed src="${e.target.result}" type="application/pdf" width="100%" height="200px" style="border-radius: 4px;">`;
                         };
                         reader.readAsDataURL(file);
+                    } else if (ext === 'md') {
+                        // Render markdown files
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            const text = e.target.result;
+                            const renderedHtml = renderMarkdown(text);
+                            groupPreviewContent.innerHTML = `<div style="text-align: left; max-height: 200px; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 12px;">${renderedHtml}</div>`;
+                        };
+                        reader.readAsText(file);
+                    } else if (['txt', 'json', 'xml', 'csv'].includes(ext)) {
+                        // Show text files as plain text
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            const text = e.target.result;
+                            groupPreviewContent.innerHTML = `<pre style="text-align: left; max-height: 200px; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 11px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(text)}</pre>`;
+                        };
+                        reader.readAsText(file);
                     } else {
                         groupPreviewContent.innerHTML = `
                             <div style="text-align: center;">
@@ -4186,6 +4451,17 @@ async function init() {
                             </div>
                         `;
                     }
+                    
+                    // Auto-upload the file to the list
+                    if (!groupSelectedFiles.find(f => f.name === file.name)) {
+                        groupSelectedFiles.push({file: file, name: file.name, selected: false});
+                        window.groupSelectedFiles = groupSelectedFiles;
+                        updateGroupFilesList();
+                        showMessage('File added to list', 'success');
+                    }
+                    
+                    // Clear the input
+                    if (groupFileInput) groupFileInput.value = '';
                 }
             });
         }
@@ -4331,6 +4607,7 @@ async function init() {
         // Setup reminder file management (separate from groups)
         // reminderSelectedFiles is now declared at top level (line 673)
         let reminderPreviewFile = null;
+        let reminderPreviewToken = 0;
         const reminderFileInput = document.getElementById('reminder-file-input');
         const reminderFilesList = document.getElementById('reminder-files-list');
         const reminderFilesIcon = document.getElementById('reminder-files-icon');
@@ -4362,6 +4639,8 @@ async function init() {
                     `).join('');
                 }
             }
+
+            window.reminderSelectedFiles = reminderSelectedFiles;
         }
         window.updateReminderFilesList = updateReminderFilesList;
         
@@ -4389,27 +4668,49 @@ async function init() {
             updateReminderFilesList();
         });
         
-        // Handle file selection - show preview
+        // Handle file selection - show preview and auto-upload
         if (reminderFileInput) {
             reminderFileInput.addEventListener('change', (e) => {
                 const file = e.target.files[0];
                 if (file) {
                     reminderPreviewFile = file;
+                    const currentPreviewToken = ++reminderPreviewToken;
                     reminderPreviewFilename.textContent = file.name;
                     
                     const ext = file.name.split('.').pop().toLowerCase();
                     if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) {
                         const reader = new FileReader();
                         reader.onload = function(e) {
+                            if (currentPreviewToken !== reminderPreviewToken) return;
                             reminderPreviewContent.innerHTML = `<img src="${e.target.result}" style="max-width: 100%; max-height: 200px; border-radius: 4px; object-fit: contain;">`;
                         };
                         reader.readAsDataURL(file);
                     } else if (ext === 'pdf') {
                         const reader = new FileReader();
                         reader.onload = function(e) {
+                            if (currentPreviewToken !== reminderPreviewToken) return;
                             reminderPreviewContent.innerHTML = `<embed src="${e.target.result}" type="application/pdf" width="100%" height="200px" style="border-radius: 4px;">`;
                         };
                         reader.readAsDataURL(file);
+                    } else if (ext === 'md') {
+                        // Render markdown files
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            if (currentPreviewToken !== reminderPreviewToken) return;
+                            const text = e.target.result;
+                            const renderedHtml = renderMarkdown(text);
+                            reminderPreviewContent.innerHTML = `<div style="text-align: left; max-height: 200px; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 12px;">${renderedHtml}</div>`;
+                        };
+                        reader.readAsText(file);
+                    } else if (['txt', 'json', 'xml', 'csv'].includes(ext)) {
+                        // Show text files as plain text
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            if (currentPreviewToken !== reminderPreviewToken) return;
+                            const text = e.target.result;
+                            reminderPreviewContent.innerHTML = `<pre style="text-align: left; max-height: 200px; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 11px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(text)}</pre>`;
+                        };
+                        reader.readAsText(file);
                     } else {
                         reminderPreviewContent.innerHTML = `
                             <div style="text-align: center;">
@@ -4418,6 +4719,22 @@ async function init() {
                             </div>
                         `;
                     }
+                    
+                    // Auto-upload the file to the list
+                    if (!reminderSelectedFiles.find(f => f.name === file.name)) {
+                        reminderSelectedFiles.push({file: file, name: file.name, selected: false});
+                        updateReminderFilesList();
+                        showMessage('File added to list', 'success');
+                    }
+
+                    // Clear preview after adding to list
+                    reminderPreviewFile = null;
+                    reminderPreviewToken = 0;
+                    reminderPreviewFilename.textContent = '';
+                    reminderPreviewContent.innerHTML = '<div style="font-size: 48px; color: #95a5a6; margin-bottom: 10px;">📄</div>';
+                    
+                    // Clear the input
+                    reminderFileInput.value = '';
                 }
             });
         }
@@ -4430,6 +4747,7 @@ async function init() {
                     updateReminderFilesList();
                 }
                 reminderPreviewFile = null;
+                reminderPreviewToken = 0;
                 reminderFileInput.value = '';
                 reminderPreviewFilename.textContent = '';
                 reminderPreviewContent.innerHTML = '<div style="font-size: 48px; color: #95a5a6; margin-bottom: 10px;">📄</div>';
@@ -4453,6 +4771,13 @@ async function init() {
             }
             reminderSelectedFiles = reminderSelectedFiles.filter(fileObj => !fileObj.selected);
             updateReminderFilesList();
+
+            if (reminderSelectedFiles.length === 0) {
+                reminderPreviewFile = null;
+                reminderPreviewToken = 0;
+                if (reminderPreviewFilename) reminderPreviewFilename.textContent = '';
+                if (reminderPreviewContent) reminderPreviewContent.innerHTML = '<div style="font-size: 48px; color: #95a5a6; margin-bottom: 10px;">📄</div>';
+            }
         };
         
         // Load initial data with reset=true to ensure fresh load

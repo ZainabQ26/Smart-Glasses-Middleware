@@ -29,15 +29,19 @@ public class ConversationService : IConversationService
     private readonly IServiceProvider _serviceProvider;
     private readonly IHubContext<SmartGlassesMiddleware.Hubs.ConversationHub>? _conversationHub;
     private readonly IHubContext<SmartGlassesMiddleware.Hubs.ResourceHub>? _resourceHub;
+    private readonly ICacheService _cacheService;
     private readonly double _tokensPerChar;
     private const int MaxTopicLength = 50;
     private const int MaxFallbackTitleLength = 50;
+    private const int DefaultPageSize = 20;
+    private const int MaxPageSize = 100;
 
     public ConversationService(
         ApplicationDbContext context,
         ILogger<ConversationService> logger,
         IConfiguration configuration,
         IServiceProvider serviceProvider,
+        ICacheService cacheService,
         IHubContext<SmartGlassesMiddleware.Hubs.ConversationHub>? conversationHub = null,
         IHubContext<SmartGlassesMiddleware.Hubs.ResourceHub>? resourceHub = null)
     {
@@ -45,6 +49,7 @@ public class ConversationService : IConversationService
         _logger = logger;
         _configuration = configuration;
         _serviceProvider = serviceProvider;
+        _cacheService = cacheService;
         _conversationHub = conversationHub;
         _resourceHub = resourceHub;
         _tokensPerChar = configuration.GetValue<double?>("RAG:ApproximateTokensPerChar") ?? 0.25;
@@ -231,34 +236,18 @@ public class ConversationService : IConversationService
                     // Normalize the topic string (case-insensitive, length limit)
                     topic = topic.Length > MaxTopicLength ? topic.Substring(0, MaxTopicLength) : topic;
                     
-                    // Try to find or create a ResourceGroup with this topic name (case-insensitive)
-                    var existingGroup = await _context.ResourceGroups
-                        .FirstOrDefaultAsync(r => r.Name.ToLower() == topic.ToLower());
-                    
-                    if (existingGroup == null)
-                    {
-                        existingGroup = new ResourceGroup { Id = Guid.NewGuid(), Name = topic, CreatedAt = DateTime.UtcNow };
-                        _context.ResourceGroups.Add(existingGroup);
-                        await _context.SaveChangesAsync();
-                        _logger.LogInformation("Created ResourceGroup for topic '{Topic}'", topic);
-                    }
-
-                    // Now look for an active recent conversation in this group
-                    var recentInGroup = await _context.Conversations
-                        .Where(c => c.IsActive && c.ResourceGroupId == existingGroup.Id && c.UpdatedAt > DateTime.UtcNow.AddHours(-1))
-                        .OrderByDescending(c => c.UpdatedAt)
-                        .FirstOrDefaultAsync();
-
-                    if (recentInGroup != null)
-                    {
-                        _logger.LogInformation("Joining recent conversation {ConversationId} in topic group '{Topic}'", recentInGroup.Id, topic);
-                        return recentInGroup;
-                    }
+                    // Always create a new group for a new conversation topic
+                    var newGroup = new ResourceGroup { Id = Guid.NewGuid(), Name = topic, CreatedAt = DateTime.UtcNow };
+                    _context.ResourceGroups.Add(newGroup);
+                    await _context.SaveChangesAsync();
+                    await InvalidateGroupsCache();
+                    await NotifyGroupsChangedAsync();
+                    _logger.LogInformation("Created new ResourceGroup for topic '{Topic}'", topic);
 
                     // Create a new conversation with the topic-based title and attach the group
                     var title = topic.Length > MaxFallbackTitleLength ? topic.Substring(0, MaxFallbackTitleLength) + "..." : topic;
                     _logger.LogInformation("Creating new conversation with topic '{Topic}'", topic);
-                    return await CreateConversationAsync(title, existingGroup.Id);
+                    return await CreateConversationAsync(title, newGroup.Id);
                 }
             }
         }
@@ -286,6 +275,8 @@ public class ConversationService : IConversationService
                 };
                 _context.ResourceGroups.Add(newGroup);
                 await _context.SaveChangesAsync();
+                await InvalidateGroupsCache();
+                await NotifyGroupsChangedAsync();
                 _logger.LogInformation("Created ResourceGroup {GroupId} for fallback conversation", newGroup.Id);
             }
         }
@@ -299,6 +290,8 @@ public class ConversationService : IConversationService
             };
             _context.ResourceGroups.Add(newGroup);
             await _context.SaveChangesAsync();
+            await InvalidateGroupsCache();
+            await NotifyGroupsChangedAsync();
             effectiveGroupId = newGroup.Id;
             _logger.LogInformation("Created ResourceGroup {GroupId} for fallback conversation", newGroup.Id);
         }
@@ -486,21 +479,17 @@ Format: YES|topic label OR NO";
                         
                         _logger.LogInformation("Topic change detected in conversation {ConversationId}. New topic: {Topic}", conversationId, newTopic);
 
-                        // Find or create a ResourceGroup for the new topic (case-insensitive)
-                        var existingGroup = await _context.ResourceGroups
-                            .FirstOrDefaultAsync(r => r.Name.ToLower() == newTopic.ToLower());
-                        
-                        if (existingGroup == null)
+                        // Always create a new ResourceGroup for a topic change
+                        var newGroup = new ResourceGroup
                         {
-                            existingGroup = new ResourceGroup 
-                            { 
-                                Id = Guid.NewGuid(), 
-                                Name = newTopic, 
-                                CreatedAt = DateTime.UtcNow 
-                            };
-                            _context.ResourceGroups.Add(existingGroup);
-                            await _context.SaveChangesAsync();
-                        }
+                            Id = Guid.NewGuid(),
+                            Name = newTopic,
+                            CreatedAt = DateTime.UtcNow
+                        };
+                        _context.ResourceGroups.Add(newGroup);
+                        await _context.SaveChangesAsync();
+                        await InvalidateGroupsCache();
+                        await NotifyGroupsChangedAsync();
 
 
                             if (_resourceHub != null)
@@ -515,7 +504,7 @@ Format: YES|topic label OR NO";
                                 }
                             }
                         // Create new conversation in the new topic group
-                        var newConversation = await CreateConversationAsync(newTopic, existingGroup.Id);
+                        var newConversation = await CreateConversationAsync(newTopic, newGroup.Id);
                         
                         return (true, newConversation);
                     }
@@ -528,6 +517,34 @@ Format: YES|topic label OR NO";
         }
 
         return (false, null);
+    }
+
+    private Task NotifyGroupsChangedAsync()
+    {
+        return _resourceHub != null
+            ? _resourceHub.Clients.All.SendAsync("groupsChanged")
+            : Task.CompletedTask;
+    }
+
+    private async Task InvalidateGroupsCache()
+    {
+        try
+        {
+            var totalCount = await _context.ResourceGroups.CountAsync();
+            var totalPages = (int)Math.Ceiling(totalCount / (double)DefaultPageSize);
+
+            var tasks = new List<Task>();
+            for (int page = 1; page <= totalPages + 1; page++)
+            {
+                tasks.Add(_cacheService.RemoveAsync($"admin:groups:page:{page}:size:{DefaultPageSize}"));
+                tasks.Add(_cacheService.RemoveAsync($"admin:groups:page:{page}:size:{MaxPageSize}"));
+            }
+            await Task.WhenAll(tasks);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error invalidating groups cache");
+        }
     }
 
     public async Task<Conversation> SplitConversationAsync(Guid originalConversationId, string newTopic, List<ChatMessage> messagesToMove)
