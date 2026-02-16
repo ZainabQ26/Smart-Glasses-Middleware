@@ -1,6 +1,7 @@
 using iText.Kernel.Pdf;
 using iText.Kernel.Pdf.Canvas.Parser;
 using iText.Kernel.Pdf.Canvas.Parser.Listener;
+using iText.Kernel.Geom;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 using SmartGlassesMiddleware.Models;
@@ -16,8 +17,31 @@ using System.Globalization;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Markdig;
+using System.Text.Json;
 
 namespace SmartGlassesMiddleware.Services;
+
+/// <summary>
+/// Holds location metadata for document text chunks
+/// </summary>
+public class TextLocationInfo
+{
+    public int PageNumber { get; set; }
+    public int StartIndex { get; set; }
+    public int EndIndex { get; set; }
+    public double X { get; set; }
+    public double Y { get; set; }
+    public double Width { get; set; }
+    public double Height { get; set; }
+}
+
+/// <summary>
+/// Metadata container for document location information
+/// </summary>
+public class DocumentLocationMetadata
+{
+    public List<TextLocationInfo> Locations { get; set; } = new();
+}
 
 public interface IDocumentProcessingService
 {
@@ -60,24 +84,34 @@ public class DocumentProcessingService : IDocumentProcessingService
             await _monitoringService.UpdateRequestStatus(requestId, "Processing", $"Converting {fileName} to Markdown", 10);
         }
 
-        // Convert to Markdown and get the converted stream
+        // Convert to Markdown and get the converted stream with location data
         MemoryStream markdownStream;
         string markdownFileName;
+        DocumentLocationMetadata? locationMetadata = null;
         
         try
         {
             fileStream.Position = 0;
-            (markdownStream, markdownFileName) = await ConvertToMarkdownAsync(fileStream, fileName, documentType, requestId);
+            (markdownStream, markdownFileName, locationMetadata) = await ConvertToMarkdownAsync(fileStream, fileName, documentType, requestId);
             
             if (requestId != null && _monitoringService != null)
             {
                 await _monitoringService.UpdateRequestStatus(requestId, "Processing", "Uploading converted Markdown", 40);
             }
 
-            // Store only the converted Markdown
+            // Store the converted Markdown
             var storageKey = $"documents/{documentId}/{markdownFileName}";
             markdownStream.Position = 0;
             await _storageService.UploadFileAsync(storageKey, markdownStream, "text/markdown");
+
+            // Store location metadata if available
+            if (locationMetadata != null && locationMetadata.Locations.Any())
+            {
+                var locationJson = JsonSerializer.Serialize(locationMetadata);
+                var locationStream = new MemoryStream(Encoding.UTF8.GetBytes(locationJson));
+                var locationKey = $"documents/{documentId}/location-metadata.json";
+                await _storageService.UploadFileAsync(locationKey, locationStream, "application/json");
+            }
 
             var metadata = new DocumentMetadata
             {
@@ -97,9 +131,9 @@ public class DocumentProcessingService : IDocumentProcessingService
                 await _monitoringService.UpdateRequestStatus(requestId, "Processing", "Extracting text from Markdown", 60);
             }
 
-            // Extract text and create chunks from the Markdown
+            // Extract text and create chunks from the Markdown with location data
             markdownStream.Position = 0;
-            var chunks = await ExtractFromMarkdownAsync(markdownStream, metadata.Id, requestId);
+            var chunks = await ExtractFromMarkdownAsync(markdownStream, metadata.Id, requestId, locationMetadata);
 
             metadata.TotalPages = chunks.Any() ? chunks.Max(c => c.PageNumber) : 0;
             metadata.IsProcessed = true;
@@ -141,18 +175,19 @@ public class DocumentProcessingService : IDocumentProcessingService
         }
     }
 
-    private async Task<(MemoryStream markdownStream, string markdownFileName)> ConvertToMarkdownAsync(Stream inputStream, string fileName, string documentType, string? requestId)
+    private async Task<(MemoryStream markdownStream, string markdownFileName, DocumentLocationMetadata? locationMetadata)> ConvertToMarkdownAsync(Stream inputStream, string fileName, string documentType, string? requestId)
     {
         var baseFileName = System.IO.Path.GetFileNameWithoutExtension(fileName);
         var markdownFileName = $"{baseFileName}.md";
 
         MemoryStream convertedStream;
         string convertedName;
+        DocumentLocationMetadata? locationMetadata = null;
 
         switch (documentType)
         {
             case "pdf":
-                (convertedStream, convertedName) = await ConvertPdfToMarkdownAsync(inputStream, markdownFileName, requestId);
+                (convertedStream, convertedName, locationMetadata) = await ConvertPdfToMarkdownAsync(inputStream, markdownFileName, requestId);
                 break;
 
             case "docx":
@@ -189,7 +224,7 @@ public class DocumentProcessingService : IDocumentProcessingService
 
         // Reset stream position for downstream consumers
         convertedStream.Position = 0;
-        return (convertedStream, finalFileName);
+        return (convertedStream, finalFileName, locationMetadata);
     }
 
     private string GenerateSlugFromMarkdown(string markdown, string fallback)
@@ -253,7 +288,7 @@ public class DocumentProcessingService : IDocumentProcessingService
         return cleaned;
     }
 
-    private async Task<(MemoryStream, string)> ConvertPdfToMarkdownAsync(Stream pdfStream, string markdownFileName, string? requestId)
+    private async Task<(MemoryStream, string, DocumentLocationMetadata)> ConvertPdfToMarkdownAsync(Stream pdfStream, string markdownFileName, string? requestId)
     {
         if (requestId != null && _monitoringService != null)
         {
@@ -264,22 +299,50 @@ public class DocumentProcessingService : IDocumentProcessingService
         markdown.AppendLine($"# {System.IO.Path.GetFileNameWithoutExtension(markdownFileName)}");
         markdown.AppendLine();
 
+        var locationMetadata = new DocumentLocationMetadata();
+
         try
         {
             using var pdfReader = new PdfReader(pdfStream);
             using var pdfDocument = new PdfDocument(pdfReader);
             var totalPages = pdfDocument.GetNumberOfPages();
+            int currentTextIndex = 0;
 
             for (int pageNum = 1; pageNum <= totalPages; pageNum++)
             {
                 var page = pdfDocument.GetPage(pageNum);
+                
+                // Use LocationTextExtractionStrategy to get text with positions
                 var strategy = new LocationTextExtractionStrategy();
                 string pageText = PdfTextExtractor.GetTextFromPage(page, strategy);
+
+                // Get the page size for calculating bounding boxes
+                var pageSize = page.GetPageSize();
+                var pageHeight = pageSize.GetHeight();
+                var pageWidth = pageSize.GetWidth();
 
                 if (totalPages > 1)
                 {
                     markdown.AppendLine($"## Page {pageNum}");
                     markdown.AppendLine();
+                }
+
+                // Store location info for this page's text
+                // Note: For simplicity, we're storing page-level bounding boxes
+                // A more sophisticated implementation could extract word-level positions
+                if (!string.IsNullOrWhiteSpace(pageText))
+                {
+                    locationMetadata.Locations.Add(new TextLocationInfo
+                    {
+                        PageNumber = pageNum,
+                        StartIndex = currentTextIndex,
+                        EndIndex = currentTextIndex + pageText.Length,
+                        X = 0,
+                        Y = 0,
+                        Width = pageWidth,
+                        Height = pageHeight
+                    });
+                    currentTextIndex += pageText.Length + Environment.NewLine.Length * 2; // Account for newlines
                 }
 
                 markdown.AppendLine(pageText);
@@ -293,7 +356,7 @@ public class DocumentProcessingService : IDocumentProcessingService
         }
 
         var ms = new MemoryStream(Encoding.UTF8.GetBytes(markdown.ToString()));
-        return (ms, markdownFileName);
+        return (ms, markdownFileName, locationMetadata);
     }
 
     private async Task<(MemoryStream, string)> ConvertDocxToMarkdownAsync(Stream docxStream, string markdownFileName, string? requestId)
@@ -580,7 +643,7 @@ public class DocumentProcessingService : IDocumentProcessingService
         }
     }
 
-    private async Task<List<DocumentChunk>> ExtractFromMarkdownAsync(Stream markdownStream, Guid documentId, string? requestId)
+    private async Task<List<DocumentChunk>> ExtractFromMarkdownAsync(Stream markdownStream, Guid documentId, string? requestId, DocumentLocationMetadata? locationMetadata = null)
     {
         var chunks = new List<DocumentChunk>();
         var chunkIndex = 0;
@@ -590,8 +653,8 @@ public class DocumentProcessingService : IDocumentProcessingService
             using var reader = new StreamReader(markdownStream);
             var markdownText = await reader.ReadToEndAsync();
 
-            // Create chunks from markdown text
-            var pageChunks = CreateTextChunks(markdownText, 1, documentId, ref chunkIndex);
+            // Create chunks from markdown text with location data
+            var pageChunks = CreateTextChunks(markdownText, 1, documentId, ref chunkIndex, locationMetadata);
             chunks.AddRange(pageChunks);
         }
         catch (Exception ex)
@@ -634,8 +697,23 @@ public class DocumentProcessingService : IDocumentProcessingService
         using var stream = await _storageService.DownloadFileAsync(metadata.StorageKey);
         stream.Position = 0;
 
-        // Re-extract from the stored Markdown
-        var chunks = await ExtractFromMarkdownAsync(stream, metadata.Id, null);
+        // Try to load location metadata if it exists
+        DocumentLocationMetadata? locationMetadata = null;
+        try
+        {
+            var locationKey = $"documents/{metadata.Id}/location-metadata.json";
+            using var locationStream = await _storageService.DownloadFileAsync(locationKey);
+            using var reader = new StreamReader(locationStream);
+            var locationJson = await reader.ReadToEndAsync();
+            locationMetadata = JsonSerializer.Deserialize<DocumentLocationMetadata>(locationJson);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "No location metadata found for document {DocumentId}, continuing without it", documentId);
+        }
+
+        // Re-extract from the stored Markdown with location data
+        var chunks = await ExtractFromMarkdownAsync(stream, metadata.Id, null, locationMetadata);
 
         metadata.TotalPages = chunks.Any() ? chunks.Max(c => c.PageNumber) : 0;
         metadata.IsProcessed = true;
@@ -662,7 +740,7 @@ public class DocumentProcessingService : IDocumentProcessingService
         };
     }
 
-    private List<DocumentChunk> CreateTextChunks(string text, int pageNumber, Guid documentId, ref int chunkIndex)
+    private List<DocumentChunk> CreateTextChunks(string text, int pageNumber, Guid documentId, ref int chunkIndex, DocumentLocationMetadata? locationMetadata = null)
     {
         var chunks = new List<DocumentChunk>();
 
@@ -700,6 +778,22 @@ public class DocumentProcessingService : IDocumentProcessingService
                     ChunkIndex = chunkIndex++,
                     CreatedAt = DateTime.UtcNow
                 };
+
+                // Try to find location data for this chunk
+                if (locationMetadata != null && locationMetadata.Locations.Any())
+                {
+                    var locationInfo = locationMetadata.Locations
+                        .FirstOrDefault(l => startIndex >= l.StartIndex && startIndex < l.EndIndex);
+                    
+                    if (locationInfo != null)
+                    {
+                        chunk.PageNumber = locationInfo.PageNumber;
+                        chunk.X = locationInfo.X;
+                        chunk.Y = locationInfo.Y;
+                        chunk.Width = locationInfo.Width;
+                        chunk.Height = locationInfo.Height;
+                    }
+                }
 
                 chunks.Add(chunk);
             }

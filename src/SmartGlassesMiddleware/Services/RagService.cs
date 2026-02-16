@@ -225,7 +225,11 @@ Answer:";
                 FileName = c.DocumentMetadata.FileName,
                 PageNumber = c.PageNumber,
                 ChunkId = c.Id,
-                ChunkText = c.ChunkText.Length > 200 ? c.ChunkText.Substring(0, 200) + "..." : c.ChunkText
+                ChunkText = c.ChunkText.Length > 200 ? c.ChunkText.Substring(0, 200) + "..." : c.ChunkText,
+                X = c.X,
+                Y = c.Y,
+                Width = c.Width,
+                Height = c.Height
             }).ToList();
 
             // Analyze response to identify which sources were actually referenced
@@ -425,7 +429,11 @@ Answer:";
                 FileName = c.DocumentMetadata.FileName,
                 PageNumber = c.PageNumber,
                 ChunkId = c.Id,
-                ChunkText = c.ChunkText.Length > 200 ? c.ChunkText.Substring(0, 200) + "..." : c.ChunkText
+                ChunkText = c.ChunkText.Length > 200 ? c.ChunkText.Substring(0, 200) + "..." : c.ChunkText,
+                X = c.X,
+                Y = c.Y,
+                Width = c.Width,
+                Height = c.Height
             }).ToList();
 
             // Build conversation sources list
@@ -1239,7 +1247,11 @@ Answer:";
                         : $"Reminder: {reminder.InputText}",
                     PageNumber = 0,
                     ChunkId = Guid.Empty,
-                    ChunkText = reminder.InputText
+                    ChunkText = reminder.InputText,
+                    X = null,
+                    Y = null,
+                    Width = null,
+                    Height = null
                 });
             }
 
