@@ -296,7 +296,8 @@ public class DocumentProcessingService : IDocumentProcessingService
         }
 
         var markdown = new StringBuilder();
-        markdown.AppendLine($"# {System.IO.Path.GetFileNameWithoutExtension(markdownFileName)}");
+        var headerText = $"# {System.IO.Path.GetFileNameWithoutExtension(markdownFileName)}";
+        markdown.AppendLine(headerText);
         markdown.AppendLine();
 
         var locationMetadata = new DocumentLocationMetadata();
@@ -306,7 +307,6 @@ public class DocumentProcessingService : IDocumentProcessingService
             using var pdfReader = new PdfReader(pdfStream);
             using var pdfDocument = new PdfDocument(pdfReader);
             var totalPages = pdfDocument.GetNumberOfPages();
-            int currentTextIndex = 0;
 
             for (int pageNum = 1; pageNum <= totalPages; pageNum++)
             {
@@ -321,32 +321,39 @@ public class DocumentProcessingService : IDocumentProcessingService
                 var pageHeight = pageSize.GetHeight();
                 var pageWidth = pageSize.GetWidth();
 
+                // Record the current length before adding page content
+                int startIndex = markdown.Length;
+
                 if (totalPages > 1)
                 {
                     markdown.AppendLine($"## Page {pageNum}");
                     markdown.AppendLine();
                 }
 
+                markdown.AppendLine(pageText);
+                markdown.AppendLine();
+
+                // Calculate the actual end index after adding content
+                int endIndex = markdown.Length;
+
                 // Store location info for this page's text
-                // Note: For simplicity, we're storing page-level bounding boxes
-                // A more sophisticated implementation could extract word-level positions
+                // Note: For simplicity, we're storing page-level bounding boxes.
+                // The X, Y, Width, Height represent the full page dimensions.
+                // A more sophisticated implementation could extract word-level positions using
+                // iText's TextRenderInfo to get precise bounding boxes for each text element.
                 if (!string.IsNullOrWhiteSpace(pageText))
                 {
                     locationMetadata.Locations.Add(new TextLocationInfo
                     {
                         PageNumber = pageNum,
-                        StartIndex = currentTextIndex,
-                        EndIndex = currentTextIndex + pageText.Length,
+                        StartIndex = startIndex,
+                        EndIndex = endIndex,
                         X = 0,
                         Y = 0,
                         Width = pageWidth,
                         Height = pageHeight
                     });
-                    currentTextIndex += pageText.Length + Environment.NewLine.Length * 2; // Account for newlines
                 }
-
-                markdown.AppendLine(pageText);
-                markdown.AppendLine();
             }
         }
         catch (Exception ex)
@@ -780,18 +787,33 @@ public class DocumentProcessingService : IDocumentProcessingService
                 };
 
                 // Try to find location data for this chunk
+                // Find the location that contains the majority of the chunk's text
                 if (locationMetadata != null && locationMetadata.Locations.Any())
                 {
-                    var locationInfo = locationMetadata.Locations
-                        .FirstOrDefault(l => startIndex >= l.StartIndex && startIndex < l.EndIndex);
-                    
-                    if (locationInfo != null)
+                    TextLocationInfo? bestLocation = null;
+                    int maxOverlap = 0;
+
+                    foreach (var location in locationMetadata.Locations)
                     {
-                        chunk.PageNumber = locationInfo.PageNumber;
-                        chunk.X = locationInfo.X;
-                        chunk.Y = locationInfo.Y;
-                        chunk.Width = locationInfo.Width;
-                        chunk.Height = locationInfo.Height;
+                        // Calculate overlap between chunk and location ranges
+                        int overlapStart = Math.Max(startIndex, location.StartIndex);
+                        int overlapEnd = Math.Min(endIndex, location.EndIndex);
+                        int overlap = Math.Max(0, overlapEnd - overlapStart);
+
+                        if (overlap > maxOverlap)
+                        {
+                            maxOverlap = overlap;
+                            bestLocation = location;
+                        }
+                    }
+                    
+                    if (bestLocation != null)
+                    {
+                        chunk.PageNumber = bestLocation.PageNumber;
+                        chunk.X = bestLocation.X;
+                        chunk.Y = bestLocation.Y;
+                        chunk.Width = bestLocation.Width;
+                        chunk.Height = bestLocation.Height;
                     }
                 }
 

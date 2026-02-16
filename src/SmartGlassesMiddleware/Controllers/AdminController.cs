@@ -49,6 +49,28 @@ public class AdminController : ControllerBase
     #region Files
 
     /// <summary>
+    /// DTO for file list items combining both managed files and documents
+    /// </summary>
+    public class FileListItem
+    {
+        public Guid Id { get; set; }
+        public string FileName { get; set; } = string.Empty;
+        public string Label { get; set; } = string.Empty;
+        public string ContentType { get; set; } = string.Empty;
+        public string StorageKey { get; set; } = string.Empty;
+        public DateTime UploadedAt { get; set; }
+        public long FileSize { get; set; }
+        public List<GroupInfo> Groups { get; set; } = new();
+        public string Type { get; set; } = string.Empty; // "managed" or "document"
+    }
+
+    public class GroupInfo
+    {
+        public Guid Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+    }
+
+    /// <summary>
     /// Get managed files and documents with pagination and caching
     /// </summary>
     [HttpGet("files")]
@@ -67,22 +89,28 @@ public class AdminController : ControllerBase
             return Ok(cachedResult);
         }
 
+        // Get counts first for pagination
+        var managedFilesCount = await _context.ManagedFiles.CountAsync();
+        var documentsCount = await _context.DocumentMetadatas.CountAsync();
+        var totalCount = managedFilesCount + documentsCount;
+        var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
+
         // Get ManagedFiles
         var managedFiles = await _context.ManagedFiles
             .Include(f => f.FileGroups)
             .ThenInclude(fg => fg.ResourceGroup)
             .OrderByDescending(f => f.UploadedAt)
-            .Select(f => new
+            .Select(f => new FileListItem
             {
-                f.Id,
-                f.FileName,
-                f.Label,
-                f.ContentType,
-                f.StorageKey,
-                f.UploadedAt,
-                f.FileSize,
-                Groups = f.FileGroups.Select(fg => new { fg.ResourceGroup.Id, fg.ResourceGroup.Name }),
-                Type = "managed" // Distinguish from documents
+                Id = f.Id,
+                FileName = f.FileName,
+                Label = f.Label,
+                ContentType = f.ContentType,
+                StorageKey = f.StorageKey,
+                UploadedAt = f.UploadedAt,
+                FileSize = f.FileSize,
+                Groups = f.FileGroups.Select(fg => new GroupInfo { Id = fg.ResourceGroup.Id, Name = fg.ResourceGroup.Name }).ToList(),
+                Type = "managed"
             })
             .ToListAsync();
 
@@ -91,31 +119,27 @@ public class AdminController : ControllerBase
             .Include(d => d.DocumentGroups)
             .ThenInclude(dg => dg.ResourceGroup)
             .OrderByDescending(d => d.UploadedAt)
-            .Select(d => new
+            .Select(d => new FileListItem
             {
-                d.Id,
-                d.FileName,
+                Id = d.Id,
+                FileName = d.FileName,
                 Label = d.OriginalFileName, // Use original filename as label
-                d.ContentType,
-                d.StorageKey,
+                ContentType = d.ContentType,
+                StorageKey = d.StorageKey,
                 UploadedAt = d.UploadedAt,
-                d.FileSize,
-                Groups = d.DocumentGroups.Select(dg => new { dg.ResourceGroup.Id, dg.ResourceGroup.Name }),
-                Type = "document" // Distinguish from managed files
+                FileSize = d.FileSize,
+                Groups = d.DocumentGroups.Select(dg => new GroupInfo { Id = dg.ResourceGroup.Id, Name = dg.ResourceGroup.Name }).ToList(),
+                Type = "document"
             })
             .ToListAsync();
 
-        // Combine both lists and sort by UploadedAt
+        // Combine both lists and apply pagination
         var allFiles = managedFiles
-            .Cast<dynamic>()
-            .Concat(documents.Cast<dynamic>())
+            .Concat(documents)
             .OrderByDescending(f => f.UploadedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToList();
-
-        var totalCount = await _context.ManagedFiles.CountAsync() + await _context.DocumentMetadatas.CountAsync();
-        var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
 
         var result = new
         {
