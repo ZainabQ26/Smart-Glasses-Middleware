@@ -362,9 +362,10 @@ public class DocumentProcessingService : IDocumentProcessingService
                 document.Add(new iText.Layout.Element.Paragraph("XML Content").SetFontSize(16).SetBold());
                 document.Add(new iText.Layout.Element.Paragraph(xdoc.ToString()));
             }
-            catch
+            catch (Exception ex)
             {
-                // If parsing fails, just add raw XML
+                // If XML parsing fails, add raw XML content instead
+                _logger.LogWarning(ex, "Failed to parse XML content, using raw text");
                 document.Add(new iText.Layout.Element.Paragraph(xmlContent));
             }
 
@@ -985,10 +986,15 @@ public class DocumentProcessingService : IDocumentProcessingService
 
                 // Calculate bounding box from text items
                 bool hasChunkItems = chunkItems.Any();
-                double minX = hasChunkItems ? chunkItems.Min(t => t.X) : 0;
-                double maxX = hasChunkItems ? chunkItems.Max(t => t.X + t.Width) : 0;
-                double minY = hasChunkItems ? chunkItems.Min(t => t.Y) : 0;
-                double maxY = hasChunkItems ? chunkItems.Max(t => t.Y + t.Height) : 0;
+                double minX = 0, maxX = 0, minY = 0, maxY = 0;
+                
+                if (hasChunkItems)
+                {
+                    minX = chunkItems.Min(t => t.X);
+                    maxX = chunkItems.Max(t => t.X + t.Width);
+                    minY = chunkItems.Min(t => t.Y);
+                    maxY = chunkItems.Max(t => t.Y + t.Height);
+                }
 
                 var chunk = new DocumentChunk
                 {
