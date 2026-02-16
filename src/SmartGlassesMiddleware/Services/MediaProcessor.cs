@@ -10,17 +10,19 @@ public class MediaProcessor : IMediaProcessor
     private readonly ITranscriptionService _transcriptionService;
     private readonly IAIService _aiService;
     private readonly IHistoryService _historyService;
+    private readonly int _backgroundAiTimeoutSeconds;
     private readonly ILogger<MediaProcessor> _logger;
     private readonly IRagService _mediaRagService;
     private readonly IRequestMonitoringService? _monitoringService;
 
-    public MediaProcessor(IMediaStorageService mediaStorageService, ITranscriptionService transcriptionService, IAIService aiService, IHistoryService historyService, IRagService mediaRagService, ILogger<MediaProcessor> logger, IRequestMonitoringService? monitoringService = null)
+    public MediaProcessor(IMediaStorageService mediaStorageService, ITranscriptionService transcriptionService, IAIService aiService, IHistoryService historyService, IRagService mediaRagService, IConfiguration configuration, ILogger<MediaProcessor> logger, IRequestMonitoringService? monitoringService = null)
     {
         _mediaStorageService = mediaStorageService;
         _transcriptionService = transcriptionService;
         _aiService = aiService;
         _historyService = historyService;
         _mediaRagService = mediaRagService;
+        _backgroundAiTimeoutSeconds = configuration.GetValue<int?>("ServiceTimeouts:MediaBackgroundAiTimeoutSeconds") ?? 30;
         _logger = logger;
         _monitoringService = monitoringService;
     }
@@ -93,17 +95,28 @@ public class MediaProcessor : IMediaProcessor
                 ? promptText
                 : entry.MediaItems.Select(i => i.Transcription).FirstOrDefault(s => !string.IsNullOrWhiteSpace(s)) ?? textToProcess;
 
-            var ragContext = await _mediaRagService.GetRagContextAsync(retrievalQuery, maxResults: 3, monitoringRequestId: entry.MonitoringRequestId);
-            if (!string.IsNullOrWhiteSpace(ragContext))
+            var ragTask = _mediaRagService.GetRagContextAsync(retrievalQuery, maxResults: 3, monitoringRequestId: entry.MonitoringRequestId);
+            var timeoutTask = Task.Delay(TimeSpan.FromSeconds(20));
+            var completedTask = await Task.WhenAny(ragTask, timeoutTask);
+            if (completedTask == ragTask)
             {
-                _logger.LogInformation("Including media RAG context in AI prompt (len={Len})", ragContext.Length);
-                textToProcess = promptText + "\n\nContext:\n" + ragContext + "\n\n" + string.Join("\n\n", partsForAi);
-                ReportProgress(entry.MonitoringRequestId, 55, "Retrieval", "RAG context retrieved");
+                var ragContext = await ragTask;
+                if (!string.IsNullOrWhiteSpace(ragContext))
+                {
+                    _logger.LogInformation("Including media RAG context in AI prompt (len={Len})", ragContext.Length);
+                    textToProcess = promptText + "\n\nContext:\n" + ragContext + "\n\n" + string.Join("\n\n", partsForAi);
+                    ReportProgress(entry.MonitoringRequestId, 55, "Retrieval", "RAG context retrieved");
+                }
+                else
+                {
+                    _logger.LogInformation("No media RAG context found for query, proceeding without it");
+                    ReportProgress(entry.MonitoringRequestId, 45, "Retrieval", "No relevant RAG context found");
+                }
             }
             else
             {
-                _logger.LogInformation("No media RAG context found for query, proceeding without it");
-                ReportProgress(entry.MonitoringRequestId, 45, "Retrieval", "No relevant RAG context found");
+                _logger.LogWarning("RAG context retrieval timed out; proceeding without context");
+                ReportProgress(entry.MonitoringRequestId, 45, "Retrieval", "RAG lookup timed out");
             }
         }
         catch (Exception ex)
@@ -113,8 +126,31 @@ public class MediaProcessor : IMediaProcessor
         }
 
         ReportProgress(entry.MonitoringRequestId, 60, "AI", "Sending to AI service");
-        var (task, response, usedAdvancedModel) = await _aiService.ProcessRequestAsync(textToProcess);
-        ReportProgress(entry.MonitoringRequestId, 95, "AI", "AI response received");
+        // Use a configurable timeout to prevent hanging on the AI service
+        string task = "", response = "";
+        bool usedAdvancedModel = false;
+        try
+        {
+            using var aiCts = new CancellationTokenSource(TimeSpan.FromSeconds(_backgroundAiTimeoutSeconds));
+            (task, response, usedAdvancedModel) = await _aiService.ProcessRequestAsync(textToProcess, aiCts.Token);
+            ReportProgress(entry.MonitoringRequestId, 95, "AI", "AI response received");
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning("AI service call timed out after {Seconds} seconds for background task {Id}; proceeding with fallback response", _backgroundAiTimeoutSeconds, entry.Id);
+            ReportProgress(entry.MonitoringRequestId, 65, "AI", "AI service timed out; using fallback");
+            task = "document_analysis";
+            response = "The AI service did not respond within the time limit. The request was received and will be processed asynchronously.";
+            usedAdvancedModel = false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "AI service processing failed for background task {Id}; proceeding with fallback", entry.Id);
+            ReportProgress(entry.MonitoringRequestId, 65, "AI", "AI service unavailable; using fallback");
+            task = "document_analysis";
+            response = "The AI service encountered an error. The request was received and may be retried.";
+            usedAdvancedModel = false;
+        }
 
         // Save history
         try

@@ -131,6 +131,17 @@ public class MediaController : ControllerBase
                 files.AddRange(form.Files.ToList());
             }
 
+            // First, parse the input/transcription field early so we can skip unnecessary transcription
+            string? inputText = null;
+            if (form != null && form.TryGetValue("input", out var iv))
+            {
+                inputText = iv.FirstOrDefault();
+            }
+            if (string.IsNullOrWhiteSpace(inputText))
+            {
+                inputText = request.Transcription;
+            }
+
             // If a prompt audio file was uploaded as `promptAudio`, enforce exclusivity with text prompt, transcribe it, and remove it from uploads
             var promptAudioFile = form?.Files?.FirstOrDefault(f => string.Equals(f.Name, "promptAudio", StringComparison.OrdinalIgnoreCase));
             if (promptAudioFile != null)
@@ -158,31 +169,30 @@ public class MediaController : ControllerBase
                     return BadRequest(pd);
                 }
 
-                try
+                // If input transcription is already provided, skip transcription to avoid unnecessary processing
+                if (string.IsNullOrWhiteSpace(inputText))
                 {
-                    using var promptStream = promptAudioFile.OpenReadStream();
-                    var contentType = promptAudioFile.ContentType ?? string.Empty;
-                    var transcribedPrompt = await _transcriptionService.TranscribeAsync(promptStream, promptAudioFile.FileName, contentType);
-                    if (!string.IsNullOrWhiteSpace(transcribedPrompt)) promptAudioTranscription = transcribedPrompt;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to transcribe prompt audio");
+                    try
+                    {
+                        using var promptStream = promptAudioFile.OpenReadStream();
+                        var contentType = promptAudioFile.ContentType ?? string.Empty;
+                        // Use CancellationToken with 15s timeout to prevent hanging on the transcription service
+                        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                        var transcribedPrompt = await _transcriptionService.TranscribeAsync(promptStream, promptAudioFile.FileName, contentType, cts.Token);
+                        if (!string.IsNullOrWhiteSpace(transcribedPrompt)) promptAudioTranscription = transcribedPrompt;
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        _logger.LogWarning("Transcription timeout for prompt audio");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to transcribe prompt audio");
+                    }
                 }
 
                 // Ensure promptAudio is not treated as a normal media file to upload
                 files.RemoveAll(f => string.Equals(f.Name, "promptAudio", StringComparison.OrdinalIgnoreCase));
-            }
-
-            // Support a single combined `input` form field which may be either a file part or a plain transcription string.
-            string? inputText = null;
-            if (form != null && form.TryGetValue("input", out var iv))
-            {
-                inputText = iv.FirstOrDefault();
-            }
-            if (string.IsNullOrWhiteSpace(inputText))
-            {
-                inputText = request.Transcription;
             }
 
             IFormFile? inputFile = null;
@@ -214,7 +224,9 @@ public class MediaController : ControllerBase
                         await _monitoringService.UpdateRequestStatus(monitoringRequestId, "Processing");
                     }
 
-                    var (tTask, tResponse, tUsedAdvancedModel) = await _aiService.ProcessRequestAsync(transText);
+                    // Use CancellationToken with 30s timeout to prevent endpoint from hanging
+                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                    var (tTask, tResponse, tUsedAdvancedModel) = await _aiService.ProcessRequestAsync(transText, cts.Token);
 
                     // Save history (no media key)
                     try
@@ -247,6 +259,15 @@ public class MediaController : ControllerBase
                         }
                         return Ok(new { task = tTask, response = tResponse, usedAdvancedModel = tUsedAdvancedModel, transcription = inputText });
                     }
+                }
+                catch (OperationCanceledException)
+                {
+                    _logger.LogWarning("AI service timeout for transcription-only ask");
+                    if (!string.IsNullOrWhiteSpace(monitoringRequestId) && _monitoringService != null)
+                    {
+                        await _monitoringService.CompleteRequest(monitoringRequestId, false, error: "AI service timeout");
+                    }
+                    return Problem("AI service is taking too long to process. Please try again.");
                 }
                 catch (Exception ex)
                 {

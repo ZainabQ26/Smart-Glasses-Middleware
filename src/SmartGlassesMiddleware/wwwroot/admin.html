@@ -1414,7 +1414,7 @@
                                 </div>
                                 <div class="form-group">
                                     <label for="prompt-file-input">Upload File (auto-upload on select)</label>
-                                    <input type="file" id="prompt-file-input" accept=".jpg,.jpeg,.png,.pdf,.docx,.txt,.xml,.wav,.mp3,.m4a,.ogg,.webm">
+                                    <input type="file" id="prompt-file-input" accept=".jpg,.jpeg,.png,.pdf,.docx,.txt,.xml,.wav,.mp3,.m4a,.ogg,.webm,.md">
                                 </div>
                             </div>
                             
@@ -1477,10 +1477,9 @@
                                 </div>
                                 <div id="reminder-preview-filename" style="margin: 10px 0; text-align: center; color: #2c3e50; font-size: 14px; font-weight: 500;"></div>
                                 <div class="form-group">
-                                    <label for="reminder-file-input">Upload File</label>
-                                    <input type="file" id="reminder-file-input" accept=".jpg,.jpeg,.png,.pdf,.docx,.txt,.xml">
+                                    <label for="reminder-file-input">Upload File (auto-upload on select)</label>
+                                    <input type="file" id="reminder-file-input" accept=".jpg,.jpeg,.png,.pdf,.docx,.txt,.xml,.md">
                                 </div>
-                                <button type="button" id="reminder-upload-btn" style="width: 100%; padding: 10px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Upload</button>
                             </div>
                             
                             <!-- Files Panel -->
@@ -1545,10 +1544,9 @@
                                 </div>
                                 <div id="group-preview-filename" style="margin: 10px 0; text-align: center; color: #2c3e50; font-size: 14px; font-weight: 500;"></div>
                                 <div class="form-group">
-                                    <label for="group-file-input">Upload File</label>
-                                    <input type="file" id="group-file-input" accept=".jpg,.jpeg,.png,.pdf,.docx,.txt,.xml">
+                                    <label for="group-file-input">Upload File (auto-upload on select)</label>
+                                    <input type="file" id="group-file-input" accept=".jpg,.jpeg,.png,.pdf,.docx,.txt,.xml,.md">
                                 </div>
-                                <button type="button" id="group-upload-btn" style="width: 100%; padding: 10px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Upload</button>
                             </div>
                             
                             <!-- Files Panel -->
@@ -1685,14 +1683,24 @@
         const toastsScript = document.createElement('script');
         toastsScript.src = `toasts.js?v=${timestamp}`;
         toastsScript.onload = () => {
-            const signalRScript = document.createElement('script');
-            signalRScript.src = 'https://cdn.jsdelivr.net/npm/@microsoft/signalr@latest/dist/browser/signalr.min.js';
-            signalRScript.onload = () => {
-                const script = document.createElement('script');
-                script.src = `admin.js?v=${timestamp}`;
-                document.body.appendChild(script);
+            const dompurifyScript = document.createElement('script');
+            dompurifyScript.src = 'https://cdn.jsdelivr.net/npm/dompurify@3.0.9/dist/purify.min.js';
+            dompurifyScript.onload = () => {
+                const markedScript = document.createElement('script');
+                markedScript.src = 'https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js';
+                markedScript.onload = () => {
+                    const signalRScript = document.createElement('script');
+                    signalRScript.src = 'https://cdn.jsdelivr.net/npm/@microsoft/signalr@latest/dist/browser/signalr.min.js';
+                    signalRScript.onload = () => {
+                        const script = document.createElement('script');
+                        script.src = `admin.js?v=${timestamp}`;
+                        document.body.appendChild(script);
+                    };
+                    document.body.appendChild(signalRScript);
+                };
+                document.body.appendChild(markedScript);
             };
-            document.body.appendChild(signalRScript);
+            document.body.appendChild(dompurifyScript);
         };
         document.body.appendChild(toastsScript);
     </script>
