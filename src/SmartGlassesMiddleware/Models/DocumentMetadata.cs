@@ -18,10 +18,14 @@ public class DocumentMetadata
     public DateTime? ProcessedAt { get; set; }
     public string? ProcessingError { get; set; }
 
+    // Optional reference to ManagedFile for showing in Files tab
+    public Guid? ManagedFileId { get; set; }
+    public ManagedFile? ManagedFile { get; set; }
+
     // Navigation properties
     public List<DocumentChunk> Chunks { get; set; } = new();
     public List<DocumentGroup> DocumentGroups { get; set; } = new();
-    public List<ChatMessageAttachment> MessageAttachments { get; set; } = new();
+    public List<ChatMessageAttachment> MessageAttachments { get; } = new();
 }
 
 /// <summary>
