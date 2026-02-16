@@ -279,8 +279,8 @@ public class MediaController : ControllerBase
                     return Problem("An error occurred while processing the request.");
                 }
             }
-            // Allowed extensions
-            var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".gif", ".mp4", ".avi", ".mov", ".wav", ".mp3", ".m4a", ".flac", ".aac" };
+            // Allowed extensions (audio uploads are disallowed to avoid storing audio files)
+            var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".gif", ".mp4", ".avi", ".mov" };
             var audioExtensions = new[] { ".wav", ".mp3", ".m4a", ".flac", ".aac" };
 
             // Parse manifest JSON if provided
