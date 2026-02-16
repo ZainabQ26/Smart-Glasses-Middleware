@@ -480,6 +480,104 @@ public class DocumentsController : ControllerBase
     }
 
     /// <summary>
+    /// Find the location of specific text within a document
+    /// </summary>
+    [HttpPost("{documentId}/find-location")]
+    [ProducesResponseType(typeof(List<TextLocation>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> FindTextLocation(Guid documentId, [FromBody] FindLocationRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.SearchText))
+            return BadRequest("SearchText is required");
+
+        var document = await _context.DocumentMetadatas
+            .Include(d => d.Chunks)
+            .FirstOrDefaultAsync(d => d.Id == documentId);
+
+        if (document == null)
+            return NotFound(new { error = "Document not found" });
+
+        var locations = new List<TextLocation>();
+
+        foreach (var chunk in document.Chunks)
+        {
+            if (chunk.ChunkText.Contains(request.SearchText, StringComparison.OrdinalIgnoreCase))
+            {
+                // Calculate position description
+                var positionDescription = GetPositionDescription(chunk.X, chunk.Y, chunk.Width, chunk.Height);
+                
+                locations.Add(new TextLocation
+                {
+                    DocumentId = documentId,
+                    DocumentName = document.FileName,
+                    ChunkId = chunk.Id,
+                    PageNumber = chunk.PageNumber,
+                    X = chunk.X,
+                    Y = chunk.Y,
+                    Width = chunk.Width,
+                    Height = chunk.Height,
+                    Position = positionDescription,
+                    ContextText = GetContextAroundText(chunk.ChunkText, request.SearchText, 50)
+                });
+            }
+        }
+
+        return Ok(new
+        {
+            DocumentId = documentId,
+            DocumentName = document.FileName,
+            SearchText = request.SearchText,
+            MatchCount = locations.Count,
+            Locations = locations
+        });
+    }
+
+    private string GetPositionDescription(double? x, double? y, double? width, double? height)
+    {
+        if (!x.HasValue || !y.HasValue)
+            return "position unknown";
+
+        // Assuming standard US Letter page dimensions (612x792 points)
+        const double pageWidth = 612;
+        const double pageHeight = 792;
+
+        // Determine horizontal position
+        string horizontal;
+        if (x.Value < pageWidth / 3)
+            horizontal = "left";
+        else if (x.Value < 2 * pageWidth / 3)
+            horizontal = "center";
+        else
+            horizontal = "right";
+
+        // Determine vertical position (Y is from bottom in PDF coordinates)
+        string vertical;
+        if (y.Value < pageHeight / 3)
+            vertical = "bottom";
+        else if (y.Value < 2 * pageHeight / 3)
+            vertical = "middle";
+        else
+            vertical = "top";
+
+        return $"{vertical} {horizontal}";
+    }
+
+    private string GetContextAroundText(string text, string searchText, int contextChars)
+    {
+        var index = text.IndexOf(searchText, StringComparison.OrdinalIgnoreCase);
+        if (index == -1)
+            return text.Length > 100 ? text.Substring(0, 100) + "..." : text;
+
+        var startIndex = Math.Max(0, index - contextChars);
+        var endIndex = Math.Min(text.Length, index + searchText.Length + contextChars);
+        
+        var prefix = startIndex > 0 ? "..." : "";
+        var suffix = endIndex < text.Length ? "..." : "";
+        
+        return prefix + text.Substring(startIndex, endIndex - startIndex) + suffix;
+    }
+
+    /// <summary>
     /// Reprocess failed or unprocessed documents
     /// </summary>
     [HttpPost("reprocess")]
@@ -630,4 +728,23 @@ public class HighlightRequest
 {
     public List<Guid>? ChunkIds { get; set; }
     public string? SearchText { get; set; }
+}
+
+public class FindLocationRequest
+{
+    public string SearchText { get; set; } = string.Empty;
+}
+
+public class TextLocation
+{
+    public Guid DocumentId { get; set; }
+    public string DocumentName { get; set; } = string.Empty;
+    public Guid ChunkId { get; set; }
+    public int PageNumber { get; set; }
+    public double? X { get; set; }
+    public double? Y { get; set; }
+    public double? Width { get; set; }
+    public double? Height { get; set; }
+    public string Position { get; set; } = string.Empty; // e.g., "bottom right of page 2"
+    public string ContextText { get; set; } = string.Empty;
 }
