@@ -402,7 +402,11 @@ public class DocumentsController : ControllerBase
                 c.Id,
                 c.PageNumber,
                 c.ChunkIndex,
-                Preview = c.ChunkText.Length > 100 ? c.ChunkText.Substring(0, 100) + "..." : c.ChunkText
+                Preview = c.ChunkText.Length > 100 ? c.ChunkText.Substring(0, 100) + "..." : c.ChunkText,
+                c.X,
+                c.Y,
+                c.Width,
+                c.Height
             }).ToList()
         });
     }
