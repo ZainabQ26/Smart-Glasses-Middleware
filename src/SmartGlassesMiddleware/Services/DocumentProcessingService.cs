@@ -984,10 +984,11 @@ public class DocumentProcessingService : IDocumentProcessingService
                 }
 
                 // Calculate bounding box from text items
-                double minX = chunkItems.Any() ? chunkItems.Min(t => t.X) : 0;
-                double maxX = chunkItems.Any() ? chunkItems.Max(t => t.X + t.Width) : 0;
-                double minY = chunkItems.Any() ? chunkItems.Min(t => t.Y) : 0;
-                double maxY = chunkItems.Any() ? chunkItems.Max(t => t.Y + t.Height) : 0;
+                bool hasChunkItems = chunkItems.Any();
+                double minX = hasChunkItems ? chunkItems.Min(t => t.X) : 0;
+                double maxX = hasChunkItems ? chunkItems.Max(t => t.X + t.Width) : 0;
+                double minY = hasChunkItems ? chunkItems.Min(t => t.Y) : 0;
+                double maxY = hasChunkItems ? chunkItems.Max(t => t.Y + t.Height) : 0;
 
                 var chunk = new DocumentChunk
                 {
@@ -1147,63 +1148,63 @@ public class DocumentProcessingService : IDocumentProcessingService
 
         return chunks;
     }
-}
 
-/// <summary>
-/// Helper class to store text with its position information
-/// </summary>
-public class TextItem
-{
-    public string Text { get; set; } = string.Empty;
-    public double X { get; set; }
-    public double Y { get; set; }
-    public double Width { get; set; }
-    public double Height { get; set; }
-}
-
-/// <summary>
-/// Custom text extraction strategy that captures text positions
-/// </summary>
-public class SimpleTextWithLocationStrategy : ITextExtractionStrategy
-{
-    private readonly List<TextItem> _textItems = new();
-
-    public void EventOccurred(IEventData data, EventType type)
+    /// <summary>
+    /// Helper class to store text with its position information
+    /// </summary>
+    private class TextItem
     {
-        if (type == EventType.RENDER_TEXT)
+        public string Text { get; set; } = string.Empty;
+        public double X { get; set; }
+        public double Y { get; set; }
+        public double Width { get; set; }
+        public double Height { get; set; }
+    }
+
+    /// <summary>
+    /// Custom text extraction strategy that captures text positions
+    /// </summary>
+    private class SimpleTextWithLocationStrategy : ITextExtractionStrategy
+    {
+        private readonly List<TextItem> _textItems = new();
+
+        public void EventOccurred(IEventData data, EventType type)
         {
-            var renderInfo = (TextRenderInfo)data;
-            var text = renderInfo.GetText();
-            
-            if (!string.IsNullOrWhiteSpace(text))
+            if (type == EventType.RENDER_TEXT)
             {
-                var baseline = renderInfo.GetBaseline();
-                var ascentLine = renderInfo.GetAscentLine();
+                var renderInfo = (TextRenderInfo)data;
+                var text = renderInfo.GetText();
                 
-                _textItems.Add(new TextItem
+                if (!string.IsNullOrWhiteSpace(text))
                 {
-                    Text = text,
-                    X = baseline.GetStartPoint().Get(0),
-                    Y = baseline.GetStartPoint().Get(1),
-                    Width = baseline.GetLength(),
-                    Height = ascentLine.GetStartPoint().Get(1) - baseline.GetStartPoint().Get(1)
-                });
+                    var baseline = renderInfo.GetBaseline();
+                    var ascentLine = renderInfo.GetAscentLine();
+                    
+                    _textItems.Add(new TextItem
+                    {
+                        Text = text,
+                        X = baseline.GetStartPoint().Get(0),
+                        Y = baseline.GetStartPoint().Get(1),
+                        Width = baseline.GetLength(),
+                        Height = ascentLine.GetStartPoint().Get(1) - baseline.GetStartPoint().Get(1)
+                    });
+                }
             }
         }
-    }
 
-    public ICollection<EventType> GetSupportedEvents()
-    {
-        return new[] { EventType.RENDER_TEXT };
-    }
+        public ICollection<EventType> GetSupportedEvents()
+        {
+            return new[] { EventType.RENDER_TEXT };
+        }
 
-    public string GetResultantText()
-    {
-        return string.Join(" ", _textItems.Select(t => t.Text));
-    }
+        public string GetResultantText()
+        {
+            return string.Join(" ", _textItems.Select(t => t.Text));
+        }
 
-    public List<TextItem> GetTextItems()
-    {
-        return _textItems;
+        public List<TextItem> GetTextItems()
+        {
+            return _textItems;
+        }
     }
 }
