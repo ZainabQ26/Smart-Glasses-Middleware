@@ -918,14 +918,15 @@ public class DocumentProcessingService : IDocumentProcessingService
                 var page = pdfDocument.GetPage(pageNum);
                 var pageSize = page.GetPageSize();
                 
-                // Extract text with location using custom extraction strategy
-                var strategy = new LocationTextExtractionStrategy();
-                var text = PdfTextExtractor.GetTextFromPage(page, strategy);
+                // Extract text with location using location-aware extraction strategy
+                var strategy = new SimpleTextWithLocationStrategy();
+                PdfTextExtractor.GetTextFromPage(page, strategy);
+                var textItems = strategy.GetTextItems();
 
-                if (!string.IsNullOrWhiteSpace(text))
+                if (textItems.Any())
                 {
-                    // Create chunks for this page with location data
-                    var pageChunks = CreateTextChunksWithLocation(text, pageNum, pageSize, documentId, ref chunkIndex);
+                    // Create chunks from text items with actual location data
+                    var pageChunks = CreateTextChunksFromTextItems(textItems, pageNum, documentId, ref chunkIndex);
                     chunks.AddRange(pageChunks);
                 }
             }
@@ -939,26 +940,28 @@ public class DocumentProcessingService : IDocumentProcessingService
         return chunks;
     }
 
-    private List<DocumentChunk> CreateTextChunksWithLocation(string text, int pageNumber, iText.Kernel.Geom.Rectangle pageSize, Guid documentId, ref int chunkIndex)
+    private List<DocumentChunk> CreateTextChunksFromTextItems(List<TextItem> textItems, int pageNumber, Guid documentId, ref int chunkIndex)
     {
         var chunks = new List<DocumentChunk>();
 
-        if (string.IsNullOrWhiteSpace(text))
+        // Combine all text items into a single text string
+        var fullText = string.Join(" ", textItems.Select(t => t.Text));
+        
+        if (string.IsNullOrWhiteSpace(fullText))
             return chunks;
 
         var startIndex = 0;
-        var pageHeight = pageSize.GetHeight();
-        var pageWidth = pageSize.GetWidth();
+        var currentPosition = 0;
 
-        while (startIndex < text.Length)
+        while (startIndex < fullText.Length)
         {
-            var endIndex = Math.Min(startIndex + ChunkSize, text.Length);
+            var endIndex = Math.Min(startIndex + ChunkSize, fullText.Length);
 
             // Try to break at sentence or word boundary
-            if (endIndex < text.Length)
+            if (endIndex < fullText.Length)
             {
-                var lastPeriod = text.LastIndexOf('.', endIndex, Math.Min(100, endIndex - startIndex));
-                var lastSpace = text.LastIndexOf(' ', endIndex, Math.Min(100, endIndex - startIndex));
+                var lastPeriod = fullText.LastIndexOf('.', endIndex, Math.Min(100, endIndex - startIndex));
+                var lastSpace = fullText.LastIndexOf(' ', endIndex, Math.Min(100, endIndex - startIndex));
 
                 if (lastPeriod > startIndex)
                     endIndex = lastPeriod + 1;
@@ -966,17 +969,25 @@ public class DocumentProcessingService : IDocumentProcessingService
                     endIndex = lastSpace;
             }
 
-            var chunkText = text.Substring(startIndex, endIndex - startIndex).Trim();
+            var chunkText = fullText.Substring(startIndex, endIndex - startIndex).Trim();
 
             if (!string.IsNullOrWhiteSpace(chunkText))
             {
-                // Estimate position based on chunk position in the text
-                // This is a simplified approach - for precise location, we'd need to track during extraction
-                var relativePosition = (double)startIndex / text.Length;
-                var estimatedY = pageHeight * (1 - relativePosition); // PDF coordinates start from bottom
-                var estimatedX = 72; // Default left margin (72 points = 1 inch)
-                var estimatedWidth = pageWidth - 144; // Assume 1 inch margins on both sides
-                var estimatedHeight = (double)(endIndex - startIndex) / ChunkSize * 100; // Rough estimate
+                // Find the text items that correspond to this chunk
+                var chunkItems = new List<TextItem>();
+                var chunkCharCount = 0;
+                
+                for (int i = currentPosition; i < textItems.Count && chunkCharCount < chunkText.Length; i++)
+                {
+                    chunkItems.Add(textItems[i]);
+                    chunkCharCount += textItems[i].Text.Length + 1; // +1 for space
+                }
+
+                // Calculate bounding box from text items
+                double minX = chunkItems.Any() ? chunkItems.Min(t => t.X) : 0;
+                double maxX = chunkItems.Any() ? chunkItems.Max(t => t.X + t.Width) : 0;
+                double minY = chunkItems.Any() ? chunkItems.Min(t => t.Y) : 0;
+                double maxY = chunkItems.Any() ? chunkItems.Max(t => t.Y + t.Height) : 0;
 
                 var chunk = new DocumentChunk
                 {
@@ -985,14 +996,15 @@ public class DocumentProcessingService : IDocumentProcessingService
                     ChunkText = chunkText,
                     PageNumber = pageNumber,
                     ChunkIndex = chunkIndex++,
-                    X = estimatedX,
-                    Y = estimatedY,
-                    Width = estimatedWidth,
-                    Height = estimatedHeight,
+                    X = minX,
+                    Y = minY,
+                    Width = maxX - minX,
+                    Height = maxY - minY,
                     CreatedAt = DateTime.UtcNow
                 };
 
                 chunks.Add(chunk);
+                currentPosition += chunkItems.Count;
             }
 
             // Ensure we always advance to prevent infinite loops
@@ -1134,5 +1146,64 @@ public class DocumentProcessingService : IDocumentProcessingService
         }
 
         return chunks;
+    }
+}
+
+/// <summary>
+/// Helper class to store text with its position information
+/// </summary>
+public class TextItem
+{
+    public string Text { get; set; } = string.Empty;
+    public double X { get; set; }
+    public double Y { get; set; }
+    public double Width { get; set; }
+    public double Height { get; set; }
+}
+
+/// <summary>
+/// Custom text extraction strategy that captures text positions
+/// </summary>
+public class SimpleTextWithLocationStrategy : ITextExtractionStrategy
+{
+    private readonly List<TextItem> _textItems = new();
+
+    public void EventOccurred(IEventData data, EventType type)
+    {
+        if (type == EventType.RENDER_TEXT)
+        {
+            var renderInfo = (TextRenderInfo)data;
+            var text = renderInfo.GetText();
+            
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                var baseline = renderInfo.GetBaseline();
+                var ascentLine = renderInfo.GetAscentLine();
+                
+                _textItems.Add(new TextItem
+                {
+                    Text = text,
+                    X = baseline.GetStartPoint().Get(0),
+                    Y = baseline.GetStartPoint().Get(1),
+                    Width = baseline.GetLength(),
+                    Height = ascentLine.GetStartPoint().Get(1) - baseline.GetStartPoint().Get(1)
+                });
+            }
+        }
+    }
+
+    public ICollection<EventType> GetSupportedEvents()
+    {
+        return new[] { EventType.RENDER_TEXT };
+    }
+
+    public string GetResultantText()
+    {
+        return string.Join(" ", _textItems.Select(t => t.Text));
+    }
+
+    public List<TextItem> GetTextItems()
+    {
+        return _textItems;
     }
 }
