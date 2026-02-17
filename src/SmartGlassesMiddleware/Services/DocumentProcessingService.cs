@@ -25,6 +25,7 @@ using System.Globalization;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Markdig;
+using HtmlAgilityPack;
 
 namespace SmartGlassesMiddleware.Services;
 
@@ -196,6 +197,10 @@ public class DocumentProcessingService : IDocumentProcessingService
                 convertedStream = await ConvertXmlToPdfAsync(inputStream, pdfFileName, requestId);
                 break;
 
+            case "html":
+                convertedStream = await ConvertHtmlToPdfAsync(inputStream, pdfFileName, requestId);
+                break;
+
             case "image":
                 convertedStream = await ConvertImageToPdfAsync(inputStream, pdfFileName, requestId);
                 break;
@@ -229,7 +234,7 @@ public class DocumentProcessingService : IDocumentProcessingService
             using var pdfDocument = new PdfDocument(pdfReader);
             
             var outputStream = new MemoryStream();
-            using var writer = new PdfWriter(outputStream);
+            using var writer = CreatePdfWriter(outputStream);
             writer.SetCloseStream(false);
             using var outPdf = new PdfDocument(writer);
             
@@ -258,7 +263,7 @@ public class DocumentProcessingService : IDocumentProcessingService
         
         try
         {
-            using var writer = new PdfWriter(outputStream);
+                using var writer = CreatePdfWriter(outputStream);
             writer.SetCloseStream(false);
             using var pdf = new PdfDocument(writer);
             using var document = new iText.Layout.Document(pdf);
@@ -326,7 +331,7 @@ public class DocumentProcessingService : IDocumentProcessingService
             // Try iText writer (wrap in try/catch to fallback)
             try
             {
-                using var writer = new PdfWriter(outputStream);
+                    using var writer = CreatePdfWriter(outputStream);
                 writer.SetCloseStream(false);
                 using var pdf = new PdfDocument(writer);
                 using var document = new iText.Layout.Document(pdf);
@@ -434,6 +439,14 @@ public class DocumentProcessingService : IDocumentProcessingService
         return lines;
     }
 
+    // Create a PdfWriter with SmartMode disabled to avoid native BouncyCastle adapter requirements
+    private PdfWriter CreatePdfWriter(Stream outputStream)
+    {
+        var writer = new PdfWriter(outputStream);
+        writer.SetCloseStream(false);
+        return writer;
+    }
+
     private async Task<MemoryStream> ConvertXmlToPdfAsync(Stream xmlStream, string pdfFileName, string? requestId)
     {
         if (requestId != null && _monitoringService != null)
@@ -448,7 +461,7 @@ public class DocumentProcessingService : IDocumentProcessingService
             using var reader = new StreamReader(xmlStream);
             var xmlContent = await reader.ReadToEndAsync();
 
-            using var writer = new PdfWriter(outputStream);
+            using var writer = CreatePdfWriter(outputStream);
             writer.SetCloseStream(false);
             using var pdf = new PdfDocument(writer);
             using var document = new iText.Layout.Document(pdf);
@@ -498,7 +511,7 @@ public class DocumentProcessingService : IDocumentProcessingService
             // Perform OCR
             var ocrText = await PerformOcrOnImageAsync(croppedImage);
 
-            using var writer = new PdfWriter(outputStream);
+            using var writer = CreatePdfWriter(outputStream);
             writer.SetCloseStream(false);
             using var pdf = new PdfDocument(writer);
             using var document = new iText.Layout.Document(pdf);
@@ -519,6 +532,61 @@ public class DocumentProcessingService : IDocumentProcessingService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error converting image to PDF");
+            throw;
+        }
+
+        outputStream.Position = 0;
+        return outputStream;
+    }
+
+    private async Task<MemoryStream> ConvertHtmlToPdfAsync(Stream htmlStream, string pdfFileName, string? requestId)
+    {
+        if (requestId != null && _monitoringService != null)
+        {
+            await _monitoringService.UpdateRequestStatus(requestId, "Processing", "Converting HTML to PDF", 20);
+        }
+
+        var outputStream = new MemoryStream();
+        try
+        {
+            htmlStream.Position = 0;
+            using var reader = new StreamReader(htmlStream, Encoding.UTF8, true, 1024, true);
+            var html = await reader.ReadToEndAsync();
+
+            // Parse HTML and extract visible text
+            var doc = new HtmlDocument();
+            doc.LoadHtml(html);
+
+            // Remove script/style/noscript nodes
+            var nodesToRemove = doc.DocumentNode.SelectNodes("//script|//style|//noscript");
+            if (nodesToRemove != null)
+            {
+                foreach (var n in nodesToRemove) n.Remove();
+            }
+
+            var title = doc.DocumentNode.SelectSingleNode("//title")?.InnerText?.Trim();
+            var text = doc.DocumentNode.InnerText ?? string.Empty;
+
+            // Collapse whitespace
+            text = Regex.Replace(text, "[\t\n\r]{1,}", "\n");
+            text = Regex.Replace(text, "\n{2,}", "\n\n");
+            text = text.Trim();
+
+            // Prepend title if present
+            if (!string.IsNullOrWhiteSpace(title))
+            {
+                text = title + "\n\n" + text;
+            }
+
+            // Generate PDF from extracted text using text->PDF converter (uses iText with fallbacks)
+            var textBytes = Encoding.UTF8.GetBytes(text);
+            using var textStream = new MemoryStream(textBytes);
+            var converted = await ConvertTextToPdfAsync(textStream, pdfFileName, requestId);
+            return converted;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error converting HTML to PDF");
             throw;
         }
 
@@ -1207,10 +1275,12 @@ public class DocumentProcessingService : IDocumentProcessingService
             ".docx" => "docx",
             ".txt" => "txt",
             ".xml" => "xml",
+            ".html" or ".htm" => "html",
             ".jpg" or ".jpeg" or ".png" or ".bmp" or ".tiff" or ".gif" => "image",
             _ => contentType.StartsWith("image/") ? "image" : 
                  contentType.Contains("xml") ? "xml" : 
-                 contentType.Contains("pdf") ? "pdf" : "unknown"
+                 contentType.Contains("pdf") ? "pdf" : 
+                 contentType.Contains("html") ? "html" : "unknown"
         };
     }
 
