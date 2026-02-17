@@ -9,82 +9,102 @@ using SmartGlassesMiddleware.Hubs;
 namespace SmartGlassesMiddleware.Controllers;
 
 [ApiController]
-[Route("api/[controller]")]
-public class DocumentsController : ControllerBase
-{
-    private readonly ILogger<DocumentsController> _logger;
-    private readonly IDocumentProcessingService _processingService;
-    private readonly IRAGService _ragService;
-    private readonly IDocumentHighlightService _highlightService;
-    private readonly ApplicationDbContext _context;
-    private readonly IConfiguration _configuration;
-    private readonly IRequestMonitoringService _monitoringService;
-    private readonly IHistoryService _historyService;
-    private readonly IMediaStorageService _mediaStorageService;
-    private readonly IConversationService _conversationService;
-    private readonly IGroupConversationMappingService? _groupConversationMappingService;
-    private readonly ICacheService _cacheService;
-    private readonly IHubContext<ResourceHub>? _resourceHub;
-    private const int DefaultPageSize = 20;
-    private const int MaxPageSize = 100;
-    private readonly long _maxFileSize;
-
-    public DocumentsController(
-        ILogger<DocumentsController> logger,
-        IDocumentProcessingService processingService,
-        IRAGService ragService,
-        IDocumentHighlightService highlightService,
-        ApplicationDbContext context,
-        IConfiguration configuration,
-        IRequestMonitoringService monitoringService,
-        IHistoryService historyService,
-        IMediaStorageService mediaStorageService,
-        IConversationService conversationService,
-        IGroupConversationMappingService? groupConversationMappingService = null,
-        ICacheService? cacheService = null,
-        IHubContext<ResourceHub>? resourceHub = null)
-    {
-        _logger = logger;
-        _processingService = processingService;
-        _ragService = ragService;
-        _highlightService = highlightService;
-        _context = context;
-        _configuration = configuration;
-        _monitoringService = monitoringService;
-        _historyService = historyService;
-        _mediaStorageService = mediaStorageService;
-        _conversationService = conversationService;
-        _groupConversationMappingService = groupConversationMappingService;
-        _cacheService = cacheService ?? throw new ArgumentNullException(nameof(cacheService));
-        _resourceHub = resourceHub;
-        var maxFileSizeMB = configuration.GetValue<int?>("RAG:MaxFileSizeMB") ?? 50;
-        _maxFileSize = maxFileSizeMB * 1024 * 1024;
-    }
-
-    /// <summary>
-    /// Upload and process a document (PDF, DOCX, TXT, or image)
-    /// </summary>
-    [HttpPost("upload")]
-    [ProducesResponseType(typeof(DocumentMetadata), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> UploadDocument(IFormFile file, [FromForm] List<Guid>? groupIds = null)
-    {
-        if (file == null || file.Length == 0)
-            return BadRequest("No file uploaded");
-
-        // Validate file size
-        if (file.Length > _maxFileSize)
-            return BadRequest($"File size exceeds maximum allowed size of {_maxFileSize / 1024 / 1024}MB");
-
-        // Start monitoring
-        var requestId = await _monitoringService.StartRequest("DocumentUpload", $"Uploading {file.FileName}");
-
         try
         {
-            using var stream = file.OpenReadStream();
-            var document = await _processingService.ProcessDocumentAsync(stream, file.FileName, file.ContentType, requestId);
+            // Read the uploaded file into memory (small files expected in tests)
+            using var ms = new MemoryStream();
+            await file.CopyToAsync(ms);
+            ms.Position = 0;
 
-            // Invalidate admin files cache and notify UI so processed file appears quickly
+            // Create a placeholder DocumentMetadata so we can return an ID immediately
+            var documentId = Guid.NewGuid();
+            var placeholder = new DocumentMetadata
+            {
+                Id = documentId,
+                FileName = file.FileName ?? string.Empty,
+                OriginalFileName = file.FileName ?? string.Empty,
+                ContentType = file.ContentType ?? "application/octet-stream",
+                UploadedAt = DateTime.UtcNow,
+                FileSize = file.Length,
+                DocumentType = Path.GetExtension(file.FileName)?.TrimStart('.') ?? "",
+                IsProcessed = false
+            };
+
+            _context.DocumentMetadatas.Add(placeholder);
+            await _context.SaveChangesAsync();
+
+            // Fire-and-forget processing task to avoid blocking the request thread
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    ms.Position = 0;
+                    var processed = await _processingService.ProcessDocumentAsync(ms, file.FileName, file.ContentType, requestId, documentId);
+
+                    // Attach to groups if specified
+                    if (groupIds != null && groupIds.Any())
+                    {
+                        foreach (var groupId in groupIds)
+                        {
+                            var group = await _context.ResourceGroups.FindAsync(groupId);
+                            if (group != null)
+                            {
+                                processed.DocumentGroups.Add(new DocumentGroup
+                                {
+                                    DocumentMetadataId = processed.Id,
+                                    ResourceGroupId = groupId
+                                });
+                            }
+                            else
+                            {
+                                _logger.LogWarning("Group {GroupId} not found during background processing", groupId);
+                            }
+                        }
+                        await _context.SaveChangesAsync();
+
+                        await InvalidateGroupsCache();
+                        await NotifyGroupsChangedAsync();
+                    }
+
+                    // Generate embeddings (best-effort)
+                    try
+                    {
+                        await _monitoringService.UpdateRequestStatus(requestId, "Processing", "Generating embeddings", 95);
+                        await _ragService.GenerateEmbeddingsAsync(processed.Id);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error generating embeddings for document {DocumentId} in background", processed.Id);
+                    }
+
+                    // Invalidate caches and notify UI
+                    try
+                    {
+                        await InvalidateFilesCache();
+                        await NotifyFilesChangedAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to invalidate files cache or notify clients after background document processing");
+                    }
+
+                    await _monitoringService.CompleteRequest(requestId, true, $"Document {processed.FileName} processed successfully");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Background processing failed for uploaded document {FileName}", file.FileName);
+                    try { await _monitoringService.CompleteRequest(requestId, false, error: ex.Message); } catch { }
+                }
+            });
+
+            return CreatedAtAction(nameof(UploadDocument), new { id = documentId }, new { id = documentId, requestId });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error uploading document");
+            await _monitoringService.CompleteRequest(requestId, false, error: ex.Message);
+            return StatusCode(500, new { error = "Failed to accept document", details = ex.Message });
+        }
             try
             {
                 await InvalidateFilesCache();

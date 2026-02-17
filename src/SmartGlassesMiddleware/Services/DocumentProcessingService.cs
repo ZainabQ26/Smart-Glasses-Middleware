@@ -31,7 +31,7 @@ namespace SmartGlassesMiddleware.Services;
 
 public interface IDocumentProcessingService
 {
-    Task<DocumentMetadata> ProcessDocumentAsync(Stream fileStream, string fileName, string contentType, string? requestId = null);
+    Task<DocumentMetadata> ProcessDocumentAsync(Stream fileStream, string fileName, string contentType, string? requestId = null, Guid? documentId = null);
     Task<List<DocumentChunk>> ExtractChunksAsync(Guid documentId);
     Task<DocumentMetadata> ReprocessDocumentAsync(Guid documentId);
 }
@@ -60,10 +60,10 @@ public class DocumentProcessingService : IDocumentProcessingService
         _configuration = configuration;
     }
 
-    public async Task<DocumentMetadata> ProcessDocumentAsync(Stream fileStream, string fileName, string contentType, string? requestId = null)
+    public async Task<DocumentMetadata> ProcessDocumentAsync(Stream fileStream, string fileName, string contentType, string? requestId = null, Guid? documentId = null)
     {
         var documentType = DetermineDocumentType(fileName, contentType);
-        var documentId = Guid.NewGuid();
+        var documentId = documentId = documentId ?? Guid.NewGuid();
         
         if (requestId != null && _monitoringService != null)
         {
@@ -98,7 +98,7 @@ public class DocumentProcessingService : IDocumentProcessingService
             {
                 Id = Guid.NewGuid(),
                 FileName = pdfFileName,
-                Label = $"Processed: {fileName}",
+                        var docId = documentId ?? Guid.NewGuid();
                 ContentType = "application/pdf",
                 StorageKey = storageKey,
                 ContentHash = contentHash,
@@ -108,9 +108,10 @@ public class DocumentProcessingService : IDocumentProcessingService
 
             _context.ManagedFiles.Add(managedFile);
 
-            var metadata = new DocumentMetadata
+            var metadata = await _context.DocumentMetadatas.FindAsync(documentId) ?? new DocumentMetadata
             {
-                Id = documentId,
+
+                Id = documentId.Value,
                 FileName = pdfFileName,
                 OriginalFileName = fileName,
                 ContentType = "application/pdf",
@@ -121,6 +122,12 @@ public class DocumentProcessingService : IDocumentProcessingService
                 IsProcessed = false,
                 ManagedFileId = managedFile.Id
             };
+
+            // If metadata already existed, update fields accordingly
+            if (_context.Entry(metadata).State == Microsoft.EntityFrameworkCore.EntityState.Detached)
+            {
+                _context.DocumentMetadatas.Add(metadata);
+            }
 
             if (requestId != null && _monitoringService != null)
             {
@@ -136,9 +143,9 @@ public class DocumentProcessingService : IDocumentProcessingService
             metadata.ProcessedAt = DateTime.UtcNow;
             metadata.Chunks = chunks;
 
-            _context.DocumentMetadatas.Add(metadata);
+                            var metadata = await _context.DocumentMetadatas.FindAsync(docId) ?? new DocumentMetadata
             await _context.SaveChangesAsync();
-
+                                Id = docId,
             if (requestId != null && _monitoringService != null)
             {
                 await _monitoringService.UpdateRequestStatus(requestId, "Processing", "Document processed successfully", 90);
