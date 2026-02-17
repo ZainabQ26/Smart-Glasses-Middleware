@@ -218,14 +218,19 @@ Answer:";
                 }
             }
 
-            // Build sources list
+            // Build sources list with position information
             var sources = relevantChunks.Select(c => new DocumentSource
             {
                 DocumentId = c.DocumentMetadataId,
                 FileName = c.DocumentMetadata.FileName,
                 PageNumber = c.PageNumber,
                 ChunkId = c.Id,
-                ChunkText = c.ChunkText.Length > 200 ? c.ChunkText.Substring(0, 200) + "..." : c.ChunkText
+                ChunkText = c.ChunkText.Length > 200 ? c.ChunkText.Substring(0, 200) + "..." : c.ChunkText,
+                X = c.X,
+                Y = c.Y,
+                Width = c.Width,
+                Height = c.Height,
+                Position = GetPositionDescription(c.X, c.Y)
             }).ToList();
 
             // Analyze response to identify which sources were actually referenced
@@ -418,14 +423,19 @@ Answer:";
             // Call the model directly without task detection wrapper to preserve conversation context
             var response = await GenerateResponseWithLocalModel(prompt);
 
-            // Build sources list
+            // Build sources list with position information
             var sources = relevantChunks.Select(c => new DocumentSource
             {
                 DocumentId = c.DocumentMetadataId,
                 FileName = c.DocumentMetadata.FileName,
                 PageNumber = c.PageNumber,
                 ChunkId = c.Id,
-                ChunkText = c.ChunkText.Length > 200 ? c.ChunkText.Substring(0, 200) + "..." : c.ChunkText
+                ChunkText = c.ChunkText.Length > 200 ? c.ChunkText.Substring(0, 200) + "..." : c.ChunkText,
+                X = c.X,
+                Y = c.Y,
+                Width = c.Width,
+                Height = c.Height,
+                Position = GetPositionDescription(c.X, c.Y)
             }).ToList();
 
             // Build conversation sources list
@@ -1402,5 +1412,31 @@ Answer:";
                 TokenCount = 0
             };
         }
+    }
+
+    private string? GetPositionDescription(double? x, double? y)
+    {
+        if (!x.HasValue || !y.HasValue)
+            return null;
+
+        // Determine horizontal position
+        string horizontal;
+        if (x.Value < PdfConstants.PageWidth / 3)
+            horizontal = "left";
+        else if (x.Value < 2 * PdfConstants.PageWidth / 3)
+            horizontal = "center";
+        else
+            horizontal = "right";
+
+        // Determine vertical position (Y is from bottom in PDF coordinates)
+        string vertical;
+        if (y.Value < PdfConstants.PageHeight / 3)
+            vertical = "bottom";
+        else if (y.Value < 2 * PdfConstants.PageHeight / 3)
+            vertical = "middle";
+        else
+            vertical = "top";
+
+        return $"{vertical} {horizontal}";
     }
 }

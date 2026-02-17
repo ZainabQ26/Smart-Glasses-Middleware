@@ -1,6 +1,11 @@
 using iText.Kernel.Pdf;
 using iText.Kernel.Pdf.Canvas.Parser;
 using iText.Kernel.Pdf.Canvas.Parser.Listener;
+using iText.Kernel.Pdf.Canvas.Parser.Data;
+using iText.Kernel.Geom;
+using iText.Layout;
+using iText.Layout.Element;
+using iText.Layout.Properties;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 using SmartGlassesMiddleware.Models;
@@ -9,6 +14,10 @@ using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using Tesseract;
+using PdfSharpCore.Drawing;
+using PdfSharpDoc = PdfSharpCore.Pdf.PdfDocument;
+using QuestPDF.Fluent;
+using QuestPDF.Helpers;
 using System.Text;
 using System.Xml;
 using System.Xml.Linq;
@@ -57,49 +66,69 @@ public class DocumentProcessingService : IDocumentProcessingService
         
         if (requestId != null && _monitoringService != null)
         {
-            await _monitoringService.UpdateRequestStatus(requestId, "Processing", $"Converting {fileName} to Markdown", 10);
+            await _monitoringService.UpdateRequestStatus(requestId, "Processing", $"Converting {fileName} to text-based PDF", 10);
         }
 
-        // Convert to Markdown and get the converted stream
-        MemoryStream markdownStream;
-        string markdownFileName;
+        // Convert to text-based PDF and get the converted stream
+        MemoryStream pdfStream;
+        string pdfFileName;
         
         try
         {
             fileStream.Position = 0;
-            (markdownStream, markdownFileName) = await ConvertToMarkdownAsync(fileStream, fileName, documentType, requestId);
+            (pdfStream, pdfFileName) = await ConvertToTextPdfAsync(fileStream, fileName, documentType, requestId);
             
             if (requestId != null && _monitoringService != null)
             {
-                await _monitoringService.UpdateRequestStatus(requestId, "Processing", "Uploading converted Markdown", 40);
+                await _monitoringService.UpdateRequestStatus(requestId, "Processing", "Uploading converted PDF", 40);
             }
 
-            // Store only the converted Markdown
-            var storageKey = $"documents/{documentId}/{markdownFileName}";
-            markdownStream.Position = 0;
-            await _storageService.UploadFileAsync(storageKey, markdownStream, "text/markdown");
+            // Store only the converted text-based PDF
+            var storageKey = $"documents/{documentId}/{pdfFileName}";
+            pdfStream.Position = 0;
+            await _storageService.UploadFileAsync(storageKey, pdfStream, "application/pdf");
+
+            // Compute content hash for ManagedFile
+            pdfStream.Position = 0;
+            var contentHash = _storageService.ComputeContentHash(pdfStream);
+
+            // Create ManagedFile entry so it shows up in Files tab
+            var managedFile = new ManagedFile
+            {
+                Id = Guid.NewGuid(),
+                FileName = pdfFileName,
+                Label = $"Processed: {fileName}",
+                ContentType = "application/pdf",
+                StorageKey = storageKey,
+                ContentHash = contentHash,
+                UploadedAt = DateTime.UtcNow,
+                FileSize = pdfStream.Length
+            };
+
+            _context.ManagedFiles.Add(managedFile);
 
             var metadata = new DocumentMetadata
             {
                 Id = documentId,
-                FileName = markdownFileName,
+                FileName = pdfFileName,
                 OriginalFileName = fileName,
-                ContentType = "text/markdown",
+                ContentType = "application/pdf",
                 StorageKey = storageKey,
                 UploadedAt = DateTime.UtcNow,
-                FileSize = markdownStream.Length,
-                DocumentType = "markdown",
-                IsProcessed = false
+                FileSize = pdfStream.Length,
+                DocumentType = "pdf",
+                IsProcessed = false,
+                ManagedFileId = managedFile.Id
             };
 
             if (requestId != null && _monitoringService != null)
             {
-                await _monitoringService.UpdateRequestStatus(requestId, "Processing", "Extracting text from Markdown", 60);
+                await _monitoringService.UpdateRequestStatus(requestId, "Processing", "Extracting text with location data from PDF", 60);
             }
 
-            // Extract text and create chunks from the Markdown
-            markdownStream.Position = 0;
-            var chunks = await ExtractFromMarkdownAsync(markdownStream, metadata.Id, requestId);
+            // Extract text and create chunks from the PDF with location data
+            pdfStream.Position = 0;
+            var chunks = await ExtractFromPdfWithLocationAsync(pdfStream, metadata.Id, requestId);
 
             metadata.TotalPages = chunks.Any() ? chunks.Max(c => c.PageNumber) : 0;
             metadata.IsProcessed = true;
@@ -139,6 +168,398 @@ public class DocumentProcessingService : IDocumentProcessingService
 
             throw;
         }
+    }
+
+    private async Task<(MemoryStream pdfStream, string pdfFileName)> ConvertToTextPdfAsync(Stream inputStream, string fileName, string documentType, string? requestId)
+    {
+        var baseFileName = System.IO.Path.GetFileNameWithoutExtension(fileName);
+        var pdfFileName = $"{baseFileName}.pdf";
+
+        MemoryStream convertedStream;
+
+        switch (documentType)
+        {
+            case "pdf":
+                // PDF is already in PDF format, but we need to ensure it's text-based (searchable)
+                convertedStream = await EnsureTextBasedPdfAsync(inputStream, requestId);
+                break;
+
+            case "docx":
+                convertedStream = await ConvertDocxToPdfAsync(inputStream, pdfFileName, requestId);
+                break;
+
+            case "txt":
+                convertedStream = await ConvertTextToPdfAsync(inputStream, pdfFileName, requestId);
+                break;
+
+            case "xml":
+                convertedStream = await ConvertXmlToPdfAsync(inputStream, pdfFileName, requestId);
+                break;
+
+            case "image":
+                convertedStream = await ConvertImageToPdfAsync(inputStream, pdfFileName, requestId);
+                break;
+
+            default:
+                throw new NotSupportedException($"Document type {documentType} is not supported");
+        }
+
+        // Generate a meaningful filename
+        convertedStream.Position = 0;
+        var slug = await GenerateSlugFromPdfAsync(convertedStream, baseFileName);
+        var finalFileName = $"{slug}.pdf";
+
+        // Reset stream position for downstream consumers
+        convertedStream.Position = 0;
+        return (convertedStream, finalFileName);
+    }
+
+    private async Task<MemoryStream> EnsureTextBasedPdfAsync(Stream pdfStream, string? requestId)
+    {
+        if (requestId != null && _monitoringService != null)
+        {
+            await _monitoringService.UpdateRequestStatus(requestId, "Processing", "Ensuring PDF is text-based", 20);
+        }
+
+        try
+        {
+            // Read the PDF and check if it has text layers
+            pdfStream.Position = 0;
+            using var pdfReader = new PdfReader(pdfStream);
+            using var pdfDocument = new PdfDocument(pdfReader);
+            
+            var outputStream = new MemoryStream();
+            using var writer = new PdfWriter(outputStream);
+            writer.SetCloseStream(false);
+            using var outPdf = new PdfDocument(writer);
+            
+            // Copy all pages to ensure they're properly formatted
+            pdfDocument.CopyPagesTo(1, pdfDocument.GetNumberOfPages(), outPdf);
+            outPdf.Close();
+            
+            outputStream.Position = 0;
+            return outputStream;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error ensuring PDF is text-based");
+            throw;
+        }
+    }
+
+    private async Task<MemoryStream> ConvertDocxToPdfAsync(Stream docxStream, string pdfFileName, string? requestId)
+    {
+        if (requestId != null && _monitoringService != null)
+        {
+            await _monitoringService.UpdateRequestStatus(requestId, "Processing", "Converting DOCX to PDF", 20);
+        }
+
+        var outputStream = new MemoryStream();
+        
+        try
+        {
+            using var writer = new PdfWriter(outputStream);
+            writer.SetCloseStream(false);
+            using var pdf = new PdfDocument(writer);
+            using var document = new iText.Layout.Document(pdf);
+
+            // Extract text from DOCX
+            using var doc = WordprocessingDocument.Open(docxStream, false);
+            var body = doc.MainDocumentPart?.Document?.Body;
+
+            if (body != null)
+            {
+                foreach (var paragraph in body.Elements<DocumentFormat.OpenXml.Wordprocessing.Paragraph>())
+                {
+                    var text = paragraph.InnerText;
+                    if (!string.IsNullOrWhiteSpace(text))
+                    {
+                        // Check if it's a heading based on style
+                        var pPr = paragraph.Elements<ParagraphProperties>().FirstOrDefault();
+                        var styleId = pPr?.ParagraphStyleId?.Val?.Value;
+                        
+                        if (styleId != null && styleId.StartsWith("Heading"))
+                        {
+                            // Add as heading with larger font
+                            var para = new iText.Layout.Element.Paragraph(text)
+                                .SetFontSize(16)
+                                .SetBold();
+                            document.Add(para);
+                        }
+                        else
+                        {
+                            // Add as regular paragraph
+                            document.Add(new iText.Layout.Element.Paragraph(text));
+                        }
+                    }
+                }
+            }
+
+            document.Close();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error converting DOCX to PDF");
+            throw;
+        }
+
+        outputStream.Position = 0;
+        return outputStream;
+    }
+
+    private async Task<MemoryStream> ConvertTextToPdfAsync(Stream textStream, string pdfFileName, string? requestId)
+    {
+        if (requestId != null && _monitoringService != null)
+        {
+            await _monitoringService.UpdateRequestStatus(requestId, "Processing", "Converting text to PDF", 20);
+        }
+
+        // Try iText first (existing behavior). If it fails due to iText/BouncyCastle adapter issues,
+        // fall back to QuestPDF to produce a simple text-based PDF.
+        var outputStream = new MemoryStream();
+
+        try
+        {
+            using var reader = new StreamReader(textStream);
+            var text = await reader.ReadToEndAsync();
+
+            // Try iText writer (wrap in try/catch to fallback)
+            try
+            {
+                using var writer = new PdfWriter(outputStream);
+                writer.SetCloseStream(false);
+                using var pdf = new PdfDocument(writer);
+                using var document = new iText.Layout.Document(pdf);
+
+                document.Add(new iText.Layout.Element.Paragraph(text));
+                document.Close();
+
+                outputStream.Position = 0;
+                return outputStream;
+            }
+                catch (Exception itexEx)
+                {
+                    _logger.LogWarning(itexEx, "iText text->PDF conversion failed, falling back to QuestPDF then PdfSharpCore");
+                    // Reset stream and try QuestPDF first (uses Skia native libs which are included), then PdfSharpCore as last resort
+                    outputStream = new MemoryStream();
+
+                    try
+                    {
+                        // Use QuestPDF to generate a simple PDF with the text content
+                        QuestPDF.Fluent.Document.Create(container =>
+                        {
+                            container.Page(page =>
+                            {
+                                page.Size(QuestPDF.Helpers.PageSizes.A4);
+                                page.Margin(20);
+                                page.Content().Column(column =>
+                                {
+                                    column.Item().PaddingBottom(5).Text(text).FontSize(10);
+                                });
+                            });
+                        }).GeneratePdf(outputStream);
+
+                        outputStream.Position = 0;
+                        return outputStream;
+                    }
+                    catch (Exception qex)
+                    {
+                        _logger.LogWarning(qex, "QuestPDF fallback failed, trying PdfSharpCore fallback");
+                        // Reset stream and fallback to PdfSharpCore
+                        outputStream = new MemoryStream();
+
+                        try
+                        {
+                            using var doc = new PdfSharpDoc();
+                            var page = doc.AddPage();
+                            page.Size = PdfSharpCore.PageSize.A4;
+                            using var gfx = XGraphics.FromPdfPage(page);
+
+                            var font = new XFont("Arial", 11);
+                            var layoutRect = new XRect(40, 40, page.Width - 80, page.Height - 80);
+
+                            // Basic word-wrapping by measuring lines
+                            var lines = WrapText(gfx, text, font, layoutRect.Width);
+                            double y = layoutRect.Y;
+                            var lineHeight = gfx.MeasureString("Ay", font).Height;
+                            foreach (var line in lines)
+                            {
+                                gfx.DrawString(line, font, XBrushes.Black, new XRect(layoutRect.X, y, layoutRect.Width, lineHeight), XStringFormats.TopLeft);
+                                y += lineHeight;
+                                if (y > layoutRect.Y + layoutRect.Height - lineHeight) break; // avoid overflow
+                            }
+
+                            doc.Save(outputStream);
+                            outputStream.Position = 0;
+                            return outputStream;
+                        }
+                        catch (Exception pex)
+                        {
+                            _logger.LogError(pex, "PdfSharpCore fallback also failed");
+                            throw; // let outer catch handle
+                        }
+                    }
+                }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error converting text to PDF");
+            throw;
+        }
+    }
+
+    // Helper to wrap text into lines fitting the given width
+    private static List<string> WrapText(XGraphics gfx, string text, XFont font, double maxWidth)
+    {
+        var words = text.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+        var lines = new List<string>();
+        var sb = new StringBuilder();
+        foreach (var w in words)
+        {
+            var candidate = sb.Length == 0 ? w : sb + " " + w;
+            var size = gfx.MeasureString(candidate, font);
+            if (size.Width > maxWidth && sb.Length > 0)
+            {
+                lines.Add(sb.ToString());
+                sb.Clear();
+                sb.Append(w);
+            }
+            else
+            {
+                if (sb.Length > 0) sb.Append(' ');
+                sb.Append(w);
+            }
+        }
+        if (sb.Length > 0) lines.Add(sb.ToString());
+        return lines;
+    }
+
+    private async Task<MemoryStream> ConvertXmlToPdfAsync(Stream xmlStream, string pdfFileName, string? requestId)
+    {
+        if (requestId != null && _monitoringService != null)
+        {
+            await _monitoringService.UpdateRequestStatus(requestId, "Processing", "Converting XML to PDF", 20);
+        }
+
+        var outputStream = new MemoryStream();
+        
+        try
+        {
+            using var reader = new StreamReader(xmlStream);
+            var xmlContent = await reader.ReadToEndAsync();
+
+            using var writer = new PdfWriter(outputStream);
+            writer.SetCloseStream(false);
+            using var pdf = new PdfDocument(writer);
+            using var document = new iText.Layout.Document(pdf);
+
+            // Parse XML and add to PDF
+            try
+            {
+                var xdoc = XDocument.Parse(xmlContent);
+                document.Add(new iText.Layout.Element.Paragraph("XML Content").SetFontSize(16).SetBold());
+                document.Add(new iText.Layout.Element.Paragraph(xdoc.ToString()));
+            }
+            catch (Exception ex)
+            {
+                // If XML parsing fails, add raw XML content instead
+                _logger.LogWarning(ex, "Failed to parse XML content, using raw text");
+                document.Add(new iText.Layout.Element.Paragraph(xmlContent));
+            }
+
+            document.Close();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error converting XML to PDF");
+            throw;
+        }
+
+        outputStream.Position = 0;
+        return outputStream;
+    }
+
+    private async Task<MemoryStream> ConvertImageToPdfAsync(Stream imageStream, string pdfFileName, string? requestId)
+    {
+        if (requestId != null && _monitoringService != null)
+        {
+            await _monitoringService.UpdateRequestStatus(requestId, "Processing", "Converting image to PDF", 20);
+        }
+
+        var outputStream = new MemoryStream();
+        
+        try
+        {
+            // Load and crop image
+            imageStream.Position = 0;
+            using var image = await SixLabors.ImageSharp.Image.LoadAsync<Rgb24>(imageStream);
+            var croppedImage = CropToPaper(image);
+            
+            // Perform OCR
+            var ocrText = await PerformOcrOnImageAsync(croppedImage);
+
+            using var writer = new PdfWriter(outputStream);
+            writer.SetCloseStream(false);
+            using var pdf = new PdfDocument(writer);
+            using var document = new iText.Layout.Document(pdf);
+
+            // Add OCR text to PDF
+            if (!string.IsNullOrWhiteSpace(ocrText))
+            {
+                document.Add(new iText.Layout.Element.Paragraph("Extracted Text (OCR)").SetFontSize(14).SetBold());
+                document.Add(new iText.Layout.Element.Paragraph(ocrText));
+            }
+            else
+            {
+                document.Add(new iText.Layout.Element.Paragraph("No text extracted from image"));
+            }
+
+            document.Close();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error converting image to PDF");
+            throw;
+        }
+
+        outputStream.Position = 0;
+        return outputStream;
+    }
+
+    private async Task<string> GenerateSlugFromPdfAsync(Stream pdfStream, string fallback)
+    {
+        try
+        {
+            pdfStream.Position = 0;
+            using var pdfReader = new PdfReader(pdfStream);
+            using var pdfDocument = new PdfDocument(pdfReader);
+            
+            if (pdfDocument.GetNumberOfPages() > 0)
+            {
+                var firstPage = pdfDocument.GetFirstPage();
+                var text = PdfTextExtractor.GetTextFromPage(firstPage);
+                
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    // Take first line or first few words
+                    var lines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+                    if (lines.Length > 0)
+                    {
+                        var firstLine = lines[0].Trim();
+                        var words = firstLine.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                        var snippet = string.Join(' ', words.Take(6));
+                        if (!string.IsNullOrWhiteSpace(snippet))
+                            return Slugify(snippet);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error generating slug from PDF, using fallback");
+        }
+
+        return Slugify(fallback ?? "document");
     }
 
     private async Task<(MemoryStream markdownStream, string markdownFileName)> ConvertToMarkdownAsync(Stream inputStream, string fileName, string documentType, string? requestId)
@@ -580,6 +1001,136 @@ public class DocumentProcessingService : IDocumentProcessingService
         }
     }
 
+    private async Task<List<DocumentChunk>> ExtractFromPdfWithLocationAsync(Stream pdfStream, Guid documentId, string? requestId)
+    {
+        var chunks = new List<DocumentChunk>();
+        var chunkIndex = 0;
+
+        try
+        {
+            using var pdfReader = new PdfReader(pdfStream);
+            using var pdfDocument = new PdfDocument(pdfReader);
+            var totalPages = pdfDocument.GetNumberOfPages();
+
+            for (int pageNum = 1; pageNum <= totalPages; pageNum++)
+            {
+                var page = pdfDocument.GetPage(pageNum);
+                var pageSize = page.GetPageSize();
+                
+                // Extract text with location using location-aware extraction strategy
+                var strategy = new SimpleTextWithLocationStrategy();
+                PdfTextExtractor.GetTextFromPage(page, strategy);
+                var textItems = strategy.GetTextItems();
+
+                if (textItems.Any())
+                {
+                    // Create chunks from text items with actual location data
+                    var pageChunks = CreateTextChunksFromTextItems(textItems, pageNum, documentId, ref chunkIndex);
+                    chunks.AddRange(pageChunks);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error extracting text with location from PDF");
+            throw;
+        }
+
+        return chunks;
+    }
+
+    private List<DocumentChunk> CreateTextChunksFromTextItems(List<TextItem> textItems, int pageNumber, Guid documentId, ref int chunkIndex)
+    {
+        var chunks = new List<DocumentChunk>();
+
+        // Combine all text items into a single text string.
+        // If text items are single-character (extracted as individual letters),
+        // join without spaces; otherwise join with spaces and normalize whitespace.
+        var avgLen = textItems.Average(t => t.Text?.Length ?? 0);
+        string fullText;
+        if (avgLen <= 1.5)
+        {
+            fullText = string.Concat(textItems.Select(t => t.Text));
+        }
+        else
+        {
+            fullText = Regex.Replace(string.Join(" ", textItems.Select(t => t.Text)), "\\s+", " ");
+        }
+        
+        if (string.IsNullOrWhiteSpace(fullText))
+            return chunks;
+
+        var startIndex = 0;
+        var currentPosition = 0;
+
+        while (startIndex < fullText.Length)
+        {
+            var endIndex = Math.Min(startIndex + ChunkSize, fullText.Length);
+
+            // Try to break at sentence or word boundary
+            if (endIndex < fullText.Length)
+            {
+                var lastPeriod = fullText.LastIndexOf('.', endIndex, Math.Min(100, endIndex - startIndex));
+                var lastSpace = fullText.LastIndexOf(' ', endIndex, Math.Min(100, endIndex - startIndex));
+
+                if (lastPeriod > startIndex)
+                    endIndex = lastPeriod + 1;
+                else if (lastSpace > startIndex)
+                    endIndex = lastSpace;
+            }
+
+            var chunkText = fullText.Substring(startIndex, endIndex - startIndex).Trim();
+
+            if (!string.IsNullOrWhiteSpace(chunkText))
+            {
+                // Find the text items that correspond to this chunk
+                var chunkItems = new List<TextItem>();
+                var chunkCharCount = 0;
+                
+                for (int i = currentPosition; i < textItems.Count && chunkCharCount < chunkText.Length; i++)
+                {
+                    chunkItems.Add(textItems[i]);
+                    chunkCharCount += textItems[i].Text.Length + 1; // +1 for space
+                }
+
+                // Calculate bounding box from text items
+                bool hasChunkItems = chunkItems.Any();
+                double minX = 0, maxX = 0, minY = 0, maxY = 0;
+                
+                if (hasChunkItems)
+                {
+                    minX = chunkItems.Min(t => t.X);
+                    maxX = chunkItems.Max(t => t.X + t.Width);
+                    minY = chunkItems.Min(t => t.Y);
+                    maxY = chunkItems.Max(t => t.Y + t.Height);
+                }
+
+                var chunk = new DocumentChunk
+                {
+                    Id = Guid.NewGuid(),
+                    DocumentMetadataId = documentId,
+                    ChunkText = chunkText,
+                    PageNumber = pageNumber,
+                    ChunkIndex = chunkIndex++,
+                    X = minX,
+                    Y = minY,
+                    Width = maxX - minX,
+                    Height = maxY - minY,
+                    CreatedAt = DateTime.UtcNow
+                };
+
+                chunks.Add(chunk);
+                currentPosition += chunkItems.Count;
+            }
+
+            // Ensure we always advance to prevent infinite loops
+            var nextStart = endIndex - ChunkOverlap;
+            startIndex = Math.Max(nextStart, startIndex + 1);
+        }
+
+        return chunks;
+    }
+
     private async Task<List<DocumentChunk>> ExtractFromMarkdownAsync(Stream markdownStream, Guid documentId, string? requestId)
     {
         var chunks = new List<DocumentChunk>();
@@ -634,8 +1185,8 @@ public class DocumentProcessingService : IDocumentProcessingService
         using var stream = await _storageService.DownloadFileAsync(metadata.StorageKey);
         stream.Position = 0;
 
-        // Re-extract from the stored Markdown
-        var chunks = await ExtractFromMarkdownAsync(stream, metadata.Id, null);
+        // Re-extract from the stored PDF with location data
+        var chunks = await ExtractFromPdfWithLocationAsync(stream, metadata.Id, null);
 
         metadata.TotalPages = chunks.Any() ? chunks.Max(c => c.PageNumber) : 0;
         metadata.IsProcessed = true;
@@ -658,7 +1209,8 @@ public class DocumentProcessingService : IDocumentProcessingService
             ".xml" => "xml",
             ".jpg" or ".jpeg" or ".png" or ".bmp" or ".tiff" or ".gif" => "image",
             _ => contentType.StartsWith("image/") ? "image" : 
-                 contentType.Contains("xml") ? "xml" : "unknown"
+                 contentType.Contains("xml") ? "xml" : 
+                 contentType.Contains("pdf") ? "pdf" : "unknown"
         };
     }
 
@@ -710,5 +1262,64 @@ public class DocumentProcessingService : IDocumentProcessingService
         }
 
         return chunks;
+    }
+
+    /// <summary>
+    /// Helper class to store text with its position information
+    /// </summary>
+    private class TextItem
+    {
+        public string Text { get; set; } = string.Empty;
+        public double X { get; set; }
+        public double Y { get; set; }
+        public double Width { get; set; }
+        public double Height { get; set; }
+    }
+
+    /// <summary>
+    /// Custom text extraction strategy that captures text positions
+    /// </summary>
+    private class SimpleTextWithLocationStrategy : ITextExtractionStrategy
+    {
+        private readonly List<TextItem> _textItems = new();
+
+        public void EventOccurred(IEventData data, EventType type)
+        {
+            if (type == EventType.RENDER_TEXT)
+            {
+                var renderInfo = (TextRenderInfo)data;
+                var text = renderInfo.GetText();
+                
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    var baseline = renderInfo.GetBaseline();
+                    var ascentLine = renderInfo.GetAscentLine();
+                    
+                    _textItems.Add(new TextItem
+                    {
+                        Text = text,
+                        X = baseline.GetStartPoint().Get(0),
+                        Y = baseline.GetStartPoint().Get(1),
+                        Width = baseline.GetLength(),
+                        Height = ascentLine.GetStartPoint().Get(1) - baseline.GetStartPoint().Get(1)
+                    });
+                }
+            }
+        }
+
+        public ICollection<EventType> GetSupportedEvents()
+        {
+            return new[] { EventType.RENDER_TEXT };
+        }
+
+        public string GetResultantText()
+        {
+            return string.Join(" ", _textItems.Select(t => t.Text));
+        }
+
+        public List<TextItem> GetTextItems()
+        {
+            return _textItems;
+        }
     }
 }

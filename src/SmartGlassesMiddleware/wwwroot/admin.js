@@ -927,7 +927,7 @@ async function previewFile(id, fileName) {
     const cacheBuster = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
     const previewUrl = `${API_BASE}/files/${id}/preview?v=${cacheBuster}`;
     const ext = fileName.split('.').pop().toLowerCase();
-    
+
     if (previewContent?.dataset?.blobUrl) {
         try {
             URL.revokeObjectURL(previewContent.dataset.blobUrl);
@@ -936,48 +936,49 @@ async function previewFile(id, fileName) {
         }
         delete previewContent.dataset.blobUrl;
     }
+    // Fetch file once and decide preview based on MIME/header rather than filename extension
+    try {
+        const response = await fetch(previewUrl);
+        if (!response.ok) throw new Error('Failed to load file');
+        const contentType = (response.headers.get('content-type') || '').toLowerCase();
+        const buffer = await response.arrayBuffer();
+        const header = new TextDecoder().decode(new Uint8Array(buffer.slice(0, 4)));
 
-    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) {
-        const img = new Image();
-        img.onload = function() {
-            previewContent.innerHTML = `<img src="${previewUrl}" alt="${escapeHtml(fileName)}" style="max-width: 100%; max-height: 400px; border-radius: 4px;">`;
-        };
-        img.onerror = function() {
-            previewContent.innerHTML = '<p style="color: #e74c3c;">Failed to load image preview.</p>';
-        };
-        img.src = previewUrl;
-    } else if (ext === 'pdf') {
-        try {
-            const response = await fetch(previewUrl);
-            if (!response.ok) throw new Error('Failed to load PDF');
-            const buffer = await response.arrayBuffer();
-            const header = new TextDecoder().decode(new Uint8Array(buffer.slice(0, 4)));
-            if (header !== '%PDF') {
-                const text = new TextDecoder().decode(buffer);
-                previewContent.innerHTML = `<pre style="text-align: left; max-height: 400px; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(text)}</pre>`;
-            } else {
-                const blobUrl = URL.createObjectURL(new Blob([buffer], { type: 'application/pdf' }));
-                previewContent.dataset.blobUrl = blobUrl;
-                previewContent.innerHTML = `<embed src="${blobUrl}" type="application/pdf" width="100%" height="400px" style="border-radius: 4px;">`;
-            }
-        } catch (error) {
-            previewContent.innerHTML = '<p style="color: #e74c3c;">Failed to load file.</p>';
+        // Images
+        if (contentType.startsWith('image/') || ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) {
+            const blobUrl = URL.createObjectURL(new Blob([buffer], { type: contentType || 'image/*' }));
+            previewContent.dataset.blobUrl = blobUrl;
+            previewContent.innerHTML = `<img src="${blobUrl}" alt="${escapeHtml(fileName)}" style="max-width: 100%; max-height: 400px; border-radius: 4px;">`;
+            return;
         }
-    } else if (['txt', 'json', 'xml', 'csv'].includes(ext)) {
-        try {
-            const response = await fetch(previewUrl);
-            if (response.ok) {
-                const text = await response.text();
-                previewContent.innerHTML = `<pre style="text-align: left; max-height: 400px; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(text)}</pre>`;
-            } else {
-                previewContent.innerHTML = '<p style="color: #e74c3c;">Failed to load file preview.</p>';
-            }
-        } catch (error) {
-            previewContent.innerHTML = '<p style="color: #e74c3c;">Failed to load file preview.</p>';
+
+        // PDF (detect by content-type or header)
+        if (contentType.includes('pdf') || header === '%PDF') {
+            const blobUrl = URL.createObjectURL(new Blob([buffer], { type: 'application/pdf' }));
+            previewContent.dataset.blobUrl = blobUrl;
+            previewContent.innerHTML = `<embed src="${blobUrl}" type="application/pdf" width="100%" height="400px" style="border-radius: 4px;">`;
+            return;
         }
-    } else if (ext === 'md') {
-        try {
-            const response = await fetch(previewUrl);
+
+        // Text-like content
+        if (contentType.startsWith('text/') || ['txt', 'json', 'xml', 'csv'].includes(ext) || header !== '%PDF' && buffer.byteLength < 200000) {
+            const text = new TextDecoder().decode(buffer);
+            previewContent.innerHTML = `<pre style="text-align: left; max-height: 400px; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(text)}</pre>`;
+            return;
+        }
+
+        // Markdown fallback (render as text if small)
+        if (ext === 'md') {
+            const text = new TextDecoder().decode(buffer);
+            previewContent.innerHTML = `<pre style="text-align: left; max-height: 400px; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(text)}</pre>`;
+            return;
+        }
+
+        // Unknown binary: show download link
+        previewContent.innerHTML = '<p style="color: #e74c3c;">No preview available for this file type. Use download.</p>';
+    } catch (error) {
+        previewContent.innerHTML = '<p style="color: #e74c3c;">Failed to load file preview.</p>';
+    }
             if (response.ok) {
                 const text = await response.text();
                 const renderedHtml = renderMarkdown(text);
