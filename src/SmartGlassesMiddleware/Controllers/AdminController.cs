@@ -46,6 +46,56 @@ public class AdminController : ControllerBase
         _resourceHub = resourceHub;
     }
 
+    /// <summary>
+    /// Fix ManagedFile entries for already-processed documents so filenames and content-types reflect the converted PDF.
+    /// </summary>
+    [HttpPost("fix-processed-managedfiles")]
+    public async Task<IActionResult> FixProcessedManagedFiles()
+    {
+        // Find processed documents with an associated ManagedFile
+        var docs = await _context.DocumentMetadatas
+            .Where(d => d.IsProcessed && d.ManagedFileId != null)
+            .ToListAsync();
+
+        int updated = 0;
+        foreach (var doc in docs)
+        {
+            if (doc.ManagedFileId is not Guid mfId) continue;
+            var mf = await _context.ManagedFiles.FindAsync(mfId);
+            if (mf == null) continue;
+
+            var desiredFileName = doc.FileName;
+            if (!desiredFileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+            {
+                // Ensure PDF extension on metadata filename as a fallback
+                desiredFileName = Path.GetFileNameWithoutExtension(desiredFileName) + ".pdf";
+            }
+
+            bool changed = false;
+            if (!string.Equals(mf.FileName, desiredFileName, StringComparison.Ordinal))
+            {
+                mf.FileName = desiredFileName;
+                changed = true;
+            }
+
+            if (!string.Equals(mf.ContentType, "application/pdf", StringComparison.OrdinalIgnoreCase))
+            {
+                mf.ContentType = "application/pdf";
+                changed = true;
+            }
+
+            if (changed)
+            {
+                _context.ManagedFiles.Update(mf);
+                updated++;
+            }
+        }
+
+        if (updated > 0) await _context.SaveChangesAsync();
+
+        return Ok(new { updated, total = docs.Count });
+    }
+
     #region Files
 
     /// <summary>
@@ -159,10 +209,10 @@ public class AdminController : ControllerBase
         }
 
         string? requestId = null;
-        try
-        {
-            requestId = await _monitoringService.StartRequest("FileUpload", 
-                $"Uploading: {request.File.FileName} (Label: {request.Label})");
+            try
+            {
+                requestId = await _monitoringService.StartRequest("FileUpload", 
+                    $"Uploading: {request.File.FileName ?? string.Empty} (Label: {request.Label})");
             await _monitoringService.UpdateRequestStatus(requestId, "Uploading file...");
 
             // Compute content hash for deduplication
@@ -195,13 +245,13 @@ public class AdminController : ControllerBase
             // Upload to MinIO
             using var stream = request.File.OpenReadStream();
             var contentType = request.File.ContentType ?? "application/octet-stream";
-            var storageKey = await _mediaStorageService.UploadMediaAsync(stream, request.File.FileName, contentType);
+            var storageKey = await _mediaStorageService.UploadMediaAsync(stream, request.File.FileName ?? string.Empty, contentType);
 
             // Save to database
-            var managedFile = new ManagedFile
+                var managedFile = new ManagedFile
             {
                 Id = Guid.NewGuid(),
-                FileName = request.File.FileName,
+                    FileName = request.File.FileName ?? string.Empty,
                 Label = request.Label,
                 ContentType = contentType,
                 StorageKey = storageKey,

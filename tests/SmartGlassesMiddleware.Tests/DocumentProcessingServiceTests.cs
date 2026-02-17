@@ -46,7 +46,7 @@ public class DocumentProcessingServiceTests
     }
 
     [Fact]
-    public async Task ProcessDocumentAsync_TextFile_ShouldCreateMarkdownAndChunks()
+    public async Task ProcessDocumentAsync_TextFile_ShouldCreatePdfAndChunks()
     {
         // Arrange
         var content = "This is a test document. It has multiple sentences. This will be chunked appropriately.";
@@ -57,27 +57,37 @@ public class DocumentProcessingServiceTests
         _mockStorageService
             .Setup(s => s.UploadFileAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string>()))
             .ReturnsAsync("test-storage-key");
+        
+        _mockStorageService
+            .Setup(s => s.ComputeContentHash(It.IsAny<Stream>()))
+            .Returns("test-hash-123");
 
         // Act
         var result = await _service.ProcessDocumentAsync(stream, fileName, contentType);
 
         // Assert
         Assert.NotNull(result);
-        Assert.EndsWith(".md", result.FileName); // Now produces markdown
-        Assert.Equal("markdown", result.DocumentType); // Document type is now markdown
-        Assert.Equal("text/markdown", result.ContentType); // Content type is markdown
+        Assert.EndsWith(".pdf", result.FileName); // Now produces PDF
+        Assert.Equal("pdf", result.DocumentType); // Document type is now PDF
+        Assert.Equal("application/pdf", result.ContentType); // Content type is PDF
         Assert.True(result.IsProcessed);
         Assert.NotEmpty(result.Chunks);
+        Assert.NotNull(result.ManagedFileId); // Should have ManagedFile link
 
-        // Verify storage was called with markdown content type
+        // Verify storage was called with PDF content type
         _mockStorageService.Verify(
-            s => s.UploadFileAsync(It.IsAny<string>(), It.IsAny<Stream>(), "text/markdown"),
+            s => s.UploadFileAsync(It.IsAny<string>(), It.IsAny<Stream>(), "application/pdf"),
             Times.Once
         );
+        
+        // Verify ManagedFile was created
+        var managedFile = await _context.ManagedFiles.FirstOrDefaultAsync(f => f.Id == result.ManagedFileId);
+        Assert.NotNull(managedFile);
+        Assert.Equal(result.FileName, managedFile.FileName);
     }
 
     [Fact]
-    public async Task ProcessDocumentAsync_XMLFile_ShouldConvertToMarkdown()
+    public async Task ProcessDocumentAsync_XMLFile_ShouldConvertToPdf()
     {
         // Arrange
         var xmlContent = "<?xml version=\"1.0\"?><root><item>Test</item></root>";
@@ -88,14 +98,18 @@ public class DocumentProcessingServiceTests
         _mockStorageService
             .Setup(s => s.UploadFileAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string>()))
             .ReturnsAsync("test-storage-key");
+        
+        _mockStorageService
+            .Setup(s => s.ComputeContentHash(It.IsAny<Stream>()))
+            .Returns("test-hash-123");
 
         // Act
         var result = await _service.ProcessDocumentAsync(stream, fileName, contentType);
 
         // Assert
         Assert.NotNull(result);
-        Assert.EndsWith(".md", result.FileName);
-        Assert.Equal("markdown", result.DocumentType);
+        Assert.EndsWith(".pdf", result.FileName); // Now produces PDF
+        Assert.Equal("pdf", result.DocumentType); // Document type is now PDF
         Assert.True(result.IsProcessed);
         Assert.NotEmpty(result.Chunks);
     }
@@ -211,5 +225,74 @@ public class DocumentProcessingServiceTests
         Assert.Equal("First chunk", result[0].ChunkText);
         Assert.Equal("Second chunk", result[1].ChunkText);
         Assert.Equal("Third chunk", result[2].ChunkText);
+    }
+
+    [Fact]
+    public async Task ProcessDocumentAsync_ShouldIncludePositionData()
+    {
+        // Arrange
+        var content = "Test content with position data";
+        var stream = new MemoryStream(Encoding.UTF8.GetBytes(content));
+        var fileName = "test.txt";
+        var contentType = "text/plain";
+
+        _mockStorageService
+            .Setup(s => s.UploadFileAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string>()))
+            .ReturnsAsync("test-storage-key");
+        
+        _mockStorageService
+            .Setup(s => s.ComputeContentHash(It.IsAny<Stream>()))
+            .Returns("test-hash-123");
+
+        // Act
+        var result = await _service.ProcessDocumentAsync(stream, fileName, contentType);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.True(result.IsProcessed);
+        Assert.NotEmpty(result.Chunks);
+        
+        // Verify chunks have position data
+        foreach (var chunk in result.Chunks)
+        {
+            Assert.NotNull(chunk.X);
+            Assert.NotNull(chunk.Y);
+            Assert.NotNull(chunk.Width);
+            Assert.NotNull(chunk.Height);
+            Assert.True(chunk.X >= 0);
+            Assert.True(chunk.Y >= 0);
+        }
+    }
+
+    [Fact]
+    public async Task ProcessDocumentAsync_ShouldCreateManagedFile()
+    {
+        // Arrange
+        var content = "Test content";
+        var stream = new MemoryStream(Encoding.UTF8.GetBytes(content));
+        var fileName = "test.txt";
+        var contentType = "text/plain";
+
+        _mockStorageService
+            .Setup(s => s.UploadFileAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string>()))
+            .ReturnsAsync("test-storage-key");
+        
+        _mockStorageService
+            .Setup(s => s.ComputeContentHash(It.IsAny<Stream>()))
+            .Returns("test-hash-123");
+
+        // Act
+        var result = await _service.ProcessDocumentAsync(stream, fileName, contentType);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.NotNull(result.ManagedFileId);
+        
+        // Verify ManagedFile was created in database
+        var managedFile = await _context.ManagedFiles.FindAsync(result.ManagedFileId);
+        Assert.NotNull(managedFile);
+        Assert.Equal(result.FileName, managedFile.FileName);
+        Assert.Equal("application/pdf", managedFile.ContentType);
+        Assert.StartsWith("Processed:", managedFile.Label);
     }
 }

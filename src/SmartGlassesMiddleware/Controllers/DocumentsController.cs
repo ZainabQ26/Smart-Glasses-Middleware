@@ -84,6 +84,17 @@ public class DocumentsController : ControllerBase
             using var stream = file.OpenReadStream();
             var document = await _processingService.ProcessDocumentAsync(stream, file.FileName, file.ContentType, requestId);
 
+            // Invalidate admin files cache and notify UI so processed file appears quickly
+            try
+            {
+                await InvalidateFilesCache();
+                await NotifyFilesChangedAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to invalidate files cache or notify clients after document processing");
+            }
+
             // Add to groups if specified
             if (groupIds != null && groupIds.Any())
             {
@@ -127,11 +138,13 @@ public class DocumentsController : ControllerBase
             {
                 document.Id,
                 document.FileName,
+                document.ContentType,
                 document.DocumentType,
                 document.TotalPages,
                 document.IsProcessed,
                 document.ProcessedAt,
                 ChunkCount = document.Chunks.Count,
+                ManagedFileId = document.ManagedFileId,
                 Groups = document.DocumentGroups.Select(dg => dg.ResourceGroupId).ToList(),
                 RequestId = requestId
             });
@@ -141,6 +154,34 @@ public class DocumentsController : ControllerBase
             _logger.LogError(ex, "Error uploading document");
             await _monitoringService.CompleteRequest(requestId, false, error: ex.Message);
             return StatusCode(500, new { error = "Failed to process document", details = ex.Message });
+        }
+    }
+
+    private Task NotifyFilesChangedAsync()
+    {
+        return _resourceHub != null
+            ? _resourceHub.Clients.All.SendAsync("filesChanged")
+            : Task.CompletedTask;
+    }
+
+    private async Task InvalidateFilesCache()
+    {
+        try
+        {
+            var totalCount = await _context.ManagedFiles.CountAsync();
+            var totalPages = (int)Math.Ceiling(totalCount / (double)DefaultPageSize);
+
+            var tasks = new List<Task>();
+            for (int page = 1; page <= totalPages + 1; page++)
+            {
+                tasks.Add(_cacheService.RemoveAsync($"admin:files:page:{page}:size:{DefaultPageSize}"));
+                tasks.Add(_cacheService.RemoveAsync($"admin:files:page:{page}:size:{MaxPageSize}"));
+            }
+            await Task.WhenAll(tasks);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error invalidating files cache");
         }
     }
 
@@ -391,11 +432,13 @@ public class DocumentsController : ControllerBase
         {
             document.Id,
             document.FileName,
+            document.ContentType,
             document.DocumentType,
             document.TotalPages,
             document.FileSize,
             document.UploadedAt,
             document.IsProcessed,
+            ManagedFileId = document.ManagedFileId,
             document.ProcessedAt,
             Chunks = document.Chunks.Select(c => new
             {
@@ -477,6 +520,100 @@ public class DocumentsController : ControllerBase
         }
 
         return NoContent();
+    }
+
+    /// <summary>
+    /// Find the location of specific text within a document
+    /// </summary>
+    [HttpPost("{documentId}/find-location")]
+    [ProducesResponseType(typeof(FindLocationResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> FindTextLocation(Guid documentId, [FromBody] FindLocationRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.SearchText))
+            return BadRequest("SearchText is required");
+
+        var document = await _context.DocumentMetadatas
+            .Include(d => d.Chunks)
+            .FirstOrDefaultAsync(d => d.Id == documentId);
+
+        if (document == null)
+            return NotFound(new { error = "Document not found" });
+
+        var locations = new List<TextLocation>();
+
+        foreach (var chunk in document.Chunks)
+        {
+            if (chunk.ChunkText.Contains(request.SearchText, StringComparison.OrdinalIgnoreCase))
+            {
+                // Calculate position description
+                var positionDescription = GetPositionDescription(chunk.X, chunk.Y, chunk.Width, chunk.Height);
+                
+                locations.Add(new TextLocation
+                {
+                    DocumentId = documentId,
+                    DocumentName = document.FileName,
+                    ChunkId = chunk.Id,
+                    PageNumber = chunk.PageNumber,
+                    X = chunk.X,
+                    Y = chunk.Y,
+                    Width = chunk.Width,
+                    Height = chunk.Height,
+                    Position = positionDescription,
+                    ContextText = GetContextAroundText(chunk.ChunkText, request.SearchText, 50)
+                });
+            }
+        }
+
+        return Ok(new FindLocationResponse
+        {
+            DocumentId = documentId,
+            DocumentName = document.FileName,
+            SearchText = request.SearchText,
+            MatchCount = locations.Count,
+            Locations = locations
+        });
+    }
+
+    private string GetPositionDescription(double? x, double? y, double? width, double? height)
+    {
+        if (!x.HasValue || !y.HasValue)
+            return "position unknown";
+
+        // Determine horizontal position
+        string horizontal;
+        if (x.Value < PdfConstants.PageWidth / 3)
+            horizontal = "left";
+        else if (x.Value < 2 * PdfConstants.PageWidth / 3)
+            horizontal = "center";
+        else
+            horizontal = "right";
+
+        // Determine vertical position (Y is from bottom in PDF coordinates)
+        string vertical;
+        if (y.Value < PdfConstants.PageHeight / 3)
+            vertical = "bottom";
+        else if (y.Value < 2 * PdfConstants.PageHeight / 3)
+            vertical = "middle";
+        else
+            vertical = "top";
+
+        return $"{vertical} {horizontal}";
+    }
+
+    private string GetContextAroundText(string text, string searchText, int contextChars)
+    {
+        var index = text.IndexOf(searchText, StringComparison.OrdinalIgnoreCase);
+        if (index == -1)
+            return text.Length > 100 ? text.Substring(0, 100) + "..." : text;
+
+        var startIndex = Math.Max(0, index - contextChars);
+        var endIndex = Math.Min(text.Length, index + searchText.Length + contextChars);
+        
+        var prefix = startIndex > 0 ? "..." : "";
+        var suffix = endIndex < text.Length ? "..." : "";
+        
+        return prefix + text.Substring(startIndex, endIndex - startIndex) + suffix;
     }
 
     /// <summary>

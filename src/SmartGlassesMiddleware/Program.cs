@@ -14,6 +14,7 @@ using StackExchange.Redis;
 using System.Reflection;
 using System.Runtime.Loader;
 using System.Collections.Generic;
+using QuestPDF;
 using System.Linq;
 using System.Threading.RateLimiting;
 using Polly;
@@ -22,6 +23,9 @@ using Polly.Extensions.Http;
 #pragma warning disable SKEXP0010
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Configure QuestPDF license for community usage to avoid runtime license validation errors
+QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
 
 // Configure basic logging providers early so we can log during startup
 builder.Logging.ClearProviders();
