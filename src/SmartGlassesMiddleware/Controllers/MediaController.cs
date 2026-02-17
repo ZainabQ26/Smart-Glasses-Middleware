@@ -281,7 +281,6 @@ public class MediaController : ControllerBase
             }
             // Allowed extensions (audio uploads are disallowed to avoid storing audio files)
             var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".gif", ".mp4", ".avi", ".mov" };
-            var audioExtensions = new[] { ".wav", ".mp3", ".m4a", ".flac", ".aac" };
 
             // Parse manifest JSON if provided
             List<string>? manifestOrder = null;
@@ -321,6 +320,33 @@ public class MediaController : ControllerBase
             else
             {
                 orderedFiles = files;
+            }
+
+            // If any uploaded file is an audio file and a text prompt exists, transcribe the
+            // first audio file and treat it as promptAudio (do not store the audio file).
+            var audioExtensions = new[] { ".wav", ".mp3", ".m4a", ".flac", ".aac" };
+            if (!string.IsNullOrWhiteSpace(request.Prompt) && orderedFiles.Any(f => audioExtensions.Contains(Path.GetExtension(f.FileName).ToLowerInvariant())))
+            {
+                var audioFile = orderedFiles.First(f => audioExtensions.Contains(Path.GetExtension(f.FileName).ToLowerInvariant()));
+                try
+                {
+                    using var promptStream = audioFile.OpenReadStream();
+                    var contentType = audioFile.ContentType ?? string.Empty;
+                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                    var transcribedPrompt = await _transcriptionService.TranscribeAsync(promptStream, audioFile.FileName, contentType, cts.Token);
+                    if (!string.IsNullOrWhiteSpace(transcribedPrompt)) promptAudioTranscription = transcribedPrompt;
+                }
+                catch (OperationCanceledException)
+                {
+                    _logger.LogWarning("Transcription timeout for inline prompt audio");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to transcribe inline prompt audio");
+                }
+
+                // Remove any audio files from the upload so they are not stored
+                orderedFiles = orderedFiles.Where(f => !audioExtensions.Contains(Path.GetExtension(f.FileName).ToLowerInvariant())).ToList();
             }
 
             // Parse per-file transcriptions JSON if provided

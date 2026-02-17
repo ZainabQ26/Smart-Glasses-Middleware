@@ -225,8 +225,20 @@ public class AdminController : ControllerBase
 
             if (existingFile != null)
             {
-                _logger.LogInformation("File with hash {Hash} already exists as {FileId}, returning existing file", contentHash, existingFile.Id);
-                await _monitoringService.CompleteRequest(requestId, true, "File already exists (deduplicated)");
+                _logger.LogInformation("File with hash {Hash} already exists as {FileId}, updating timestamp and returning existing file", contentHash, existingFile.Id);
+
+                // Refresh the uploaded timestamp so repeated uploads surface in the admin listing
+                existingFile.UploadedAt = DateTime.UtcNow;
+                // Optionally update the label to reflect the most recent upload label
+                existingFile.Label = request.Label ?? existingFile.Label;
+                _context.ManagedFiles.Update(existingFile);
+                await _context.SaveChangesAsync();
+
+                // Invalidate caches and notify listeners so UI and API listings reflect the update immediately
+                try { await InvalidateFilesCache(); } catch { /* best-effort */ }
+                try { await NotifyFilesChangedAsync(); } catch { /* best-effort */ }
+
+                await _monitoringService.CompleteRequest(requestId, true, "File already exists (deduplicated, refreshed)");
                 return Ok(new
                 {
                     existingFile.Id,
