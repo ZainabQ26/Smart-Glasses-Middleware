@@ -95,7 +95,7 @@ terraform init
 # Review plan
 terraform plan
 
-# Apply (this will take 15-20 minutes)
+# Apply (this will take 25-40 minutes - RDS Aurora alone takes 10-15 minutes)
 terraform apply
 
 # Save outputs
