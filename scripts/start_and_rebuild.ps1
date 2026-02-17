@@ -13,7 +13,7 @@ $ErrorActionPreference = 'Stop'
 Push-Location (Join-Path $PSScriptRoot '..')
 
 if ($E2E) {
-    Write-Host "E2E mode enabled — setting E2E_MODE=true for docker compose"
+    Write-Host "E2E mode enabled - setting E2E_MODE=true for docker compose"
     $env:E2E_MODE = 'true'
 } else {
     # ensure default is defined so docker-compose variable expansion is deterministic
