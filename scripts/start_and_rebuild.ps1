@@ -13,7 +13,7 @@ $ErrorActionPreference = 'Stop'
 Push-Location (Join-Path $PSScriptRoot '..')
 
 if ($E2E) {
-    Write-Host "E2E mode enabled — setting E2E_MODE=true for docker compose"
+    Write-Host "E2E mode enabled, setting E2E_MODE=true for docker compose"
     $env:E2E_MODE = 'true'
 } else {
     # ensure default is defined so docker-compose variable expansion is deterministic
@@ -62,7 +62,7 @@ Write-Host "Opening admin UI at: $adminUrl"
 try {
     Start-Process $adminUrl
 } catch {
-    Write-Host "Could not open browser automatically. Visit: $adminUrl"
+    Write-Host ("Could not open browser automatically. Visit: " + $adminUrl)
 }
 
 Pop-Location
