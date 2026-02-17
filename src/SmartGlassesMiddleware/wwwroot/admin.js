@@ -979,25 +979,6 @@ async function previewFile(id, fileName) {
     } catch (error) {
         previewContent.innerHTML = '<p style="color: #e74c3c;">Failed to load file preview.</p>';
     }
-            if (response.ok) {
-                const text = await response.text();
-                const renderedHtml = renderMarkdown(text);
-                previewContent.innerHTML = `<div style="text-align: left; max-height: 400px; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 14px;">${renderedHtml}</div>`;
-            } else {
-                previewContent.innerHTML = '<p style="color: #e74c3c;">Failed to load file preview.</p>';
-            }
-        } catch (error) {
-            previewContent.innerHTML = '<p style="color: #e74c3c;">Failed to load file preview.</p>';
-        }
-    } else {
-        previewContent.innerHTML = `
-            <div style="text-align: center; padding: 20px;">
-                <div style="font-size: 48px; margin-bottom: 10px;">📄</div>
-                <p style="color: #2f3a3f;">Preview not available for this file type.</p>
-                <p style="color: #95a5a6; font-size: 12px;">File: ${escapeHtml(fileName)}</p>
-            </div>
-        `;
-    }
 }
 
 function createPromptCard(prompt) {
