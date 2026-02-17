@@ -1043,8 +1043,19 @@ public class DocumentProcessingService : IDocumentProcessingService
     {
         var chunks = new List<DocumentChunk>();
 
-        // Combine all text items into a single text string
-        var fullText = string.Join(" ", textItems.Select(t => t.Text));
+        // Combine all text items into a single text string.
+        // If text items are single-character (extracted as individual letters),
+        // join without spaces; otherwise join with spaces and normalize whitespace.
+        var avgLen = textItems.Average(t => t.Text?.Length ?? 0);
+        string fullText;
+        if (avgLen <= 1.5)
+        {
+            fullText = string.Concat(textItems.Select(t => t.Text));
+        }
+        else
+        {
+            fullText = Regex.Replace(string.Join(" ", textItems.Select(t => t.Text)), "\\s+", " ");
+        }
         
         if (string.IsNullOrWhiteSpace(fullText))
             return chunks;
