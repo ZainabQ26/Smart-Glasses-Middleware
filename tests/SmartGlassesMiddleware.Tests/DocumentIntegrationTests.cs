@@ -147,6 +147,73 @@ namespace SmartGlassesMiddleware.Tests
         }
 
         [Fact(Timeout = 20000)]
+        public async Task AdminFiles_HtmlUpload_Triggers_RagProcessing()
+        {
+            var mockStorage = new Mock<IMediaStorageService>();
+            var mockRag = new Mock<IRagService>();
+
+            mockStorage.Setup(s => s.UploadMediaAsync(It.IsAny<System.IO.Stream>(), It.IsAny<string>(), It.IsAny<string>()))
+                .ReturnsAsync((System.IO.Stream s, string fn, string ct) => $"storage/{fn}");
+
+            var factory = _factory.WithWebHostBuilder(builder =>
+            {
+                builder.ConfigureServices(services =>
+                {
+                    services.AddSingleton<IMediaStorageService>(mockStorage.Object);
+                    services.AddSingleton<IRagService>(mockRag.Object);
+                });
+            });
+
+            using var client = factory.CreateClient();
+
+            var htmlBytes = System.Text.Encoding.UTF8.GetBytes("<html><body><h1>Hello</h1><p>HTML body</p></body></html>");
+            using var content = new MultipartFormDataContent();
+            var byteContent = new ByteArrayContent(htmlBytes);
+            byteContent.Headers.ContentType = new MediaTypeHeaderValue("text/html");
+            content.Add(byteContent, "file", "sample.html");
+            content.Add(new StringContent("e2e-html"), "label");
+
+            var resp = await client.PostAsync("/api/admin/files", content);
+            Assert.True(resp.StatusCode == HttpStatusCode.Accepted || resp.StatusCode == HttpStatusCode.OK);
+
+            mockRag.Verify(r => r.ProcessFileForRagAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()), Times.AtLeastOnce);
+        }
+
+        [Fact(Timeout = 20000)]
+        public async Task AdminFiles_DocxUpload_Triggers_RagProcessing()
+        {
+            var mockStorage = new Mock<IMediaStorageService>();
+            var mockRag = new Mock<IRagService>();
+
+            mockStorage.Setup(s => s.UploadMediaAsync(It.IsAny<System.IO.Stream>(), It.IsAny<string>(), It.IsAny<string>()))
+                .ReturnsAsync((System.IO.Stream s, string fn, string ct) => $"storage/{fn}");
+
+            var factory = _factory.WithWebHostBuilder(builder =>
+            {
+                builder.ConfigureServices(services =>
+                {
+                    services.AddSingleton<IMediaStorageService>(mockStorage.Object);
+                    services.AddSingleton<IRagService>(mockRag.Object);
+                });
+            });
+
+            using var client = factory.CreateClient();
+
+            // Minimal DOCX-like bytes (ZIP header) to simulate a .docx file
+            var docxBytes = new byte[] { 0x50, 0x4B, 0x03, 0x04 };
+            using var content = new MultipartFormDataContent();
+            var byteContent = new ByteArrayContent(docxBytes);
+            byteContent.Headers.ContentType = new MediaTypeHeaderValue("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+            content.Add(byteContent, "file", "sample.docx");
+            content.Add(new StringContent("e2e-docx"), "label");
+
+            var resp = await client.PostAsync("/api/admin/files", content);
+            Assert.True(resp.StatusCode == HttpStatusCode.Accepted || resp.StatusCode == HttpStatusCode.OK);
+
+            mockRag.Verify(r => r.ProcessFileForRagAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()), Times.AtLeastOnce);
+        }
+
+        [Fact(Timeout = 20000)]
         public async Task DocumentsUpload_TextFile_Is_AutoNamed_And_Stored_As_Markdown()
         {
             var mockStorage = new Mock<IMediaStorageService>();
