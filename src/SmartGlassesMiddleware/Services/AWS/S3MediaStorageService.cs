@@ -72,7 +72,18 @@ public class S3MediaStorageService : IMediaStorageService
 
     public async Task<string> UploadFileAsync(string key, Stream fileStream, string contentType)
     {
-        var bucket = contentType.Contains("document") || contentType.Contains("pdf") || contentType.Contains("word")
+        // Use proper MIME type matching for bucket selection
+        var documentMimeTypes = new[]
+        {
+            "application/pdf",
+            "application/msword",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.ms-excel",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "text/plain"
+        };
+        
+        var bucket = documentMimeTypes.Any(mime => contentType.StartsWith(mime, StringComparison.OrdinalIgnoreCase))
             ? _documentsBucket : _mediaBucket;
         var uploadRequest = new TransferUtilityUploadRequest
         {

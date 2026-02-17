@@ -124,9 +124,10 @@ resource "aws_secretsmanager_secret" "redis_credentials" {
 resource "aws_secretsmanager_secret_version" "redis_credentials" {
   secret_id = aws_secretsmanager_secret.redis_credentials.id
   secret_string = jsonencode({
-    auth_token = random_password.redis_auth_token.result
-    endpoint   = var.environment == "prod" ? aws_elasticache_replication_group.redis.primary_endpoint_address : (var.environment == "dev" ? aws_elasticache_cluster.redis_single[0].cache_nodes[0].address : aws_elasticache_replication_group.redis.primary_endpoint_address)
-    port       = 6379
+    auth_token        = random_password.redis_auth_token.result
+    endpoint          = var.environment == "prod" ? aws_elasticache_replication_group.redis.primary_endpoint_address : (var.environment == "dev" ? aws_elasticache_cluster.redis_single[0].cache_nodes[0].address : aws_elasticache_replication_group.redis.primary_endpoint_address)
+    port              = 6379
+    connection_string = var.environment == "prod" ? "${aws_elasticache_replication_group.redis.primary_endpoint_address}:6379,password=${random_password.redis_auth_token.result}" : (var.environment == "dev" ? "${aws_elasticache_cluster.redis_single[0].cache_nodes[0].address}:6379" : "${aws_elasticache_replication_group.redis.primary_endpoint_address}:6379,password=${random_password.redis_auth_token.result}")
   })
 
   depends_on = [

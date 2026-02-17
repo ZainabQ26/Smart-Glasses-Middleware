@@ -26,6 +26,8 @@ public class BedrockAIService : IAIService
         _logger = logger;
         _dispatcher = dispatcher;
         
+        // Model ID with version date (20240229). Update to newer versions as they become available.
+        // Check AWS Bedrock documentation for latest model versions: https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html
         _modelId = configuration["AWS:Bedrock:ModelId"] ?? "anthropic.claude-3-sonnet-20240229-v1:0";
         _knownTasks = configuration.GetSection("AI:KnownTasks").Get<List<string>>() ?? new List<string>
         {

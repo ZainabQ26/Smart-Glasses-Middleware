@@ -53,12 +53,13 @@ resource "aws_secretsmanager_secret" "db_credentials" {
 resource "aws_secretsmanager_secret_version" "db_credentials" {
   secret_id = aws_secretsmanager_secret.db_credentials.id
   secret_string = jsonencode({
-    username = var.db_username
-    password = random_password.db_password.result
-    engine   = "postgres"
-    host     = aws_rds_cluster.main.endpoint
-    port     = 5432
-    dbname   = var.db_name
+    username          = var.db_username
+    password          = random_password.db_password.result
+    engine            = "postgres"
+    host              = aws_rds_cluster.main.endpoint
+    port              = 5432
+    dbname            = var.db_name
+    connection_string = "Host=${aws_rds_cluster.main.endpoint};Port=5432;Database=${var.db_name};Username=${var.db_username};Password=${random_password.db_password.result}"
   })
 }
 

@@ -35,8 +35,12 @@ def get_db_connection():
     
     if db_connection is not None:
         try:
-            # Test connection
-            db_connection.cursor().execute('SELECT 1')
+            # Test connection and properly close cursor
+            cursor = db_connection.cursor()
+            try:
+                cursor.execute('SELECT 1')
+            finally:
+                cursor.close()
             return db_connection
         except:
             db_connection = None
@@ -112,8 +116,10 @@ def get_embedding(text: str) -> List[float]:
     """Generate embedding using Amazon Bedrock Titan Embeddings"""
     try:
         # Prepare request for Titan Embeddings V2
+        # Titan V2 supports up to 8192 tokens (~32768 characters for English)
+        # Using 25000 characters as a conservative estimate (1 token ≈ 4 chars)
         request_body = json.dumps({
-            "inputText": text[:8000],  # Titan V2 max input: 8192 tokens
+            "inputText": text[:25000],
             "dimensions": 384,  # Match pgvector dimension
             "normalize": True
         })

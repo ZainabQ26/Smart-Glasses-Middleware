@@ -8,7 +8,6 @@ resource "aws_lb" "api" {
 
   enable_deletion_protection = var.environment == "prod" ? true : false
   enable_http2              = true
-  enable_cross_zone_load_balancing = true
 
   tags = {
     Name = "${var.project_name}-${var.environment}-api-alb"
