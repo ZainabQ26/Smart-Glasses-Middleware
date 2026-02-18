@@ -111,11 +111,25 @@ secrets/
 tests/**/TestResults/
 *.dmp
 
-# Playwright artifacts
-node_modules/
-playwright-report/
-test-results/
-playwright/.cache/
+# Test and temporary files
+*.txt
+!requirements.txt
+*.wav
+*.pdf
+!*.csproj
+regression-results*.txt
+*-results.txt
+test-*.txt
+test_*.txt
+*.json
+!package.json
+!package-lock.json
+!appsettings*.json
+!tsconfig*.json
+!*.csproj
+
+# LocalStack tokens
+.localstack_token*.txt
 
 # AWS and Terraform
 *.tfstate
