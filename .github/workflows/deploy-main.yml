@@ -58,7 +58,7 @@ jobs:
         id: api
         run: |
           IMAGE_URI=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/smart-glasses-api:${{ github.sha }}
-          docker build -t $IMAGE_URI ./src/SmartGlassesMiddleware
+          docker build -t $IMAGE_URI -f ./src/SmartGlassesMiddleware/Dockerfile .
           docker push $IMAGE_URI
           echo "api_image=$IMAGE_URI" >> $GITHUB_OUTPUT
 
