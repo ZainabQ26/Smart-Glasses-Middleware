@@ -80,8 +80,7 @@ public static class AwsServiceConfiguration
         services.AddScoped<IMediaStorageService, S3MediaStorageService>();
         services.AddScoped<IAIService, BedrockAIService>();
 
-        // TODO: Configure transcription implementation (Transcribe or Whisper Lambda)
-        // For now, using stub implementation while disabled services are being refactored
+        // Transcription service
         services.AddScoped<ITranscriptionService, StubTranscriptionService>();
 
         return services;

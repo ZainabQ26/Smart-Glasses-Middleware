@@ -1,9 +1,7 @@
 namespace SmartGlassesMiddleware.Services;
 
 /// <summary>
-/// Stub transcription service for local development.
-/// This is a placeholder that returns empty string for transcription.
-/// To be replaced with actual transcription service (AWS Transcribe, Whisper Lambda, etc.)
+/// Stub transcription service that returns empty transcriptions
 /// </summary>
 public class StubTranscriptionService : ITranscriptionService
 {

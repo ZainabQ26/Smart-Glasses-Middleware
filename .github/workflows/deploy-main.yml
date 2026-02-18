@@ -1,16 +1,44 @@
-name: CI/CD - Deploy on push to main
+name: Deploy to AWS
 
 on:
   push:
     branches: [ "main" ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'prod'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
 
 jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      
+      - name: Restore dependencies
+        run: dotnet restore
+      
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+
   build-and-push:
+    needs: build
     runs-on: ubuntu-latest
     outputs:
       api-image: ${{ steps.api.outputs.api_image }}
-      lambda-image: ${{ steps.lambda.outputs.lambda_image }}
-      client-image: ${{ steps.client.outputs.client_image }}
+      lambda-whisper-image: ${{ steps.lambda-whisper.outputs.lambda_image }}
+      lambda-document-image: ${{ steps.lambda-document.outputs.lambda_image }}
     steps:
       - uses: actions/checkout@v4
 
@@ -33,20 +61,28 @@ jobs:
           echo "api_image=$IMAGE_URI" >> $GITHUB_OUTPUT
 
       - name: Build & push Whisper Lambda image
-        id: lambda
+        id: lambda-whisper
         run: |
           IMAGE_URI=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/whisper-lambda:${{ github.sha }}
           docker build -t $IMAGE_URI ./aws/lambda-whisper
           docker push $IMAGE_URI
           echo "lambda_image=$IMAGE_URI" >> $GITHUB_OUTPUT
 
-      - name: Build & push client image (optional)
-        id: client
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build & push Document Processor Lambda image
+        id: lambda-document
         run: |
-          IMAGE_URI=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/smart-glasses-client:${{ github.sha }}
-          docker build -t $IMAGE_URI ./client-app
+          cd aws/lambda-document-processor
+          chmod +x build.sh
+          ./build.sh
+          IMAGE_URI=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/document-processor-lambda:${{ github.sha }}
+          docker build -t $IMAGE_URI .
           docker push $IMAGE_URI
-          echo "client_image=$IMAGE_URI" >> $GITHUB_OUTPUT
+          echo "lambda_image=$IMAGE_URI" >> $GITHUB_OUTPUT
 
   terraform-apply:
     needs: build-and-push
@@ -72,8 +108,8 @@ jobs:
         run: |
           cat > aws/infrastructure/tf_image_vars.auto.tfvars <<EOF
           api_image = "${{ needs.build-and-push.outputs.api-image }}"
-          lambda_image = "${{ needs.build-and-push.outputs.lambda-image }}"
-          client_image = "${{ needs.build-and-push.outputs.client-image }}"
+          lambda_whisper_image = "${{ needs.build-and-push.outputs.lambda-whisper-image }}"
+          lambda_document_image = "${{ needs.build-and-push.outputs.lambda-document-image }}"
           EOF
 
       - name: Terraform init & apply
