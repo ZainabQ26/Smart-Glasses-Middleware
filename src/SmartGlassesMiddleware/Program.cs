@@ -124,8 +124,7 @@ else
     _startupLogger.LogWarning("Redis registration skipped (either not configured or running in Testing environment).");
 }
 
-// Configure S3-compatible storage (MinIO for legacy compatibility, AWS S3 for production)
-// Note: When using AWS S3, configure via AWS:S3 settings in environment variables
+// Configure S3-compatible storage client
 builder.Services.AddSingleton<IMinioClient>(sp =>
 {
     var endpoint = builder.Configuration["MinIO:Endpoint"] ?? "localhost:9000";
@@ -138,8 +137,7 @@ builder.Services.AddSingleton<IMinioClient>(sp =>
         .Build();
 });
 
-// Configure AI model service (Ollama for legacy compatibility, AWS Bedrock for production)
-// Note: When using AWS Bedrock, configure via AWS:Bedrock settings in environment variables
+// Configure AI model service with Semantic Kernel
 builder.Services.AddSingleton<Kernel>(sp =>
 {
     var kernelBuilder = Kernel.CreateBuilder();
@@ -148,9 +146,7 @@ builder.Services.AddSingleton<Kernel>(sp =>
     var ollamaModel = builder.Configuration["AI:OllamaModel"] ?? "llama2";
     var ollamaEmbeddingModel = builder.Configuration["AI:OllamaEmbeddingModel"] ?? "nomic-embed-text";
 
-    // Configure Ollama chat completion service using OpenAI-compatible endpoint
-    // Ollama doesn't require an API key for local endpoints; the API key
-    // parameter is present for OpenAI-compatible overloads and is unused here
+    // Configure chat completion service using OpenAI-compatible endpoint
     const string notUsedPlaceholderApiKey = "not-needed";
     
     // Configure with timeout and attach a logging handler to capture outgoing requests
@@ -166,16 +162,15 @@ builder.Services.AddSingleton<Kernel>(sp =>
         endpoint: new Uri($"{ollamaEndpoint.TrimEnd('/')}/v1"),
         httpClient: httpClient);
     
-    // Configure Ollama embedding service
+    // Configure embedding service
     var embedHandler = new SmartGlassesMiddleware.Services.HttpLoggingHandler(_preLoggerFactory.CreateLogger("OllamaEmbedHttp")) { InnerHandler = new HttpClientHandler() };
     var embeddingHttpClient = new HttpClient(embedHandler)
     {
         Timeout = TimeSpan.FromSeconds(builder.Configuration.GetValue<int?>("AI:OllamaEmbeddingTimeoutSeconds") ?? 120)
     };
 
-    // Embeddings are provided via the typed IOllamaEmbeddingClient registered
-    // below (used by RAGService). Avoid calling AddOpenAIEmbeddingGenerator
-    // to keep compatibility with the installed SemanticKernel package
+    // Embeddings are provided via the typed IOllamaEmbeddingClient registered below (used by RAGService)
+    // Avoid calling AddOpenAIEmbeddingGenerator to keep compatibility with the installed SemanticKernel package
 
     return kernelBuilder.Build();
 });
@@ -206,7 +201,7 @@ else
 builder.Services.AddSingleton<IMetricsService, MetricsService>();
 builder.Services.AddSingleton<IRequestMonitoringService, RequestMonitoringService>();
 builder.Services.AddScoped<IRagService, RagService>();
-// Register embedding client (Ollama for legacy compatibility, AWS Bedrock for production)
+// Register embedding client
 builder.Services.AddHttpClient<IOllamaEmbeddingClient, OllamaEmbeddingClient>((sp, http) =>
 {
     var cfg = sp.GetRequiredService<IConfiguration>();
@@ -221,8 +216,7 @@ builder.Services.AddScoped<IDocumentHighlightService, DocumentHighlightService>(
 builder.Services.AddScoped<IConversationService, ConversationService>();
 // Global mapping service for ResourceGroup -> Conversation
 builder.Services.AddScoped<IGroupConversationMappingService, GroupConversationMappingService>();
-// Transcription service — stub implementation for local testing
-// For production, configure AWS Transcribe or deploy Whisper Lambda
+// Transcription service
 builder.Services.AddScoped<ITranscriptionService, StubTranscriptionService>();
 
 // Auto-register ITaskHandler implementations from this assembly and optional plugin DLLs in the 'tasks' folder.
@@ -1117,7 +1111,7 @@ app.MapGet("/health", async (IServiceProvider services) =>
     checks["ollama"] = new { healthy = ollamaOk, error = ollamaError };
     allHealthy &= ollamaOk;
 
-    // Check transcription service (legacy Vosk or AWS Transcribe/Whisper Lambda)
+    // Check transcription service
     var transcriptionOk = false;
     string? transcriptionError = null;
     try

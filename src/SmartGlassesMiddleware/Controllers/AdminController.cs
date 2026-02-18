@@ -254,7 +254,7 @@ public class AdminController : ControllerBase
             }
 
             await _monitoringService.UpdateRequestStatus(requestId, "Storing file...");
-            // Upload to storage (S3-compatible: MinIO for dev, AWS S3 for production)
+            // Upload to storage
             using var stream = request.File.OpenReadStream();
             var contentType = request.File.ContentType ?? "application/octet-stream";
             var storageKey = await _mediaStorageService.UploadMediaAsync(stream, request.File.FileName ?? string.Empty, contentType);
@@ -349,7 +349,7 @@ public class AdminController : ControllerBase
             requestId = await _monitoringService.StartRequest("FileDelete", 
                 $"Deleting file: {file.FileName}");
             
-            // Delete from storage (S3-compatible: MinIO for dev, AWS S3 for production)
+            // Delete from storage
             await _mediaStorageService.DeleteMediaAsync(file.StorageKey);
 
             // Delete from database
