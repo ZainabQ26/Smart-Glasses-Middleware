@@ -221,6 +221,14 @@ locals {
         {
           name  = "AWS_REGION"
           value = var.aws_region
+        },
+        {
+          name  = "DEPLOYMENT_ID"
+          value = var.deployment_id
+        },
+        {
+          name  = "DEPLOYMENT_ID"
+          value = var.deployment_id
         }
       ]
 
@@ -271,6 +279,7 @@ resource "aws_ecs_service" "api" {
   task_definition = aws_ecs_task_definition.api.arn
   desired_count   = var.ecs_api_desired_count
   launch_type     = "FARGATE"
+  force_new_deployment = true  # Force new deployment on every terraform apply
 
   network_configuration {
     subnets          = aws_subnet.private_app[*].id

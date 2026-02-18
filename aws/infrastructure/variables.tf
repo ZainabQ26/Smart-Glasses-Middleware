@@ -123,3 +123,9 @@ variable "localstack_endpoint" {
   type        = string
   default     = "http://localhost:4566"
 }
+
+variable "deployment_id" {
+  description = "Unique deployment ID (e.g. from GitHub Actions run ID) to force container updates"
+  type        = string
+  default     = ""
+}
