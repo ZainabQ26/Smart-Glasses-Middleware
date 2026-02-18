@@ -42,6 +42,16 @@ public static class AwsServiceConfiguration
                 {
                     ServiceURL = localStackEndpoint
                 }));
+            services.AddSingleton<Amazon.Lambda.IAmazonLambda>(sp =>
+                new Amazon.Lambda.AmazonLambdaClient(credentials, new Amazon.Lambda.AmazonLambdaConfig
+                {
+                    ServiceURL = localStackEndpoint
+                }));
+            services.AddSingleton<Amazon.SQS.IAmazonSQS>(sp =>
+                new Amazon.SQS.AmazonSQSClient(credentials, new Amazon.SQS.AmazonSQSConfig
+                {
+                    ServiceURL = localStackEndpoint
+                }));
             services.AddSingleton<IAmazonTranscribeService>(sp => 
                 new AmazonTranscribeServiceClient(credentials, new AmazonTranscribeServiceConfig
                 {
@@ -58,6 +68,8 @@ public static class AwsServiceConfiguration
             // Configure for real AWS
             services.AddAWSService<IAmazonS3>();
             services.AddAWSService<IAmazonBedrockRuntime>();
+            services.AddAWSService<Amazon.Lambda.IAmazonLambda>();
+            services.AddAWSService<Amazon.SQS.IAmazonSQS>();
             services.AddAWSService<IAmazonTranscribeService>();
             services.AddAWSService<IAmazonSecretsManager>();
             
@@ -67,7 +79,17 @@ public static class AwsServiceConfiguration
         // Register AWS-based service implementations
         services.AddScoped<IMediaStorageService, S3MediaStorageService>();
         services.AddScoped<IAIService, BedrockAIService>();
-        services.AddScoped<ITranscriptionService, AwsTranscribeService>();
+
+        // Allow configurable transcription implementation (Transcribe or Whisper Lambda)
+        var useWhisperLambda = configuration.GetValue<bool>("AWS:Transcription:UseWhisperLambda");
+        if (useWhisperLambda)
+        {
+            services.AddScoped<ITranscriptionService, LambdaWhisperService>();
+        }
+        else
+        {
+            services.AddScoped<ITranscriptionService, AwsTranscribeService>();
+        }
 
         return services;
     }

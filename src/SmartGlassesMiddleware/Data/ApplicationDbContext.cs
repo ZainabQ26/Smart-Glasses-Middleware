@@ -29,6 +29,7 @@ public class ApplicationDbContext : DbContext
     public DbSet<DocumentChunk> DocumentChunks { get; set; }
     public DbSet<DocumentGroup> DocumentGroups { get; set; }
     public DbSet<Conversation> Conversations { get; set; }
+    public DbSet<TranscriptionJob> TranscriptionJobs { get; set; }
     public DbSet<ChatMessage> ChatMessages { get; set; }
     public DbSet<ChatMessageAttachment> ChatMessageAttachments { get; set; }
     public DbSet<AIInteractionLog> AIInteractionLogs { get; set; }
@@ -257,6 +258,17 @@ public class ApplicationDbContext : DbContext
             entity.HasIndex(e => e.Timestamp);
             // Index for querying by model
             entity.HasIndex(e => e.ModelUsed);
+        });
+
+        modelBuilder.Entity<TranscriptionJob>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.JobId).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.S3Bucket).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.S3Key).IsRequired();
+            entity.Property(e => e.Status).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.CreatedAt).IsRequired();
+            entity.HasIndex(e => e.JobId).IsUnique();
         });
     }
 }

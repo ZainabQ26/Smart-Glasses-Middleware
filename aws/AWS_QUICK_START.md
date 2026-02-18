@@ -138,7 +138,7 @@ npm test
 |---------|----------------------|-------------------|
 | Storage | MinioMediaStorageService | S3MediaStorageService |
 | AI/LLM | OllamaAIService | BedrockAIService |
-| Transcription | HttpTranscriptionService (Vosk) | AwsTranscribeService |
+| Transcription | HttpTranscriptionService (Vosk) | AwsTranscribeService or Whisper Lambda |
 | Database | PostgreSQL (Docker) | RDS Aurora PostgreSQL |
 | Cache | Redis (Docker) | ElastiCache Redis |
 | Document Processing | Background Service | Lambda Function |
@@ -228,6 +228,46 @@ aws logs tail /aws/lambda/smart-glasses-dev-document-processor --follow
 2. Follow [aws/DEPLOYMENT.md](aws/DEPLOYMENT.md) for deployment
 3. Use [aws/LOCALSTACK.md](aws/LOCALSTACK.md) for local testing
 4. Review [aws/MIGRATION.md](aws/MIGRATION.md) for migration from Docker
+5. To switch transcription to a Whisper Lambda, see `aws/lambda-whisper` and `aws/infrastructure/whisper_lambda.tf` for templates.
+
+## Whisper Lambda - Quick Instructions
+
+1. Create an ECR repository for the whisper lambda (example name `smart-glasses-whisper`).
+
+2. Build and push the container image (from `aws/lambda-whisper`):
+
+```powershell
+# Build, tag, and push (replace <ECR_URI> with your repo URI)
+cd aws\lambda-whisper
+./build.sh <ECR_URI> latest
+```
+
+3. Deploy the Lambda via Terraform by passing the image URI to the module/terraform file:
+
+```powershell
+cd aws\infrastructure
+terraform init
+terraform apply -var "whisper_image_uri=<ECR_URI>:latest"
+```
+
+4. Update application AWS config (e.g., `appsettings.AWS.json`) to enable the Whisper Lambda:
+
+```json
+"AWS": {
+  "Transcription": {
+    "UseWhisperLambda": true,
+    "WhisperLambdaFunction": "smart-glasses-whisper",
+    "TranscriptionTimeoutSeconds": 300
+  }
+}
+```
+
+5. Redeploy the API (ECS) so it picks up the new configuration and DI registration.
+
+Notes:
+- The sample `aws/lambda-whisper` image uses `whisper`/`torch` and will be large; choose model `tiny` or `base` for lower memory and faster startup.
+- Ensure the Lambda has sufficient memory (>=2048MB) and timeout (>=120s) for longer audio.
+- Add IAM permissions if the Lambda needs to access S3 (for fetching audio) instead of sending bytes in the payload.
 
 ## Additional Resources
 
