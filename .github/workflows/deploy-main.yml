@@ -114,11 +114,34 @@ jobs:
           lambda_document_image = "${{ needs.build-and-push.outputs.lambda-document-image }}"
           EOF
 
-      - name: Terraform init & apply
+      - name: Terraform init
+        working-directory: aws/infrastructure
+        run: terraform init
+
+      - name: Import existing resources (if any)
         working-directory: aws/infrastructure
         run: |
-          terraform init
-          terraform apply -auto-approve
+          set +e
+          terraform import aws_s3_bucket.media smart-glasses-dev-media || true
+          terraform import aws_s3_bucket.documents smart-glasses-dev-documents || true
+          terraform import aws_s3_bucket.frontend smart-glasses-dev-frontend || true
+          terraform import aws_kms_alias.s3 alias/smart-glasses-dev-s3 || true
+          terraform import aws_kms_alias.rds alias/smart-glasses-dev-rds || true
+          terraform import aws_secretsmanager_secret.app_secrets smart-glasses-dev-app-secrets || true
+          terraform import aws_secretsmanager_secret.db_credentials smart-glasses-dev-db-credentials || true
+          terraform import aws_iam_role.rds_monitoring smart-glasses-dev-rds-monitoring-role || true
+          terraform import aws_iam_role.lambda_exec smart-glasses-whisper-exec || true
+
+          OAC_ID=$(aws cloudfront list-origin-access-controls --query "OriginAccessControlList.Items[?Name=='smart-glasses-dev-frontend-oac'].Id" --output text)
+          if [ -n "$OAC_ID" ] && [ "$OAC_ID" != "None" ]; then
+            terraform import aws_cloudfront_origin_access_control.frontend "$OAC_ID" || true
+          fi
+
+          set -e
+
+      - name: Terraform apply
+        working-directory: aws/infrastructure
+        run: terraform apply -auto-approve
 
       - name: Save Terraform outputs
         working-directory: aws/infrastructure
