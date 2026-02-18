@@ -118,6 +118,10 @@ resource "aws_secretsmanager_secret" "redis_credentials" {
   tags = {
     Name = "${var.project_name}-${var.environment}-redis-credentials"
   }
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_secretsmanager_secret_version" "redis_credentials" {
@@ -133,6 +137,10 @@ resource "aws_secretsmanager_secret_version" "redis_credentials" {
     aws_elasticache_replication_group.redis,
     aws_elasticache_cluster.redis_single
   ]
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
 }
 
 # CloudWatch Log Groups for ElastiCache
@@ -143,11 +151,23 @@ resource "aws_cloudwatch_log_group" "elasticache_slow_log" {
   tags = {
     Name = "${var.project_name}-${var.environment}-elasticache-slow-log"
   }
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_cloudwatch_log_group" "elasticache_engine_log" {
   name              = "/aws/elasticache/${var.project_name}-${var.environment}/engine-log"
   retention_in_days = var.environment == "prod" ? 30 : 7
+
+  tags = {
+    Name = "${var.project_name}-${var.environment}-elasticache-engine-log"
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
 
   tags = {
     Name = "${var.project_name}-${var.environment}-elasticache-engine-log"

@@ -135,6 +135,7 @@ jobs:
           # Secrets (by ARN, not name)
           terraform import aws_secretsmanager_secret.app_secrets arn:aws:secretsmanager:${AWS_REGION}:${{ secrets.AWS_ACCOUNT_ID }}:secret:smart-glasses-dev-app-secrets-* || true
           terraform import aws_secretsmanager_secret.db_credentials arn:aws:secretsmanager:${AWS_REGION}:${{ secrets.AWS_ACCOUNT_ID }}:secret:smart-glasses-dev-db-credentials-* || true
+          terraform import aws_secretsmanager_secret.redis_credentials arn:aws:secretsmanager:${AWS_REGION}:${{ secrets.AWS_ACCOUNT_ID }}:secret:smart-glasses-dev-redis-credentials-* || true
           
           # RDS
           terraform import aws_iam_role.rds_monitoring smart-glasses-dev-rds-monitoring-role || true
@@ -143,10 +144,16 @@ jobs:
           terraform import aws_iam_role.lambda_exec smart-glasses-whisper-exec || true
           terraform import aws_iam_role.lambda_document_exec smart-glasses-document-exec || true
           
-          # ALB (use full ARN after querying)
+          # ALB and target group (use full ARN)
           ALB_ARN=$(aws elbv2 describe-load-balancers --query "LoadBalancers[?LoadBalancerName=='smart-glasses-dev-api-alb'].LoadBalancerArn" --output text)
           if [ -n "$ALB_ARN" ] && [ "$ALB_ARN" != "None" ]; then
             terraform import aws_lb.api "$ALB_ARN" || true
+            # Extract load balancer name for target group import
+            LB_NAME=$(echo $ALB_ARN | cut -d'/' -f3-)
+            TG_ARN=$(aws elbv2 describe-target-groups --load-balancer-arn "$ALB_ARN" --query "TargetGroups[0].TargetGroupArn" --output text)
+            if [ -n "$TG_ARN" ] && [ "$TG_ARN" != "None" ]; then
+              terraform import aws_lb_target_group.api "$TG_ARN" || true
+            fi
           fi
           
           # CloudFront OAC
@@ -154,6 +161,10 @@ jobs:
           if [ -n "$OAC_ID" ] && [ "$OAC_ID" != "None" ]; then
             terraform import aws_cloudfront_origin_access_control.frontend "$OAC_ID" || true
           fi
+          
+          # CloudWatch Log Groups
+          terraform import aws_cloudwatch_log_group.elasticache_slow_log "/aws/elasticache/smart-glasses-dev/slow-log" || true
+          terraform import aws_cloudwatch_log_group.elasticache_engine_log "/aws/elasticache/smart-glasses-dev/engine-log" || true
           
           set -e
 
