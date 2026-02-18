@@ -15,7 +15,7 @@ output "rds_reader_endpoint" {
 
 output "elasticache_endpoint" {
   description = "ElastiCache Redis endpoint"
-  value       = aws_elasticache_cluster.redis.cache_nodes[0].address
+  value       = aws_elasticache_replication_group.redis.primary_endpoint_address
 }
 
 output "s3_media_bucket" {
