@@ -5,12 +5,12 @@ using SmartGlassesMiddleware.Services.AWS;
 namespace SmartGlassesMiddleware.Services;
 
 /// <summary>
-/// Extension methods for registering services (AWS or legacy)
+/// Extension methods for registering services
 /// </summary>
 public static class ServiceRegistrationExtensions
 {
     /// <summary>
-    /// Register storage services (AWS S3 for production, MinIO for local/legacy)
+    /// Register storage services
     /// </summary>
     public static IServiceCollection AddStorageServices(
         this IServiceCollection services, 
@@ -18,12 +18,12 @@ public static class ServiceRegistrationExtensions
     {
         if (configuration.IsAwsConfigured())
         {
-            // Use AWS S3 for production
+            // Use AWS S3
             services.AddAwsServices(configuration);
         }
         else
         {
-            // Use MinIO for local development or legacy deployments
+            // Use S3-compatible storage
             services.AddSingleton<IMinioClient>(sp =>
             {
                 var endpoint = configuration["MinIO:Endpoint"] ?? "localhost:9000";
@@ -43,7 +43,7 @@ public static class ServiceRegistrationExtensions
     }
 
     /// <summary>
-    /// Register AI services (AWS Bedrock for production, Ollama for local/legacy)
+    /// Register AI services
     /// </summary>
     public static IServiceCollection AddAIServices(
         this IServiceCollection services,
@@ -52,7 +52,7 @@ public static class ServiceRegistrationExtensions
     {
         if (configuration.IsAwsConfigured())
         {
-            // Use AWS Bedrock for production
+            // Use AWS Bedrock
             // AWS Bedrock is already registered by AddAwsServices
             if (!services.Any(s => s.ServiceType == typeof(IAIService)))
             {
@@ -61,7 +61,7 @@ public static class ServiceRegistrationExtensions
         }
         else
         {
-            // Use Ollama for local development or legacy deployments
+            // Use alternative AI service
             if (kernel != null)
             {
                 services.AddSingleton(kernel);
@@ -78,14 +78,13 @@ public static class ServiceRegistrationExtensions
     }
 
     /// <summary>
-    /// Register transcription services (stub for local, AWS Transcribe/Whisper Lambda for production)
+    /// Register transcription services
     /// </summary>
     public static IServiceCollection AddTranscriptionServices(
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        // Use stub implementation for local development
-        // For production, configure AWS Transcribe or deploy Whisper Lambda
+        // Use stub implementation
         if (!services.Any(s => s.ServiceType == typeof(ITranscriptionService)))
         {
             services.AddScoped<ITranscriptionService, StubTranscriptionService>();
@@ -95,7 +94,7 @@ public static class ServiceRegistrationExtensions
     }
 
     /// <summary>
-    /// Register embedding services (AWS Bedrock for production, Ollama for local/legacy)
+    /// Register embedding services
     /// </summary>
     public static IServiceCollection AddEmbeddingServices(
         this IServiceCollection services,
@@ -108,7 +107,7 @@ public static class ServiceRegistrationExtensions
         }
         else
         {
-            // Use Ollama for local development or legacy deployments
+            // Use alternative embedding service
             services.AddHttpClient<IOllamaEmbeddingClient, OllamaEmbeddingClient>((sp, http) =>
             {
                 var baseUrl = configuration["AI:OllamaEndpoint"] ?? "http://ollama:11434";

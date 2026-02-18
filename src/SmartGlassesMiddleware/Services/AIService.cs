@@ -76,7 +76,7 @@ public class OllamaAIService : IAIService
             }
 
             _logger.LogInformation("IAIService.ProcessRequestAsync entered; inputLength={L}", input.Length);
-            // Use AI model to detect the task (Ollama for legacy, AWS Bedrock for production)
+            // Use AI model to detect the task
             var taskDetectionPrompt = $@"
 You are a task classifier. Analyze the following input and determine if it matches one of these known tasks: 
 {string.Join(", ", _knownTasks)}.
@@ -145,9 +145,9 @@ Task:";
                 _logger.LogError(ex, "Handler for task {Task} failed, falling back to model processing", detectedTask);
             }
 
-            // Process with local AI model if no task handler is available
+            // Process with AI model if no task handler is available
             try
-{
+            {
                 var chatService = _kernel.GetRequiredService<IChatCompletionService>();
                 var processingPrompt = $@"
 You are a helpful assistant processing a {detectedTask} task.

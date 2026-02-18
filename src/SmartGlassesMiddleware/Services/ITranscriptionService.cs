@@ -2,7 +2,6 @@ namespace SmartGlassesMiddleware.Services;
 
 /// <summary>
 /// Interface for audio transcription services
-/// Currently a stub to allow build without transcription implementation
 /// </summary>
 public interface ITranscriptionService
 {
