@@ -10,7 +10,7 @@ namespace SmartGlassesMiddleware.Services;
 public static class ServiceRegistrationExtensions
 {
     /// <summary>
-    /// Register storage services (AWS S3 or MinIO)
+    /// Register storage services (AWS S3 for production, MinIO for local/legacy)
     /// </summary>
     public static IServiceCollection AddStorageServices(
         this IServiceCollection services, 
@@ -18,12 +18,12 @@ public static class ServiceRegistrationExtensions
     {
         if (configuration.IsAwsConfigured())
         {
-            // Use AWS services
+            // Use AWS S3 for production
             services.AddAwsServices(configuration);
         }
         else
         {
-            // Use legacy MinIO
+            // Use MinIO for local development or legacy deployments
             services.AddSingleton<IMinioClient>(sp =>
             {
                 var endpoint = configuration["MinIO:Endpoint"] ?? "localhost:9000";
@@ -43,7 +43,7 @@ public static class ServiceRegistrationExtensions
     }
 
     /// <summary>
-    /// Register AI services (AWS Bedrock or Ollama)
+    /// Register AI services (AWS Bedrock for production, Ollama for local/legacy)
     /// </summary>
     public static IServiceCollection AddAIServices(
         this IServiceCollection services,
@@ -52,8 +52,8 @@ public static class ServiceRegistrationExtensions
     {
         if (configuration.IsAwsConfigured())
         {
+            // Use AWS Bedrock for production
             // AWS Bedrock is already registered by AddAwsServices
-            // Just ensure it's configured
             if (!services.Any(s => s.ServiceType == typeof(IAIService)))
             {
                 services.AddScoped<IAIService, BedrockAIService>();
@@ -61,7 +61,7 @@ public static class ServiceRegistrationExtensions
         }
         else
         {
-            // Use legacy Ollama with Semantic Kernel
+            // Use Ollama for local development or legacy deployments
             if (kernel != null)
             {
                 services.AddSingleton(kernel);
