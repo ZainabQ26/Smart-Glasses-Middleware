@@ -1,4 +1,4 @@
 torch>=2.0.0
-whisper==20230314
+openai-whisper
 ffmpeg-python
 boto3
