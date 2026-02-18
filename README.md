@@ -9,30 +9,45 @@ This application can be deployed in two modes:
 ### 🐳 Docker Compose (Development/Self-Hosted)
 Quick setup for local development and self-hosted deployments using MinIO, Ollama, and containerized services.
 
+**Quick Start:**
+```bash
+docker-compose up -d
+```
+
 ### ☁️ AWS Cloud (Production)
 Cloud-native deployment using AWS services (S3, Bedrock, RDS Aurora, ElastiCache, Lambda, ECS Fargate).
 
-📚 **For AWS deployment, see:** [aws/AWS_QUICK_START.md](aws/AWS_QUICK_START.md)
+**Quick Start:**
+```powershell
+# 1. Configure AWS CLI
+aws configure
+
+# 2. Deploy infrastructure
+cd aws/infrastructure
+terraform init
+terraform apply
+
+# 3. Push Docker images
+# (See full guide for details)
+
+# 4. Deploy complete
+```
+
+📚 **For complete step-by-step AWS deployment, see:** [AWS_DEPLOYMENT_GUIDE.md](AWS_DEPLOYMENT_GUIDE.md)
+
+📚 **For AWS quick reference, see:** [aws/AWS_QUICK_START.md](aws/AWS_QUICK_START.md)
 
 ## Frontend Options
 
-The middleware provides a REST API and can be paired with any frontend. Three options are included:
+The middleware provides a REST API and can be paired with any frontend. Two options are included:
 
-### ⚡ Vite + React SPA (Recommended for Smart Glasses)
+### ⚡ Vite + React SPA (Recommended)
 Lightweight (~80KB) client-side app optimized for voice commands and PDF viewing. Ideal for Android glasses with limited resources.
 
 - **Location:** `client-app/`
 - **Quick Start:** `.\start-client.ps1` or see [client-app/README.md](client-app/README.md)
-- **Features:** Voice recording, PDF viewer, minimal bundle, fast load, TypeScript
-- **Best for:** Server-dependent apps, Android WebView, resource-constrained devices
-
-### 🎨 Next.js SSR Frontend (For Rich Dashboards)
-A Next.js application with server-side rendering that proxies API requests to the .NET backend. Ideal for building rich, interactive dashboards and user interfaces.
-
-- **Location:** `next-app/`
-- **Quick Start:** `.\start-nextjs.ps1` or see [next-app/README.md](next-app/README.md)
-- **Features:** SSR, TypeScript, Tailwind CSS, SignalR integration, automatic API proxying
-- **Best for:** Admin dashboards, desktop/tablet interfaces
+- **Features:** Voice recording, PDF viewer, minimal bundle, fast load, TypeScript, Tailwind CSS
+- **Best for:** Smart glasses, server-dependent apps, Android WebView, resource-constrained devices
 
 ### 📄 Static HTML Admin Pages
 Simple HTML/JS admin and monitoring dashboards served from `wwwroot/`. Good for basic admin tasks without a build step.
