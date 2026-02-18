@@ -63,6 +63,30 @@ resource "aws_sqs_queue" "whisper_queue" {
   name = "${var.whisper_function_name}-queue"
 }
 
+data "aws_iam_policy_document" "allow_sqs_send" {
+  statement {
+    actions = ["sqs:SendMessage", "sqs:SendMessageBatch"]
+    resources = [aws_sqs_queue.whisper_queue.arn]
+  }
+}
+
+resource "aws_iam_policy" "allow_sqs_send" {
+  name   = "${var.whisper_function_name}-allow-sqs-send"
+  policy = data.aws_iam_policy_document.allow_sqs_send.json
+}
+
+variable "api_role_name" {
+  type    = string
+  default = ""
+  description = "Optional: name of the IAM role (e.g. ECS or API role) to attach SQS send permission to"
+}
+
+resource "aws_iam_role_policy_attachment" "api_attach_sqs_send" {
+  count      = var.api_role_name != "" ? 1 : 0
+  role       = var.api_role_name
+  policy_arn = aws_iam_policy.allow_sqs_send.arn
+}
+
 resource "aws_lambda_event_source_mapping" "whisper_sqs_mapping" {
   event_source_arn = aws_sqs_queue.whisper_queue.arn
   function_name    = aws_lambda_function.whisper.arn
