@@ -122,21 +122,39 @@ jobs:
         working-directory: aws/infrastructure
         run: |
           set +e
+          
+          # S3 buckets
           terraform import aws_s3_bucket.media smart-glasses-dev-media || true
           terraform import aws_s3_bucket.documents smart-glasses-dev-documents || true
           terraform import aws_s3_bucket.frontend smart-glasses-dev-frontend || true
+          
+          # KMS keys and aliases
           terraform import aws_kms_alias.s3 alias/smart-glasses-dev-s3 || true
           terraform import aws_kms_alias.rds alias/smart-glasses-dev-rds || true
-          terraform import aws_secretsmanager_secret.app_secrets smart-glasses-dev-app-secrets || true
-          terraform import aws_secretsmanager_secret.db_credentials smart-glasses-dev-db-credentials || true
+          
+          # Secrets (by ARN, not name)
+          terraform import aws_secretsmanager_secret.app_secrets arn:aws:secretsmanager:${AWS_REGION}:${{ secrets.AWS_ACCOUNT_ID }}:secret:smart-glasses-dev-app-secrets-* || true
+          terraform import aws_secretsmanager_secret.db_credentials arn:aws:secretsmanager:${AWS_REGION}:${{ secrets.AWS_ACCOUNT_ID }}:secret:smart-glasses-dev-db-credentials-* || true
+          
+          # RDS
           terraform import aws_iam_role.rds_monitoring smart-glasses-dev-rds-monitoring-role || true
+          
+          # Lambda IAM roles
           terraform import aws_iam_role.lambda_exec smart-glasses-whisper-exec || true
-
+          terraform import aws_iam_role.lambda_document_exec smart-glasses-document-exec || true
+          
+          # ALB (use full ARN after querying)
+          ALB_ARN=$(aws elbv2 describe-load-balancers --query "LoadBalancers[?LoadBalancerName=='smart-glasses-dev-api-alb'].LoadBalancerArn" --output text)
+          if [ -n "$ALB_ARN" ] && [ "$ALB_ARN" != "None" ]; then
+            terraform import aws_lb.api "$ALB_ARN" || true
+          fi
+          
+          # CloudFront OAC
           OAC_ID=$(aws cloudfront list-origin-access-controls --query "OriginAccessControlList.Items[?Name=='smart-glasses-dev-frontend-oac'].Id" --output text)
           if [ -n "$OAC_ID" ] && [ "$OAC_ID" != "None" ]; then
             terraform import aws_cloudfront_origin_access_control.frontend "$OAC_ID" || true
           fi
-
+          
           set -e
 
       - name: Terraform apply
