@@ -1,4 +1,4 @@
-torch>=2.0.0
+torch==2.0.0+cpu -f https://download.pytorch.org/whl/torch_stable.html
 openai-whisper
 ffmpeg-python
 boto3
