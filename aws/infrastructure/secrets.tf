@@ -6,6 +6,10 @@ resource "aws_secretsmanager_secret" "app_secrets" {
   tags = {
     Name = "${var.project_name}-${var.environment}-app-secrets"
   }
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_secretsmanager_secret_version" "app_secrets" {
@@ -18,4 +22,10 @@ resource "aws_secretsmanager_secret_version" "app_secrets" {
     transcribe_language  = "en-US"
     cors_allowed_origins = var.domain_name != "" ? "https://${var.domain_name}" : "*"
   })
+
+  lifecycle {
+    ignore_changes = [
+      secret_string
+    ]
+  }
 }

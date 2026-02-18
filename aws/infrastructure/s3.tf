@@ -6,6 +6,10 @@ resource "aws_s3_bucket" "media" {
     Name        = "${var.project_name}-${var.environment}-media"
     Description = "Media files storage"
   }
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_s3_bucket_versioning" "media" {
@@ -85,6 +89,10 @@ resource "aws_s3_bucket" "documents" {
     Name        = "${var.project_name}-${var.environment}-documents"
     Description = "Document files storage"
   }
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_s3_bucket_versioning" "documents" {
@@ -151,6 +159,10 @@ resource "aws_s3_bucket" "frontend" {
   tags = {
     Name        = "${var.project_name}-${var.environment}-frontend"
     Description = "Static frontend files"
+  }
+
+  lifecycle {
+    prevent_destroy = true
   }
 }
 
@@ -233,6 +245,10 @@ resource "aws_kms_key" "s3" {
 
   tags = {
     Name = "${var.project_name}-${var.environment}-s3-kms"
+  }
+
+  lifecycle {
+    prevent_destroy = true
   }
 }
 
