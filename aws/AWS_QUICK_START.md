@@ -18,7 +18,7 @@ The application can be deployed in two modes:
 - Amazon Bedrock for AI/LLM
 - Amazon RDS Aurora for database
 - Amazon ElastiCache for caching
-- AWS Transcribe for transcription
+- Whisper Lambda (self-hosted) for transcription
 - AWS Lambda for document processing
 - Amazon ECS Fargate for API hosting
 - Amazon CloudFront for CDN

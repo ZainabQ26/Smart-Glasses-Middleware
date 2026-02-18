@@ -49,7 +49,7 @@ aws/
 - **Amazon Bedrock**: Managed LLM service (Claude 3 Sonnet)
 - **Amazon RDS Aurora**: Serverless PostgreSQL with pgvector
 - **Amazon ElastiCache**: Managed Redis
-- **AWS Transcribe**: Speech-to-text service (or self-hosted Vosk on ECS)
+- **Whisper Lambda**: Self-hosted Whisper model in Lambda for speech-to-text (replaces AWS Transcribe)
 - **AWS Lambda**: Serverless document processing
 - **Amazon ECS Fargate**: Container orchestration for API
 - **Application Load Balancer**: Load balancing and SSL
@@ -281,7 +281,7 @@ GitHub Actions workflow (`.github/workflows/deploy-aws.yml`) automatically:
 ### Phase 2: Code Updates
 - ✅ S3 service implementation
 - ✅ Bedrock AI service
-- ✅ Transcribe service
+- ✅ Whisper Lambda (transcription)
 - 🔄 Integration with existing code
 - ⏳ Update unit tests
 

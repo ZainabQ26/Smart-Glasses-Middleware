@@ -1,7 +1,4 @@
-variable "whisper_image_uri" {
-  description = "ECR image URI for the whisper lambda (including tag)"
-  type = string
-}
+// Use `lambda_image` variable from variables.tf (populated by CI) if provided.
 
 variable "whisper_function_name" {
   type = string
@@ -96,7 +93,7 @@ resource "aws_lambda_event_source_mapping" "whisper_sqs_mapping" {
 resource "aws_lambda_function" "whisper" {
   function_name = var.whisper_function_name
   package_type  = "Image"
-  image_uri     = var.whisper_image_uri
+  image_uri     = var.lambda_image != "" ? var.lambda_image : ""
   role          = aws_iam_role.lambda_exec.arn
   memory_size   = var.lambda_memory_mb
   timeout       = var.lambda_timeout
