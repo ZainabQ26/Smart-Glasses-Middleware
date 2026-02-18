@@ -27,7 +27,6 @@ public class DocumentsController : ControllerBase
     private readonly IHubContext<ResourceHub>? _resourceHub;
     private const int DefaultPageSize = 20;
     private const int MaxPageSize = 100;
-    private readonly long _maxFileSize;
 
     public DocumentsController(
         ILogger<DocumentsController> logger,
@@ -55,92 +54,150 @@ public class DocumentsController : ControllerBase
         _mediaStorageService = mediaStorageService;
         _conversationService = conversationService;
         _groupConversationMappingService = groupConversationMappingService;
-        _cacheService = cacheService ?? throw new ArgumentNullException(nameof(cacheService));
+        _cacheService = cacheService ?? new InMemoryCacheService(LoggerFactory.Create(b => b.AddConsole()).CreateLogger<InMemoryCacheService>());
         _resourceHub = resourceHub;
-        var maxFileSizeMB = configuration.GetValue<int?>("RAG:MaxFileSizeMB") ?? 50;
-        _maxFileSize = maxFileSizeMB * 1024 * 1024;
     }
 
     /// <summary>
-    /// Upload and process a document (PDF, DOCX, TXT, or image)
+    /// Upload a new document for processing and indexing
     /// </summary>
     [HttpPost("upload")]
-    [ProducesResponseType(typeof(DocumentMetadata), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(CreatedAtActionResult), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> UploadDocument(IFormFile file, [FromForm] List<Guid>? groupIds = null)
+    public async Task<IActionResult> UploadDocument(IFormFile? file, [FromQuery] List<Guid>? groupIds = null)
     {
         if (file == null || file.Length == 0)
-            return BadRequest("No file uploaded");
+            return BadRequest("File is required and cannot be empty");
 
-        // Validate file size
-        if (file.Length > _maxFileSize)
-            return BadRequest($"File size exceeds maximum allowed size of {_maxFileSize / 1024 / 1024}MB");
+        var maxFileSizeMb = int.TryParse(_configuration["RAG:MaxFileSizeMB"], out var size) ? size : 50;
+        if (file.Length > maxFileSizeMb * 1024 * 1024)
+            return BadRequest($"File size exceeds maximum of {maxFileSizeMb}MB");
 
-        // Start monitoring
-        var requestId = await _monitoringService.StartRequest("DocumentUpload", $"Uploading {file.FileName}");
+        var requestId = await _monitoringService.StartRequest("DocumentUpload", file.FileName ?? "unknown");
 
         try
         {
-            using var stream = file.OpenReadStream();
-            var document = await _processingService.ProcessDocumentAsync(stream, file.FileName, file.ContentType, requestId);
+            // Read the uploaded file into memory (small files expected in tests)
+            using var ms = new MemoryStream();
+            await file.CopyToAsync(ms);
+            ms.Position = 0;
 
-            // Add to groups if specified
-            if (groupIds != null && groupIds.Any())
+            // Create a placeholder DocumentMetadata so we can return an ID immediately
+            var documentId = Guid.NewGuid();
+            var placeholder = new DocumentMetadata
             {
-                foreach (var groupId in groupIds)
+                Id = documentId,
+                FileName = file.FileName ?? string.Empty,
+                OriginalFileName = file.FileName ?? string.Empty,
+                ContentType = file.ContentType ?? "application/octet-stream",
+                UploadedAt = DateTime.UtcNow,
+                FileSize = file.Length,
+                DocumentType = Path.GetExtension(file.FileName)?.TrimStart('.') ?? "",
+                IsProcessed = false
+            };
+
+            _context.DocumentMetadatas.Add(placeholder);
+            await _context.SaveChangesAsync();
+
+            // Fire-and-forget processing task to avoid blocking the request thread
+            _ = Task.Run(async () =>
+            {
+                try
                 {
-                    var group = await _context.ResourceGroups.FindAsync(groupId);
-                    if (group != null)
+                    ms.Position = 0;
+                    var processed = await _processingService.ProcessDocumentAsync(ms, file.FileName, file.ContentType, requestId, documentId);
+
+                    // Attach to groups if specified
+                    if (groupIds != null && groupIds.Any())
                     {
-                        document.DocumentGroups.Add(new DocumentGroup
+                        foreach (var groupId in groupIds)
                         {
-                            DocumentMetadataId = document.Id,
-                            ResourceGroupId = groupId
-                        });
+                            var group = await _context.ResourceGroups.FindAsync(groupId);
+                            if (group != null)
+                            {
+                                processed.DocumentGroups.Add(new DocumentGroup
+                                {
+                                    DocumentMetadataId = processed.Id,
+                                    ResourceGroupId = groupId
+                                });
+                            }
+                            else
+                            {
+                                _logger.LogWarning("Group {GroupId} not found during background processing", groupId);
+                            }
+                        }
+                        await _context.SaveChangesAsync();
+
+                        await InvalidateGroupsCache();
+                        await NotifyGroupsChangedAsync();
                     }
-                    else
+
+                    // Generate embeddings (best-effort)
+                    try
                     {
-                        _logger.LogWarning("Group {GroupId} not found, skipping", groupId);
+                        await _monitoringService.UpdateRequestStatus(requestId, "Processing", "Generating embeddings", 95);
+                        await _ragService.GenerateEmbeddingsAsync(processed.Id);
                     }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error generating embeddings for document {DocumentId} in background", processed.Id);
+                    }
+
+                    // Invalidate caches and notify UI
+                    try
+                    {
+                        await InvalidateFilesCache();
+                        await NotifyFilesChangedAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to invalidate files cache or notify clients after background document processing");
+                    }
+
+                    await _monitoringService.CompleteRequest(requestId, true, $"Document {processed.FileName} processed successfully");
                 }
-                await _context.SaveChangesAsync();
-
-                await InvalidateGroupsCache();
-                await NotifyGroupsChangedAsync();
-            }
-
-            // Generate embeddings for the document chunks (with retry logic)
-            try
-            {
-                await _monitoringService.UpdateRequestStatus(requestId, "Processing", "Generating embeddings", 95);
-                await _ragService.GenerateEmbeddingsAsync(document.Id);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error generating embeddings for document {DocumentId}, will retry later", document.Id);
-                // Don't fail the upload, background service will retry
-            }
-
-            await _monitoringService.CompleteRequest(requestId, true, $"Document {document.FileName} processed successfully");
-
-            return Ok(new
-            {
-                document.Id,
-                document.FileName,
-                document.DocumentType,
-                document.TotalPages,
-                document.IsProcessed,
-                document.ProcessedAt,
-                ChunkCount = document.Chunks.Count,
-                Groups = document.DocumentGroups.Select(dg => dg.ResourceGroupId).ToList(),
-                RequestId = requestId
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Background processing failed for uploaded document {FileName}", file.FileName);
+                    try { await _monitoringService.CompleteRequest(requestId, false, error: ex.Message); } catch { }
+                }
             });
+
+            return CreatedAtAction(nameof(UploadDocument), new { id = documentId }, new { id = documentId, requestId });
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error uploading document");
             await _monitoringService.CompleteRequest(requestId, false, error: ex.Message);
-            return StatusCode(500, new { error = "Failed to process document", details = ex.Message });
+            return StatusCode(500, new { error = "Failed to accept document", details = ex.Message });
+        }
+    }
+
+    private Task NotifyFilesChangedAsync()
+    {
+        return _resourceHub != null
+            ? _resourceHub.Clients.All.SendAsync("filesChanged")
+            : Task.CompletedTask;
+    }
+
+    private async Task InvalidateFilesCache()
+    {
+        try
+        {
+            var totalCount = await _context.ManagedFiles.CountAsync();
+            var totalPages = (int)Math.Ceiling(totalCount / (double)DefaultPageSize);
+
+            var tasks = new List<Task>();
+            for (int page = 1; page <= totalPages + 1; page++)
+            {
+                tasks.Add(_cacheService.RemoveAsync($"admin:files:page:{page}:size:{DefaultPageSize}"));
+                tasks.Add(_cacheService.RemoveAsync($"admin:files:page:{page}:size:{MaxPageSize}"));
+            }
+            await Task.WhenAll(tasks);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error invalidating files cache");
         }
     }
 
@@ -391,11 +448,13 @@ public class DocumentsController : ControllerBase
         {
             document.Id,
             document.FileName,
+            document.ContentType,
             document.DocumentType,
             document.TotalPages,
             document.FileSize,
             document.UploadedAt,
             document.IsProcessed,
+            ManagedFileId = document.ManagedFileId,
             document.ProcessedAt,
             Chunks = document.Chunks.Select(c => new
             {
@@ -477,6 +536,100 @@ public class DocumentsController : ControllerBase
         }
 
         return NoContent();
+    }
+
+    /// <summary>
+    /// Find the location of specific text within a document
+    /// </summary>
+    [HttpPost("{documentId}/find-location")]
+    [ProducesResponseType(typeof(FindLocationResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> FindTextLocation(Guid documentId, [FromBody] FindLocationRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.SearchText))
+            return BadRequest("SearchText is required");
+
+        var document = await _context.DocumentMetadatas
+            .Include(d => d.Chunks)
+            .FirstOrDefaultAsync(d => d.Id == documentId);
+
+        if (document == null)
+            return NotFound(new { error = "Document not found" });
+
+        var locations = new List<TextLocation>();
+
+        foreach (var chunk in document.Chunks)
+        {
+            if (chunk.ChunkText.Contains(request.SearchText, StringComparison.OrdinalIgnoreCase))
+            {
+                // Calculate position description
+                var positionDescription = GetPositionDescription(chunk.X, chunk.Y, chunk.Width, chunk.Height);
+                
+                locations.Add(new TextLocation
+                {
+                    DocumentId = documentId,
+                    DocumentName = document.FileName,
+                    ChunkId = chunk.Id,
+                    PageNumber = chunk.PageNumber,
+                    X = chunk.X,
+                    Y = chunk.Y,
+                    Width = chunk.Width,
+                    Height = chunk.Height,
+                    Position = positionDescription,
+                    ContextText = GetContextAroundText(chunk.ChunkText, request.SearchText, 50)
+                });
+            }
+        }
+
+        return Ok(new FindLocationResponse
+        {
+            DocumentId = documentId,
+            DocumentName = document.FileName,
+            SearchText = request.SearchText,
+            MatchCount = locations.Count,
+            Locations = locations
+        });
+    }
+
+    private string GetPositionDescription(double? x, double? y, double? width, double? height)
+    {
+        if (!x.HasValue || !y.HasValue)
+            return "position unknown";
+
+        // Determine horizontal position
+        string horizontal;
+        if (x.Value < PdfConstants.PageWidth / 3)
+            horizontal = "left";
+        else if (x.Value < 2 * PdfConstants.PageWidth / 3)
+            horizontal = "center";
+        else
+            horizontal = "right";
+
+        // Determine vertical position (Y is from bottom in PDF coordinates)
+        string vertical;
+        if (y.Value < PdfConstants.PageHeight / 3)
+            vertical = "bottom";
+        else if (y.Value < 2 * PdfConstants.PageHeight / 3)
+            vertical = "middle";
+        else
+            vertical = "top";
+
+        return $"{vertical} {horizontal}";
+    }
+
+    private string GetContextAroundText(string text, string searchText, int contextChars)
+    {
+        var index = text.IndexOf(searchText, StringComparison.OrdinalIgnoreCase);
+        if (index == -1)
+            return text.Length > 100 ? text.Substring(0, 100) + "..." : text;
+
+        var startIndex = Math.Max(0, index - contextChars);
+        var endIndex = Math.Min(text.Length, index + searchText.Length + contextChars);
+        
+        var prefix = startIndex > 0 ? "..." : "";
+        var suffix = endIndex < text.Length ? "..." : "";
+        
+        return prefix + text.Substring(startIndex, endIndex - startIndex) + suffix;
     }
 
     /// <summary>

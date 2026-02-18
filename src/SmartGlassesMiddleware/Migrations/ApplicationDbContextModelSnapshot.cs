@@ -276,6 +276,9 @@ namespace SmartGlassesMiddleware.Migrations
                     b.Property<bool>("IsProcessed")
                         .HasColumnType("boolean");
 
+                    b.Property<Guid?>("ManagedFileId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("OriginalFileName")
                         .IsRequired()
                         .HasMaxLength(255)
@@ -298,6 +301,8 @@ namespace SmartGlassesMiddleware.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ManagedFileId");
 
                     b.ToTable("DocumentMetadatas");
                 });
@@ -678,6 +683,15 @@ namespace SmartGlassesMiddleware.Migrations
                     b.Navigation("DocumentMetadata");
 
                     b.Navigation("ResourceGroup");
+                });
+
+            modelBuilder.Entity("SmartGlassesMiddleware.Models.DocumentMetadata", b =>
+                {
+                    b.HasOne("SmartGlassesMiddleware.Models.ManagedFile", "ManagedFile")
+                        .WithMany()
+                        .HasForeignKey("ManagedFileId");
+
+                    b.Navigation("ManagedFile");
                 });
 
             modelBuilder.Entity("SmartGlassesMiddleware.Models.ManagedFileGroup", b =>

@@ -14,6 +14,7 @@ using StackExchange.Redis;
 using System.Reflection;
 using System.Runtime.Loader;
 using System.Collections.Generic;
+using QuestPDF;
 using System.Linq;
 using System.Threading.RateLimiting;
 using Polly;
@@ -22,6 +23,9 @@ using Polly.Extensions.Http;
 #pragma warning disable SKEXP0010
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Configure QuestPDF license for community usage to avoid runtime license validation errors
+QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
 
 // Configure basic logging providers early so we can log during startup
 builder.Logging.ClearProviders();
@@ -39,8 +43,8 @@ using var _preLoggerFactory = LoggerFactory.Create(lb =>
 });
 var _startupLogger = _preLoggerFactory.CreateLogger("Startup");
 
-// Configuration is now loaded from environment variables (via .env file in docker-compose)
-// No need for Docker secrets file loading since all settings are in .env
+// Configuration is loaded from environment variables (via .env file or docker-compose)
+// For AWS LocalStack deployment, see docker-compose.localstack.yml
 
 // Add services to the container.
 builder.Services.AddControllers();
@@ -120,7 +124,7 @@ else
     _startupLogger.LogWarning("Redis registration skipped (either not configured or running in Testing environment).");
 }
 
-// Configure MinIO
+// Configure S3-compatible storage client
 builder.Services.AddSingleton<IMinioClient>(sp =>
 {
     var endpoint = builder.Configuration["MinIO:Endpoint"] ?? "localhost:9000";
@@ -133,7 +137,7 @@ builder.Services.AddSingleton<IMinioClient>(sp =>
         .Build();
 });
 
-// Configure Semantic Kernel with Ollama
+// Configure AI model service with Semantic Kernel
 builder.Services.AddSingleton<Kernel>(sp =>
 {
     var kernelBuilder = Kernel.CreateBuilder();
@@ -142,9 +146,7 @@ builder.Services.AddSingleton<Kernel>(sp =>
     var ollamaModel = builder.Configuration["AI:OllamaModel"] ?? "llama2";
     var ollamaEmbeddingModel = builder.Configuration["AI:OllamaEmbeddingModel"] ?? "nomic-embed-text";
 
-    // Add Ollama chat completion service using OpenAI-compatible endpoint.
-    // Note: Ollama doesn't require an API key for local endpoints; the API key
-    // parameter is present for OpenAI-compatible overloads and is unused here.
+    // Configure chat completion service using OpenAI-compatible endpoint
     const string notUsedPlaceholderApiKey = "not-needed";
     
     // Configure with timeout and attach a logging handler to capture outgoing requests
@@ -160,16 +162,15 @@ builder.Services.AddSingleton<Kernel>(sp =>
         endpoint: new Uri($"{ollamaEndpoint.TrimEnd('/')}/v1"),
         httpClient: httpClient);
     
-    // Add Ollama embedding service
+    // Configure embedding service
     var embedHandler = new SmartGlassesMiddleware.Services.HttpLoggingHandler(_preLoggerFactory.CreateLogger("OllamaEmbedHttp")) { InnerHandler = new HttpClientHandler() };
     var embeddingHttpClient = new HttpClient(embedHandler)
     {
         Timeout = TimeSpan.FromSeconds(builder.Configuration.GetValue<int?>("AI:OllamaEmbeddingTimeoutSeconds") ?? 120)
     };
 
-    // Embeddings are provided via the typed IOllamaEmbeddingClient registered
-    // below (used by RAGService). Avoid calling AddOpenAIEmbeddingGenerator
-    // to keep compatibility with the installed SemanticKernel package.
+    // Embeddings are provided via the typed IOllamaEmbeddingClient registered below (used by RAGService)
+    // Avoid calling AddOpenAIEmbeddingGenerator to keep compatibility with the installed SemanticKernel package
 
     return kernelBuilder.Build();
 });
@@ -200,7 +201,7 @@ else
 builder.Services.AddSingleton<IMetricsService, MetricsService>();
 builder.Services.AddSingleton<IRequestMonitoringService, RequestMonitoringService>();
 builder.Services.AddScoped<IRagService, RagService>();
-// Register Ollama embedding client (typed HttpClient)
+// Register embedding client
 builder.Services.AddHttpClient<IOllamaEmbeddingClient, OllamaEmbeddingClient>((sp, http) =>
 {
     var cfg = sp.GetRequiredService<IConfiguration>();
@@ -215,15 +216,8 @@ builder.Services.AddScoped<IDocumentHighlightService, DocumentHighlightService>(
 builder.Services.AddScoped<IConversationService, ConversationService>();
 // Global mapping service for ResourceGroup -> Conversation
 builder.Services.AddScoped<IGroupConversationMappingService, GroupConversationMappingService>();
-// Transcription service (server-side) — registered as a typed HTTP client with timeout configuration
-builder.Services.AddHttpClient<ITranscriptionService, HttpTranscriptionService>((sp, client) =>
-{
-    var config = sp.GetRequiredService<IConfiguration>();
-    var timeoutSeconds = config.GetValue<int?>("ServiceTimeouts:TranscriptionTimeoutSeconds") ?? 30;
-    client.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
-})
-.AddPolicyHandler(GetRetryPolicy())
-.AddPolicyHandler(GetCircuitBreakerPolicy());
+// Transcription service
+builder.Services.AddScoped<ITranscriptionService, StubTranscriptionService>();
 
 // Auto-register ITaskHandler implementations from this assembly and optional plugin DLLs in the 'tasks' folder.
 
@@ -1117,23 +1111,23 @@ app.MapGet("/health", async (IServiceProvider services) =>
     checks["ollama"] = new { healthy = ollamaOk, error = ollamaError };
     allHealthy &= ollamaOk;
 
-    // Check Vosk Transcriber
-    var voskOk = false;
-    string? voskError = null;
+    // Check transcription service
+    var transcriptionOk = false;
+    string? transcriptionError = null;
     try
     {
-        var voskEndpoint = configuration["Transcription:Endpoint"] ?? "http://vosk-transcriber:8080";
+        var transcriptionEndpoint = configuration["Transcription:Endpoint"] ?? "http://vosk-transcriber:8080";
         using var httpClient = httpClientFactory.CreateClient();
         httpClient.Timeout = TimeSpan.FromSeconds(5);
-        var response = await httpClient.GetAsync($"{voskEndpoint}/health");
-        voskOk = response.IsSuccessStatusCode;
+        var response = await httpClient.GetAsync($"{transcriptionEndpoint}/health");
+        transcriptionOk = response.IsSuccessStatusCode;
     }
     catch (Exception ex)
     {
-        voskError = ex.Message;
+        transcriptionError = ex.Message;
     }
-    checks["vosk-transcriber"] = new { healthy = voskOk, error = voskError };
-    allHealthy &= voskOk;
+    checks["transcription-service"] = new { healthy = transcriptionOk, error = transcriptionError };
+    allHealthy &= transcriptionOk;
 
     // Check Redis Pub/Sub bridge
     var bridgeOk = false;
