@@ -1,0 +1,4 @@
+torch>=2.0.0
+whisper==20230314
+ffmpeg-python
+boto3

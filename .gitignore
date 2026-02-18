@@ -116,3 +116,19 @@ node_modules/
 playwright-report/
 test-results/
 playwright/.cache/
+
+# AWS and Terraform
+*.tfstate
+*.tfstate.backup
+*.tfstate.lock.info
+.terraform/
+.terraform.lock.hcl
+terraform.tfvars
+*.tfvars.json
+
+# Lambda deployment packages
+aws/lambda-*/deployment.zip
+aws/lambda-*/package/
+
+# LocalStack data
+.localstack/

@@ -2,6 +2,18 @@
 
 This repository contains the backend middleware for a smart glasses application. It provides a powerful, multi-modal API for interacting with AI models, processing documents, and managing tasks. The system is designed to be extensible, allowing developers to add new capabilities with ease.
 
+## Deployment Options
+
+This application can be deployed in two modes:
+
+### 🐳 Docker Compose (Development/Self-Hosted)
+Quick setup for local development and self-hosted deployments using MinIO, Ollama, and containerized services.
+
+### ☁️ AWS Cloud (Production)
+Cloud-native deployment using AWS services (S3, Bedrock, RDS Aurora, ElastiCache, Lambda, ECS Fargate).
+
+📚 **For AWS deployment, see:** [aws/AWS_QUICK_START.md](aws/AWS_QUICK_START.md)
+
 ## Features
 
   - **Multi-format Document Processing**: Extracts text and layout information from PDFs (digital and scanned), DOCX, TXT, and various image formats.
