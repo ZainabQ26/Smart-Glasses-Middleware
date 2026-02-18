@@ -1,4 +1,8 @@
-version: '3.8'
+# LocalStack Docker Compose Configuration
+# This file sets up LocalStack for local AWS development
+# 
+# To use LocalStack Pro features, set LOCALSTACK_AUTH_TOKEN environment variable
+# For LocalStack Community Edition, leave LOCALSTACK_AUTH_TOKEN empty
 
 services:
   localstack:

@@ -48,9 +48,9 @@ public class OllamaAIService : IAIService
             }
         }
         _dispatcher = dispatcher;
-        // Do not eagerly enumerate all task handlers during construction (those handlers
-        // may require heavy services like DB/minio/redis). Resolve known tasks lazily
-        // during request processing if needed. Initialize to empty list here.
+        // Do not eagerly enumerate all task handlers during construction
+        // (those handlers may require heavy services like DB, storage, or cache)
+        // Resolve known tasks lazily during request processing if needed
         _knownTasks = new List<string>();
     }
 
@@ -76,7 +76,7 @@ public class OllamaAIService : IAIService
             }
 
             _logger.LogInformation("IAIService.ProcessRequestAsync entered; inputLength={L}", input.Length);
-            // First, use Ollama to detect the task
+            // Use AI model to detect the task
             var taskDetectionPrompt = $@"
 You are a task classifier. Analyze the following input and determine if it matches one of these known tasks: 
 {string.Join(", ", _knownTasks)}.
@@ -145,7 +145,7 @@ Task:";
                 _logger.LogError(ex, "Handler for task {Task} failed, falling back to model processing", detectedTask);
             }
 
-            // Otherwise, process with local Ollama model
+            // Process with AI model if no task handler is available
             try
             {
                 var chatService = _kernel.GetRequiredService<IChatCompletionService>();
