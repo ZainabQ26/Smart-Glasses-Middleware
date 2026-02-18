@@ -171,7 +171,7 @@ See `aws/README.md` for more details.
 
 ## Notes
 
-- The application source code supports both AWS and legacy services (MinIO, Ollama) through configuration
-- Health checks for legacy services (Ollama, transcription) gracefully handle failures when not available
+- The application source code supports both AWS services and alternative service implementations through configuration
+- Health checks gracefully handle service failures when components are not available
 - The flexible architecture allows switching between LocalStack (dev) and production AWS services
 - Single GitHub workflow (`deploy-main.yml`) handles AWS deployment on push to main branch
