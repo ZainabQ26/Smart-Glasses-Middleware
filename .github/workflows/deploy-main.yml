@@ -128,7 +128,7 @@ jobs:
           terraform import aws_s3_bucket.documents smart-glasses-dev-documents 2>/dev/null || true
           terraform import aws_s3_bucket.frontend smart-glasses-dev-frontend 2>/dev/null || true
           
-          # KMS keys and aliases (silently ignore if not found)
+          # KMS keys and aliases
           terraform import aws_kms_alias.s3 alias/smart-glasses-dev-s3 2>/dev/null || true
           terraform import aws_kms_alias.rds alias/smart-glasses-dev-rds 2>/dev/null || true
           
@@ -141,15 +141,23 @@ jobs:
           terraform import aws_db_subnet_group.main smart-glasses-dev-db-subnet-group 2>/dev/null || true
           terraform import aws_rds_cluster_parameter_group.main smart-glasses-dev-aurora-pg-params 2>/dev/null || true
           
-          # RDS Monitoring Role
+          # RDS Monitoring Role and Policy
           terraform import aws_iam_role.rds_monitoring smart-glasses-dev-rds-monitoring-role 2>/dev/null || true
           terraform import aws_iam_role_policy.rds_monitoring smart-glasses-dev-rds-monitoring-role/inline-policy 2>/dev/null || true
           
-          # Lambda IAM roles
+          # Lambda Execution Roles and Inline Policies
           terraform import aws_iam_role.lambda_exec smart-glasses-whisper-exec 2>/dev/null || true
+          terraform import aws_iam_role_policy.lambda_exec smart-glasses-whisper-exec/inline-policy 2>/dev/null || true
           terraform import aws_iam_role.lambda_document_exec smart-glasses-document-exec 2>/dev/null || true
-          terraform import aws_iam_role_policy.lambda_exec smart-glasses-whisper-exec/lambda-policy 2>/dev/null || true
-          terraform import aws_iam_role_policy.lambda_document_exec smart-glasses-document-exec/lambda-document-policy 2>/dev/null || true
+          terraform import aws_iam_role_policy.lambda_document_exec smart-glasses-document-exec/inline-policy 2>/dev/null || true
+          
+          # Lambda IAM Policies
+          terraform import aws_iam_policy.lambda_s3_access arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:policy/smart-glasses-whisper-s3-access 2>/dev/null || true
+          terraform import aws_iam_policy.allow_sqs_send arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:policy/smart-glasses-whisper-allow-sqs-send 2>/dev/null || true
+          
+          # Lambda Functions (import by function name)
+          terraform import aws_lambda_function.whisper smart-glasses-dev-whisper 2>/dev/null || true
+          terraform import aws_lambda_function.document_processor smart-glasses-dev-document-processor 2>/dev/null || true
           
           # ALB and target group
           ALB_ARN=$(aws elbv2 describe-load-balancers --query "LoadBalancers[?LoadBalancerName=='smart-glasses-dev-api-alb'].LoadBalancerArn" --output text 2>/dev/null)
@@ -172,9 +180,10 @@ jobs:
           terraform import aws_cloudwatch_log_group.elasticache_engine_log "/aws/elasticache/smart-glasses-dev/engine-log" 2>/dev/null || true
           terraform import aws_cloudwatch_log_group.lambda_whisper "/aws/lambda/smart-glasses-dev-whisper" 2>/dev/null || true
           terraform import aws_cloudwatch_log_group.lambda_document_processor "/aws/lambda/smart-glasses-dev-document-processor" 2>/dev/null || true
+          terraform import aws_cloudwatch_log_group.ecs_api "/ecs/smart-glasses-dev/api" 2>/dev/null || true
           
-          # ECS resources
-          terraform import aws_ecs_cluster.main "${var.project_name}-${var.environment}-ecs" 2>/dev/null || true
+          # ECS Cluster
+          terraform import aws_ecs_cluster.main smart-glasses-dev-cluster 2>/dev/null || true
           
           set -e
 
