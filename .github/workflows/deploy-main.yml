@@ -118,73 +118,28 @@ jobs:
         working-directory: aws/infrastructure
         run: terraform init
 
-      - name: Import existing resources (if any)
+      - name: Import S3 and core resources into Terraform state
         working-directory: aws/infrastructure
         run: |
           set +e
           
-          # S3 buckets
-          terraform import aws_s3_bucket.media smart-glasses-dev-media 2>/dev/null || true
-          terraform import aws_s3_bucket.documents smart-glasses-dev-documents 2>/dev/null || true
-          terraform import aws_s3_bucket.frontend smart-glasses-dev-frontend 2>/dev/null || true
+          echo "=== Attempting to import critical resources ==="
           
-          # KMS keys and aliases
-          terraform import aws_kms_alias.s3 alias/smart-glasses-dev-s3 2>/dev/null || true
-          terraform import aws_kms_alias.rds alias/smart-glasses-dev-rds 2>/dev/null || true
+          # Import S3 buckets (CRITICAL - will block terraform if not imported)
+          terraform import -auto-approve aws_s3_bucket.media smart-glasses-dev-media
+          terraform import -auto-approve aws_s3_bucket.documents smart-glasses-dev-documents
+          terraform import -auto-approve aws_s3_bucket.frontend smart-glasses-dev-frontend
           
-          # Secrets (by ARN)
-          terraform import aws_secretsmanager_secret.app_secrets arn:aws:secretsmanager:${AWS_REGION}:${{ secrets.AWS_ACCOUNT_ID }}:secret:smart-glasses-dev-app-secrets-* 2>/dev/null || true
-          terraform import aws_secretsmanager_secret.db_credentials arn:aws:secretsmanager:${AWS_REGION}:${{ secrets.AWS_ACCOUNT_ID }}:secret:smart-glasses-dev-db-credentials-* 2>/dev/null || true
-          terraform import aws_secretsmanager_secret.redis_credentials arn:aws:secretsmanager:${AWS_REGION}:${{ secrets.AWS_ACCOUNT_ID }}:secret:smart-glasses-dev-redis-credentials-* 2>/dev/null || true
+          # Import KMS aliases (CRITICAL)
+          terraform import -auto-approve aws_kms_alias.s3 alias/smart-glasses-dev-s3 || true
+          terraform import -auto-approve aws_kms_alias.rds alias/smart-glasses-dev-rds || true
           
-          # RDS Subnet Group and Parameter Group
-          terraform import aws_db_subnet_group.main smart-glasses-dev-db-subnet-group 2>/dev/null || true
-          terraform import aws_rds_cluster_parameter_group.main smart-glasses-dev-aurora-pg-params 2>/dev/null || true
+          # Import secrets (CRITICAL - contains sensitive data)
+          terraform import -auto-approve aws_secretsmanager_secret.app_secrets arn:aws:secretsmanager:${AWS_REGION}:${{ secrets.AWS_ACCOUNT_ID }}:secret:smart-glasses-dev-app-secrets-* || true
+          terraform import -auto-approve aws_secretsmanager_secret.db_credentials arn:aws:secretsmanager:${AWS_REGION}:${{ secrets.AWS_ACCOUNT_ID }}:secret:smart-glasses-dev-db-credentials-* || true
+          terraform import -auto-approve aws_secretsmanager_secret.redis_credentials arn:aws:secretsmanager:${AWS_REGION}:${{ secrets.AWS_ACCOUNT_ID }}:secret:smart-glasses-dev-redis-credentials-* || true
           
-          # RDS Monitoring Role and Policy
-          terraform import aws_iam_role.rds_monitoring smart-glasses-dev-rds-monitoring-role 2>/dev/null || true
-          terraform import aws_iam_role_policy.rds_monitoring smart-glasses-dev-rds-monitoring-role/inline-policy 2>/dev/null || true
-          
-          # Lambda Execution Roles and Inline Policies
-          terraform import aws_iam_role.lambda_exec smart-glasses-whisper-exec 2>/dev/null || true
-          terraform import aws_iam_role_policy.lambda_exec smart-glasses-whisper-exec/inline-policy 2>/dev/null || true
-          terraform import aws_iam_role.lambda_document_exec smart-glasses-document-exec 2>/dev/null || true
-          terraform import aws_iam_role_policy.lambda_document_exec smart-glasses-document-exec/inline-policy 2>/dev/null || true
-          
-          # Lambda IAM Policies
-          terraform import aws_iam_policy.lambda_s3_access arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:policy/smart-glasses-whisper-s3-access 2>/dev/null || true
-          terraform import aws_iam_policy.allow_sqs_send arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:policy/smart-glasses-whisper-allow-sqs-send 2>/dev/null || true
-          
-          # Lambda Functions (import by function name)
-          terraform import aws_lambda_function.whisper smart-glasses-dev-whisper 2>/dev/null || true
-          terraform import aws_lambda_function.document_processor smart-glasses-dev-document-processor 2>/dev/null || true
-          
-          # ALB and target group
-          ALB_ARN=$(aws elbv2 describe-load-balancers --query "LoadBalancers[?LoadBalancerName=='smart-glasses-dev-api-alb'].LoadBalancerArn" --output text 2>/dev/null)
-          if [ -n "$ALB_ARN" ] && [ "$ALB_ARN" != "None" ]; then
-            terraform import aws_lb.api "$ALB_ARN" 2>/dev/null || true
-            TG_ARN=$(aws elbv2 describe-target-groups --load-balancer-arn "$ALB_ARN" --query "TargetGroups[?TargetGroupName=='smart-glasses-dev-api-tg'].TargetGroupArn" --output text 2>/dev/null)
-            if [ -n "$TG_ARN" ] && [ "$TG_ARN" != "None" ]; then
-              terraform import aws_lb_target_group.api "$TG_ARN" 2>/dev/null || true
-            fi
-          fi
-          
-          # CloudFront OAC
-          OAC_ID=$(aws cloudfront list-origin-access-controls --query "OriginAccessControlList.Items[?Name=='smart-glasses-dev-frontend-oac'].Id" --output text 2>/dev/null)
-          if [ -n "$OAC_ID" ] && [ "$OAC_ID" != "None" ]; then
-            terraform import aws_cloudfront_origin_access_control.frontend "$OAC_ID" 2>/dev/null || true
-          fi
-          
-          # CloudWatch Log Groups
-          terraform import aws_cloudwatch_log_group.elasticache_slow_log "/aws/elasticache/smart-glasses-dev/slow-log" 2>/dev/null || true
-          terraform import aws_cloudwatch_log_group.elasticache_engine_log "/aws/elasticache/smart-glasses-dev/engine-log" 2>/dev/null || true
-          terraform import aws_cloudwatch_log_group.lambda_whisper "/aws/lambda/smart-glasses-dev-whisper" 2>/dev/null || true
-          terraform import aws_cloudwatch_log_group.lambda_document_processor "/aws/lambda/smart-glasses-dev-document-processor" 2>/dev/null || true
-          terraform import aws_cloudwatch_log_group.ecs_api "/ecs/smart-glasses-dev/api" 2>/dev/null || true
-          
-          # ECS Cluster
-          terraform import aws_ecs_cluster.main smart-glasses-dev-cluster 2>/dev/null || true
-          
+          echo "=== Import step complete ==="
           set -e
 
       - name: Terraform apply
