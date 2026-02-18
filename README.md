@@ -14,6 +14,32 @@ Cloud-native deployment using AWS services (S3, Bedrock, RDS Aurora, ElastiCache
 
 📚 **For AWS deployment, see:** [aws/AWS_QUICK_START.md](aws/AWS_QUICK_START.md)
 
+## Frontend Options
+
+The middleware provides a REST API and can be paired with any frontend. Three options are included:
+
+### ⚡ Vite + React SPA (Recommended for Smart Glasses)
+Lightweight (~80KB) client-side app optimized for voice commands and PDF viewing. Ideal for Android glasses with limited resources.
+
+- **Location:** `client-app/`
+- **Quick Start:** `.\start-client.ps1` or see [client-app/README.md](client-app/README.md)
+- **Features:** Voice recording, PDF viewer, minimal bundle, fast load, TypeScript
+- **Best for:** Server-dependent apps, Android WebView, resource-constrained devices
+
+### 🎨 Next.js SSR Frontend (For Rich Dashboards)
+A Next.js application with server-side rendering that proxies API requests to the .NET backend. Ideal for building rich, interactive dashboards and user interfaces.
+
+- **Location:** `next-app/`
+- **Quick Start:** `.\start-nextjs.ps1` or see [next-app/README.md](next-app/README.md)
+- **Features:** SSR, TypeScript, Tailwind CSS, SignalR integration, automatic API proxying
+- **Best for:** Admin dashboards, desktop/tablet interfaces
+
+### 📄 Static HTML Admin Pages
+Simple HTML/JS admin and monitoring dashboards served from `wwwroot/`. Good for basic admin tasks without a build step.
+
+- **Files:** `wwwroot/admin.html`, `wwwroot/monitoring.html`
+- **Access:** Run the .NET app and visit `http://localhost:5000/admin.html`
+
 ## Features
 
   - **Multi-format Document Processing**: Extracts text and layout information from PDFs (digital and scanned), DOCX, TXT, and various image formats.
