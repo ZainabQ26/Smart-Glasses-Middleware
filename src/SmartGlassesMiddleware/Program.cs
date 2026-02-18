@@ -43,8 +43,8 @@ using var _preLoggerFactory = LoggerFactory.Create(lb =>
 });
 var _startupLogger = _preLoggerFactory.CreateLogger("Startup");
 
-// Configuration is now loaded from environment variables (via .env file in docker-compose)
-// No need for Docker secrets file loading since all settings are in .env
+// Configuration is loaded from environment variables (via .env file or docker-compose)
+// For AWS LocalStack deployment, see docker-compose.localstack.yml
 
 // Add services to the container.
 builder.Services.AddControllers();
