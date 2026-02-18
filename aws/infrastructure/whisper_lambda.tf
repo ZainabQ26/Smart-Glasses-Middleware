@@ -106,6 +106,12 @@ resource "aws_lambda_function" "whisper" {
   memory_size   = var.lambda_memory_mb
   timeout       = var.lambda_timeout
 
+  environment {
+    variables = {
+      DEPLOYMENT_ID = var.deployment_id  # Force update on every deploy
+    }
+  }
+
   lifecycle {
     ignore_changes = [image_uri]
   }

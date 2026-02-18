@@ -110,6 +110,7 @@ resource "aws_lambda_function" "document_processor" {
   runtime       = "python3.12"
   timeout       = 300 # 5 minutes
   memory_size   = 2048
+  source_code_hash = filebase64sha256("${path.module}/../lambda-document-processor/deployment.zip")
 
   vpc_config {
     subnet_ids         = aws_subnet.private_app[*].id
@@ -125,6 +126,7 @@ resource "aws_lambda_function" "document_processor" {
       EMBEDDING_MODEL_ID    = "amazon.titan-embed-text-v2:0"
       MAX_CHUNK_SIZE        = "1000"
       CHUNK_OVERLAP         = "200"
+      DEPLOYMENT_ID         = var.deployment_id  # Changes on every deploy
     }
   }
 

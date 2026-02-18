@@ -112,6 +112,7 @@ jobs:
           lambda_whisper_image = "${{ needs.build-and-push.outputs.lambda-whisper-image }}"
           lambda_image = "${{ needs.build-and-push.outputs.lambda-whisper-image }}"
           lambda_document_image = "${{ needs.build-and-push.outputs.lambda-document-image }}"
+          deployment_id = "${{ github.run_id }}"
           EOF
 
       - name: Terraform init
