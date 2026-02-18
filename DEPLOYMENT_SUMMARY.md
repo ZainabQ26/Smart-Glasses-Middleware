@@ -44,7 +44,7 @@ This repository has been cleaned and refocused to support AWS LocalStack deploym
 
 ### Source Code
 - ✅ `src/SmartGlassesMiddleware/Program.cs` - Updated comments for clarity
-- ✅ GitHub workflows updated to remove client-app references
+- ✅ GitHub workflow consolidated into single `deploy-main.yml` for AWS deployment
 
 ## Current Repository Structure
 
@@ -171,7 +171,7 @@ See `aws/README.md` for more details.
 
 ## Notes
 
-- The application source code still supports both AWS and legacy services (MinIO, Ollama) through configuration
-- Health checks for Ollama and Vosk are still present but gracefully handle failures
+- The application source code supports both AWS and legacy services (MinIO, Ollama) through configuration
+- Health checks for legacy services (Ollama, transcription) gracefully handle failures when not available
 - The flexible architecture allows switching between LocalStack (dev) and production AWS services
-- GitHub workflows are configured for production AWS deployment
+- Single GitHub workflow (`deploy-main.yml`) handles AWS deployment on push to main branch

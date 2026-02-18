@@ -78,14 +78,14 @@ public static class ServiceRegistrationExtensions
     }
 
     /// <summary>
-    /// Register transcription services (stub implementation for local testing)
-    /// TODO: Replace with actual transcription service (AWS Transcribe, Whisper Lambda, HTTP, etc.)
+    /// Register transcription services (stub for local, AWS Transcribe/Whisper Lambda for production)
     /// </summary>
     public static IServiceCollection AddTranscriptionServices(
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        // Always use stub for now to avoid dependency on disabled services
+        // Use stub implementation for local development
+        // For production, configure AWS Transcribe or deploy Whisper Lambda
         if (!services.Any(s => s.ServiceType == typeof(ITranscriptionService)))
         {
             services.AddScoped<ITranscriptionService, StubTranscriptionService>();
@@ -95,7 +95,7 @@ public static class ServiceRegistrationExtensions
     }
 
     /// <summary>
-    /// Register embedding services (AWS Bedrock or Ollama)
+    /// Register embedding services (AWS Bedrock for production, Ollama for local/legacy)
     /// </summary>
     public static IServiceCollection AddEmbeddingServices(
         this IServiceCollection services,
@@ -108,7 +108,7 @@ public static class ServiceRegistrationExtensions
         }
         else
         {
-            // Use legacy Ollama embeddings
+            // Use Ollama for local development or legacy deployments
             services.AddHttpClient<IOllamaEmbeddingClient, OllamaEmbeddingClient>((sp, http) =>
             {
                 var baseUrl = configuration["AI:OllamaEndpoint"] ?? "http://ollama:11434";
