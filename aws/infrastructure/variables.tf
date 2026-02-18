@@ -100,6 +100,12 @@ variable "lambda_image" {
   default     = ""
 }
 
+variable "lambda_whisper_image" {
+  description = "Full image URI for the Whisper Lambda Docker image"
+  type        = string
+  default     = ""
+}
+
 variable "client_image" {
   description = "Optional: full image URI (including tag) for the client container (optional)."
   type        = string

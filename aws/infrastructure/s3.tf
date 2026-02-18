@@ -4,7 +4,7 @@ resource "aws_s3_bucket" "media" {
 
   tags = {
     Name        = "${var.project_name}-${var.environment}-media"
-    Description = "Media files storage (images, videos, audio)"
+    Description = "Media files storage"
   }
 }
 
@@ -83,7 +83,7 @@ resource "aws_s3_bucket" "documents" {
 
   tags = {
     Name        = "${var.project_name}-${var.environment}-documents"
-    Description = "Document files storage (PDFs, DOCX, etc.)"
+    Description = "Document files storage"
   }
 }
 
@@ -150,7 +150,7 @@ resource "aws_s3_bucket" "frontend" {
 
   tags = {
     Name        = "${var.project_name}-${var.environment}-frontend"
-    Description = "Static frontend website files"
+    Description = "Static frontend files"
   }
 }
 

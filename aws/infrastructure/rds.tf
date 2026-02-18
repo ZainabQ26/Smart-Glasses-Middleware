@@ -16,7 +16,7 @@ resource "aws_rds_cluster_parameter_group" "main" {
 
   parameter {
     name  = "shared_preload_libraries"
-    value = "pg_stat_statements,pgvector"
+    value = "pg_stat_statements"
   }
 
   parameter {

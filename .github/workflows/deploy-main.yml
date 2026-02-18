@@ -110,6 +110,7 @@ jobs:
           cat > aws/infrastructure/tf_image_vars.auto.tfvars <<EOF
           api_image = "${{ needs.build-and-push.outputs.api-image }}"
           lambda_whisper_image = "${{ needs.build-and-push.outputs.lambda-whisper-image }}"
+          lambda_image = "${{ needs.build-and-push.outputs.lambda-whisper-image }}"
           lambda_document_image = "${{ needs.build-and-push.outputs.lambda-document-image }}"
           EOF
 

@@ -93,7 +93,7 @@ resource "aws_lambda_event_source_mapping" "whisper_sqs_mapping" {
 resource "aws_lambda_function" "whisper" {
   function_name = var.whisper_function_name
   package_type  = "Image"
-  image_uri     = var.lambda_image != "" ? var.lambda_image : ""
+  image_uri     = var.lambda_whisper_image != "" ? var.lambda_whisper_image : var.lambda_image
   role          = aws_iam_role.lambda_exec.arn
   memory_size   = var.lambda_memory_mb
   timeout       = var.lambda_timeout
