@@ -221,6 +221,64 @@ dotnet test
 npm test
 ```
 
+### Local helpers (run without installing Terraform locally)
+
+Two helper scripts are provided in the repository under `scripts/`:
+
+- `scripts/terraform_docker.ps1` — runs `terraform` inside the official HashiCorp Docker image. Example usages:
+
+```powershell
+# Validate terraform
+.\scripts\terraform_docker.ps1 -Cmd validate
+
+# Init (no remote backend) and plan
+.\scripts\terraform_docker.ps1 -Cmd "init -input=false"
+.\scripts\terraform_docker.ps1 -Cmd plan
+
+# Apply (requires AWS creds in env)
+.\scripts\terraform_docker.ps1 -Cmd apply
+```
+
+- `scripts/start_localstack.ps1` — start LocalStack via `docker-compose.localstack.yml` for local testing of S3, SQS, Lambda, etc. Example:
+
+```powershell
+.\scripts\start_localstack.ps1
+```
+
+Notes:
+- The `terraform_docker.ps1` helper mounts `aws/infrastructure` into the container. Provide AWS credentials in your shell (or use a local profile) so Terraform can authenticate when applying.
+- These helpers let you run `terraform validate` and basic plans without installing the Terraform binary locally.
+
+## Using the AWS Toolkit in VS Code
+
+The AWS Toolkit extension for VS Code lets you view AWS resources, deploy functions, and invoke Lambdas directly from the editor. Suggested flow:
+
+1. Install the **AWS Toolkit** extension and sign in to an AWS profile (or select the credentials the Toolkit should use).
+
+2. Use the VS Code **Run Task** UI to run the helper tasks added to the repository (`.vscode/tasks.json`):
+
+  - `Start LocalStack` — start LocalStack for local testing.
+  - `Terraform: init/validate/plan/apply (LocalStack)` — run Terraform inside Docker for local infra tests.
+  - `Build: Whisper Lambda image` and `Build: API image` — build images locally.
+  - `Push: ... to ECR` — push images to your ECR (requires AWS credentials in the environment).
+
+3. Deploy a Lambda from an image with the Toolkit:
+
+  - In the AWS Explorer, expand **ECR** to confirm the image exists (or use the pushed image URI).
+  - Right-click **Lambda** and choose **Deploy Lambda from container image** (Toolkit will prompt for function name, memory, timeout, and environment variables).
+
+4. Invoke and test the Lambda from the Toolkit:
+
+  - Right-click the function → **Invoke on AWS** to run test events and view logs.
+  - For the API, run the `Run API locally` task to exercise the sync fast-path locally, or deploy the API via Terraform/CI and test the provisioned endpoint.
+
+Notes:
+
+- The Toolkit uses your local AWS credentials/profile; ensure the profile has permissions to push to ECR and deploy Lambdas.
+- LocalStack provides good coverage for S3, SQS, and Lambda, but complex services like RDS/ElastiCache are partially supported — prefer a dev AWS account for full integration tests.
+- The `.vscode/tasks.json` in the repo provides one-click tasks to build, push, run Terraform (via Docker), and start LocalStack.
+
+
 ## Monitoring and Maintenance
 
 ### CloudWatch Logs
@@ -319,3 +377,41 @@ For issues or questions:
 - Review CloudWatch logs for error details
 - Check AWS service health dashboard
 - Consult AWS documentation for service-specific issues
+
+## Deployment Checklist (GitHub Actions)
+
+Before pushing to `main`, ensure the following repository secrets are set in GitHub (Settings → Secrets):
+
+- `AWS_ACCESS_KEY_ID` — IAM user or deploy role access key with permissions to create ECR, ECS, Lambda, S3, SQS, RDS, CloudFront, IAM.
+- `AWS_SECRET_ACCESS_KEY` — Secret key for the above.
+- `AWS_REGION` — e.g. `us-east-1`.
+- `AWS_ACCOUNT_ID` — Your AWS account ID (used for forming ECR URIs).
+- `DB_NAME` — Database name used by EF migrations (e.g. `smartglasses`).
+- `DB_USER` — DB admin/user for EF migrations.
+- `DB_PASSWORD` — DB password used for migrations (stored as a secret only used by workflow).
+
+Also verify these repository prerequisites:
+
+- The Terraform module `aws/infrastructure` exposes an output named `rds_endpoint` (workflow expects this). If different, update the workflow.
+- The Terraform config accepts optional variables `api_image`, `lambda_image`, and `client_image` (CI will write `tf_image_vars.auto.tfvars`).
+- Ensure an S3 backend is configured and accessible for Terraform state before running `terraform init`.
+
+Quick workflow verification steps (run locally):
+
+```bash
+# Validate Terraform in the infra folder
+cd aws/infrastructure
+terraform fmt -check
+terraform validate
+
+# Lint Dockerfiles (optional)
+hadolint aws/lambda-whisper/Dockerfile
+hadolint src/SmartGlassesMiddleware/Dockerfile
+```
+
+After these are set, pushing to `main` will trigger the `.github/workflows/deploy-main.yml` workflow which:
+
+- Builds & pushes images to ECR using the commit SHA as tag
+- Writes `api_image`, `lambda_image`, `client_image` into a `tf_image_vars.auto.tfvars` used by Terraform
+- Runs `terraform apply` in `aws/infrastructure`
+- Runs EF Core migrations against the provisioned RDS endpoint

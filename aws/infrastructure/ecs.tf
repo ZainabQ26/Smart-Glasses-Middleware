@@ -50,9 +50,6 @@ resource "aws_iam_role" "ecs_task_execution" {
     }]
   })
 
-  tags = {
-    Name = "${var.project_name}-${var.environment}-ecs-task-execution-role"
-  }
 }
 
 resource "aws_iam_role_policy_attachment" "ecs_task_execution" {
@@ -186,10 +183,21 @@ resource "aws_ecs_task_definition" "api" {
   execution_role_arn       = aws_iam_role.ecs_task_execution.arn
   task_role_arn            = aws_iam_role.ecs_task.arn
 
-  container_definitions = jsonencode([
+  # Use provided API image if set (e.g., from CI), otherwise fall back to ECR repo :latest
+  container_definitions = local.api_container_definitions
+
+  tags = {
+    Name = "${var.project_name}-${var.environment}-api-task"
+  }
+}
+
+locals {
+  api_image_to_use = var.api_image != "" ? var.api_image : "${aws_ecr_repository.api.repository_url}:latest"
+
+  api_container_definitions = jsonencode([
     {
       name      = "api"
-      image     = "${aws_ecr_repository.api.repository_url}:latest"
+      image     = local.api_image_to_use
       essential = true
 
       portMappings = [{
@@ -246,9 +254,6 @@ resource "aws_ecs_task_definition" "api" {
     }
   ])
 
-  tags = {
-    Name = "${var.project_name}-${var.environment}-api-task"
-  }
 }
 
 # ECS Service for API

@@ -87,3 +87,33 @@ variable "certificate_arn" {
   type        = string
   default     = ""
 }
+
+variable "api_image" {
+  description = "Optional: full image URI (including tag) for the API container. If empty, uses the ECR repo :latest tag."
+  type        = string
+  default     = ""
+}
+
+variable "lambda_image" {
+  description = "Optional: full image URI (including tag) for the Whisper Lambda image. If empty, Terraform will expect a default or separate variable."
+  type        = string
+  default     = ""
+}
+
+variable "client_image" {
+  description = "Optional: full image URI (including tag) for the client container (optional)."
+  type        = string
+  default     = ""
+}
+
+variable "use_localstack" {
+  description = "When true, configure the AWS provider to use LocalStack endpoints."
+  type        = bool
+  default     = false
+}
+
+variable "localstack_endpoint" {
+  description = "Base endpoint URL for LocalStack (including scheme and port), e.g. http://host.docker.internal:4566 or http://localhost:4566"
+  type        = string
+  default     = "http://localhost:4566"
+}

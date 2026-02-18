@@ -40,7 +40,7 @@ This PR implements a comprehensive cloud-native migration of the Smart Glasses M
   - Streaming support
   - Configurable model versions
   
-- **AwsTranscribeService.cs**: Replaces Vosk with AWS Transcribe
+- **LambdaWhisperService.cs**: Replaces Vosk/AWS Transcribe with self-hosted Whisper Lambda
   - Automatic language detection
   - S3-based workflow
   - Polling for completion
