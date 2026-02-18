@@ -41,44 +41,15 @@ The API will be available at `http://localhost:5000` after the containers start.
 
 ### VS Code AWS Toolkit Setup
 
-For the best development experience with LocalStack, configure VS Code AWS Toolkit:
+For the best development experience with LocalStack, you can configure VS Code AWS Toolkit.
 
-1. **Create a LocalStack AWS profile:**
+📚 **For complete VS Code AWS Toolkit setup instructions, see:** [VSCODE_AWS_TOOLKIT_SETUP.md](VSCODE_AWS_TOOLKIT_SETUP.md)
 
-PowerShell (Windows):
-```powershell
-aws configure set aws_access_key_id test --profile localstack
-aws configure set aws_secret_access_key test --profile localstack
-aws configure set region us-east-1 --profile localstack
-```
-
-Bash (Linux/Mac):
-```bash
-aws configure set aws_access_key_id test --profile localstack
-aws configure set aws_secret_access_key test --profile localstack
-aws configure set region us-east-1 --profile localstack
-```
-
-2. **Connect the AWS Toolkit to the LocalStack profile:**
-   - Open VS Code Command Palette (Ctrl+Shift+P / Cmd+Shift+P)
-   - Run `AWS: Add Connection`
-   - Choose `Shared credentials` and select the `localstack` profile
-
-3. **Use the LocalStack endpoint for CLI operations:**
-
-PowerShell:
-```powershell
-$env:AWS_PROFILE = "localstack"
-$env:AWS_ENDPOINT_URL = "http://localhost:4566"
-aws s3 ls --endpoint-url http://localhost:4566
-```
-
-Bash:
-```bash
-export AWS_PROFILE=localstack
-export AWS_ENDPOINT_URL=http://localhost:4566
-aws s3 ls --endpoint-url http://localhost:4566
-```
+**Quick Setup:**
+1. Create a LocalStack AWS profile: `aws configure set aws_access_key_id test --profile localstack`
+2. Set region: `aws configure set region us-east-1 --profile localstack`
+3. Connect AWS Toolkit to the `localstack` profile in VS Code
+4. Use AWS CLI with LocalStack endpoint: `aws --endpoint-url=http://localhost:4566 s3 ls`
 
 📚 **For detailed LocalStack testing and deployment information, see:** [aws/LOCALSTACK.md](aws/LOCALSTACK.md)
 
