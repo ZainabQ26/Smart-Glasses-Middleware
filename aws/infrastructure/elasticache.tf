@@ -31,7 +31,7 @@ resource "aws_elasticache_parameter_group" "redis" {
 # ElastiCache Replication Group (Redis Cluster)
 resource "aws_elasticache_replication_group" "redis" {
   replication_group_id       = "${var.project_name}-${var.environment}-redis"
-  replication_group_description = "Redis cluster for Smart Glasses Middleware"
+  description                = "Redis cluster for Smart Glasses Middleware"
   engine                     = "redis"
   engine_version             = "7.1"
   node_type                  = var.elasticache_node_type
@@ -53,7 +53,6 @@ resource "aws_elasticache_replication_group" "redis" {
   # Encryption
   at_rest_encryption_enabled = true
   transit_encryption_enabled = true
-  auth_token_enabled         = true
   auth_token                 = random_password.redis_auth_token.result
 
   # Notifications
