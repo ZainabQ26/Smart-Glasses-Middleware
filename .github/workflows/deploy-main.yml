@@ -10,7 +10,6 @@ jobs:
     outputs:
       api-image: ${{ steps.api.outputs.api_image }}
       lambda-image: ${{ steps.lambda.outputs.lambda_image }}
-      client-image: ${{ steps.client.outputs.client_image }}
     steps:
       - uses: actions/checkout@v4
 
@@ -40,14 +39,6 @@ jobs:
           docker push $IMAGE_URI
           echo "lambda_image=$IMAGE_URI" >> $GITHUB_OUTPUT
 
-      - name: Build & push client image (optional)
-        id: client
-        run: |
-          IMAGE_URI=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/smart-glasses-client:${{ github.sha }}
-          docker build -t $IMAGE_URI ./client-app
-          docker push $IMAGE_URI
-          echo "client_image=$IMAGE_URI" >> $GITHUB_OUTPUT
-
   terraform-apply:
     needs: build-and-push
     runs-on: ubuntu-latest
@@ -73,7 +64,6 @@ jobs:
           cat > aws/infrastructure/tf_image_vars.auto.tfvars <<EOF
           api_image = "${{ needs.build-and-push.outputs.api-image }}"
           lambda_image = "${{ needs.build-and-push.outputs.lambda-image }}"
-          client_image = "${{ needs.build-and-push.outputs.client-image }}"
           EOF
 
       - name: Terraform init & apply
