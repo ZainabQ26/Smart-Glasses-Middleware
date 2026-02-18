@@ -1,0 +1,144 @@
+version: '3.8'
+
+services:
+  localstack:
+    image: localstack/localstack:latest
+    container_name: localstack
+    ports:
+      - "4566:4566"            # LocalStack Gateway
+      - "4510-4559:4510-4559"  # External services port range
+    environment:
+      - SERVICES=s3,dynamodb,lambda,secretsmanager,rds,elasticache,ecr,ecs,cloudwatch,logs,bedrock
+      - DEBUG=1
+      - DATA_DIR=/tmp/localstack/data
+      - LAMBDA_EXECUTOR=docker
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+    volumes:
+      - "${LOCALSTACK_VOLUME_DIR:-./.localstack}:/tmp/localstack"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    networks:
+      - localstack-network
+
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: localstack-postgres
+    environment:
+      POSTGRES_DB: smartglasses
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-localstack-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - localstack-network
+
+  redis:
+    image: redis:latest
+    container_name: localstack-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-localstack-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - localstack-network
+
+  # Initialize LocalStack with AWS resources
+  localstack-init:
+    image: amazon/aws-cli:latest
+    container_name: localstack-init
+    depends_on:
+      - localstack
+    environment:
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ENDPOINT_URL=http://localstack:4566
+    entrypoint: /bin/sh -c
+    command: |
+      "
+      # Wait for LocalStack to be ready
+      until aws --endpoint-url=http://localstack:4566 s3 ls; do
+        echo 'Waiting for LocalStack to be ready...'
+        sleep 2
+      done
+
+      echo 'Creating S3 buckets...'
+      aws --endpoint-url=http://localstack:4566 s3 mb s3://smart-glasses-dev-media || true
+      aws --endpoint-url=http://localstack:4566 s3 mb s3://smart-glasses-dev-documents || true
+      aws --endpoint-url=http://localstack:4566 s3 mb s3://smart-glasses-dev-frontend || true
+
+      echo 'Creating Secrets Manager secrets...'
+      aws --endpoint-url=http://localstack:4566 secretsmanager create-secret \
+        --name smart-glasses-dev-db-credentials \
+        --secret-string '{\"username\":\"postgres\",\"password\":\"postgres\",\"host\":\"postgres\",\"port\":5432,\"dbname\":\"smartglasses\",\"connection_string\":\"Host=postgres;Port=5432;Database=smartglasses;Username=postgres;Password=postgres\"}' || true
+
+      aws --endpoint-url=http://localstack:4566 secretsmanager create-secret \
+        --name smart-glasses-dev-redis-credentials \
+        --secret-string '{\"auth_token\":\"\",\"endpoint\":\"redis\",\"port\":6379,\"connection_string\":\"redis:6379\"}' || true
+
+      aws --endpoint-url=http://localstack:4566 secretsmanager create-secret \
+        --name smart-glasses-dev-app-secrets \
+        --secret-string '{\"s3_media_bucket\":\"smart-glasses-dev-media\",\"s3_documents_bucket\":\"smart-glasses-dev-documents\",\"bedrock_model_id\":\"anthropic.claude-v2\",\"embedding_model_id\":\"amazon.titan-embed-text-v1\"}' || true
+
+      echo 'LocalStack initialization complete!'
+      "
+    networks:
+      - localstack-network
+
+  # Smart Glasses API configured for LocalStack
+  api:
+    build:
+      context: .
+      dockerfile: src/SmartGlassesMiddleware/Dockerfile
+    container_name: localstack-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      localstack:
+        condition: service_started
+      localstack-init:
+        condition: service_completed_successfully
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_ENDPOINT_URL=http://localstack:4566
+      - ConnectionStrings__DefaultConnection=Host=postgres;Port=5432;Database=smartglasses;Username=postgres;Password=postgres
+      - ConnectionStrings__Redis=redis:6379
+      - AWS__UseLocalStack=true
+      - AWS__S3__MediaBucket=smart-glasses-dev-media
+      - AWS__S3__DocumentsBucket=smart-glasses-dev-documents
+      - AWS__S3__Endpoint=http://localstack:4566
+      - AWS__Bedrock__ModelId=anthropic.claude-v2
+      - AWS__Bedrock__EmbeddingModelId=amazon.titan-embed-text-v1
+      - AWS__Bedrock__Endpoint=http://localstack:4566
+      - MigrateOnStartup=true
+    ports:
+      - "5000:5000"
+    networks:
+      - localstack-network
+
+networks:
+  localstack-network:
+    driver: bridge
+
+volumes:
+  postgres-localstack-data:
+  redis-localstack-data:
