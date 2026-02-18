@@ -1,14 +1,7 @@
-using Amazon.TranscribeService;
-using Amazon.TranscribeService.Model;
-using Amazon.S3;
-using Amazon.S3.Model;
-
 namespace SmartGlassesMiddleware.Services;
 
-/// <summary>
-/// AWS Transcribe implementation of transcription service
-/// </summary>
-public class AwsTranscribeService : ITranscriptionService
+// AwsTranscribeService disabled for LocalStack testing
+// Re-enable by ensuring all required AWS SDK packages are installed
 {
     private readonly IAmazonTranscribeService _transcribeClient;
     private readonly IAmazonS3 _s3Client;

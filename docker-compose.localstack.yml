@@ -10,14 +10,14 @@ services:
     environment:
       - SERVICES=s3,dynamodb,lambda,secretsmanager,rds,elasticache,ecr,ecs,cloudwatch,logs,bedrock
       - DEBUG=1
-      - DATA_DIR=/tmp/localstack/data
+      - DATA_DIR=/tmp/localstack_data/data
       - LAMBDA_EXECUTOR=docker
       - DOCKER_HOST=unix:///var/run/docker.sock
       - AWS_DEFAULT_REGION=us-east-1
       - AWS_ACCESS_KEY_ID=test
       - AWS_SECRET_ACCESS_KEY=test
     volumes:
-      - "${LOCALSTACK_VOLUME_DIR:-./.localstack}:/tmp/localstack"
+      - "localstack-data:/tmp/localstack_data"
       - "/var/run/docker.sock:/var/run/docker.sock"
     networks:
       - localstack-network
@@ -142,3 +142,4 @@ networks:
 volumes:
   postgres-localstack-data:
   redis-localstack-data:
+  localstack-data:

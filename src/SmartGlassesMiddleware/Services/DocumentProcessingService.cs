@@ -63,7 +63,7 @@ public class DocumentProcessingService : IDocumentProcessingService
     public async Task<DocumentMetadata> ProcessDocumentAsync(Stream fileStream, string fileName, string contentType, string? requestId = null, Guid? documentId = null)
     {
         var documentType = DetermineDocumentType(fileName, contentType);
-        var documentId = documentId = documentId ?? Guid.NewGuid();
+        var finalDocumentId = documentId ?? Guid.NewGuid();
         
         if (requestId != null && _monitoringService != null)
         {
@@ -85,7 +85,7 @@ public class DocumentProcessingService : IDocumentProcessingService
             }
 
             // Store only the converted text-based PDF
-            var storageKey = $"documents/{documentId}/{pdfFileName}";
+            var storageKey = $"documents/{finalDocumentId}/{pdfFileName}";
             pdfStream.Position = 0;
             await _storageService.UploadFileAsync(storageKey, pdfStream, "application/pdf");
 
@@ -98,7 +98,6 @@ public class DocumentProcessingService : IDocumentProcessingService
             {
                 Id = Guid.NewGuid(),
                 FileName = pdfFileName,
-                        var docId = documentId ?? Guid.NewGuid();
                 ContentType = "application/pdf",
                 StorageKey = storageKey,
                 ContentHash = contentHash,
@@ -108,10 +107,9 @@ public class DocumentProcessingService : IDocumentProcessingService
 
             _context.ManagedFiles.Add(managedFile);
 
-            var metadata = await _context.DocumentMetadatas.FindAsync(documentId) ?? new DocumentMetadata
+            var metadata = await _context.DocumentMetadatas.FindAsync(finalDocumentId) ?? new DocumentMetadata
             {
-
-                Id = documentId.Value,
+                Id = finalDocumentId,
                 FileName = pdfFileName,
                 OriginalFileName = fileName,
                 ContentType = "application/pdf",
@@ -143,9 +141,7 @@ public class DocumentProcessingService : IDocumentProcessingService
             metadata.ProcessedAt = DateTime.UtcNow;
             metadata.Chunks = chunks;
 
-                            var metadata = await _context.DocumentMetadatas.FindAsync(docId) ?? new DocumentMetadata
             await _context.SaveChangesAsync();
-                                Id = docId,
             if (requestId != null && _monitoringService != null)
             {
                 await _monitoringService.UpdateRequestStatus(requestId, "Processing", "Document processed successfully", 90);
@@ -159,7 +155,7 @@ public class DocumentProcessingService : IDocumentProcessingService
             
             var metadata = new DocumentMetadata
             {
-                Id = documentId,
+                Id = finalDocumentId,
                 FileName = fileName,
                 OriginalFileName = fileName,
                 ContentType = contentType,

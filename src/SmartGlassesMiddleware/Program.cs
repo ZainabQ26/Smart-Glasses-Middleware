@@ -219,15 +219,9 @@ builder.Services.AddScoped<IDocumentHighlightService, DocumentHighlightService>(
 builder.Services.AddScoped<IConversationService, ConversationService>();
 // Global mapping service for ResourceGroup -> Conversation
 builder.Services.AddScoped<IGroupConversationMappingService, GroupConversationMappingService>();
-// Transcription service (server-side) — registered as a typed HTTP client with timeout configuration
-builder.Services.AddHttpClient<ITranscriptionService, HttpTranscriptionService>((sp, client) =>
-{
-    var config = sp.GetRequiredService<IConfiguration>();
-    var timeoutSeconds = config.GetValue<int?>("ServiceTimeouts:TranscriptionTimeoutSeconds") ?? 30;
-    client.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
-})
-.AddPolicyHandler(GetRetryPolicy())
-.AddPolicyHandler(GetCircuitBreakerPolicy());
+// Transcription service — using stub implementation for local testing
+// TODO: Replace with actual transcription service (AWS Transcribe, Whisper Lambda, etc.)
+builder.Services.AddScoped<ITranscriptionService, StubTranscriptionService>();
 
 // Auto-register ITaskHandler implementations from this assembly and optional plugin DLLs in the 'tasks' folder.
 

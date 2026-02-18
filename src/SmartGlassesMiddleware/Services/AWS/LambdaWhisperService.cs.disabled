@@ -1,20 +1,7 @@
-using System.Text;
-using System.Text.Json;
-using Amazon.Lambda;
-using Amazon.Lambda.Model;
-using Amazon.S3;
-using Amazon.S3.Model;
-using Microsoft.EntityFrameworkCore;
-using SmartGlassesMiddleware.Data;
-
 namespace SmartGlassesMiddleware.Services;
 
-/// <summary>
-/// Transcription service that invokes a Whisper Lambda (container) on AWS.
-/// Expects the Lambda to accept a JSON payload: { "audio_base64": "..." }
-/// and return JSON: { "transcript": "..." }.
-/// </summary>
-public class LambdaWhisperService : ITranscriptionService
+// LambdaWhisperService disabled for LocalStack testing
+// Re-enable by ensuring all required AWS SDK packages are installed
 {
     private readonly IAmazonS3 _s3Client;
     private readonly IAmazonSQS _sqsClient;

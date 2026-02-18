@@ -32,6 +32,8 @@ docker-compose -f docker-compose.localstack.yml up -d
 docker-compose -f docker-compose.localstack.yml logs -f localstack
 ```
 
+If you are using VS Code, you can also run the task `Start LocalStack` from the Command Palette.
+
 ### 2. Configure Environment
 
 ```bash
@@ -41,6 +43,54 @@ export AWS_SECRET_ACCESS_KEY=test
 export AWS_DEFAULT_REGION=us-east-1
 export AWS_ENDPOINT_URL=http://localhost:4566
 ```
+
+## VS Code AWS Toolkit Setup (LocalStack)
+
+The AWS Toolkit can manage credentials, while LocalStack testing is done via AWS CLI commands that include the LocalStack endpoint.
+
+### 1. Create a LocalStack AWS profile
+
+PowerShell (Windows):
+
+```powershell
+aws configure set aws_access_key_id test --profile localstack
+aws configure set aws_secret_access_key test --profile localstack
+aws configure set region us-east-1 --profile localstack
+```
+
+Bash:
+
+```bash
+aws configure set aws_access_key_id test --profile localstack
+aws configure set aws_secret_access_key test --profile localstack
+aws configure set region us-east-1 --profile localstack
+```
+
+### 2. Connect the AWS Toolkit to the LocalStack profile
+
+1. In VS Code, open the Command Palette.
+2. Run `AWS: Add Connection`.
+3. Choose `Shared credentials` and select the `localstack` profile.
+
+### 3. Use the LocalStack endpoint for CLI calls
+
+PowerShell (Windows):
+
+```powershell
+$env:AWS_PROFILE = "localstack"
+$env:AWS_ENDPOINT_URL = "http://localhost:4566"
+aws s3 ls --endpoint-url http://localhost:4566
+```
+
+Bash:
+
+```bash
+export AWS_PROFILE=localstack
+export AWS_ENDPOINT_URL=http://localhost:4566
+aws s3 ls --endpoint-url http://localhost:4566
+```
+
+Note: The AWS Toolkit uses real AWS endpoints for its Explorer views. For LocalStack validation, use CLI commands with the LocalStack endpoint as shown above.
 
 ### 3. Verify Setup
 

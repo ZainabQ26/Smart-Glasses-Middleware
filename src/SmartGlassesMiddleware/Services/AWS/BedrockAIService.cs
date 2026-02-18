@@ -50,13 +50,16 @@ public class BedrockAIService : IAIService
             if (_knownTasks.Contains(task.ToLower()))
             {
                 _logger.LogInformation("Dispatching known task: {Task}", task);
-                var handlerResponse = await _dispatcher.DispatchTaskAsync(task, input, cancellationToken);
-                return (task, handlerResponse, true);
+                var (handled, handlerResponse) = await _dispatcher.TryHandleAsync(task, input);
+                if (handled && !string.IsNullOrEmpty(handlerResponse))
+                {
+                    return (task, handlerResponse, true);
+                }
             }
 
             // Generate response using Bedrock
             var response = await GenerateResponseAsync(input, cancellationToken);
-            return (task, response, true);
+            return (task, response ?? "", true);
         }
         catch (Exception ex)
         {
