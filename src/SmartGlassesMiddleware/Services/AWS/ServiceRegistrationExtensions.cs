@@ -78,28 +78,17 @@ public static class ServiceRegistrationExtensions
     }
 
     /// <summary>
-    /// Register transcription services (AWS Transcribe or HTTP/Vosk)
+    /// Register transcription services (stub implementation for local testing)
+    /// TODO: Replace with actual transcription service (AWS Transcribe, Whisper Lambda, HTTP, etc.)
     /// </summary>
     public static IServiceCollection AddTranscriptionServices(
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        if (configuration.IsAwsConfigured())
+        // Always use stub for now to avoid dependency on disabled services
+        if (!services.Any(s => s.ServiceType == typeof(ITranscriptionService)))
         {
-            // AWS Transcribe is already registered by AddAwsServices
-            if (!services.Any(s => s.ServiceType == typeof(ITranscriptionService)))
-            {
-                services.AddScoped<ITranscriptionService, AwsTranscribeService>();
-            }
-        }
-        else
-        {
-            // Use legacy HTTP transcription service
-            services.AddHttpClient<ITranscriptionService, HttpTranscriptionService>((sp, client) =>
-            {
-                var timeoutSeconds = configuration.GetValue<int?>("ServiceTimeouts:TranscriptionTimeoutSeconds") ?? 30;
-                client.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
-            });
+            services.AddScoped<ITranscriptionService, StubTranscriptionService>();
         }
 
         return services;

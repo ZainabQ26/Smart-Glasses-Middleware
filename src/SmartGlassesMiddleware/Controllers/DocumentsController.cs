@@ -9,6 +9,72 @@ using SmartGlassesMiddleware.Hubs;
 namespace SmartGlassesMiddleware.Controllers;
 
 [ApiController]
+[Route("api/[controller]")]
+public class DocumentsController : ControllerBase
+{
+    private readonly ILogger<DocumentsController> _logger;
+    private readonly IDocumentProcessingService _processingService;
+    private readonly IRAGService _ragService;
+    private readonly IDocumentHighlightService _highlightService;
+    private readonly ApplicationDbContext _context;
+    private readonly IConfiguration _configuration;
+    private readonly IRequestMonitoringService _monitoringService;
+    private readonly IHistoryService _historyService;
+    private readonly IMediaStorageService _mediaStorageService;
+    private readonly IConversationService _conversationService;
+    private readonly IGroupConversationMappingService? _groupConversationMappingService;
+    private readonly ICacheService _cacheService;
+    private readonly IHubContext<ResourceHub>? _resourceHub;
+    private const int DefaultPageSize = 20;
+    private const int MaxPageSize = 100;
+
+    public DocumentsController(
+        ILogger<DocumentsController> logger,
+        IDocumentProcessingService processingService,
+        IRAGService ragService,
+        IDocumentHighlightService highlightService,
+        ApplicationDbContext context,
+        IConfiguration configuration,
+        IRequestMonitoringService monitoringService,
+        IHistoryService historyService,
+        IMediaStorageService mediaStorageService,
+        IConversationService conversationService,
+        IGroupConversationMappingService? groupConversationMappingService = null,
+        ICacheService? cacheService = null,
+        IHubContext<ResourceHub>? resourceHub = null)
+    {
+        _logger = logger;
+        _processingService = processingService;
+        _ragService = ragService;
+        _highlightService = highlightService;
+        _context = context;
+        _configuration = configuration;
+        _monitoringService = monitoringService;
+        _historyService = historyService;
+        _mediaStorageService = mediaStorageService;
+        _conversationService = conversationService;
+        _groupConversationMappingService = groupConversationMappingService;
+        _cacheService = cacheService ?? new InMemoryCacheService(LoggerFactory.Create(b => b.AddConsole()).CreateLogger<InMemoryCacheService>());
+        _resourceHub = resourceHub;
+    }
+
+    /// <summary>
+    /// Upload a new document for processing and indexing
+    /// </summary>
+    [HttpPost("upload")]
+    [ProducesResponseType(typeof(CreatedAtActionResult), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> UploadDocument(IFormFile? file, [FromQuery] List<Guid>? groupIds = null)
+    {
+        if (file == null || file.Length == 0)
+            return BadRequest("File is required and cannot be empty");
+
+        var maxFileSizeMb = int.TryParse(_configuration["RAG:MaxFileSizeMB"], out var size) ? size : 50;
+        if (file.Length > maxFileSizeMb * 1024 * 1024)
+            return BadRequest($"File size exceeds maximum of {maxFileSizeMb}MB");
+
+        var requestId = await _monitoringService.StartRequest("DocumentUpload", file.FileName ?? "unknown");
+
         try
         {
             // Read the uploaded file into memory (small files expected in tests)
@@ -104,76 +170,6 @@ namespace SmartGlassesMiddleware.Controllers;
             _logger.LogError(ex, "Error uploading document");
             await _monitoringService.CompleteRequest(requestId, false, error: ex.Message);
             return StatusCode(500, new { error = "Failed to accept document", details = ex.Message });
-        }
-            try
-            {
-                await InvalidateFilesCache();
-                await NotifyFilesChangedAsync();
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to invalidate files cache or notify clients after document processing");
-            }
-
-            // Add to groups if specified
-            if (groupIds != null && groupIds.Any())
-            {
-                foreach (var groupId in groupIds)
-                {
-                    var group = await _context.ResourceGroups.FindAsync(groupId);
-                    if (group != null)
-                    {
-                        document.DocumentGroups.Add(new DocumentGroup
-                        {
-                            DocumentMetadataId = document.Id,
-                            ResourceGroupId = groupId
-                        });
-                    }
-                    else
-                    {
-                        _logger.LogWarning("Group {GroupId} not found, skipping", groupId);
-                    }
-                }
-                await _context.SaveChangesAsync();
-
-                await InvalidateGroupsCache();
-                await NotifyGroupsChangedAsync();
-            }
-
-            // Generate embeddings for the document chunks (with retry logic)
-            try
-            {
-                await _monitoringService.UpdateRequestStatus(requestId, "Processing", "Generating embeddings", 95);
-                await _ragService.GenerateEmbeddingsAsync(document.Id);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error generating embeddings for document {DocumentId}, will retry later", document.Id);
-                // Don't fail the upload, background service will retry
-            }
-
-            await _monitoringService.CompleteRequest(requestId, true, $"Document {document.FileName} processed successfully");
-
-            return Ok(new
-            {
-                document.Id,
-                document.FileName,
-                document.ContentType,
-                document.DocumentType,
-                document.TotalPages,
-                document.IsProcessed,
-                document.ProcessedAt,
-                ChunkCount = document.Chunks.Count,
-                ManagedFileId = document.ManagedFileId,
-                Groups = document.DocumentGroups.Select(dg => dg.ResourceGroupId).ToList(),
-                RequestId = requestId
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error uploading document");
-            await _monitoringService.CompleteRequest(requestId, false, error: ex.Message);
-            return StatusCode(500, new { error = "Failed to process document", details = ex.Message });
         }
     }
 

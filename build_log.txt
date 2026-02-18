@@ -1,0 +1,83 @@
+#0 building with "desktop-linux" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 806B done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for mcr.microsoft.com/dotnet/sdk:10.0
+#2 DONE 0.2s
+
+#3 [internal] load metadata for mcr.microsoft.com/dotnet/aspnet:10.0
+#3 DONE 0.2s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 2B done
+#4 DONE 0.0s
+
+#5 [stage-1 1/4] FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:52dcfb4225fda614c38ba5997a4ec72cbd5260a624125174416e547ff9eb9b8c
+#5 resolve mcr.microsoft.com/dotnet/aspnet:10.0@sha256:52dcfb4225fda614c38ba5997a4ec72cbd5260a624125174416e547ff9eb9b8c 0.1s done
+#5 DONE 0.1s
+
+#6 [build 1/6] FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:0a506ab0c8aa077361af42f82569d364ab1b8741e967955d883e3f23683d473a
+#6 resolve mcr.microsoft.com/dotnet/sdk:10.0@sha256:0a506ab0c8aa077361af42f82569d364ab1b8741e967955d883e3f23683d473a 0.1s done
+#6 DONE 0.1s
+
+#7 [internal] load build context
+#7 transferring context: 449.06kB 0.3s done
+#7 DONE 0.3s
+
+#8 [build 3/6] COPY [src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj, src/SmartGlassesMiddleware/]
+#8 CACHED
+
+#9 [build 2/6] WORKDIR /src
+#9 CACHED
+
+#10 [build 4/6] RUN dotnet restore "src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj"
+#10 CACHED
+
+#11 [build 5/6] COPY . .
+#11 DONE 2.6s
+
+#12 [build 6/6] RUN dotnet publish "src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj" -c Release -o /app/publish
+#12 0.882   Determining projects to restore...
+#12 2.382 /src/src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj : warning NU1603: SmartGlassesMiddleware depends on AWSSDK.BedrockRuntime (>= 3.7.400.44) but AWSSDK.BedrockRuntime 3.7.400.44 was not found. AWSSDK.BedrockRuntime 3.7.401 was resolved instead.
+#12 2.382 /src/src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj : warning NU1603: SmartGlassesMiddleware depends on AWSSDK.Lambda (>= 3.7.400.44) but AWSSDK.Lambda 3.7.400.44 was not found. AWSSDK.Lambda 3.7.401 was resolved instead.
+#12 2.383 /src/src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj : warning NU1603: SmartGlassesMiddleware depends on AWSSDK.S3 (>= 3.7.400.44) but AWSSDK.S3 3.7.400.44 was not found. AWSSDK.S3 3.7.401 was resolved instead.
+#12 2.383 /src/src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj : warning NU1603: SmartGlassesMiddleware depends on HarfBuzzSharp.NativeAssets.Linux (>= 2.10.1) but HarfBuzzSharp.NativeAssets.Linux 2.10.1 was not found. HarfBuzzSharp.NativeAssets.Linux 7.3.0 was resolved instead.
+#12 2.580   Restored /src/src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj (in 1.41 sec).
+#12 2.796 /src/src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj : warning NU1603: SmartGlassesMiddleware depends on AWSSDK.BedrockRuntime (>= 3.7.400.44) but AWSSDK.BedrockRuntime 3.7.400.44 was not found. AWSSDK.BedrockRuntime 3.7.401 was resolved instead.
+#12 2.796 /src/src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj : warning NU1603: SmartGlassesMiddleware depends on AWSSDK.Lambda (>= 3.7.400.44) but AWSSDK.Lambda 3.7.400.44 was not found. AWSSDK.Lambda 3.7.401 was resolved instead.
+#12 2.796 /src/src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj : warning NU1603: SmartGlassesMiddleware depends on AWSSDK.S3 (>= 3.7.400.44) but AWSSDK.S3 3.7.400.44 was not found. AWSSDK.S3 3.7.401 was resolved instead.
+#12 2.796 /src/src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj : warning NU1603: SmartGlassesMiddleware depends on HarfBuzzSharp.NativeAssets.Linux (>= 2.10.1) but HarfBuzzSharp.NativeAssets.Linux 2.10.1 was not found. HarfBuzzSharp.NativeAssets.Linux 7.3.0 was resolved instead.
+#12 7.130 /src/src/SmartGlassesMiddleware/Controllers/DocumentsController.cs(57,45): error CS7036: There is no argument given that corresponds to the required parameter 'logger' of 'InMemoryCacheService.InMemoryCacheService(ILogger<InMemoryCacheService>)' [/src/src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj]
+#12 7.130 /src/src/SmartGlassesMiddleware/Controllers/DocumentsController.cs(108,87): warning CS8604: Possible null reference argument for parameter 'fileName' in 'Task<DocumentMetadata> IDocumentProcessingService.ProcessDocumentAsync(Stream fileStream, string fileName, string contentType, string? requestId = null, Guid? documentId = null)'. [/src/src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj]
+#12 7.130 /src/src/SmartGlassesMiddleware/Controllers/DocumentsController.cs(108,102): warning CS8604: Possible null reference argument for parameter 'contentType' in 'Task<DocumentMetadata> IDocumentProcessingService.ProcessDocumentAsync(Stream fileStream, string fileName, string contentType, string? requestId = null, Guid? documentId = null)'. [/src/src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj]
+#12 7.130 /src/src/SmartGlassesMiddleware/Services/AWS/BedrockAIService.cs(56,28): warning CS8619: Nullability of reference types in value of type '(string task, string? handlerResponse, bool)' doesn't match target type '(string task, string response, bool usedAdvancedModel)'. [/src/src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj]
+#12 7.130 /src/src/SmartGlassesMiddleware/Controllers/MediaController.cs(237,41): warning CS8601: Possible null reference assignment. [/src/src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj]
+#12 7.130 /src/src/SmartGlassesMiddleware/Controllers/MediaController.cs(506,30): warning CS8601: Possible null reference assignment. [/src/src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj]
+#12 7.130 /src/src/SmartGlassesMiddleware/Services/DocumentProcessingService.cs(596,9): warning CS0162: Unreachable code detected [/src/src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj]
+#12 ERROR: process "/bin/sh -c dotnet publish \"src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj\" -c Release -o /app/publish" did not complete successfully: exit code: 1
+------
+ > [build 6/6] RUN dotnet publish "src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj" -c Release -o /app/publish:
+2.796 /src/src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj : warning NU1603: SmartGlassesMiddleware depends on AWSSDK.Lambda (>= 3.7.400.44) but AWSSDK.Lambda 3.7.400.44 was not found. AWSSDK.Lambda 3.7.401 was resolved instead.
+2.796 /src/src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj : warning NU1603: SmartGlassesMiddleware depends on AWSSDK.S3 (>= 3.7.400.44) but AWSSDK.S3 3.7.400.44 was not found. AWSSDK.S3 3.7.401 was resolved instead.
+2.796 /src/src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj : warning NU1603: SmartGlassesMiddleware depends on HarfBuzzSharp.NativeAssets.Linux (>= 2.10.1) but HarfBuzzSharp.NativeAssets.Linux 2.10.1 was not found. HarfBuzzSharp.NativeAssets.Linux 7.3.0 was resolved instead.
+7.130 /src/src/SmartGlassesMiddleware/Controllers/DocumentsController.cs(57,45): error CS7036: There is no argument given that corresponds to the required parameter 'logger' of 'InMemoryCacheService.InMemoryCacheService(ILogger<InMemoryCacheService>)' [/src/src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj]
+7.130 /src/src/SmartGlassesMiddleware/Controllers/DocumentsController.cs(108,87): warning CS8604: Possible null reference argument for parameter 'fileName' in 'Task<DocumentMetadata> IDocumentProcessingService.ProcessDocumentAsync(Stream fileStream, string fileName, string contentType, string? requestId = null, Guid? documentId = null)'. [/src/src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj]
+7.130 /src/src/SmartGlassesMiddleware/Controllers/DocumentsController.cs(108,102): warning CS8604: Possible null reference argument for parameter 'contentType' in 'Task<DocumentMetadata> IDocumentProcessingService.ProcessDocumentAsync(Stream fileStream, string fileName, string contentType, string? requestId = null, Guid? documentId = null)'. [/src/src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj]
+7.130 /src/src/SmartGlassesMiddleware/Services/AWS/BedrockAIService.cs(56,28): warning CS8619: Nullability of reference types in value of type '(string task, string? handlerResponse, bool)' doesn't match target type '(string task, string response, bool usedAdvancedModel)'. [/src/src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj]
+7.130 /src/src/SmartGlassesMiddleware/Controllers/MediaController.cs(237,41): warning CS8601: Possible null reference assignment. [/src/src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj]
+7.130 /src/src/SmartGlassesMiddleware/Controllers/MediaController.cs(506,30): warning CS8601: Possible null reference assignment. [/src/src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj]
+7.130 /src/src/SmartGlassesMiddleware/Services/DocumentProcessingService.cs(596,9): warning CS0162: Unreachable code detected [/src/src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj]
+------
+Dockerfile:10
+--------------------
+   8 |     # copy everything else and publish
+   9 |     COPY . .
+  10 | >>> RUN dotnet publish "src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj" -c Release -o /app/publish
+  11 |     
+  12 |     FROM mcr.microsoft.com/dotnet/aspnet:10.0
+--------------------
+ERROR: failed to build: failed to solve: process "/bin/sh -c dotnet publish \"src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj\" -c Release -o /app/publish" did not complete successfully: exit code: 1
+
+View build details: docker-desktop://dashboard/build/desktop-linux/desktop-linux/blin48285krjhbo56jp8pxkvs
