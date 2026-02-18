@@ -1,0 +1,87 @@
+# Application Load Balancer for API
+resource "aws_lb" "api" {
+  name               = "${var.project_name}-${var.environment}-api-alb"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.alb.id]
+  subnets            = aws_subnet.public[*].id
+
+  enable_deletion_protection = var.environment == "prod" ? true : false
+  enable_http2              = true
+
+  tags = {
+    Name = "${var.project_name}-${var.environment}-api-alb"
+  }
+}
+
+# Target Group for API
+resource "aws_lb_target_group" "api" {
+  name        = "${var.project_name}-${var.environment}-api-tg"
+  port        = 5000
+  protocol    = "HTTP"
+  vpc_id      = aws_vpc.main.id
+  target_type = "ip"
+
+  health_check {
+    enabled             = true
+    healthy_threshold   = 2
+    unhealthy_threshold = 3
+    timeout             = 5
+    interval            = 30
+    path                = "/health"
+    protocol            = "HTTP"
+    matcher             = "200"
+  }
+
+  deregistration_delay = 30
+
+  tags = {
+    Name = "${var.project_name}-${var.environment}-api-tg"
+  }
+}
+
+# HTTP Listener (redirect to HTTPS)
+resource "aws_lb_listener" "api_http" {
+  load_balancer_arn = aws_lb.api.arn
+  port              = "80"
+  protocol          = "HTTP"
+
+  default_action {
+    type = "redirect"
+
+    redirect {
+      port        = "443"
+      protocol    = "HTTPS"
+      status_code = "HTTP_301"
+    }
+  }
+}
+
+# HTTPS Listener
+resource "aws_lb_listener" "api_https" {
+  load_balancer_arn = aws_lb.api.arn
+  port              = "443"
+  protocol          = "HTTPS"
+  ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
+  certificate_arn   = var.certificate_arn != "" ? var.certificate_arn : aws_acm_certificate.api[0].arn
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.api.arn
+  }
+}
+
+# ACM Certificate for ALB (self-signed for dev, use your own for prod)
+resource "aws_acm_certificate" "api" {
+  count             = var.certificate_arn == "" ? 1 : 0
+  domain_name       = var.domain_name != "" ? var.domain_name : "${var.project_name}-${var.environment}-api.example.com"
+  validation_method = "DNS"
+
+  tags = {
+    Name = "${var.project_name}-${var.environment}-api-cert"
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}

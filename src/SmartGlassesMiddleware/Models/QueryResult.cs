@@ -68,6 +68,13 @@ public class DocumentSource
     public int PageNumber { get; set; }
     public Guid ChunkId { get; set; }
     public string ChunkText { get; set; } = string.Empty;
+    
+    // Position information for location tracking
+    public double? X { get; set; }
+    public double? Y { get; set; }
+    public double? Width { get; set; }
+    public double? Height { get; set; }
+    public string? Position { get; set; } // e.g., "bottom right"
 }
 
 /// <summary>

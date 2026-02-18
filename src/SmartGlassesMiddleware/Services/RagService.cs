@@ -218,14 +218,19 @@ Answer:";
                 }
             }
 
-            // Build sources list
+            // Build sources list with position information
             var sources = relevantChunks.Select(c => new DocumentSource
             {
                 DocumentId = c.DocumentMetadataId,
                 FileName = c.DocumentMetadata.FileName,
                 PageNumber = c.PageNumber,
                 ChunkId = c.Id,
-                ChunkText = c.ChunkText.Length > 200 ? c.ChunkText.Substring(0, 200) + "..." : c.ChunkText
+                ChunkText = c.ChunkText.Length > 200 ? c.ChunkText.Substring(0, 200) + "..." : c.ChunkText,
+                X = c.X,
+                Y = c.Y,
+                Width = c.Width,
+                Height = c.Height,
+                Position = GetPositionDescription(c.X, c.Y)
             }).ToList();
 
             // Analyze response to identify which sources were actually referenced
@@ -418,14 +423,19 @@ Answer:";
             // Call the model directly without task detection wrapper to preserve conversation context
             var response = await GenerateResponseWithLocalModel(prompt);
 
-            // Build sources list
+            // Build sources list with position information
             var sources = relevantChunks.Select(c => new DocumentSource
             {
                 DocumentId = c.DocumentMetadataId,
                 FileName = c.DocumentMetadata.FileName,
                 PageNumber = c.PageNumber,
                 ChunkId = c.Id,
-                ChunkText = c.ChunkText.Length > 200 ? c.ChunkText.Substring(0, 200) + "..." : c.ChunkText
+                ChunkText = c.ChunkText.Length > 200 ? c.ChunkText.Substring(0, 200) + "..." : c.ChunkText,
+                X = c.X,
+                Y = c.Y,
+                Width = c.Width,
+                Height = c.Height,
+                Position = GetPositionDescription(c.X, c.Y)
             }).ToList();
 
             // Build conversation sources list
@@ -825,8 +835,7 @@ Answer:";
         {
             _logger.LogInformation("Attempting to generate embedding for text (length: {Length})", text.Length);
             
-            // Try to use Semantic Kernel's embedding service
-            // Prefer local Ollama embedding client if registered in DI
+            // Try to use embedding client if registered in DI
             try
             {
                 var client = _serviceProvider.GetService(typeof(IOllamaEmbeddingClient)) as IOllamaEmbeddingClient;
@@ -838,7 +847,7 @@ Answer:";
                     var model = cfg?.GetValue<string>("AI:OllamaEmbeddingModel") ?? "nomic-embed-text:latest";
                     var embedding = await client.GenerateEmbeddingAsync(model, text);
                     sw.Stop();
-                    _logger.LogInformation("Successfully generated embedding from Ollama client (dimension: {Dimension}) in {Ms}ms", embedding.Length, sw.ElapsedMilliseconds);
+                    _logger.LogInformation("Successfully generated embedding (dimension: {Dimension}) in {Ms}ms", embedding.Length, sw.ElapsedMilliseconds);
                     return embedding;
                 }
             }
@@ -1137,24 +1146,24 @@ Answer:";
     {
             try
             {
-            _logger.LogInformation("Generating response with local Ollama model...");
+            _logger.LogInformation("Generating response with AI model...");
             var chatService = _kernel.GetRequiredService<IChatCompletionService>();
-            _logger.LogInformation("Chat service obtained, sending request to Ollama...");
+            _logger.LogInformation("Chat service obtained, sending request...");
             var sw = Stopwatch.StartNew();
             var result = await chatService.GetChatMessageContentAsync(prompt, cancellationToken: cancellationToken);
             sw.Stop();
-            _logger.LogInformation("Successfully received response from Ollama (length: {Length}) in {Ms}ms", result.Content?.Length ?? 0, sw.ElapsedMilliseconds);
-            return result.Content ?? "No response from local model.";
+            _logger.LogInformation("Successfully received response (length: {Length}) in {Ms}ms", result.Content?.Length ?? 0, sw.ElapsedMilliseconds);
+            return result.Content ?? "No response from model.";
             }
         catch (OperationCanceledException)
         {
-            _logger.LogWarning("Local model generation was cancelled/timed out");
+            _logger.LogWarning("Model generation was cancelled/timed out");
             throw;
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogError(ex, "HTTP error connecting to Ollama: {Message}", ex.Message);
-            return $"Error: Cannot connect to Ollama. Please ensure Ollama is running. Details: {ex.Message}";
+            _logger.LogError(ex, "HTTP error connecting to AI service: {Message}", ex.Message);
+            return $"Error: Cannot connect to AI service. Please ensure the service is running. Details: {ex.Message}";
         }
         catch (Exception ex)
         {
@@ -1402,5 +1411,31 @@ Answer:";
                 TokenCount = 0
             };
         }
+    }
+
+    private string? GetPositionDescription(double? x, double? y)
+    {
+        if (!x.HasValue || !y.HasValue)
+            return null;
+
+        // Determine horizontal position
+        string horizontal;
+        if (x.Value < PdfConstants.PageWidth / 3)
+            horizontal = "left";
+        else if (x.Value < 2 * PdfConstants.PageWidth / 3)
+            horizontal = "center";
+        else
+            horizontal = "right";
+
+        // Determine vertical position (Y is from bottom in PDF coordinates)
+        string vertical;
+        if (y.Value < PdfConstants.PageHeight / 3)
+            vertical = "bottom";
+        else if (y.Value < 2 * PdfConstants.PageHeight / 3)
+            vertical = "middle";
+        else
+            vertical = "top";
+
+        return $"{vertical} {horizontal}";
     }
 }

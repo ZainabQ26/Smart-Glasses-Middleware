@@ -46,6 +46,56 @@ public class AdminController : ControllerBase
         _resourceHub = resourceHub;
     }
 
+    /// <summary>
+    /// Fix ManagedFile entries for already-processed documents so filenames and content-types reflect the converted PDF.
+    /// </summary>
+    [HttpPost("fix-processed-managedfiles")]
+    public async Task<IActionResult> FixProcessedManagedFiles()
+    {
+        // Find processed documents with an associated ManagedFile
+        var docs = await _context.DocumentMetadatas
+            .Where(d => d.IsProcessed && d.ManagedFileId != null)
+            .ToListAsync();
+
+        int updated = 0;
+        foreach (var doc in docs)
+        {
+            if (doc.ManagedFileId is not Guid mfId) continue;
+            var mf = await _context.ManagedFiles.FindAsync(mfId);
+            if (mf == null) continue;
+
+            var desiredFileName = doc.FileName;
+            if (!desiredFileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+            {
+                // Ensure PDF extension on metadata filename as a fallback
+                desiredFileName = Path.GetFileNameWithoutExtension(desiredFileName) + ".pdf";
+            }
+
+            bool changed = false;
+            if (!string.Equals(mf.FileName, desiredFileName, StringComparison.Ordinal))
+            {
+                mf.FileName = desiredFileName;
+                changed = true;
+            }
+
+            if (!string.Equals(mf.ContentType, "application/pdf", StringComparison.OrdinalIgnoreCase))
+            {
+                mf.ContentType = "application/pdf";
+                changed = true;
+            }
+
+            if (changed)
+            {
+                _context.ManagedFiles.Update(mf);
+                updated++;
+            }
+        }
+
+        if (updated > 0) await _context.SaveChangesAsync();
+
+        return Ok(new { updated, total = docs.Count });
+    }
+
     #region Files
 
     /// <summary>
@@ -159,10 +209,10 @@ public class AdminController : ControllerBase
         }
 
         string? requestId = null;
-        try
-        {
-            requestId = await _monitoringService.StartRequest("FileUpload", 
-                $"Uploading: {request.File.FileName} (Label: {request.Label})");
+            try
+            {
+                requestId = await _monitoringService.StartRequest("FileUpload", 
+                    $"Uploading: {request.File.FileName ?? string.Empty} (Label: {request.Label})");
             await _monitoringService.UpdateRequestStatus(requestId, "Uploading file...");
 
             // Compute content hash for deduplication
@@ -175,8 +225,20 @@ public class AdminController : ControllerBase
 
             if (existingFile != null)
             {
-                _logger.LogInformation("File with hash {Hash} already exists as {FileId}, returning existing file", contentHash, existingFile.Id);
-                await _monitoringService.CompleteRequest(requestId, true, "File already exists (deduplicated)");
+                _logger.LogInformation("File with hash {Hash} already exists as {FileId}, updating timestamp and returning existing file", contentHash, existingFile.Id);
+
+                // Refresh the uploaded timestamp so repeated uploads surface in the admin listing
+                existingFile.UploadedAt = DateTime.UtcNow;
+                // Optionally update the label to reflect the most recent upload label
+                existingFile.Label = request.Label ?? existingFile.Label;
+                _context.ManagedFiles.Update(existingFile);
+                await _context.SaveChangesAsync();
+
+                // Invalidate caches and notify listeners so UI and API listings reflect the update immediately
+                try { await InvalidateFilesCache(); } catch { /* best-effort */ }
+                try { await NotifyFilesChangedAsync(); } catch { /* best-effort */ }
+
+                await _monitoringService.CompleteRequest(requestId, true, "File already exists (deduplicated, refreshed)");
                 return Ok(new
                 {
                     existingFile.Id,
@@ -192,16 +254,16 @@ public class AdminController : ControllerBase
             }
 
             await _monitoringService.UpdateRequestStatus(requestId, "Storing file...");
-            // Upload to MinIO
+            // Upload to storage
             using var stream = request.File.OpenReadStream();
             var contentType = request.File.ContentType ?? "application/octet-stream";
-            var storageKey = await _mediaStorageService.UploadMediaAsync(stream, request.File.FileName, contentType);
+            var storageKey = await _mediaStorageService.UploadMediaAsync(stream, request.File.FileName ?? string.Empty, contentType);
 
             // Save to database
-            var managedFile = new ManagedFile
+                var managedFile = new ManagedFile
             {
                 Id = Guid.NewGuid(),
-                FileName = request.File.FileName,
+                    FileName = request.File.FileName ?? string.Empty,
                 Label = request.Label,
                 ContentType = contentType,
                 StorageKey = storageKey,
@@ -287,7 +349,7 @@ public class AdminController : ControllerBase
             requestId = await _monitoringService.StartRequest("FileDelete", 
                 $"Deleting file: {file.FileName}");
             
-            // Delete from MinIO
+            // Delete from storage
             await _mediaStorageService.DeleteMediaAsync(file.StorageKey);
 
             // Delete from database

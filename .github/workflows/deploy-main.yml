@@ -1,0 +1,163 @@
+name: Deploy to AWS
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'prod'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      
+      - name: Restore dependencies
+        run: dotnet restore
+      
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+
+  build-and-push:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      api-image: ${{ steps.api.outputs.api_image }}
+      lambda-whisper-image: ${{ steps.lambda-whisper.outputs.lambda_image }}
+      lambda-document-image: ${{ steps.lambda-document.outputs.lambda_image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Build & push API image
+        id: api
+        run: |
+          IMAGE_URI=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/smart-glasses-api:${{ github.sha }}
+          docker build -t $IMAGE_URI ./src/SmartGlassesMiddleware
+          docker push $IMAGE_URI
+          echo "api_image=$IMAGE_URI" >> $GITHUB_OUTPUT
+
+      - name: Build & push Whisper Lambda image
+        id: lambda-whisper
+        run: |
+          IMAGE_URI=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/whisper-lambda:${{ github.sha }}
+          docker build -t $IMAGE_URI ./aws/lambda-whisper
+          docker push $IMAGE_URI
+          echo "lambda_image=$IMAGE_URI" >> $GITHUB_OUTPUT
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build & push Document Processor Lambda image
+        id: lambda-document
+        run: |
+          cd aws/lambda-document-processor
+          chmod +x build.sh
+          ./build.sh
+          IMAGE_URI=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/document-processor-lambda:${{ github.sha }}
+          docker build -t $IMAGE_URI .
+          docker push $IMAGE_URI
+          echo "lambda_image=$IMAGE_URI" >> $GITHUB_OUTPUT
+
+  terraform-apply:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.5.7
+
+      - name: Write image variables for Terraform
+        run: |
+          cat > aws/infrastructure/tf_image_vars.auto.tfvars <<EOF
+          api_image = "${{ needs.build-and-push.outputs.api-image }}"
+          lambda_whisper_image = "${{ needs.build-and-push.outputs.lambda-whisper-image }}"
+          lambda_document_image = "${{ needs.build-and-push.outputs.lambda-document-image }}"
+          EOF
+
+      - name: Terraform init & apply
+        working-directory: aws/infrastructure
+        run: |
+          terraform init
+          terraform apply -auto-approve
+
+      - name: Save Terraform outputs
+        working-directory: aws/infrastructure
+        run: terraform output -json > tf_outputs.json
+
+      - name: Upload tf outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: tf-outputs
+          path: aws/infrastructure/tf_outputs.json
+
+  run-migrations:
+    needs: terraform-apply
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download tf outputs
+        uses: actions/download-artifact@v4
+        with:
+          name: tf-outputs
+          path: ./tf
+
+      - name: Extract DB endpoint
+        id: db
+        run: |
+          DB_ENDPOINT=$(jq -r '.rds_endpoint.value' ./tf/tf_outputs.json)
+          echo "DB_ENDPOINT=$DB_ENDPOINT" >> $GITHUB_ENV
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Run EF migrations
+        env:
+          ConnectionStrings__DefaultConnection: "Host=${{ env.DB_ENDPOINT }};Database=${{ secrets.DB_NAME }};Username=${{ secrets.DB_USER }};Password=${{ secrets.DB_PASSWORD }}"
+        run: |
+          cd src/SmartGlassesMiddleware
+          dotnet tool restore
+          dotnet restore
+          dotnet ef database update --no-build
