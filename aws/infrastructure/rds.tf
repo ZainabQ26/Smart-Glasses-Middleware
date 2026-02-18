@@ -48,6 +48,10 @@ resource "aws_secretsmanager_secret" "db_credentials" {
   tags = {
     Name = "${var.project_name}-${var.environment}-db-credentials"
   }
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_secretsmanager_secret_version" "db_credentials" {
@@ -61,6 +65,12 @@ resource "aws_secretsmanager_secret_version" "db_credentials" {
     dbname            = var.db_name
     connection_string = "Host=${aws_rds_cluster.main.endpoint};Port=5432;Database=${var.db_name};Username=${var.db_username};Password=${random_password.db_password.result}"
   })
+
+  lifecycle {
+    ignore_changes = [
+      secret_string
+    ]
+  }
 }
 
 # RDS Aurora Serverless v2 Cluster (Cost-effective and scalable)
@@ -107,6 +117,7 @@ resource "aws_rds_cluster" "main" {
       master_password,
       final_snapshot_identifier
     ]
+    prevent_destroy = true
   }
 }
 
@@ -130,6 +141,10 @@ resource "aws_rds_cluster_instance" "main" {
   tags = {
     Name = "${var.project_name}-${var.environment}-aurora-instance-${count.index + 1}"
   }
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # KMS Key for RDS encryption
@@ -140,6 +155,10 @@ resource "aws_kms_key" "rds" {
 
   tags = {
     Name = "${var.project_name}-${var.environment}-rds-kms"
+  }
+
+  lifecycle {
+    prevent_destroy = true
   }
 }
 
