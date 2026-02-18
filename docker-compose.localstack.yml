@@ -2,12 +2,13 @@ version: '3.8'
 
 services:
   localstack:
-    image: localstack/localstack:latest
+    image: localstack/localstack-pro:latest
     container_name: localstack
     ports:
       - "4566:4566"            # LocalStack Gateway
       - "4510-4559:4510-4559"  # External services port range
     environment:
+      - LOCALSTACK_AUTH_TOKEN=${LOCALSTACK_AUTH_TOKEN}
       - SERVICES=s3,dynamodb,lambda,secretsmanager,rds,elasticache,ecr,ecs,cloudwatch,logs,bedrock
       - DEBUG=1
       - DATA_DIR=/tmp/localstack_data/data

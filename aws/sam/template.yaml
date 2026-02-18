@@ -1,0 +1,85 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: SAM template for Smart Glasses Lambda functions (document processor + whisper)
+
+Globals:
+  Function:
+    Timeout: 300
+    Runtime: python3.11
+    MemorySize: 1024
+
+Parameters:
+  DocumentsBucket:
+    Type: String
+    Description: S3 bucket where documents are uploaded
+  DBSecretArn:
+    Type: String
+    Description: Secrets Manager ARN for database credentials
+
+Resources:
+  DocumentProcessorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: smart-glasses-document-processor
+      Handler: handler
+      CodeUri: ../lambda-document-processor/
+      Environment:
+        Variables:
+          DOCUMENTS_BUCKET: !Ref DocumentsBucket
+          DB_SECRET_ARN: !Ref DBSecretArn
+          AWS_REGION: !Ref "AWS::Region"
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - PolicyName: DocumentProcessorInlinePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !Sub arn:aws:s3:::${DocumentsBucket}/*
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref DBSecretArn
+              - Effect: Allow
+                Action:
+                  - textract:DetectDocumentText
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - bedrock-runtime:InvokeModel
+                Resource: "*"
+
+  WhisperFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: smart-glasses-whisper
+      Handler: lambda_handler
+      CodeUri: ../lambda-whisper/
+      Environment:
+        Variables:
+          AWS_REGION: !Ref "AWS::Region"
+          WHISPER_MODEL: tiny
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - PolicyName: WhisperInlinePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !Sub arn:aws:s3:::${DocumentsBucket}/*
+
+Outputs:
+  DocumentProcessorFunctionArn:
+    Description: ARN of the Document Processor Lambda
+    Value: !GetAtt DocumentProcessorFunction.Arn
+  WhisperFunctionArn:
+    Description: ARN of the Whisper Lambda
+    Value: !GetAtt WhisperFunction.Arn
