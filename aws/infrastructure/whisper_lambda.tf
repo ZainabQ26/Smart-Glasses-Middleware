@@ -49,6 +49,10 @@ data "aws_iam_policy_document" "s3_lambda_access" {
 resource "aws_iam_policy" "lambda_s3_access" {
   name   = "${var.whisper_function_name}-s3-access"
   policy = data.aws_iam_policy_document.s3_lambda_access.json
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_iam_role_policy_attachment" "lambda_s3_attach" {
@@ -70,6 +74,10 @@ data "aws_iam_policy_document" "allow_sqs_send" {
 resource "aws_iam_policy" "allow_sqs_send" {
   name   = "${var.whisper_function_name}-allow-sqs-send"
   policy = data.aws_iam_policy_document.allow_sqs_send.json
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 variable "api_role_name" {
@@ -97,6 +105,10 @@ resource "aws_lambda_function" "whisper" {
   role          = aws_iam_role.lambda_exec.arn
   memory_size   = var.lambda_memory_mb
   timeout       = var.lambda_timeout
+
+  lifecycle {
+    ignore_changes = [image_uri]
+  }
 }
 
 output "whisper_lambda_function_name" {
