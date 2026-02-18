@@ -21,7 +21,7 @@ resource "aws_cloudfront_distribution" "frontend" {
     custom_origin_config {
       http_port              = 80
       https_port             = 443
-      origin_protocol_policy = "https-only"
+      origin_protocol_policy = "http-only"
       origin_ssl_protocols   = ["TLSv1.2"]
     }
   }
@@ -136,7 +136,7 @@ resource "aws_cloudfront_origin_request_policy" "api" {
   headers_config {
     header_behavior = "whitelist"
     headers {
-      items = ["Authorization", "Accept", "Content-Type", "Origin", "User-Agent"]
+      items = ["Accept", "Content-Type", "Origin", "User-Agent"]
     }
   }
 

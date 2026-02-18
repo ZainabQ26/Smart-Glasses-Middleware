@@ -40,30 +40,11 @@ resource "aws_lb_target_group" "api" {
   }
 }
 
-# HTTP Listener (redirect to HTTPS)
+# HTTP Listener
 resource "aws_lb_listener" "api_http" {
   load_balancer_arn = aws_lb.api.arn
   port              = "80"
   protocol          = "HTTP"
-
-  default_action {
-    type = "redirect"
-
-    redirect {
-      port        = "443"
-      protocol    = "HTTPS"
-      status_code = "HTTP_301"
-    }
-  }
-}
-
-# HTTPS Listener
-resource "aws_lb_listener" "api_https" {
-  load_balancer_arn = aws_lb.api.arn
-  port              = "443"
-  protocol          = "HTTPS"
-  ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
-  certificate_arn   = var.certificate_arn != "" ? var.certificate_arn : aws_acm_certificate.api[0].arn
 
   default_action {
     type             = "forward"
@@ -71,17 +52,17 @@ resource "aws_lb_listener" "api_https" {
   }
 }
 
-# ACM Certificate for ALB (self-signed for dev, use your own for prod)
-resource "aws_acm_certificate" "api" {
-  count             = var.certificate_arn == "" ? 1 : 0
-  domain_name       = var.domain_name != "" ? var.domain_name : "${var.project_name}-${var.environment}-api.example.com"
-  validation_method = "DNS"
+# HTTPS Listener (only when a cert ARN is provided)
+resource "aws_lb_listener" "api_https" {
+  count             = var.certificate_arn != "" ? 1 : 0
+  load_balancer_arn = aws_lb.api.arn
+  port              = "443"
+  protocol          = "HTTPS"
+  ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
+  certificate_arn   = var.certificate_arn
 
-  tags = {
-    Name = "${var.project_name}-${var.environment}-api-cert"
-  }
-
-  lifecycle {
-    create_before_destroy = true
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.api.arn
   }
 }
