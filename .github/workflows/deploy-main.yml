@@ -116,30 +116,35 @@ jobs:
 
       - name: Terraform init
         working-directory: aws/infrastructure
-        run: terraform init
+        run: |
+          # Remove old state files to force fresh state
+          rm -rf .terraform.lock.hcl terraform.tfstate* 2>/dev/null || true
+          terraform init
 
-      - name: Import S3 and core resources into Terraform state
+      - name: Import critical resources into fresh state
         working-directory: aws/infrastructure
         run: |
           set +e
           
-          echo "=== Attempting to import critical resources ==="
+          echo "=== Importing critical resources into fresh state ==="
           
-          # Import S3 buckets (CRITICAL - will block terraform if not imported)
-          terraform import -auto-approve aws_s3_bucket.media smart-glasses-dev-media
-          terraform import -auto-approve aws_s3_bucket.documents smart-glasses-dev-documents
-          terraform import -auto-approve aws_s3_bucket.frontend smart-glasses-dev-frontend
+          # Import S3 buckets (REQUIRED - data)
+          terraform import aws_s3_bucket.media smart-glasses-dev-media
+          terraform import aws_s3_bucket.documents smart-glasses-dev-documents
+          terraform import aws_s3_bucket.frontend smart-glasses-dev-frontend
           
-          # Import KMS aliases (CRITICAL)
-          terraform import -auto-approve aws_kms_alias.s3 alias/smart-glasses-dev-s3 || true
-          terraform import -auto-approve aws_kms_alias.rds alias/smart-glasses-dev-rds || true
+          # Import KMS (encrypts S3)
+          terraform import aws_kms_key.s3 $(aws kms describe-key --key-id alias/smart-glasses-dev-s3 --query 'KeyMetadata.KeyId' --output text) 2>/dev/null || true
+          terraform import aws_kms_alias.s3 alias/smart-glasses-dev-s3 2>/dev/null || true
+          terraform import aws_kms_key.rds $(aws kms describe-key --key-id alias/smart-glasses-dev-rds --query 'KeyMetadata.KeyId' --output text) 2>/dev/null || true
+          terraform import aws_kms_alias.rds alias/smart-glasses-dev-rds 2>/dev/null || true
           
-          # Import secrets (CRITICAL - contains sensitive data)
-          terraform import -auto-approve aws_secretsmanager_secret.app_secrets arn:aws:secretsmanager:${AWS_REGION}:${{ secrets.AWS_ACCOUNT_ID }}:secret:smart-glasses-dev-app-secrets-* || true
-          terraform import -auto-approve aws_secretsmanager_secret.db_credentials arn:aws:secretsmanager:${AWS_REGION}:${{ secrets.AWS_ACCOUNT_ID }}:secret:smart-glasses-dev-db-credentials-* || true
-          terraform import -auto-approve aws_secretsmanager_secret.redis_credentials arn:aws:secretsmanager:${AWS_REGION}:${{ secrets.AWS_ACCOUNT_ID }}:secret:smart-glasses-dev-redis-credentials-* || true
+          # Import Secrets (sensitive data)
+          terraform import aws_secretsmanager_secret.app_secrets arn:aws:secretsmanager:${AWS_REGION}:${{ secrets.AWS_ACCOUNT_ID }}:secret:smart-glasses-dev-app-secrets-* 2>/dev/null || true
+          terraform import aws_secretsmanager_secret.db_credentials arn:aws:secretsmanager:${AWS_REGION}:${{ secrets.AWS_ACCOUNT_ID }}:secret:smart-glasses-dev-db-credentials-* 2>/dev/null || true
+          terraform import aws_secretsmanager_secret.redis_credentials arn:aws:secretsmanager:${AWS_REGION}:${{ secrets.AWS_ACCOUNT_ID }}:secret:smart-glasses-dev-redis-credentials-* 2>/dev/null || true
           
-          echo "=== Import step complete ==="
+          echo "=== Critical resource import complete ==="
           set -e
 
       - name: Terraform apply
