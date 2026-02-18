@@ -1117,23 +1117,23 @@ app.MapGet("/health", async (IServiceProvider services) =>
     checks["ollama"] = new { healthy = ollamaOk, error = ollamaError };
     allHealthy &= ollamaOk;
 
-    // Check Vosk Transcriber
-    var voskOk = false;
-    string? voskError = null;
+    // Check transcription service (legacy Vosk or AWS Transcribe/Whisper Lambda)
+    var transcriptionOk = false;
+    string? transcriptionError = null;
     try
     {
-        var voskEndpoint = configuration["Transcription:Endpoint"] ?? "http://vosk-transcriber:8080";
+        var transcriptionEndpoint = configuration["Transcription:Endpoint"] ?? "http://vosk-transcriber:8080";
         using var httpClient = httpClientFactory.CreateClient();
         httpClient.Timeout = TimeSpan.FromSeconds(5);
-        var response = await httpClient.GetAsync($"{voskEndpoint}/health");
-        voskOk = response.IsSuccessStatusCode;
+        var response = await httpClient.GetAsync($"{transcriptionEndpoint}/health");
+        transcriptionOk = response.IsSuccessStatusCode;
     }
     catch (Exception ex)
     {
-        voskError = ex.Message;
+        transcriptionError = ex.Message;
     }
-    checks["vosk-transcriber"] = new { healthy = voskOk, error = voskError };
-    allHealthy &= voskOk;
+    checks["transcription-service"] = new { healthy = transcriptionOk, error = transcriptionError };
+    allHealthy &= transcriptionOk;
 
     // Check Redis Pub/Sub bridge
     var bridgeOk = false;
