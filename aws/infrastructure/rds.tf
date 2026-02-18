@@ -6,6 +6,10 @@ resource "aws_db_subnet_group" "main" {
   tags = {
     Name = "${var.project_name}-${var.environment}-db-subnet-group"
   }
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # DB Parameter Group for pgvector
@@ -31,6 +35,10 @@ resource "aws_rds_cluster_parameter_group" "main" {
 
   tags = {
     Name = "${var.project_name}-${var.environment}-aurora-pg-params"
+  }
+
+  lifecycle {
+    prevent_destroy = true
   }
 }
 

@@ -95,6 +95,10 @@ resource "aws_cloudwatch_log_group" "lambda_document_processor" {
   tags = {
     Name = "${var.project_name}-${var.environment}-lambda-doc-processor-logs"
   }
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # Lambda Function

@@ -10,6 +10,10 @@ resource "aws_ecs_cluster" "main" {
   tags = {
     Name = "${var.project_name}-${var.environment}-cluster"
   }
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # ECS Cluster Capacity Providers
@@ -32,6 +36,10 @@ resource "aws_cloudwatch_log_group" "ecs_api" {
 
   tags = {
     Name = "${var.project_name}-${var.environment}-ecs-api-logs"
+  }
+
+  lifecycle {
+    prevent_destroy = true
   }
 }
 
