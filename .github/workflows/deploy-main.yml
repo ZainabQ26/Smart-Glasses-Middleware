@@ -75,16 +75,13 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Build & push Document Processor Lambda image
+      - name: Build Document Processor Lambda zip
         id: lambda-document
         run: |
           cd aws/lambda-document-processor
           chmod +x build.sh
           ./build.sh
-          IMAGE_URI=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/document-processor-lambda:${{ github.sha }}
-          docker build -t $IMAGE_URI .
-          docker push $IMAGE_URI
-          echo "lambda_image=$IMAGE_URI" >> $GITHUB_OUTPUT
+          echo "lambda_zip=aws/lambda-document-processor/deployment.zip" >> $GITHUB_OUTPUT
 
   terraform-apply:
     needs: build-and-push
