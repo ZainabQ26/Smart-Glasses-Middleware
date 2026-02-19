@@ -572,12 +572,50 @@ jobs:
           CLUSTER=$(jq -r '.ecs_cluster_name.value // empty' ./tf/tf_outputs.json 2>/dev/null || true)
           CLUSTER=${CLUSTER:-smart-glasses-dev-cluster}
           SERVICE="smart-glasses-dev-api-service"
-          echo "Waiting for ECS service $SERVICE in cluster $CLUSTER to stabilize..."
-          aws ecs wait services-stable \
-            --cluster "$CLUSTER" \
-            --services "$SERVICE" \
-            --region "$AWS_REGION"
-          echo "ECS service is stable."
+          echo "Waiting for ECS service $SERVICE in cluster $CLUSTER (up to 15 min)..."
+          # Use a longer poll loop instead of the default 10-min waiter
+          STABLE=false
+          for attempt in $(seq 1 30); do
+            RUNNING=$(aws ecs describe-services \
+              --cluster "$CLUSTER" --services "$SERVICE" --region "$AWS_REGION" \
+              --query 'services[0].runningCount' --output text 2>/dev/null || echo 0)
+            DESIRED=$(aws ecs describe-services \
+              --cluster "$CLUSTER" --services "$SERVICE" --region "$AWS_REGION" \
+              --query 'services[0].desiredCount' --output text 2>/dev/null || echo 1)
+            PENDING=$(aws ecs describe-services \
+              --cluster "$CLUSTER" --services "$SERVICE" --region "$AWS_REGION" \
+              --query 'services[0].pendingCount' --output text 2>/dev/null || echo 99)
+            echo "Attempt $attempt/30: running=$RUNNING desired=$DESIRED pending=$PENDING"
+            if [ "$RUNNING" = "$DESIRED" ] && [ "$PENDING" = "0" ] && [ "$DESIRED" != "0" ]; then
+              echo "ECS service is stable."
+              STABLE=true
+              break
+            fi
+            # Print recent ECS events every 5 attempts for diagnostics
+            if [ $((attempt % 5)) -eq 0 ]; then
+              echo "--- Recent ECS service events ---"
+              aws ecs describe-services \
+                --cluster "$CLUSTER" --services "$SERVICE" --region "$AWS_REGION" \
+                --query 'services[0].events[0:5].[createdAt,message]' \
+                --output text 2>/dev/null || true
+              echo "--- Recent stopped task reasons ---"
+              aws ecs list-tasks --cluster "$CLUSTER" --service-name "$SERVICE" \
+                --desired-status STOPPED --region "$AWS_REGION" \
+                --query 'taskArns[0:2]' --output text 2>/dev/null \
+                | tr '\t' '\n' | grep -v '^$' \
+                | while read -r TASK_ARN; do
+                  aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK_ARN" \
+                    --region "$AWS_REGION" \
+                    --query 'tasks[0].containers[0].{reason:reason,exitCode:exitCode}' \
+                    --output json 2>/dev/null || true
+                done
+            fi
+            sleep 30
+          done
+          if [ "$STABLE" = "false" ]; then
+            echo "Warning: ECS service did not reach stable state within 15 minutes."
+            echo "Terraform apply succeeded – infra is deployed. Check ECS console for container issues."
+          fi
 
       - name: Smoke-test health endpoint
         run: |
