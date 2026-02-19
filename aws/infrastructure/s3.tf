@@ -39,6 +39,8 @@ resource "aws_s3_bucket_lifecycle_configuration" "media" {
     id     = "transition-to-ia"
     status = "Enabled"
 
+    filter {}
+
     transition {
       days          = 90
       storage_class = "STANDARD_IA"
@@ -53,6 +55,8 @@ resource "aws_s3_bucket_lifecycle_configuration" "media" {
   rule {
     id     = "delete-old-versions"
     status = "Enabled"
+
+    filter {}
 
     noncurrent_version_expiration {
       noncurrent_days = 90
@@ -122,6 +126,8 @@ resource "aws_s3_bucket_lifecycle_configuration" "documents" {
     id     = "transition-to-ia"
     status = "Enabled"
 
+    filter {}
+
     transition {
       days          = 60
       storage_class = "STANDARD_IA"
@@ -136,6 +142,8 @@ resource "aws_s3_bucket_lifecycle_configuration" "documents" {
   rule {
     id     = "delete-old-versions"
     status = "Enabled"
+
+    filter {}
 
     noncurrent_version_expiration {
       noncurrent_days = 90
