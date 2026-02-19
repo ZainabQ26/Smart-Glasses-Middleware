@@ -58,9 +58,13 @@ resource "aws_lb_listener" "api_http" {
     target_group_arn = aws_lb_target_group.api.arn
   }
 
-  # No ignore_changes: we want Terraform to update the listener when the
-  # target group changes. The import step prevents DuplicateListener errors
-  # by ensuring the listener is in state before apply runs.
+  lifecycle {
+    # The existing listener in AWS may have been configured with a redirect
+    # action (e.g. HTTP → HTTPS).  Terraform would fight it every apply and
+    # generate an "Invalid Attribute Combination" plan warning.  We import the
+    # listener to prevent DuplicateListener errors but do not change its action.
+    ignore_changes = [default_action]
+  }
 }
 
 # HTTPS Listener (only when a cert ARN is provided)
