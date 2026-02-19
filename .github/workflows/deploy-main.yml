@@ -70,7 +70,7 @@ jobs:
         id: lambda-whisper
         run: |
           IMAGE_URI=${{ steps.ecr-login.outputs.registry }}/whisper-lambda:${{ github.sha }}
-          docker build -t $IMAGE_URI ./aws/lambda-whisper
+          docker build --platform linux/amd64 --provenance=false -t $IMAGE_URI ./aws/lambda-whisper
           docker push $IMAGE_URI
           echo "lambda_image=$IMAGE_URI" >> $GITHUB_OUTPUT
 
@@ -278,13 +278,28 @@ jobs:
             terraform import aws_cloudfront_origin_access_control.frontend "$OAC_ID" || true
 
           ORP_ID=$(aws cloudfront list-origin-request-policies --type custom \
-            --query "OriginRequestPolicyList.Items[?Name=='${PREFIX}-api-policy'].Id" \
-            --output text 2>/dev/null || true)
+            --query "OriginRequestPolicyList.Items[?OriginRequestPolicy.OriginRequestPolicyConfig.Name=='${PREFIX}-api-policy'].OriginRequestPolicy.Id" \
+            --output text 2>/dev/null | tr '\t' '\n' | head -1 || true)
           [ -n "$ORP_ID" ] && [ "$ORP_ID" != "None" ] && \
             terraform import aws_cloudfront_origin_request_policy.api "$ORP_ID" || true
 
           # ── ElastiCache parameter group (can't delete while replication group exists) ──
           terraform import aws_elasticache_parameter_group.redis ${PREFIX}-redis-params || true
+
+          # ── ElastiCache Subnet Group ──────────────────────────────────────────
+          terraform import aws_elasticache_subnet_group.main ${PREFIX}-elasticache-subnet-group || true
+
+          # ── RDS DB Subnet Group ───────────────────────────────────────────────
+          terraform import aws_db_subnet_group.main ${PREFIX}-db-subnet-group || true
+
+          # ── ALB and Target Group ──────────────────────────────────────────────
+          ALB_ARN=$(aws elbv2 describe-load-balancers --names "${PREFIX}-api-alb" \
+            --query 'LoadBalancers[0].LoadBalancerArn' --output text --region "$REGION" 2>/dev/null || true)
+          [ -n "$ALB_ARN" ] && [ "$ALB_ARN" != "None" ] && terraform import aws_lb.api "$ALB_ARN" || true
+
+          TG_ARN=$(aws elbv2 describe-target-groups --names "${PREFIX}-api-tg" \
+            --query 'TargetGroups[0].TargetGroupArn' --output text --region "$REGION" 2>/dev/null || true)
+          [ -n "$TG_ARN" ] && [ "$TG_ARN" != "None" ] && terraform import aws_lb_target_group.api "$TG_ARN" || true
 
           # ── VPC and all network sub-resources (import to avoid VPC limit errors) ──
           VPC_ID=$(aws ec2 describe-vpcs \
@@ -328,7 +343,7 @@ jobs:
 
             # NAT Gateways and their Elastic IPs
             readarray -t NAT_GWS < <(aws ec2 describe-nat-gateways \
-              --filter "Name=vpc-id,Values=$VPC_ID" "Name=state,Values=available" \
+              --filter "Name=vpc-id,Values=$VPC_ID" "Name=state,Values=available,pending" \
               --query 'sort_by(NatGateways,&SubnetId)[].NatGatewayId' \
               --output text --region "$REGION" 2>/dev/null | tr '\t' '\n' | grep -v '^$' || true)
             for i in "${!NAT_GWS[@]}"; do
@@ -339,6 +354,18 @@ jobs:
               [ -n "$EIP_ALLOC" ] && [ "$EIP_ALLOC" != "None" ] && \
                 terraform import "aws_eip.nat[$i]" "$EIP_ALLOC" || true
             done
+
+            # Fallback: if NAT GWs were previously deleted, EIPs may be orphaned (still
+            # allocated but unassociated). Import them by tag to avoid AddressLimitExceeded.
+            if [ ${#NAT_GWS[@]} -eq 0 ]; then
+              readarray -t EIP_ALLOCS < <(aws ec2 describe-addresses \
+                --filters "Name=tag:Name,Values=${PREFIX}-nat-eip-*" \
+                --query 'sort_by(Addresses, &Tags[?Key==`Name`].Value|[0])[].AllocationId' \
+                --output text --region "$REGION" 2>/dev/null | tr '\t' '\n' | grep -v '^$' || true)
+              for i in "${!EIP_ALLOCS[@]}"; do
+                terraform import "aws_eip.nat[$i]" "${EIP_ALLOCS[$i]}" || true
+              done
+            fi
 
             # Route tables
             PUB_RT=$(aws ec2 describe-route-tables \
