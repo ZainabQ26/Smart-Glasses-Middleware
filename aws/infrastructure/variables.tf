@@ -4,6 +4,12 @@ variable "aws_region" {
   default     = "us-east-1"
 }
 
+variable "enable_rds" {
+  description = "Set to false to skip Aurora RDS creation (e.g. on AWS free-tier accounts that cannot create Aurora Serverless v2)"
+  type        = bool
+  default     = true
+}
+
 variable "environment" {
   description = "Environment name (dev, staging, prod)"
   type        = string

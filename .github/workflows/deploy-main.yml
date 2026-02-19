@@ -313,7 +313,26 @@ jobs:
           terraform import aws_elasticache_replication_group.redis   ${PREFIX}-redis                || true
           terraform import "aws_elasticache_cluster.redis_single[0]" ${PREFIX}-redis-single         || true
           terraform import aws_db_subnet_group.main                  ${PREFIX}-db-subnet-group      || true
+          # RDS cluster parameter group must be imported before the cluster
+          terraform import aws_rds_cluster_parameter_group.main      ${PREFIX}-aurora-pg-params     || true
           terraform import aws_rds_cluster.main                      ${PREFIX}-aurora-cluster       || true
+          # RDS cluster instances (if cluster exists)
+          for IDX in 0 1; do
+            INST_ID="${PREFIX}-aurora-instance-$((IDX + 1))"
+            terraform import "aws_rds_cluster_instance.main[$IDX]" "$INST_ID" || true
+          done
+
+          # Detect whether RDS cluster was successfully imported; write to GITHUB_ENV
+          # so the apply step can pass -var "enable_rds=false" when the cluster
+          # doesn't exist (free-tier accounts cannot create Aurora Serverless v2).
+          RDS_IN_STATE=$(terraform state list 2>/dev/null | grep '^aws_rds_cluster\.main' | head -1 || true)
+          if [ -n "$RDS_IN_STATE" ]; then
+            echo "RDS cluster is in Terraform state – enable_rds=true"
+            echo "ENABLE_RDS=true" >> "$GITHUB_ENV"
+          else
+            echo "RDS cluster NOT in state (free-tier or cluster doesn't exist) – enable_rds=false"
+            echo "ENABLE_RDS=false" >> "$GITHUB_ENV"
+          fi
 
           # ── ALB and Target Group ──────────────────────────────────────────────
           ALB_ARN=$(aws elbv2 describe-load-balancers --names "${PREFIX}-api-alb" \
@@ -342,6 +361,15 @@ jobs:
             --query 'TargetGroups[0].TargetGroupArn' --output text --region "$REGION" 2>/dev/null || true)
           [ -n "$TG_ARN" ] && [ "$TG_ARN" != "None" ] && \
             { terraform state rm aws_lb_target_group.api 2>/dev/null || true; terraform import aws_lb_target_group.api "$TG_ARN"; } || true
+
+          # ── ECS Cluster and Service ───────────────────────────────────────────
+          # Import the existing ECS cluster and service so Terraform doesn't try
+          # to CREATE them (which would fail with DuplicateListener / cross-VPC
+          # target group errors during ECS service CreateService validation).
+          ECS_CLUSTER="${PREFIX}-cluster"
+          terraform import aws_ecs_cluster.main "$ECS_CLUSTER" || true
+          ECS_TF_SERVICE="${PREFIX}-api-service"
+          terraform import aws_ecs_service.api "${ECS_CLUSTER}/${ECS_TF_SERVICE}" || true
 
           # ── VPC: use ALB's VPC as the authoritative reference ─────────────────
           # This ensures all VPC sub-resource imports target THE SAME VPC as the
@@ -541,7 +569,8 @@ jobs:
         run: |
           terraform apply -auto-approve -lock=false \
             -var "environment=dev" \
-            -var "aws_region=${AWS_REGION}"
+            -var "aws_region=${AWS_REGION}" \
+            -var "enable_rds=${ENABLE_RDS:-true}"
 
       - name: Save Terraform outputs
         working-directory: aws/infrastructure

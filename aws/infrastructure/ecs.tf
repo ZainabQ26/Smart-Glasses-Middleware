@@ -326,6 +326,12 @@ resource "aws_ecs_service" "api" {
     Name = "${var.project_name}-${var.environment}-api-service"
   }
 
+  lifecycle {
+    # desired_count is managed by Application Auto Scaling at runtime;
+    # ignore it here so Terraform doesn't reset it on every apply.
+    ignore_changes = [desired_count]
+  }
+
   depends_on = [
     aws_lb_listener.api_http
   ]
