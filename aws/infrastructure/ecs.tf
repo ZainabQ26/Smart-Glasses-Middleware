@@ -202,6 +202,11 @@ resource "aws_ecs_task_definition" "api" {
   execution_role_arn       = aws_iam_role.ecs_task_execution.arn
   task_role_arn            = aws_iam_role.ecs_task.arn
 
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = "X86_64"
+  }
+
   # Use provided API image if set (e.g., from CI), otherwise fall back to ECR repo :latest
   container_definitions = local.api_container_definitions
 
@@ -238,9 +243,12 @@ locals {
           value = var.deployment_id
         },
         {
-          # Let the app apply pending EF migrations at startup (safe – idempotent)
+          # Only run EF migrations when RDS actually exists.
+          # When enable_rds=false (free-tier) the DB connection string is a
+          # placeholder; migrating against it causes a 30-second timeout that
+          # re-throws and crashes the process with exit code 139 (Npgsql SIGSEGV).
           name  = "MIGRATE_ON_STARTUP"
-          value = "true"
+          value = var.enable_rds ? "true" : "false"
         },
         {
           # Whisper SQS queue URL so the API can submit transcription jobs
