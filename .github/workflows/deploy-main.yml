@@ -664,6 +664,31 @@ jobs:
             echo "Terraform apply succeeded – infra is deployed. Check ECS console for container issues."
           fi
 
+      - name: Fetch ECS container logs from CloudWatch
+        if: always()
+        run: |
+          LOG_GROUP="/ecs/smart-glasses-dev/api"
+          echo "=== Last container logs from $LOG_GROUP ==="
+          # Get the most recent log stream
+          STREAM=$(aws logs describe-log-streams \
+            --log-group-name "$LOG_GROUP" \
+            --order-by LastEventTime \
+            --descending \
+            --query 'logStreams[0].logStreamName' \
+            --output text --region "$AWS_REGION" 2>/dev/null || true)
+          if [ -z "$STREAM" ] || [ "$STREAM" = "None" ]; then
+            echo "No log streams found in $LOG_GROUP"
+          else
+            echo "Stream: $STREAM"
+            aws logs get-log-events \
+              --log-group-name "$LOG_GROUP" \
+              --log-stream-name "$STREAM" \
+              --limit 80 \
+              --region "$AWS_REGION" \
+              --query 'events[*].message' \
+              --output text 2>/dev/null || echo "(could not read log events)"
+          fi
+
       - name: Smoke-test health endpoint
         run: |
           ALB=$(jq -r '.api_alb_dns.value // empty' ./tf/tf_outputs.json 2>/dev/null || true)
