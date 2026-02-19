@@ -528,6 +528,51 @@ jobs:
             -var "aws_region=${AWS_REGION}" \
             -var "enable_rds=${ENABLE_RDS:-true}"
 
+      - name: Seed empty Secrets Manager secrets with placeholder values
+        run: |
+          # When enable_rds=false (free-tier), Terraform does NOT create a version
+          # for aws_secretsmanager_secret.db_credentials or .redis_credentials.
+          # ECS fails at ResourceInitializationError if a secret it references has
+          # no AWSCURRENT staging label, so we seed those secrets here.
+          ENV=dev
+          PREFIX="smart-glasses-${ENV}"
+          REGION="${AWS_REGION}"
+
+          seed_secret_if_empty() {
+            local SECRET_NAME="$1"
+            local PLACEHOLDER="$2"
+            # get-secret-value returns exit 1 with ResourceNotFoundException when
+            # no AWSCURRENT version exists; we catch that and seed.
+            aws secretsmanager get-secret-value \
+              --secret-id "$SECRET_NAME" --region "$REGION" \
+              --version-stage AWSCURRENT >/dev/null 2>&1 \
+            && echo "  $SECRET_NAME already has a value – skipping" \
+            || {
+              echo "  Seeding placeholder into $SECRET_NAME ..."
+              aws secretsmanager put-secret-value \
+                --secret-id "$SECRET_NAME" \
+                --secret-string "$PLACEHOLDER" \
+                --region "$REGION" || true
+            }
+          }
+
+          # DB credentials placeholder – allows the container to start even when
+          # Aurora does not exist (free-tier).  The app will fail to connect but
+          # will at least boot so health checks can return a non-503.
+          seed_secret_if_empty "${PREFIX}-db-credentials" \
+            '{"username":"placeholder","password":"placeholder","engine":"postgres","host":"localhost","port":5432,"dbname":"placeholder","connection_string":"Host=localhost;Port=5432;Database=placeholder;Username=placeholder;Password=placeholder"}'
+
+          # Redis credentials placeholder
+          seed_secret_if_empty "${PREFIX}-redis-credentials" \
+            '{"connection_string":"localhost:6379,password=placeholder,ssl=false,abortConnect=false"}'
+
+          # App secrets placeholder (app_secrets version IS created by Terraform,
+          # but seed it in case it somehow has no value)
+          seed_secret_if_empty "${PREFIX}-app-secrets" \
+            '{"s3_media_bucket":"placeholder","s3_documents_bucket":"placeholder","bedrock_model_id":"anthropic.claude-3-sonnet-20240229-v1:0","embedding_model_id":"amazon.titan-embed-text-v2:0","transcribe_language":"en-US","cors_allowed_origins":"*"}'
+
+          echo "Secret seeding complete."
+
       - name: Save Terraform outputs
         working-directory: aws/infrastructure
         run: |
