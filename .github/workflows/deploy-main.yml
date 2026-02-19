@@ -342,30 +342,36 @@ jobs:
             done
 
             # NAT Gateways and their Elastic IPs
-            readarray -t NAT_GWS < <(aws ec2 describe-nat-gateways \
-              --filter "Name=vpc-id,Values=$VPC_ID" "Name=state,Values=available,pending" \
-              --query 'sort_by(NatGateways,&SubnetId)[].NatGatewayId' \
-              --output text --region "$REGION" 2>/dev/null | tr '\t' '\n' | grep -v '^$' || true)
-            for i in "${!NAT_GWS[@]}"; do
-              terraform import "aws_nat_gateway.main[$i]" "${NAT_GWS[$i]}" || true
-              EIP_ALLOC=$(aws ec2 describe-nat-gateways --nat-gateway-ids "${NAT_GWS[$i]}" \
-                --query 'NatGateways[0].NatGatewayAddresses[0].AllocationId' \
+            # Import each by index using its Name tag (stable mapping regardless of state).
+            # This avoids sort-order mismatches and handles any NAT GW state.
+            AZ_COUNT=$(aws ec2 describe-availability-zones --region "$REGION" \
+              --query 'length(AvailabilityZones)' --output text 2>/dev/null || echo 2)
+            # Cap at the configured count (variables.tf default is 2 AZs)
+            [ "$AZ_COUNT" -gt 2 ] && AZ_COUNT=2
+            for i in $(seq 0 $((AZ_COUNT - 1))); do
+              NAT_NAME="${PREFIX}-nat-$((i + 1))"
+              NAT_GW_ID=$(aws ec2 describe-nat-gateways \
+                --filter "Name=tag:Name,Values=${NAT_NAME}" \
+                --query 'NatGateways[?State!=`deleted`&&State!=`failed`]|[0].NatGatewayId' \
                 --output text --region "$REGION" 2>/dev/null || true)
-              [ -n "$EIP_ALLOC" ] && [ "$EIP_ALLOC" != "None" ] && \
-                terraform import "aws_eip.nat[$i]" "$EIP_ALLOC" || true
+              if [ -n "$NAT_GW_ID" ] && [ "$NAT_GW_ID" != "None" ] && [ "$NAT_GW_ID" != "null" ]; then
+                terraform import "aws_nat_gateway.main[$i]" "$NAT_GW_ID" || true
+                EIP_ALLOC=$(aws ec2 describe-nat-gateways --nat-gateway-ids "$NAT_GW_ID" \
+                  --query 'NatGateways[0].NatGatewayAddresses[0].AllocationId' \
+                  --output text --region "$REGION" 2>/dev/null || true)
+                [ -n "$EIP_ALLOC" ] && [ "$EIP_ALLOC" != "None" ] && [ "$EIP_ALLOC" != "null" ] && \
+                  terraform import "aws_eip.nat[$i]" "$EIP_ALLOC" || true
+              else
+                # NAT GW not found by Name tag – try importing orphaned EIP by tag
+                EIP_NAME="${PREFIX}-nat-eip-$((i + 1))"
+                EIP_ALLOC=$(aws ec2 describe-addresses \
+                  --filters "Name=tag:Name,Values=${EIP_NAME}" \
+                  --query 'Addresses[0].AllocationId' \
+                  --output text --region "$REGION" 2>/dev/null || true)
+                [ -n "$EIP_ALLOC" ] && [ "$EIP_ALLOC" != "None" ] && [ "$EIP_ALLOC" != "null" ] && \
+                  terraform import "aws_eip.nat[$i]" "$EIP_ALLOC" || true
+              fi
             done
-
-            # Fallback: if NAT GWs were previously deleted, EIPs may be orphaned (still
-            # allocated but unassociated). Import them by tag to avoid AddressLimitExceeded.
-            if [ ${#NAT_GWS[@]} -eq 0 ]; then
-              readarray -t EIP_ALLOCS < <(aws ec2 describe-addresses \
-                --filters "Name=tag:Name,Values=${PREFIX}-nat-eip-*" \
-                --query 'sort_by(Addresses, &Tags[?Key==`Name`].Value|[0])[].AllocationId' \
-                --output text --region "$REGION" 2>/dev/null | tr '\t' '\n' | grep -v '^$' || true)
-              for i in "${!EIP_ALLOCS[@]}"; do
-                terraform import "aws_eip.nat[$i]" "${EIP_ALLOCS[$i]}" || true
-              done
-            fi
 
             # Route tables
             PUB_RT=$(aws ec2 describe-route-tables \

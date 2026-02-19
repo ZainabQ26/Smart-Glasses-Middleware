@@ -12,6 +12,12 @@ resource "aws_lb" "api" {
   tags = {
     Name = "${var.project_name}-${var.environment}-api-alb"
   }
+
+  # After import, do not let Terraform modify SGs – the existing ALB already has
+  # the correct security groups and SetSecurityGroups fails if SG IDs mismatch.
+  lifecycle {
+    ignore_changes = [security_groups]
+  }
 }
 
 # Target Group for API

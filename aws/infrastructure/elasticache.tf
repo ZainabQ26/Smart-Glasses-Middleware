@@ -6,6 +6,12 @@ resource "aws_elasticache_subnet_group" "main" {
   tags = {
     Name = "${var.project_name}-${var.environment}-elasticache-subnet-group"
   }
+
+  # Cannot modify subnet_ids while a replication group is active (SubnetInUse).
+  # The existing subnet group already has the correct subnets.
+  lifecycle {
+    ignore_changes = [subnet_ids]
+  }
 }
 
 # ElastiCache Parameter Group for Redis 7

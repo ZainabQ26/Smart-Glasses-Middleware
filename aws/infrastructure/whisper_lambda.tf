@@ -60,6 +60,28 @@ resource "aws_iam_role_policy_attachment" "lambda_s3_attach" {
   policy_arn = aws_iam_policy.lambda_s3_access.arn
 }
 
+# SQS policy – Lambda needs Receive/Delete/GetAttributes to process queue messages
+data "aws_iam_policy_document" "lambda_sqs_receive" {
+  statement {
+    actions = [
+      "sqs:ReceiveMessage",
+      "sqs:DeleteMessage",
+      "sqs:GetQueueAttributes",
+    ]
+    resources = [aws_sqs_queue.whisper_queue.arn]
+  }
+}
+
+resource "aws_iam_policy" "lambda_sqs_receive" {
+  name   = "${var.project_name}-${var.environment}-whisper-sqs-receive"
+  policy = data.aws_iam_policy_document.lambda_sqs_receive.json
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_sqs_attach" {
+  role       = aws_iam_role.lambda_exec.name
+  policy_arn = aws_iam_policy.lambda_sqs_receive.arn
+}
+
 resource "aws_sqs_queue" "whisper_queue" {
   name = "${var.project_name}-${var.environment}-whisper-queue"
 }
