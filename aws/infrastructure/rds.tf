@@ -103,7 +103,7 @@ resource "aws_rds_cluster" "main" {
   }
 
   # Backup configuration
-  backup_retention_period      = var.environment == "prod" ? 30 : 7
+  backup_retention_period      = var.environment == "prod" ? 30 : 1
   preferred_backup_window      = "03:00-04:00"
   preferred_maintenance_window = "mon:04:00-mon:05:00"
 

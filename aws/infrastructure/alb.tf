@@ -13,10 +13,11 @@ resource "aws_lb" "api" {
     Name = "${var.project_name}-${var.environment}-api-alb"
   }
 
-  # After import, do not let Terraform modify SGs – the existing ALB already has
-  # the correct security groups and SetSecurityGroups fails if SG IDs mismatch.
+  # After import, do not let Terraform modify SGs or subnets -- the existing ALB
+  # already has the correct values and modifying them fails when SG/subnet IDs
+  # mismatch the ALB's current VPC context.
   lifecycle {
-    ignore_changes = [security_groups]
+    ignore_changes = [security_groups, subnets]
   }
 }
 
