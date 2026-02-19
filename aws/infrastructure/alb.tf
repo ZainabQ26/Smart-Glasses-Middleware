@@ -58,9 +58,9 @@ resource "aws_lb_listener" "api_http" {
     target_group_arn = aws_lb_target_group.api.arn
   }
 
-  lifecycle {
-    ignore_changes = all
-  }
+  # No ignore_changes: we want Terraform to update the listener when the
+  # target group changes. The import step prevents DuplicateListener errors
+  # by ensuring the listener is in state before apply runs.
 }
 
 # HTTPS Listener (only when a cert ARN is provided)

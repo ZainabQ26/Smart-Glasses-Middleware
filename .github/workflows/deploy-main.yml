@@ -312,25 +312,24 @@ jobs:
           terraform import aws_elasticache_subnet_group.main         ${PREFIX}-elasticache-subnet-group || true
           terraform import aws_elasticache_replication_group.redis   ${PREFIX}-redis                || true
           terraform import "aws_elasticache_cluster.redis_single[0]" ${PREFIX}-redis-single         || true
-          terraform import aws_db_subnet_group.main                  ${PREFIX}-db-subnet-group      || true
-          # RDS cluster parameter group must be imported before the cluster
-          terraform import aws_rds_cluster_parameter_group.main      ${PREFIX}-aurora-pg-params     || true
-          terraform import aws_rds_cluster.main                      ${PREFIX}-aurora-cluster       || true
-          # RDS cluster instances (if cluster exists)
-          for IDX in 0 1; do
-            INST_ID="${PREFIX}-aurora-instance-$((IDX + 1))"
-            terraform import "aws_rds_cluster_instance.main[$IDX]" "$INST_ID" || true
-          done
+          terraform import aws_db_subnet_group.main             ${PREFIX}-db-subnet-group  || true
+          # RDS: try to import cluster (fails silently on free-tier if it doesn't exist)
+          terraform import aws_rds_cluster_parameter_group.main ${PREFIX}-aurora-pg-params || true
+          terraform import aws_rds_cluster.main                 ${PREFIX}-aurora-cluster   || true
 
           # Detect whether RDS cluster was successfully imported; write to GITHUB_ENV
-          # so the apply step can pass -var "enable_rds=false" when the cluster
-          # doesn't exist (free-tier accounts cannot create Aurora Serverless v2).
+          # so the apply step passes -var "enable_rds=false" on free-tier accounts.
           RDS_IN_STATE=$(terraform state list 2>/dev/null | grep '^aws_rds_cluster\.main' | head -1 || true)
           if [ -n "$RDS_IN_STATE" ]; then
-            echo "RDS cluster is in Terraform state – enable_rds=true"
+            echo "RDS cluster is in TF state – enable_rds=true"
             echo "ENABLE_RDS=true" >> "$GITHUB_ENV"
+            # Only import instances when the cluster exists
+            for IDX in 0 1; do
+              INST_ID="${PREFIX}-aurora-instance-$((IDX + 1))"
+              terraform import "aws_rds_cluster_instance.main[$IDX]" "$INST_ID" || true
+            done
           else
-            echo "RDS cluster NOT in state (free-tier or cluster doesn't exist) – enable_rds=false"
+            echo "RDS cluster not found in AWS (free-tier) – enable_rds=false"
             echo "ENABLE_RDS=false" >> "$GITHUB_ENV"
           fi
 
@@ -339,15 +338,26 @@ jobs:
             --query 'LoadBalancers[0].LoadBalancerArn' --output text --region "$REGION" 2>/dev/null || true)
           [ -n "$ALB_ARN" ] && [ "$ALB_ARN" != "None" ] && terraform import aws_lb.api "$ALB_ARN" || true
 
-          # ALB Listeners (HTTP port 80, HTTPS port 443)
-          # Must import before apply to avoid DuplicateListener error.
+          # ALB Listeners + Target Group
+          # IMPORTANT: derive the TG ARN from whatever the listener ACTUALLY forwards
+          # to in AWS — not a name lookup.  This guarantees the TG we import into
+          # state is the same one the ALB association was already established for,
+          # so ECS service creation passes the "TG has no associated load balancer"
+          # validation check that AWS enforces at CreateService time.
+          TG_ARN=""
           if [ -n "$ALB_ARN" ] && [ "$ALB_ARN" != "None" ]; then
             HTTP_LISTENER=$(aws elbv2 describe-listeners \
               --load-balancer-arn "$ALB_ARN" \
               --query 'Listeners[?Port==`80`].ListenerArn' \
               --output text --region "$REGION" 2>/dev/null || true)
-            [ -n "$HTTP_LISTENER" ] && [ "$HTTP_LISTENER" != "None" ] && \
+            if [ -n "$HTTP_LISTENER" ] && [ "$HTTP_LISTENER" != "None" ]; then
               terraform import aws_lb_listener.api_http "$HTTP_LISTENER" || true
+              # Read target group directly from the listener so state is consistent
+              TG_ARN=$(aws elbv2 describe-listeners \
+                --listener-arns "$HTTP_LISTENER" \
+                --query 'Listeners[0].DefaultActions[?Type==`forward`].TargetGroupArn|[0]' \
+                --output text --region "$REGION" 2>/dev/null || true)
+            fi
 
             HTTPS_LISTENER=$(aws elbv2 describe-listeners \
               --load-balancer-arn "$ALB_ARN" \
@@ -356,11 +366,14 @@ jobs:
             [ -n "$HTTPS_LISTENER" ] && [ "$HTTPS_LISTENER" != "None" ] && \
               terraform import aws_lb_listener.api_https "$HTTPS_LISTENER" || true
           fi
-
-          TG_ARN=$(aws elbv2 describe-target-groups --names "${PREFIX}-api-tg" \
-            --query 'TargetGroups[0].TargetGroupArn' --output text --region "$REGION" 2>/dev/null || true)
+          # Fall back to name lookup if listener doesn't exist or has no forward action
+          if [ -z "$TG_ARN" ] || [ "$TG_ARN" = "None" ]; then
+            TG_ARN=$(aws elbv2 describe-target-groups --names "${PREFIX}-api-tg" \
+              --query 'TargetGroups[0].TargetGroupArn' --output text --region "$REGION" 2>/dev/null || true)
+          fi
           [ -n "$TG_ARN" ] && [ "$TG_ARN" != "None" ] && \
-            { terraform state rm aws_lb_target_group.api 2>/dev/null || true; terraform import aws_lb_target_group.api "$TG_ARN"; } || true
+            { terraform state rm aws_lb_target_group.api 2>/dev/null || true
+              terraform import aws_lb_target_group.api "$TG_ARN" || true; } || true
 
           # ── ECS Cluster and Service ───────────────────────────────────────────
           # Import the existing ECS cluster and service so Terraform doesn't try
