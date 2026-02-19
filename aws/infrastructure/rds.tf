@@ -126,7 +126,10 @@ resource "aws_rds_cluster" "main" {
   lifecycle {
     ignore_changes = [
       master_password,
-      final_snapshot_identifier
+      final_snapshot_identifier,
+      # vpc_security_group_ids: prevent Terraform from replacing the SG after import
+      # when the imported state has a SG from a different run.
+      vpc_security_group_ids
     ]
     prevent_destroy = true
   }

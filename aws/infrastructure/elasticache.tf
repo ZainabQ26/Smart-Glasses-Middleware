@@ -84,7 +84,7 @@ resource "aws_elasticache_replication_group" "redis" {
   }
 
   lifecycle {
-    ignore_changes = [auth_token]
+    ignore_changes  = [auth_token, security_group_ids]
     # Replication group cannot be recreated in-place; ignore drift after initial import.
     # Security groups and subnet group are managed via their own resources.
     prevent_destroy = true
@@ -110,6 +110,10 @@ resource "aws_elasticache_cluster" "redis_single" {
 
   tags = {
     Name = "${var.project_name}-${var.environment}-redis-single"
+  }
+
+  lifecycle {
+    ignore_changes = [security_group_ids]
   }
 }
 
