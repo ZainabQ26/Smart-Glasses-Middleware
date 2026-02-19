@@ -106,6 +106,12 @@ variable "lambda_whisper_image" {
   default     = ""
 }
 
+variable "lambda_document_image" {
+  description = "Full image URI for the Document Processor Lambda (if packaged as image)."
+  type        = string
+  default     = ""
+}
+
 variable "client_image" {
   description = "Optional: full image URI (including tag) for the client container (optional)."
   type        = string

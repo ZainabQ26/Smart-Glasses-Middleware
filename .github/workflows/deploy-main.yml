@@ -83,6 +83,12 @@ jobs:
           ./build.sh
           echo "lambda_zip=aws/lambda-document-processor/deployment.zip" >> $GITHUB_OUTPUT
 
+      - name: Upload Document Processor zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: lambda-document-zip
+          path: aws/lambda-document-processor/deployment.zip
+
   terraform-apply:
     needs: build-and-push
     runs-on: ubuntu-latest
@@ -114,6 +120,12 @@ jobs:
           lambda_document_image = "${{ needs.build-and-push.outputs.lambda-document-image }}"
           deployment_id = "${{ github.run_id }}"
           EOF
+
+      - name: Download Document Processor zip
+        uses: actions/download-artifact@v4
+        with:
+          name: lambda-document-zip
+          path: .
 
       - name: Terraform init
         working-directory: aws/infrastructure
