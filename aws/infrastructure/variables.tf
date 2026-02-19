@@ -5,7 +5,7 @@ variable "aws_region" {
 }
 
 variable "enable_rds" {
-  description = "Set to false to skip Aurora RDS creation (e.g. on AWS free-tier accounts that cannot create Aurora Serverless v2)"
+  description = "Kept for backward compatibility; RDS is always created (standard db.t3.micro, free-tier eligible)"
   type        = bool
   default     = true
 }
@@ -35,9 +35,9 @@ variable "availability_zones" {
 }
 
 variable "db_instance_class" {
-  description = "RDS instance class"
+  description = "RDS instance class (db.t3.micro = free tier eligible)"
   type        = string
-  default     = "db.t3.medium"
+  default     = "db.t3.micro"
 }
 
 variable "db_name" {

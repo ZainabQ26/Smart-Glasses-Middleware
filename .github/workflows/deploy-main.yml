@@ -292,6 +292,18 @@ jobs:
             terraform import "$TF_RES" "$IMPORT_ID" || true
           }
 
+          # ── Remove old Aurora resources from state (migrated to standard RDS) ─
+          # These resource types no longer exist in the Terraform config.
+          # Removing them upfront prevents Terraform planning a destroy action.
+          echo "Cleaning up old Aurora state entries (if any)..."
+          for OLD_RES in \
+            aws_rds_cluster_parameter_group.main \
+            aws_rds_cluster.main \
+            "aws_rds_cluster_instance.main[0]" \
+            "aws_rds_cluster_instance.main[1]"; do
+            terraform state rm "$OLD_RES" 2>/dev/null && echo "  Removed $OLD_RES from state" || true
+          done
+
           # ── S3 (data must never be destroyed) ─────────────────────────────────
           safe_import aws_s3_bucket.media     "${PREFIX}-media"
           safe_import aws_s3_bucket.documents "${PREFIX}-documents"
@@ -334,19 +346,10 @@ jobs:
           safe_import "aws_elasticache_cluster.redis_single[0]" "${PREFIX}-redis-single"
 
           # ── RDS ───────────────────────────────────────────────────────────────
-          safe_import aws_db_subnet_group.main             "${PREFIX}-db-subnet-group"
-          safe_import aws_rds_cluster_parameter_group.main "${PREFIX}-aurora-pg-params"
-          safe_import aws_rds_cluster.main                 "${PREFIX}-aurora-cluster"
-          RDS_IN_STATE=$(terraform state list 2>/dev/null | grep '^aws_rds_cluster\.main' | head -1 || true)
-          if [ -n "$RDS_IN_STATE" ]; then
-            echo "RDS cluster in state – enable_rds=true"
-            echo "ENABLE_RDS=true" >> "$GITHUB_ENV"
-            safe_import "aws_rds_cluster_instance.main[0]" "${PREFIX}-aurora-instance-1"
-            safe_import "aws_rds_cluster_instance.main[1]" "${PREFIX}-aurora-instance-2"
-          else
-            echo "RDS cluster not in AWS (free-tier) – enable_rds=false"
-            echo "ENABLE_RDS=false" >> "$GITHUB_ENV"
-          fi
+          safe_import aws_db_subnet_group.main      "${PREFIX}-db-subnet-group"
+          safe_import aws_db_parameter_group.main   "${PREFIX}-pg16-params"
+          safe_import aws_db_instance.main          "${PREFIX}-postgres"
+          echo "ENABLE_RDS=true" >> "$GITHUB_ENV"
 
           # ── ALB, Listeners, Target Group ──────────────────────────────────────
           ALB_ARN=$(aws elbv2 describe-load-balancers --names "${PREFIX}-api-alb" \
@@ -525,8 +528,7 @@ jobs:
         run: |
           terraform apply -auto-approve -lock=false \
             -var "environment=dev" \
-            -var "aws_region=${AWS_REGION}" \
-            -var "enable_rds=${ENABLE_RDS:-true}"
+            -var "aws_region=${AWS_REGION}"
 
       - name: Seed empty Secrets Manager secrets with placeholder values
         run: |

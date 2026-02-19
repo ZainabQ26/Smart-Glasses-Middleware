@@ -1,9 +1,5 @@
-# Computed locals (safe to reference even when enable_rds = false)
-# try() is used because HCL ternary does NOT short-circuit: both branches are
-# evaluated even when the condition is false, so checking length() first would
-# still evaluate the [0] index and raise an 'invalid index' error.
 locals {
-  rds_endpoint = try(aws_rds_cluster.main[0].endpoint, "")
+  rds_endpoint = aws_db_instance.main.address
 }
 
 # DB Subnet Group
@@ -23,16 +19,11 @@ resource "aws_db_subnet_group" "main" {
   }
 }
 
-# DB Parameter Group for pgvector
-resource "aws_rds_cluster_parameter_group" "main" {
-  name        = "${var.project_name}-${var.environment}-aurora-pg-params"
-  family      = "aurora-postgresql16"
-  description = "Aurora PostgreSQL 16 cluster parameter group with pgvector"
-
-  parameter {
-    name  = "shared_preload_libraries"
-    value = "pg_stat_statements"
-  }
+# DB Parameter Group for standard PostgreSQL 16
+resource "aws_db_parameter_group" "main" {
+  name   = "${var.project_name}-${var.environment}-pg16-params"
+  family = "postgres16"
+  description = "PostgreSQL 16 parameter group"
 
   parameter {
     name  = "log_statement"
@@ -45,7 +36,7 @@ resource "aws_rds_cluster_parameter_group" "main" {
   }
 
   tags = {
-    Name = "${var.project_name}-${var.environment}-aurora-pg-params"
+    Name = "${var.project_name}-${var.environment}-pg16-params"
   }
 
   lifecycle {
@@ -74,7 +65,6 @@ resource "aws_secretsmanager_secret" "db_credentials" {
 }
 
 resource "aws_secretsmanager_secret_version" "db_credentials" {
-  count     = var.enable_rds ? 1 : 0
   secret_id = aws_secretsmanager_secret.db_credentials.id
   secret_string = jsonencode({
     username          = var.db_username
@@ -87,90 +77,57 @@ resource "aws_secretsmanager_secret_version" "db_credentials" {
   })
 
   lifecycle {
-    ignore_changes = [
-      secret_string
-    ]
+    ignore_changes = [secret_string]
   }
 }
 
-# RDS Aurora Serverless v2 Cluster (Cost-effective and scalable)
-# count = 0 when enable_rds = false (e.g. AWS free-tier accounts that cannot
-# create Aurora Serverless v2 without WithExpressConfiguration).
-resource "aws_rds_cluster" "main" {
-  count = var.enable_rds ? 1 : 0
-  cluster_identifier              = "${var.project_name}-${var.environment}-aurora-cluster"
-  engine                          = "aurora-postgresql"
-  engine_version                  = "16.1"
-  database_name                   = var.db_name
-  master_username                 = var.db_username
-  master_password                 = random_password.db_password.result
-  db_subnet_group_name            = aws_db_subnet_group.main.name
-  db_cluster_parameter_group_name = aws_rds_cluster_parameter_group.main.name
-  vpc_security_group_ids          = [aws_security_group.rds.id]
+# RDS PostgreSQL (free-tier eligible: db.t3.micro, single-AZ, gp2 20 GB)
+resource "aws_db_instance" "main" {
+  identifier     = "${var.project_name}-${var.environment}-postgres"
+  engine         = "postgres"
+  engine_version = "16"
+  instance_class = var.db_instance_class
 
-  # Serverless v2 scaling
-  serverlessv2_scaling_configuration {
-    max_capacity = 2.0
-    # min_capacity = 0 is required on AWS free-tier accounts (Aurora Express Mode).
-    # On paid accounts this can be raised to 0.5 for faster cold starts.
-    min_capacity = var.environment == "prod" ? 0.5 : 0
-  }
+  allocated_storage     = 20
+  max_allocated_storage = 100
+  storage_type          = "gp2"
+  storage_encrypted     = true
+  kms_key_id            = aws_kms_key.rds.arn
 
-  # Backup configuration
+  db_name  = var.db_name
+  username = var.db_username
+  password = random_password.db_password.result
+
+  db_subnet_group_name   = aws_db_subnet_group.main.name
+  vpc_security_group_ids = [aws_security_group.rds.id]
+  parameter_group_name   = aws_db_parameter_group.main.name
+
+  # Single-AZ (free tier); set to true for production HA
+  multi_az = false
+
   backup_retention_period      = var.environment == "prod" ? 30 : 1
   preferred_backup_window      = "03:00-04:00"
   preferred_maintenance_window = "mon:04:00-mon:05:00"
 
-  # Encryption
-  storage_encrypted = true
-  kms_key_id        = aws_kms_key.rds.arn
+  # Performance Insights (available on db.t3.micro, 7-day free retention)
+  performance_insights_enabled = true
 
-  # Enhanced monitoring
-  enabled_cloudwatch_logs_exports = ["postgresql"]
-
-  # Deletion protection for production
-  deletion_protection = var.environment == "prod" ? true : false
-  skip_final_snapshot = var.environment != "prod"
-  final_snapshot_identifier = var.environment == "prod" ? "${var.project_name}-${var.environment}-final-snapshot-${formatdate("YYYY-MM-DD-hhmm", timestamp())}" : null
-
-  tags = {
-    Name = "${var.project_name}-${var.environment}-aurora-cluster"
-  }
-
-  lifecycle {
-    ignore_changes = [
-      master_password,
-      final_snapshot_identifier,
-      # vpc_security_group_ids: prevent Terraform from replacing the SG after import
-      # when the imported state has a SG from a different run.
-      vpc_security_group_ids
-    ]
-    prevent_destroy = true
-  }
-}
-
-# Aurora Serverless v2 Instances
-resource "aws_rds_cluster_instance" "main" {
-  count              = var.enable_rds ? 2 : 0 # Multi-AZ for high availability
-  identifier         = "${var.project_name}-${var.environment}-aurora-instance-${count.index + 1}"
-  cluster_identifier = try(aws_rds_cluster.main[0].id, "")
-  instance_class     = "db.serverless"
-  engine             = try(aws_rds_cluster.main[0].engine, "aurora-postgresql")
-  engine_version     = try(aws_rds_cluster.main[0].engine_version, "16.1")
-
-  # Performance Insights
-  performance_insights_enabled    = true
-  performance_insights_kms_key_id = aws_kms_key.rds.arn
-
-  # Monitoring
+  # Enhanced Monitoring
   monitoring_interval = 60
   monitoring_role_arn = aws_iam_role.rds_monitoring.arn
 
+  deletion_protection = var.environment == "prod" ? true : false
+  skip_final_snapshot = var.environment != "prod"
+  final_snapshot_identifier = var.environment == "prod" ? "${var.project_name}-${var.environment}-final-snapshot" : null
+
+  enabled_cloudwatch_logs_exports = ["postgresql", "upgrade"]
+
   tags = {
-    Name = "${var.project_name}-${var.environment}-aurora-instance-${count.index + 1}"
+    Name = "${var.project_name}-${var.environment}-postgres"
   }
 
   lifecycle {
+    ignore_changes  = [password, final_snapshot_identifier]
     prevent_destroy = true
   }
 }
