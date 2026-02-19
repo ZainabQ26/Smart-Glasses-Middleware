@@ -1,3 +1,11 @@
+# Computed locals (safe to reference even when enable_rds = false)
+# try() is used because HCL ternary does NOT short-circuit: both branches are
+# evaluated even when the condition is false, so checking length() first would
+# still evaluate the [0] index and raise an 'invalid index' error.
+locals {
+  rds_endpoint = try(aws_rds_cluster.main[0].endpoint, "")
+}
+
 # DB Subnet Group
 resource "aws_db_subnet_group" "main" {
   name       = "${var.project_name}-${var.environment}-db-subnet-group"
@@ -66,15 +74,16 @@ resource "aws_secretsmanager_secret" "db_credentials" {
 }
 
 resource "aws_secretsmanager_secret_version" "db_credentials" {
+  count     = var.enable_rds ? 1 : 0
   secret_id = aws_secretsmanager_secret.db_credentials.id
   secret_string = jsonencode({
     username          = var.db_username
     password          = random_password.db_password.result
     engine            = "postgres"
-    host              = aws_rds_cluster.main.endpoint
+    host              = local.rds_endpoint
     port              = 5432
     dbname            = var.db_name
-    connection_string = "Host=${aws_rds_cluster.main.endpoint};Port=5432;Database=${var.db_name};Username=${var.db_username};Password=${random_password.db_password.result}"
+    connection_string = "Host=${local.rds_endpoint};Port=5432;Database=${var.db_name};Username=${var.db_username};Password=${random_password.db_password.result}"
   })
 
   lifecycle {
@@ -85,7 +94,10 @@ resource "aws_secretsmanager_secret_version" "db_credentials" {
 }
 
 # RDS Aurora Serverless v2 Cluster (Cost-effective and scalable)
+# count = 0 when enable_rds = false (e.g. AWS free-tier accounts that cannot
+# create Aurora Serverless v2 without WithExpressConfiguration).
 resource "aws_rds_cluster" "main" {
+  count = var.enable_rds ? 1 : 0
   cluster_identifier              = "${var.project_name}-${var.environment}-aurora-cluster"
   engine                          = "aurora-postgresql"
   engine_version                  = "16.1"
@@ -139,12 +151,12 @@ resource "aws_rds_cluster" "main" {
 
 # Aurora Serverless v2 Instances
 resource "aws_rds_cluster_instance" "main" {
-  count              = 2 # Multi-AZ for high availability
+  count              = var.enable_rds ? 2 : 0 # Multi-AZ for high availability
   identifier         = "${var.project_name}-${var.environment}-aurora-instance-${count.index + 1}"
-  cluster_identifier = aws_rds_cluster.main.id
+  cluster_identifier = try(aws_rds_cluster.main[0].id, "")
   instance_class     = "db.serverless"
-  engine             = aws_rds_cluster.main.engine
-  engine_version     = aws_rds_cluster.main.engine_version
+  engine             = try(aws_rds_cluster.main[0].engine, "aurora-postgresql")
+  engine_version     = try(aws_rds_cluster.main[0].engine_version, "16.1")
 
   # Performance Insights
   performance_insights_enabled    = true

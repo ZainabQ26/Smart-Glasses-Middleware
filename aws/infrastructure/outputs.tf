@@ -4,13 +4,13 @@ output "vpc_id" {
 }
 
 output "rds_endpoint" {
-  description = "RDS cluster endpoint"
-  value       = aws_rds_cluster.main.endpoint
+  description = "RDS cluster endpoint (empty string when enable_rds = false)"
+  value       = local.rds_endpoint
 }
 
 output "rds_reader_endpoint" {
-  description = "RDS cluster reader endpoint"
-  value       = aws_rds_cluster.main.reader_endpoint
+  description = "RDS cluster reader endpoint (empty string when enable_rds = false)"
+  value       = try(aws_rds_cluster.main[0].reader_endpoint, "")
 }
 
 output "elasticache_endpoint" {
