@@ -258,77 +258,89 @@ jobs:
 
           echo "=== Importing pre-existing AWS resources (all non-fatal) ==="
 
+          # Helper: always-overwrite import.
+          # Removes the resource from state first so stale data from previous
+          # failed runs doesn't block or corrupt the new import.
+          tf_import() {
+            local TF_RES="$1" IMPORT_ID="$2"
+            terraform state rm "$TF_RES" 2>/dev/null || true
+            terraform import "$TF_RES" "$IMPORT_ID" || true
+          }
+
           # ── S3 buckets (contain data – must import not recreate) ──────────────
-          terraform import aws_s3_bucket.media          ${PREFIX}-media      || true
-          terraform import aws_s3_bucket.documents      ${PREFIX}-documents  || true
-          terraform import aws_s3_bucket.frontend       ${PREFIX}-frontend   || true
+          tf_import aws_s3_bucket.media          ${PREFIX}-media
+          tf_import aws_s3_bucket.documents      ${PREFIX}-documents
+          tf_import aws_s3_bucket.frontend       ${PREFIX}-frontend
 
           # ── KMS keys and aliases ──────────────────────────────────────────────
           KMS_S3=$(aws kms describe-key --key-id alias/${PREFIX}-s3  --query 'KeyMetadata.KeyId' --output text 2>/dev/null || true)
           KMS_RDS=$(aws kms describe-key --key-id alias/${PREFIX}-rds --query 'KeyMetadata.KeyId' --output text 2>/dev/null || true)
-          [ -n "$KMS_S3"  ] && [ "$KMS_S3"  != "None" ] && terraform import aws_kms_key.s3   "$KMS_S3"  || true
-          [ -n "$KMS_RDS" ] && [ "$KMS_RDS" != "None" ] && terraform import aws_kms_key.rds  "$KMS_RDS" || true
-          terraform import aws_kms_alias.s3  alias/${PREFIX}-s3  || true
-          terraform import aws_kms_alias.rds alias/${PREFIX}-rds || true
+          [ -n "$KMS_S3"  ] && [ "$KMS_S3"  != "None" ] && tf_import aws_kms_key.s3   "$KMS_S3"  || true
+          [ -n "$KMS_RDS" ] && [ "$KMS_RDS" != "None" ] && tf_import aws_kms_key.rds  "$KMS_RDS" || true
+          tf_import aws_kms_alias.s3  alias/${PREFIX}-s3
+          tf_import aws_kms_alias.rds alias/${PREFIX}-rds
 
           # ── Secrets Manager ───────────────────────────────────────────────────
-          terraform import aws_secretsmanager_secret.app_secrets      arn:aws:secretsmanager:${REGION}:${ACCOUNT_ID}:secret:${PREFIX}-app-secrets      || true
-          terraform import aws_secretsmanager_secret.db_credentials   arn:aws:secretsmanager:${REGION}:${ACCOUNT_ID}:secret:${PREFIX}-db-credentials   || true
-          terraform import aws_secretsmanager_secret.redis_credentials arn:aws:secretsmanager:${REGION}:${ACCOUNT_ID}:secret:${PREFIX}-redis-credentials || true
+          tf_import aws_secretsmanager_secret.app_secrets      arn:aws:secretsmanager:${REGION}:${ACCOUNT_ID}:secret:${PREFIX}-app-secrets
+          tf_import aws_secretsmanager_secret.db_credentials   arn:aws:secretsmanager:${REGION}:${ACCOUNT_ID}:secret:${PREFIX}-db-credentials
+          tf_import aws_secretsmanager_secret.redis_credentials arn:aws:secretsmanager:${REGION}:${ACCOUNT_ID}:secret:${PREFIX}-redis-credentials
 
-          # ── CloudFront (OAC and origin request policy cannot be deleted while
-          #    associated with a distribution, so import instead of recreate) ───
+          # ── CloudFront OAC and Origin Request Policy ──────────────────────────
           OAC_ID=$(aws cloudfront list-origin-access-controls \
             --query "OriginAccessControlList.Items[?Name=='${PREFIX}-frontend-oac'].Id" \
             --output text 2>/dev/null || true)
           [ -n "$OAC_ID" ] && [ "$OAC_ID" != "None" ] && \
-            terraform import aws_cloudfront_origin_access_control.frontend "$OAC_ID" || true
+            tf_import aws_cloudfront_origin_access_control.frontend "$OAC_ID" || true
 
           ORP_ID=$(aws cloudfront list-origin-request-policies --type custom \
             --query "OriginRequestPolicyList.Items[?OriginRequestPolicy.OriginRequestPolicyConfig.Name=='${PREFIX}-api-policy'].OriginRequestPolicy.Id" \
-            --output text 2>/dev/null | tr '\t' '\n' | head -1 || true)
+            --output text 2>/dev/null | tr '\t' '\n' | grep -v '^$' | head -1 || true)
           [ -n "$ORP_ID" ] && [ "$ORP_ID" != "None" ] && \
-            terraform import aws_cloudfront_origin_request_policy.api "$ORP_ID" || true
+            tf_import aws_cloudfront_origin_request_policy.api "$ORP_ID" || true
 
-          # -- ElastiCache parameter group (can't delete while replication group exists) --
-          terraform import aws_elasticache_parameter_group.redis ${PREFIX}-redis-params || true
+          # ── ElastiCache ───────────────────────────────────────────────────────
+          tf_import aws_elasticache_parameter_group.redis     ${PREFIX}-redis-params
+          tf_import aws_elasticache_subnet_group.main         ${PREFIX}-elasticache-subnet-group
+          tf_import aws_elasticache_replication_group.redis   ${PREFIX}-redis
+          tf_import "aws_elasticache_cluster.redis_single[0]" ${PREFIX}-redis-single
 
-          # -- ElastiCache Subnet Group --
-          terraform import aws_elasticache_subnet_group.main ${PREFIX}-elasticache-subnet-group || true
+          # ── RDS ───────────────────────────────────────────────────────────────
+          tf_import aws_db_subnet_group.main   ${PREFIX}-db-subnet-group
+          tf_import aws_rds_cluster.main       ${PREFIX}-aurora-cluster
 
-          # -- ElastiCache Replication Group and single-node cluster (dev) --
-          terraform import aws_elasticache_replication_group.redis ${PREFIX}-redis || true
-          terraform import "aws_elasticache_cluster.redis_single[0]" ${PREFIX}-redis-single || true
-
-          # -- RDS DB Subnet Group --
-          terraform import aws_db_subnet_group.main ${PREFIX}-db-subnet-group || true
-
-          # -- RDS Cluster (Aurora) --
-          terraform import aws_rds_cluster.main ${PREFIX}-aurora-cluster || true
-
-          # ── ALB and Target Group ──────────────────────────────────────────────
+          # ── ALB: use ALB's VPC as the authoritative VPC ID so all subsequent ──
+          # ── resource imports (subnets, SGs, etc.) target the SAME VPC as ──────
+          # ── the pre-existing ALB/ElastiCache/RDS (avoids cross-VPC errors). ───
           ALB_ARN=$(aws elbv2 describe-load-balancers --names "${PREFIX}-api-alb" \
             --query 'LoadBalancers[0].LoadBalancerArn' --output text --region "$REGION" 2>/dev/null || true)
-          [ -n "$ALB_ARN" ] && [ "$ALB_ARN" != "None" ] && terraform import aws_lb.api "$ALB_ARN" || true
+          [ -n "$ALB_ARN" ] && [ "$ALB_ARN" != "None" ] && tf_import aws_lb.api "$ALB_ARN" || true
 
           TG_ARN=$(aws elbv2 describe-target-groups --names "${PREFIX}-api-tg" \
             --query 'TargetGroups[0].TargetGroupArn' --output text --region "$REGION" 2>/dev/null || true)
-          [ -n "$TG_ARN" ] && [ "$TG_ARN" != "None" ] && terraform import aws_lb_target_group.api "$TG_ARN" || true
+          [ -n "$TG_ARN" ] && [ "$TG_ARN" != "None" ] && tf_import aws_lb_target_group.api "$TG_ARN" || true
 
-          # ── VPC and all network sub-resources (import to avoid VPC limit errors) ──
-          VPC_ID=$(aws ec2 describe-vpcs \
-            --filters "Name=tag:Project,Values=SmartGlassesMiddleware" "Name=tag:Environment,Values=${ENV}" \
-            --query 'Vpcs[0].VpcId' --output text --region "$REGION" 2>/dev/null || true)
+          # ── VPC: derive authoritative VPC from ALB when possible ─────────────
+          ALB_VPC_ID=$(aws elbv2 describe-load-balancers --names "${PREFIX}-api-alb" \
+            --query 'LoadBalancers[0].VpcId' --output text --region "$REGION" 2>/dev/null || true)
+          if [ -n "$ALB_VPC_ID" ] && [ "$ALB_VPC_ID" != "None" ]; then
+            VPC_ID="$ALB_VPC_ID"
+            echo "Using ALB's VPC ($VPC_ID) as authoritative"
+          else
+            VPC_ID=$(aws ec2 describe-vpcs \
+              --filters "Name=tag:Project,Values=SmartGlassesMiddleware" "Name=tag:Environment,Values=${ENV}" \
+              --query 'Vpcs[0].VpcId' --output text --region "$REGION" 2>/dev/null || true)
+            echo "ALB not found; using tag-based VPC lookup: $VPC_ID"
+          fi
 
           if [ -n "$VPC_ID" ] && [ "$VPC_ID" != "None" ]; then
             echo "Importing existing project VPC: $VPC_ID"
-            terraform import aws_vpc.main "$VPC_ID" || true
+            tf_import aws_vpc.main "$VPC_ID"
 
             # Internet Gateway
             IGW_ID=$(aws ec2 describe-internet-gateways \
               --filters "Name=attachment.vpc-id,Values=$VPC_ID" \
               --query 'InternetGateways[0].InternetGatewayId' --output text --region "$REGION" 2>/dev/null || true)
-            [ -n "$IGW_ID" ] && [ "$IGW_ID" != "None" ] && terraform import aws_internet_gateway.main "$IGW_ID" || true
+            [ -n "$IGW_ID" ] && [ "$IGW_ID" != "None" ] && tf_import aws_internet_gateway.main "$IGW_ID" || true
 
             # Subnets (sorted by AZ for stable index ordering)
             readarray -t PUB_SUBNETS < <(aws ec2 describe-subnets \
@@ -336,7 +348,7 @@ jobs:
               --query 'sort_by(Subnets,&AvailabilityZone)[].SubnetId' \
               --output text --region "$REGION" 2>/dev/null | tr '\t' '\n' | grep -v '^$' || true)
             for i in "${!PUB_SUBNETS[@]}"; do
-              terraform import "aws_subnet.public[$i]" "${PUB_SUBNETS[$i]}" || true
+              tf_import "aws_subnet.public[$i]" "${PUB_SUBNETS[$i]}"
             done
 
             readarray -t PRIV_APP < <(aws ec2 describe-subnets \
@@ -344,7 +356,7 @@ jobs:
               --query 'sort_by(Subnets,&AvailabilityZone)[].SubnetId' \
               --output text --region "$REGION" 2>/dev/null | tr '\t' '\n' | grep -v '^$' || true)
             for i in "${!PRIV_APP[@]}"; do
-              terraform import "aws_subnet.private_app[$i]" "${PRIV_APP[$i]}" || true
+              tf_import "aws_subnet.private_app[$i]" "${PRIV_APP[$i]}"
             done
 
             readarray -t PRIV_DB < <(aws ec2 describe-subnets \
@@ -352,17 +364,11 @@ jobs:
               --query 'sort_by(Subnets,&AvailabilityZone)[].SubnetId' \
               --output text --region "$REGION" 2>/dev/null | tr '\t' '\n' | grep -v '^$' || true)
             for i in "${!PRIV_DB[@]}"; do
-              terraform import "aws_subnet.private_db[$i]" "${PRIV_DB[$i]}" || true
+              tf_import "aws_subnet.private_db[$i]" "${PRIV_DB[$i]}"
             done
 
             # NAT Gateways and their Elastic IPs
-            # Import each by index using its EIP Name tag: find the EIP, then
-            # look up which NAT GW owns that EIP. This is robust regardless of
-            # the NAT GW's own Name tag or state.
-            AZ_COUNT=$(aws ec2 describe-availability-zones --region "$REGION" \
-              --query 'length(AvailabilityZones)' --output text 2>/dev/null || echo 2)
-            # Cap at the configured count (variables.tf default is 2 AZs)
-            [ "$AZ_COUNT" -gt 2 ] && AZ_COUNT=2
+            AZ_COUNT=2
             for i in $(seq 0 $((AZ_COUNT - 1))); do
               NAT_NAME="${PREFIX}-nat-$((i + 1))"
               NAT_GW_ID=$(aws ec2 describe-nat-gateways \
@@ -370,28 +376,27 @@ jobs:
                 --query 'NatGateways[?State!=`deleted`&&State!=`failed`]|[0].NatGatewayId' \
                 --output text --region "$REGION" 2>/dev/null || true)
               if [ -n "$NAT_GW_ID" ] && [ "$NAT_GW_ID" != "None" ] && [ "$NAT_GW_ID" != "null" ]; then
-                terraform import "aws_nat_gateway.main[$i]" "$NAT_GW_ID" || true
+                tf_import "aws_nat_gateway.main[$i]" "$NAT_GW_ID"
                 EIP_ALLOC=$(aws ec2 describe-nat-gateways --nat-gateway-ids "$NAT_GW_ID" \
                   --query 'NatGateways[0].NatGatewayAddresses[0].AllocationId' \
                   --output text --region "$REGION" 2>/dev/null || true)
                 [ -n "$EIP_ALLOC" ] && [ "$EIP_ALLOC" != "None" ] && [ "$EIP_ALLOC" != "null" ] && \
-                  terraform import "aws_eip.nat[$i]" "$EIP_ALLOC" || true
+                  tf_import "aws_eip.nat[$i]" "$EIP_ALLOC" || true
               else
-                # NAT GW not found by Name tag -- find by EIP AllocationId
+                # NAT GW not found by Name tag -- find by EIP tag, then find the owning NAT GW
                 EIP_NAME="${PREFIX}-nat-eip-$((i + 1))"
                 EIP_ALLOC=$(aws ec2 describe-addresses \
                   --filters "Name=tag:Name,Values=${EIP_NAME}" \
                   --query 'Addresses[0].AllocationId' \
                   --output text --region "$REGION" 2>/dev/null || true)
                 if [ -n "$EIP_ALLOC" ] && [ "$EIP_ALLOC" != "None" ] && [ "$EIP_ALLOC" != "null" ]; then
-                  terraform import "aws_eip.nat[$i]" "$EIP_ALLOC" || true
-                  # Find the NAT GW that currently holds this EIP
+                  tf_import "aws_eip.nat[$i]" "$EIP_ALLOC"
                   NAT_GW_ID=$(aws ec2 describe-nat-gateways \
                     --filter "Name=vpc-id,Values=$VPC_ID" \
                     --query "NatGateways[?NatGatewayAddresses[?AllocationId=='${EIP_ALLOC}']&&State!='deleted'&&State!='failed']|[0].NatGatewayId" \
                     --output text --region "$REGION" 2>/dev/null || true)
                   [ -n "$NAT_GW_ID" ] && [ "$NAT_GW_ID" != "None" ] && [ "$NAT_GW_ID" != "null" ] && \
-                    terraform import "aws_nat_gateway.main[$i]" "$NAT_GW_ID" || true
+                    tf_import "aws_nat_gateway.main[$i]" "$NAT_GW_ID" || true
                 fi
               fi
             done
@@ -400,35 +405,36 @@ jobs:
             PUB_RT=$(aws ec2 describe-route-tables \
               --filters "Name=vpc-id,Values=$VPC_ID" "Name=tag:Name,Values=${PREFIX}-public-rt" \
               --query 'RouteTables[0].RouteTableId' --output text --region "$REGION" 2>/dev/null || true)
-            [ -n "$PUB_RT" ] && [ "$PUB_RT" != "None" ] && terraform import aws_route_table.public "$PUB_RT" || true
+            [ -n "$PUB_RT" ] && [ "$PUB_RT" != "None" ] && tf_import aws_route_table.public "$PUB_RT" || true
 
             readarray -t PRIV_RTS < <(aws ec2 describe-route-tables \
               --filters "Name=vpc-id,Values=$VPC_ID" "Name=tag:Name,Values=${PREFIX}-private-rt-*" \
               --query 'sort_by(RouteTables,&Tags[?Key==`Name`].Value|[0])[].RouteTableId' \
               --output text --region "$REGION" 2>/dev/null | tr '\t' '\n' | grep -v '^$' || true)
             for i in "${!PRIV_RTS[@]}"; do
-              terraform import "aws_route_table.private[$i]" "${PRIV_RTS[$i]}" || true
+              tf_import "aws_route_table.private[$i]" "${PRIV_RTS[$i]}"
             done
 
             # Route table associations (format: subnet-id/route-table-id)
-            [ -n "$PUB_RT" ] && [ "$PUB_RT" != "None" ] && \
-            for i in "${!PUB_SUBNETS[@]}"; do
-              terraform import "aws_route_table_association.public[$i]" "${PUB_SUBNETS[$i]}/${PUB_RT}" || true
-            done
+            if [ -n "$PUB_RT" ] && [ "$PUB_RT" != "None" ]; then
+              for i in "${!PUB_SUBNETS[@]}"; do
+                tf_import "aws_route_table_association.public[$i]" "${PUB_SUBNETS[$i]}/${PUB_RT}"
+              done
+            fi
 
             for i in "${!PRIV_APP[@]}"; do
               [ -n "${PRIV_RTS[$i]:-}" ] && \
-                terraform import "aws_route_table_association.private_app[$i]" "${PRIV_APP[$i]}/${PRIV_RTS[$i]}" || true
+                tf_import "aws_route_table_association.private_app[$i]" "${PRIV_APP[$i]}/${PRIV_RTS[$i]}" || true
             done
 
-            # Security groups
+            # Security groups (looked up in the authoritative VPC)
             import_sg() {
               local TF_NAME="$1" SG_NAME="$2"
               local SG_ID
               SG_ID=$(aws ec2 describe-security-groups \
                 --filters "Name=vpc-id,Values=$VPC_ID" "Name=group-name,Values=$SG_NAME" \
                 --query 'SecurityGroups[0].GroupId' --output text --region "$REGION" 2>/dev/null || true)
-              [ -n "$SG_ID" ] && [ "$SG_ID" != "None" ] && terraform import "$TF_NAME" "$SG_ID" || true
+              [ -n "$SG_ID" ] && [ "$SG_ID" != "None" ] && tf_import "$TF_NAME" "$SG_ID" || true
             }
             import_sg aws_security_group.alb           "${PREFIX}-alb-sg"
             import_sg aws_security_group.ecs_tasks     "${PREFIX}-ecs-tasks-sg"
@@ -445,7 +451,7 @@ jobs:
                 --filters "Name=vpc-id,Values=$VPC_ID" "Name=service-name,Values=$SVC_NAME" \
                           "Name=vpc-endpoint-state,Values=available" \
                 --query 'VpcEndpoints[0].VpcEndpointId' --output text --region "$REGION" 2>/dev/null || true)
-              [ -n "$VPCE_ID" ] && [ "$VPCE_ID" != "None" ] && terraform import "$TF_NAME" "$VPCE_ID" || true
+              [ -n "$VPCE_ID" ] && [ "$VPCE_ID" != "None" ] && tf_import "$TF_NAME" "$VPCE_ID" || true
             }
             import_vpce aws_vpc_endpoint.s3             "com.amazonaws.${REGION}.s3"
             import_vpce aws_vpc_endpoint.ecr_api        "com.amazonaws.${REGION}.ecr.api"
