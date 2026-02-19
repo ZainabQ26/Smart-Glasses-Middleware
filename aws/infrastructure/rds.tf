@@ -9,6 +9,9 @@ resource "aws_db_subnet_group" "main" {
 
   lifecycle {
     prevent_destroy = true
+    # Cannot move subnet group between VPCs (InvalidParameterValue: new subnets
+    # not in same VPC as existing group). The existing group has correct subnets.
+    ignore_changes = [subnet_ids]
   }
 }
 

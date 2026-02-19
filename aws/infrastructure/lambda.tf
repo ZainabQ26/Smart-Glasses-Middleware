@@ -121,7 +121,6 @@ resource "aws_lambda_function" "document_processor" {
 
   environment {
     variables = {
-      AWS_REGION            = var.aws_region
       DOCUMENTS_BUCKET      = aws_s3_bucket.documents.id
       DB_SECRET_ARN         = aws_secretsmanager_secret.db_credentials.arn
       BEDROCK_MODEL_ID      = "anthropic.claude-3-sonnet-20240229-v1:0"
