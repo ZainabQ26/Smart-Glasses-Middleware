@@ -106,8 +106,8 @@ resource "aws_db_instance" "main" {
   multi_az = false
 
   backup_retention_period      = var.environment == "prod" ? 30 : 1
-  preferred_backup_window      = "03:00-04:00"
-  preferred_maintenance_window = "mon:04:00-mon:05:00"
+  backup_window      = "03:00-04:00"
+  maintenance_window = "mon:04:00-mon:05:00"
 
   # Performance Insights (available on db.t3.micro, 7-day free retention)
   performance_insights_enabled = true
