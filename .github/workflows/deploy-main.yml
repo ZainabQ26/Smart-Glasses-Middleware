@@ -320,6 +320,24 @@ jobs:
             --query 'LoadBalancers[0].LoadBalancerArn' --output text --region "$REGION" 2>/dev/null || true)
           [ -n "$ALB_ARN" ] && [ "$ALB_ARN" != "None" ] && terraform import aws_lb.api "$ALB_ARN" || true
 
+          # ALB Listeners (HTTP port 80, HTTPS port 443)
+          # Must import before apply to avoid DuplicateListener error.
+          if [ -n "$ALB_ARN" ] && [ "$ALB_ARN" != "None" ]; then
+            HTTP_LISTENER=$(aws elbv2 describe-listeners \
+              --load-balancer-arn "$ALB_ARN" \
+              --query 'Listeners[?Port==`80`].ListenerArn' \
+              --output text --region "$REGION" 2>/dev/null || true)
+            [ -n "$HTTP_LISTENER" ] && [ "$HTTP_LISTENER" != "None" ] && \
+              terraform import aws_lb_listener.api_http "$HTTP_LISTENER" || true
+
+            HTTPS_LISTENER=$(aws elbv2 describe-listeners \
+              --load-balancer-arn "$ALB_ARN" \
+              --query 'Listeners[?Port==`443`].ListenerArn' \
+              --output text --region "$REGION" 2>/dev/null || true)
+            [ -n "$HTTPS_LISTENER" ] && [ "$HTTPS_LISTENER" != "None" ] && \
+              terraform import aws_lb_listener.api_https "$HTTPS_LISTENER" || true
+          fi
+
           TG_ARN=$(aws elbv2 describe-target-groups --names "${PREFIX}-api-tg" \
             --query 'TargetGroups[0].TargetGroupArn' --output text --region "$REGION" 2>/dev/null || true)
           [ -n "$TG_ARN" ] && [ "$TG_ARN" != "None" ] && \

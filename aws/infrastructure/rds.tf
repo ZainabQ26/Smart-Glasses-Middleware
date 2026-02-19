@@ -99,7 +99,9 @@ resource "aws_rds_cluster" "main" {
   # Serverless v2 scaling
   serverlessv2_scaling_configuration {
     max_capacity = 2.0
-    min_capacity = 0.5
+    # min_capacity = 0 is required on AWS free-tier accounts (Aurora Express Mode).
+    # On paid accounts this can be raised to 0.5 for faster cold starts.
+    min_capacity = var.environment == "prod" ? 0.5 : 0
   }
 
   # Backup configuration
