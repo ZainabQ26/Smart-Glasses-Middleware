@@ -50,14 +50,18 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ secrets.AWS_REGION }}
+          # Don't mask the account ID so it can appear in job outputs without being blanked
+          mask-aws-account-id: false
 
       - name: Login to ECR
+        id: ecr-login
         uses: aws-actions/amazon-ecr-login@v1
 
       - name: Build & push API image
         id: api
         run: |
-          IMAGE_URI=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/smart-glasses-api:${{ github.sha }}
+          # Use the registry URL from the ECR login action output (no secret masking)
+          IMAGE_URI=${{ steps.ecr-login.outputs.registry }}/smart-glasses-api:${{ github.sha }}
           docker build -t $IMAGE_URI -f ./src/SmartGlassesMiddleware/Dockerfile .
           docker push $IMAGE_URI
           echo "api_image=$IMAGE_URI" >> $GITHUB_OUTPUT
@@ -65,7 +69,7 @@ jobs:
       - name: Build & push Whisper Lambda image
         id: lambda-whisper
         run: |
-          IMAGE_URI=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/whisper-lambda:${{ github.sha }}
+          IMAGE_URI=${{ steps.ecr-login.outputs.registry }}/whisper-lambda:${{ github.sha }}
           docker build -t $IMAGE_URI ./aws/lambda-whisper
           docker push $IMAGE_URI
           echo "lambda_image=$IMAGE_URI" >> $GITHUB_OUTPUT
@@ -105,6 +109,8 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_TERRAFORM_ROLE }}
           aws-region: ${{ secrets.AWS_REGION }}
+          # Required so aws sts get-caller-identity returns the account ID unmasked
+          mask-aws-account-id: false
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v2
@@ -131,13 +137,9 @@ jobs:
             aws kms list-aliases --region "$REGION" --query "Aliases[?AliasName=='$a']" --output text >/dev/null 2>&1 && aws kms delete-alias --alias-name "$a" --region "$REGION" || true
           done
 
-          # CloudFront origin request policy
-          ORIGIN_POLICY_ID=$(aws cloudfront list-origin-request-policies --query "OriginRequestPolicyList.Items[?Name=='${PREFIX}-api-policy'].Id" --output text 2>/dev/null || true)
-          if [ -n "$ORIGIN_POLICY_ID" ]; then aws cloudfront delete-origin-request-policy --id "$ORIGIN_POLICY_ID" || true; fi
-
-          # CloudFront origin access control
-          OAC_ID=$(aws cloudfront list-origin-access-controls --query "OriginAccessControlList.Items[?Name=='${PREFIX}-frontend-oac'].Id" --output text 2>/dev/null || true)
-          if [ -n "$OAC_ID" ]; then aws cloudfront delete-origin-access-control --id "$OAC_ID" || true; fi
+          # NOTE: CloudFront OAC and origin request policy are NOT deleted here.
+          # They cannot be deleted while associated with a CloudFront distribution.
+          # They are handled via terraform import in the import step below.
 
           # CloudWatch Log Groups (examples from logs)
           aws logs delete-log-group --log-group-name "/ecs/${PREFIX}/api" --region "$REGION" || true
@@ -174,38 +176,12 @@ jobs:
             if [ -n "$POL_ARN" ]; then aws iam delete-policy --policy-arn "$POL_ARN" || true; fi
           done
 
-          # Parameter groups
-          aws elasticache describe-cache-parameter-groups --cache-parameter-group-name "${PREFIX}-redis-params" --region "$REGION" >/dev/null 2>&1 && aws elasticache delete-cache-parameter-group --cache-parameter-group-name "${PREFIX}-redis-params" --region "$REGION" || true
-          aws rds describe-db-cluster-parameter-groups --db-cluster-parameter-group-name "${PREFIX}-aurora-pg-params" --region "$REGION" >/dev/null 2>&1 && aws rds delete-db-cluster-parameter-group --db-cluster-parameter-group-name "${PREFIX}-aurora-pg-params" --region "$REGION" || true
-
-          # Attempt to remove VPC (best-effort). This will try to clean common attachments and delete the VPC tagged for this project/env.
-          VPC_ID=$(aws ec2 describe-vpcs --filters "Name=tag:Project,Values=SmartGlassesMiddleware" "Name=tag:Environment,Values=$ENV" --query 'Vpcs[0].VpcId' --output text 2>/dev/null || true)
-          if [ -n "$VPC_ID" ] && [ "$VPC_ID" != "None" ]; then
-            echo "Attempting to clean and delete VPC $VPC_ID"
-            # Delete NAT Gateways
-            for nat in $(aws ec2 describe-nat-gateways --filter Name=vpc-id,Values=$VPC_ID --query 'NatGateways[].NatGatewayId' --output text 2>/dev/null || true); do
-              aws ec2 delete-nat-gateway --nat-gateway-id $nat --region "$REGION" || true
-            done
-            # Detach and delete internet gateways
-            for igw in $(aws ec2 describe-internet-gateways --filters "Name=attachment.vpc-id,Values=$VPC_ID" --query 'InternetGateways[].InternetGatewayId' --output text 2>/dev/null || true); do
-              aws ec2 detach-internet-gateway --internet-gateway-id $igw --vpc-id $VPC_ID --region "$REGION" || true
-              aws ec2 delete-internet-gateway --internet-gateway-id $igw --region "$REGION" || true
-            done
-            # Delete subnets
-            for s in $(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" --query 'Subnets[].SubnetId' --output text 2>/dev/null || true); do
-              aws ec2 delete-subnet --subnet-id $s --region "$REGION" || true
-            done
-            # Delete route tables (non-main)
-            for rt in $(aws ec2 describe-route-tables --filters "Name=vpc-id,Values=$VPC_ID" --query 'RouteTables[?Associations[?Main==`false`]].RouteTableId' --output text 2>/dev/null || true); do
-              aws ec2 delete-route-table --route-table-id $rt --region "$REGION" || true
-            done
-            # Delete security groups (non-default)
-            for sg in $(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" --query 'SecurityGroups[?GroupName!=`default`].GroupId' --output text 2>/dev/null || true); do
-              aws ec2 delete-security-group --group-id $sg --region "$REGION" || true
-            done
-            # Finally attempt delete VPC
-            aws ec2 delete-vpc --vpc-id $VPC_ID --region "$REGION" || true
-          fi
+          # NOTE: ElastiCache parameter group and RDS cluster parameter group are NOT
+          # deleted here. They cannot be deleted while their clusters/replication groups
+          # still exist. They are handled via terraform import in the import step.
+          # NOTE: VPC is NOT deleted here. The VPC will be imported so Terraform manages
+          # the existing one rather than trying to create a new one (which would exceed
+          # the account's VPC limit if 5 VPCs already exist).
 
           set -e
 
@@ -213,11 +189,15 @@ jobs:
 
       - name: Write image variables for Terraform
         run: |
+          # Derive the ECR registry from STS (not from a secret, so values are never masked)
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          SHA="${{ github.sha }}"
           cat > aws/infrastructure/tf_image_vars.auto.tfvars <<EOF
-          api_image = "${{ needs.build-and-push.outputs.api-image }}"
-          lambda_whisper_image = "${{ needs.build-and-push.outputs.lambda-whisper-image }}"
-          lambda_image = "${{ needs.build-and-push.outputs.lambda-whisper-image }}"
-          lambda_document_image = "${{ needs.build-and-push.outputs.lambda-document-image }}"
+          api_image = "${REGISTRY}/smart-glasses-api:${SHA}"
+          lambda_whisper_image = "${REGISTRY}/whisper-lambda:${SHA}"
+          lambda_image = "${REGISTRY}/whisper-lambda:${SHA}"
+          lambda_document_image = ""
           deployment_id = "${{ github.run_id }}"
           EOF
 
@@ -260,32 +240,168 @@ jobs:
           rm -rf .terraform.lock.hcl terraform.tfstate* 2>/dev/null || true
           terraform init -backend-config="bucket=${BUCKET_NAME}" -backend-config="key=state/terraform.tfstate" -backend-config="region=${AWS_REGION}" -backend-config="dynamodb_table=${DDB_NAME}"
 
-      - name: Import critical resources into fresh state
+      - name: Import pre-existing resources into Terraform state
         working-directory: aws/infrastructure
         run: |
           set +e
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          REGION="${AWS_REGION}"
+          ENV=dev
+          PREFIX="smart-glasses-${ENV}"
 
-          echo "=== Importing critical resources into fresh state (non-fatal) ==="
+          echo "=== Importing pre-existing AWS resources (all non-fatal) ==="
 
-          {
-            # Import S3 buckets (REQUIRED - data)
-            terraform import aws_s3_bucket.media smart-glasses-dev-media || true
-            terraform import aws_s3_bucket.documents smart-glasses-dev-documents || true
-            terraform import aws_s3_bucket.frontend smart-glasses-dev-frontend || true
+          # ── S3 buckets (contain data – must import not recreate) ──────────────
+          terraform import aws_s3_bucket.media          ${PREFIX}-media      || true
+          terraform import aws_s3_bucket.documents      ${PREFIX}-documents  || true
+          terraform import aws_s3_bucket.frontend       ${PREFIX}-frontend   || true
 
-            # Import KMS (encrypts S3)
-            terraform import aws_kms_key.s3 $(aws kms describe-key --key-id alias/smart-glasses-dev-s3 --query 'KeyMetadata.KeyId' --output text) 2>/dev/null || true
-            terraform import aws_kms_alias.s3 alias/smart-glasses-dev-s3 2>/dev/null || true
-            terraform import aws_kms_key.rds $(aws kms describe-key --key-id alias/smart-glasses-dev-rds --query 'KeyMetadata.KeyId' --output text) 2>/dev/null || true
-            terraform import aws_kms_alias.rds alias/smart-glasses-dev-rds 2>/dev/null || true
+          # ── KMS keys and aliases ──────────────────────────────────────────────
+          KMS_S3=$(aws kms describe-key --key-id alias/${PREFIX}-s3  --query 'KeyMetadata.KeyId' --output text 2>/dev/null || true)
+          KMS_RDS=$(aws kms describe-key --key-id alias/${PREFIX}-rds --query 'KeyMetadata.KeyId' --output text 2>/dev/null || true)
+          [ -n "$KMS_S3"  ] && [ "$KMS_S3"  != "None" ] && terraform import aws_kms_key.s3   "$KMS_S3"  || true
+          [ -n "$KMS_RDS" ] && [ "$KMS_RDS" != "None" ] && terraform import aws_kms_key.rds  "$KMS_RDS" || true
+          terraform import aws_kms_alias.s3  alias/${PREFIX}-s3  || true
+          terraform import aws_kms_alias.rds alias/${PREFIX}-rds || true
 
-            # Import Secrets (sensitive data) - may fail if names/ARNs differ
-            terraform import aws_secretsmanager_secret.app_secrets arn:aws:secretsmanager:${AWS_REGION}:${{ secrets.AWS_ACCOUNT_ID }}:secret:smart-glasses-dev-app-secrets || true
-            terraform import aws_secretsmanager_secret.db_credentials arn:aws:secretsmanager:${AWS_REGION}:${{ secrets.AWS_ACCOUNT_ID }}:secret:smart-glasses-dev-db-credentials || true
-            terraform import aws_secretsmanager_secret.redis_credentials arn:aws:secretsmanager:${AWS_REGION}:${{ secrets.AWS_ACCOUNT_ID }}:secret:smart-glasses-dev-redis-credentials || true
-          } || true
+          # ── Secrets Manager ───────────────────────────────────────────────────
+          terraform import aws_secretsmanager_secret.app_secrets      arn:aws:secretsmanager:${REGION}:${ACCOUNT_ID}:secret:${PREFIX}-app-secrets      || true
+          terraform import aws_secretsmanager_secret.db_credentials   arn:aws:secretsmanager:${REGION}:${ACCOUNT_ID}:secret:${PREFIX}-db-credentials   || true
+          terraform import aws_secretsmanager_secret.redis_credentials arn:aws:secretsmanager:${REGION}:${ACCOUNT_ID}:secret:${PREFIX}-redis-credentials || true
 
-          echo "=== Critical resource import complete (non-fatal) ==="
+          # ── CloudFront (OAC and origin request policy cannot be deleted while
+          #    associated with a distribution, so import instead of recreate) ───
+          OAC_ID=$(aws cloudfront list-origin-access-controls \
+            --query "OriginAccessControlList.Items[?Name=='${PREFIX}-frontend-oac'].Id" \
+            --output text 2>/dev/null || true)
+          [ -n "$OAC_ID" ] && [ "$OAC_ID" != "None" ] && \
+            terraform import aws_cloudfront_origin_access_control.frontend "$OAC_ID" || true
+
+          ORP_ID=$(aws cloudfront list-origin-request-policies --type custom \
+            --query "OriginRequestPolicyList.Items[?Name=='${PREFIX}-api-policy'].Id" \
+            --output text 2>/dev/null || true)
+          [ -n "$ORP_ID" ] && [ "$ORP_ID" != "None" ] && \
+            terraform import aws_cloudfront_origin_request_policy.api "$ORP_ID" || true
+
+          # ── ElastiCache parameter group (can't delete while replication group exists) ──
+          terraform import aws_elasticache_parameter_group.redis ${PREFIX}-redis-params || true
+
+          # ── VPC and all network sub-resources (import to avoid VPC limit errors) ──
+          VPC_ID=$(aws ec2 describe-vpcs \
+            --filters "Name=tag:Project,Values=SmartGlassesMiddleware" "Name=tag:Environment,Values=${ENV}" \
+            --query 'Vpcs[0].VpcId' --output text --region "$REGION" 2>/dev/null || true)
+
+          if [ -n "$VPC_ID" ] && [ "$VPC_ID" != "None" ]; then
+            echo "Importing existing project VPC: $VPC_ID"
+            terraform import aws_vpc.main "$VPC_ID" || true
+
+            # Internet Gateway
+            IGW_ID=$(aws ec2 describe-internet-gateways \
+              --filters "Name=attachment.vpc-id,Values=$VPC_ID" \
+              --query 'InternetGateways[0].InternetGatewayId' --output text --region "$REGION" 2>/dev/null || true)
+            [ -n "$IGW_ID" ] && [ "$IGW_ID" != "None" ] && terraform import aws_internet_gateway.main "$IGW_ID" || true
+
+            # Subnets (sorted by AZ for stable index ordering)
+            readarray -t PUB_SUBNETS < <(aws ec2 describe-subnets \
+              --filters "Name=vpc-id,Values=$VPC_ID" "Name=tag:Type,Values=public" \
+              --query 'sort_by(Subnets,&AvailabilityZone)[].SubnetId' \
+              --output text --region "$REGION" 2>/dev/null | tr '\t' '\n' | grep -v '^$' || true)
+            for i in "${!PUB_SUBNETS[@]}"; do
+              terraform import "aws_subnet.public[$i]" "${PUB_SUBNETS[$i]}" || true
+            done
+
+            readarray -t PRIV_APP < <(aws ec2 describe-subnets \
+              --filters "Name=vpc-id,Values=$VPC_ID" "Name=tag:Type,Values=private-app" \
+              --query 'sort_by(Subnets,&AvailabilityZone)[].SubnetId' \
+              --output text --region "$REGION" 2>/dev/null | tr '\t' '\n' | grep -v '^$' || true)
+            for i in "${!PRIV_APP[@]}"; do
+              terraform import "aws_subnet.private_app[$i]" "${PRIV_APP[$i]}" || true
+            done
+
+            readarray -t PRIV_DB < <(aws ec2 describe-subnets \
+              --filters "Name=vpc-id,Values=$VPC_ID" "Name=tag:Type,Values=private-db" \
+              --query 'sort_by(Subnets,&AvailabilityZone)[].SubnetId' \
+              --output text --region "$REGION" 2>/dev/null | tr '\t' '\n' | grep -v '^$' || true)
+            for i in "${!PRIV_DB[@]}"; do
+              terraform import "aws_subnet.private_db[$i]" "${PRIV_DB[$i]}" || true
+            done
+
+            # NAT Gateways and their Elastic IPs
+            readarray -t NAT_GWS < <(aws ec2 describe-nat-gateways \
+              --filter "Name=vpc-id,Values=$VPC_ID" "Name=state,Values=available" \
+              --query 'sort_by(NatGateways,&SubnetId)[].NatGatewayId' \
+              --output text --region "$REGION" 2>/dev/null | tr '\t' '\n' | grep -v '^$' || true)
+            for i in "${!NAT_GWS[@]}"; do
+              terraform import "aws_nat_gateway.main[$i]" "${NAT_GWS[$i]}" || true
+              EIP_ALLOC=$(aws ec2 describe-nat-gateways --nat-gateway-ids "${NAT_GWS[$i]}" \
+                --query 'NatGateways[0].NatGatewayAddresses[0].AllocationId' \
+                --output text --region "$REGION" 2>/dev/null || true)
+              [ -n "$EIP_ALLOC" ] && [ "$EIP_ALLOC" != "None" ] && \
+                terraform import "aws_eip.nat[$i]" "$EIP_ALLOC" || true
+            done
+
+            # Route tables
+            PUB_RT=$(aws ec2 describe-route-tables \
+              --filters "Name=vpc-id,Values=$VPC_ID" "Name=tag:Name,Values=${PREFIX}-public-rt" \
+              --query 'RouteTables[0].RouteTableId' --output text --region "$REGION" 2>/dev/null || true)
+            [ -n "$PUB_RT" ] && [ "$PUB_RT" != "None" ] && terraform import aws_route_table.public "$PUB_RT" || true
+
+            readarray -t PRIV_RTS < <(aws ec2 describe-route-tables \
+              --filters "Name=vpc-id,Values=$VPC_ID" "Name=tag:Name,Values=${PREFIX}-private-rt-*" \
+              --query 'sort_by(RouteTables,&Tags[?Key==`Name`].Value|[0])[].RouteTableId' \
+              --output text --region "$REGION" 2>/dev/null | tr '\t' '\n' | grep -v '^$' || true)
+            for i in "${!PRIV_RTS[@]}"; do
+              terraform import "aws_route_table.private[$i]" "${PRIV_RTS[$i]}" || true
+            done
+
+            # Route table associations (format: subnet-id/route-table-id)
+            [ -n "$PUB_RT" ] && [ "$PUB_RT" != "None" ] && \
+            for i in "${!PUB_SUBNETS[@]}"; do
+              terraform import "aws_route_table_association.public[$i]" "${PUB_SUBNETS[$i]}/${PUB_RT}" || true
+            done
+
+            for i in "${!PRIV_APP[@]}"; do
+              [ -n "${PRIV_RTS[$i]:-}" ] && \
+                terraform import "aws_route_table_association.private_app[$i]" "${PRIV_APP[$i]}/${PRIV_RTS[$i]}" || true
+            done
+
+            # Security groups
+            import_sg() {
+              local TF_NAME="$1" SG_NAME="$2"
+              local SG_ID
+              SG_ID=$(aws ec2 describe-security-groups \
+                --filters "Name=vpc-id,Values=$VPC_ID" "Name=group-name,Values=$SG_NAME" \
+                --query 'SecurityGroups[0].GroupId' --output text --region "$REGION" 2>/dev/null || true)
+              [ -n "$SG_ID" ] && [ "$SG_ID" != "None" ] && terraform import "$TF_NAME" "$SG_ID" || true
+            }
+            import_sg aws_security_group.alb           "${PREFIX}-alb-sg"
+            import_sg aws_security_group.ecs_tasks     "${PREFIX}-ecs-tasks-sg"
+            import_sg aws_security_group.rds           "${PREFIX}-rds-sg"
+            import_sg aws_security_group.elasticache   "${PREFIX}-elasticache-sg"
+            import_sg aws_security_group.lambda        "${PREFIX}-lambda-sg"
+            import_sg aws_security_group.vpc_endpoints "${PREFIX}-vpc-endpoints-sg"
+
+            # VPC Endpoints
+            import_vpce() {
+              local TF_NAME="$1" SVC_NAME="$2"
+              local VPCE_ID
+              VPCE_ID=$(aws ec2 describe-vpc-endpoints \
+                --filters "Name=vpc-id,Values=$VPC_ID" "Name=service-name,Values=$SVC_NAME" \
+                          "Name=vpc-endpoint-state,Values=available" \
+                --query 'VpcEndpoints[0].VpcEndpointId' --output text --region "$REGION" 2>/dev/null || true)
+              [ -n "$VPCE_ID" ] && [ "$VPCE_ID" != "None" ] && terraform import "$TF_NAME" "$VPCE_ID" || true
+            }
+            import_vpce aws_vpc_endpoint.s3             "com.amazonaws.${REGION}.s3"
+            import_vpce aws_vpc_endpoint.ecr_api        "com.amazonaws.${REGION}.ecr.api"
+            import_vpce aws_vpc_endpoint.ecr_dkr        "com.amazonaws.${REGION}.ecr.dkr"
+            import_vpce aws_vpc_endpoint.logs           "com.amazonaws.${REGION}.logs"
+            import_vpce aws_vpc_endpoint.secretsmanager "com.amazonaws.${REGION}.secretsmanager"
+          else
+            echo "No existing project VPC found – Terraform will create a new one."
+            echo "If this fails with VpcLimitExceeded, delete an unused VPC in $REGION."
+          fi
+
+          echo "=== Import step complete ==="
           set -e
 
       - name: Terraform apply
