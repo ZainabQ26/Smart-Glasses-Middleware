@@ -45,9 +45,11 @@ resource "aws_db_parameter_group" "main" {
 }
 
 # Generate random password for RDS
+# special = false: passwords with ; or = inside a semicolon-delimited Npgsql
+# connection string cause parse failures (and SIGSEGV via FailFast in .NET).
 resource "random_password" "db_password" {
   length  = 32
-  special = true
+  special = false
 }
 
 # Store DB credentials in Secrets Manager
@@ -76,9 +78,9 @@ resource "aws_secretsmanager_secret_version" "db_credentials" {
     connection_string = "Host=${local.rds_endpoint};Port=5432;Database=${var.db_name};Username=${var.db_username};Password=${random_password.db_password.result}"
   })
 
-  lifecycle {
-    ignore_changes = [secret_string]
-  }
+  # No ignore_changes – Terraform keeps the secret in sync with the
+  # random_password resource.  If the password changes (e.g. special→false
+  # rotation), both the DB and the secret are updated atomically.
 }
 
 # RDS PostgreSQL (free-tier eligible: db.t3.micro, single-AZ, gp2 20 GB)
@@ -127,7 +129,9 @@ resource "aws_db_instance" "main" {
   }
 
   lifecycle {
-    ignore_changes  = [password, final_snapshot_identifier]
+    # password intentionally NOT in ignore_changes so Terraform can update it
+    # when random_password changes (e.g. after switching special=false).
+    ignore_changes  = [final_snapshot_identifier]
     prevent_destroy = true
   }
 }
