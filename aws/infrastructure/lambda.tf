@@ -110,7 +110,9 @@ resource "aws_lambda_function" "document_processor" {
   runtime       = "python3.12"
   timeout       = 300 # 5 minutes
   memory_size   = 2048
-  source_code_hash = filebase64sha256("${path.module}/../lambda-document-processor/deployment.zip")
+  # Guard with fileexists() so `terraform validate` passes before the artifact is built.
+  # In CI, the zip is created in the build job and placed here before terraform apply.
+  source_code_hash = fileexists("${path.module}/../lambda-document-processor/deployment.zip") ? filebase64sha256("${path.module}/../lambda-document-processor/deployment.zip") : null
 
   vpc_config {
     subnet_ids         = aws_subnet.private_app[*].id

@@ -16,7 +16,7 @@ variable "lambda_timeout" {
 }
 
 resource "aws_iam_role" "lambda_exec" {
-  name = "${var.whisper_function_name}-exec"
+  name = "${var.project_name}-${var.environment}-whisper-exec"
   assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
 }
 
@@ -47,7 +47,7 @@ data "aws_iam_policy_document" "s3_lambda_access" {
 }
 
 resource "aws_iam_policy" "lambda_s3_access" {
-  name   = "${var.whisper_function_name}-s3-access"
+  name   = "${var.project_name}-${var.environment}-whisper-s3-access"
   policy = data.aws_iam_policy_document.s3_lambda_access.json
 
   lifecycle {
@@ -61,7 +61,7 @@ resource "aws_iam_role_policy_attachment" "lambda_s3_attach" {
 }
 
 resource "aws_sqs_queue" "whisper_queue" {
-  name = "${var.whisper_function_name}-queue"
+  name = "${var.project_name}-${var.environment}-whisper-queue"
 }
 
 data "aws_iam_policy_document" "allow_sqs_send" {
@@ -72,7 +72,7 @@ data "aws_iam_policy_document" "allow_sqs_send" {
 }
 
 resource "aws_iam_policy" "allow_sqs_send" {
-  name   = "${var.whisper_function_name}-allow-sqs-send"
+  name   = "${var.project_name}-${var.environment}-whisper-allow-sqs-send"
   policy = data.aws_iam_policy_document.allow_sqs_send.json
 
   lifecycle {

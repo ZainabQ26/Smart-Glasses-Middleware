@@ -8,8 +8,10 @@ terraform {
     }
   }
 
-  # Backend configuration removed for local testing with LocalStack.
-  # Configure a remote S3 backend when deploying to real AWS.
+  # S3 backend – populated at runtime via `terraform init -backend-config` flags.
+  # Leave the block empty here so that local runs (LocalStack / -backend=false)
+  # can override it without changing this file.
+  backend "s3" {}
 }
 
 provider "aws" {
@@ -23,21 +25,25 @@ provider "aws" {
   }
 
   # Optional LocalStack endpoints block (used when `use_localstack = true`).
-  endpoints {
-    apigateway     = var.use_localstack ? var.localstack_endpoint : ""
-    cloudformation = var.use_localstack ? var.localstack_endpoint : ""
-    cloudwatch     = var.use_localstack ? var.localstack_endpoint : ""
-    dynamodb       = var.use_localstack ? var.localstack_endpoint : ""
-    ec2            = var.use_localstack ? var.localstack_endpoint : ""
-    ecr            = var.use_localstack ? var.localstack_endpoint : ""
-    ecs            = var.use_localstack ? var.localstack_endpoint : ""
-    elb            = var.use_localstack ? var.localstack_endpoint : ""
-    iam            = var.use_localstack ? var.localstack_endpoint : ""
-    lambda         = var.use_localstack ? var.localstack_endpoint : ""
-    rds            = var.use_localstack ? var.localstack_endpoint : ""
-    s3             = var.use_localstack ? var.localstack_endpoint : ""
-    secretsmanager = var.use_localstack ? var.localstack_endpoint : ""
-    sqs            = var.use_localstack ? var.localstack_endpoint : ""
-    sts            = var.use_localstack ? var.localstack_endpoint : ""
+  # null means "use the real AWS endpoint"; the AWS provider rejects empty strings.
+  dynamic "endpoints" {
+    for_each = var.use_localstack ? [1] : []
+    content {
+      apigateway     = var.localstack_endpoint
+      cloudformation = var.localstack_endpoint
+      cloudwatch     = var.localstack_endpoint
+      dynamodb       = var.localstack_endpoint
+      ec2            = var.localstack_endpoint
+      ecr            = var.localstack_endpoint
+      ecs            = var.localstack_endpoint
+      elb            = var.localstack_endpoint
+      iam            = var.localstack_endpoint
+      lambda         = var.localstack_endpoint
+      rds            = var.localstack_endpoint
+      s3             = var.localstack_endpoint
+      secretsmanager = var.localstack_endpoint
+      sqs            = var.localstack_endpoint
+      sts            = var.localstack_endpoint
+    }
   }
 }

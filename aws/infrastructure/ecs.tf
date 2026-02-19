@@ -176,6 +176,17 @@ resource "aws_iam_role_policy" "ecs_task" {
           aws_secretsmanager_secret.db_credentials.arn,
           aws_secretsmanager_secret.redis_credentials.arn
         ]
+      },
+      {
+        # Allow the API to send audio jobs to the Whisper SQS queue
+        Effect = "Allow"
+        Action = [
+          "sqs:SendMessage",
+          "sqs:SendMessageBatch",
+          "sqs:GetQueueUrl",
+          "sqs:GetQueueAttributes"
+        ]
+        Resource = aws_sqs_queue.whisper_queue.arn
       }
     ]
   })
@@ -227,8 +238,14 @@ locals {
           value = var.deployment_id
         },
         {
-          name  = "DEPLOYMENT_ID"
-          value = var.deployment_id
+          # Let the app apply pending EF migrations at startup (safe – idempotent)
+          name  = "MIGRATE_ON_STARTUP"
+          value = "true"
+        },
+        {
+          # Whisper SQS queue URL so the API can submit transcription jobs
+          name  = "AWS__WhisperQueueUrl"
+          value = aws_sqs_queue.whisper_queue.id
         }
       ]
 
