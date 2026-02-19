@@ -84,6 +84,9 @@ resource "aws_iam_role_policy_attachment" "lambda_sqs_attach" {
 
 resource "aws_sqs_queue" "whisper_queue" {
   name = "${var.project_name}-${var.environment}-whisper-queue"
+  # Visibility timeout must be >= Lambda function timeout (300 s) so that a
+  # message is not re-queued while the Lambda is still processing it.
+  visibility_timeout_seconds = 360
 }
 
 data "aws_iam_policy_document" "allow_sqs_send" {

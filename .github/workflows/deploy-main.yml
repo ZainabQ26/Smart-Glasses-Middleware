@@ -290,14 +290,21 @@ jobs:
           [ -n "$ORP_ID" ] && [ "$ORP_ID" != "None" ] && \
             terraform import aws_cloudfront_origin_request_policy.api "$ORP_ID" || true
 
-          # ── ElastiCache parameter group (can't delete while replication group exists) ──
+          # -- ElastiCache parameter group (can't delete while replication group exists) --
           terraform import aws_elasticache_parameter_group.redis ${PREFIX}-redis-params || true
 
-          # ── ElastiCache Subnet Group ──────────────────────────────────────────
+          # -- ElastiCache Subnet Group --
           terraform import aws_elasticache_subnet_group.main ${PREFIX}-elasticache-subnet-group || true
 
-          # ── RDS DB Subnet Group ───────────────────────────────────────────────
+          # -- ElastiCache Replication Group and single-node cluster (dev) --
+          terraform import aws_elasticache_replication_group.redis ${PREFIX}-redis || true
+          terraform import "aws_elasticache_cluster.redis_single[0]" ${PREFIX}-redis-single || true
+
+          # -- RDS DB Subnet Group --
           terraform import aws_db_subnet_group.main ${PREFIX}-db-subnet-group || true
+
+          # -- RDS Cluster (Aurora) --
+          terraform import aws_rds_cluster.main ${PREFIX}-aurora-cluster || true
 
           # ── ALB and Target Group ──────────────────────────────────────────────
           ALB_ARN=$(aws elbv2 describe-load-balancers --names "${PREFIX}-api-alb" \
@@ -349,8 +356,9 @@ jobs:
             done
 
             # NAT Gateways and their Elastic IPs
-            # Import each by index using its Name tag (stable mapping regardless of state).
-            # This avoids sort-order mismatches and handles any NAT GW state.
+            # Import each by index using its EIP Name tag: find the EIP, then
+            # look up which NAT GW owns that EIP. This is robust regardless of
+            # the NAT GW's own Name tag or state.
             AZ_COUNT=$(aws ec2 describe-availability-zones --region "$REGION" \
               --query 'length(AvailabilityZones)' --output text 2>/dev/null || echo 2)
             # Cap at the configured count (variables.tf default is 2 AZs)
@@ -369,14 +377,22 @@ jobs:
                 [ -n "$EIP_ALLOC" ] && [ "$EIP_ALLOC" != "None" ] && [ "$EIP_ALLOC" != "null" ] && \
                   terraform import "aws_eip.nat[$i]" "$EIP_ALLOC" || true
               else
-                # NAT GW not found by Name tag – try importing orphaned EIP by tag
+                # NAT GW not found by Name tag -- find by EIP AllocationId
                 EIP_NAME="${PREFIX}-nat-eip-$((i + 1))"
                 EIP_ALLOC=$(aws ec2 describe-addresses \
                   --filters "Name=tag:Name,Values=${EIP_NAME}" \
                   --query 'Addresses[0].AllocationId' \
                   --output text --region "$REGION" 2>/dev/null || true)
-                [ -n "$EIP_ALLOC" ] && [ "$EIP_ALLOC" != "None" ] && [ "$EIP_ALLOC" != "null" ] && \
+                if [ -n "$EIP_ALLOC" ] && [ "$EIP_ALLOC" != "None" ] && [ "$EIP_ALLOC" != "null" ]; then
                   terraform import "aws_eip.nat[$i]" "$EIP_ALLOC" || true
+                  # Find the NAT GW that currently holds this EIP
+                  NAT_GW_ID=$(aws ec2 describe-nat-gateways \
+                    --filter "Name=vpc-id,Values=$VPC_ID" \
+                    --query "NatGateways[?NatGatewayAddresses[?AllocationId=='${EIP_ALLOC}']&&State!='deleted'&&State!='failed']|[0].NatGatewayId" \
+                    --output text --region "$REGION" 2>/dev/null || true)
+                  [ -n "$NAT_GW_ID" ] && [ "$NAT_GW_ID" != "None" ] && [ "$NAT_GW_ID" != "null" ] && \
+                    terraform import "aws_nat_gateway.main[$i]" "$NAT_GW_ID" || true
+                fi
               fi
             done
 
