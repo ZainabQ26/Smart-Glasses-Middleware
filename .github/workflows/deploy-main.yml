@@ -62,7 +62,7 @@ jobs:
         run: |
           # Use the registry URL from the ECR login action output (no secret masking)
           IMAGE_URI=${{ steps.ecr-login.outputs.registry }}/smart-glasses-api:${{ github.sha }}
-          docker build -t $IMAGE_URI -f ./src/SmartGlassesMiddleware/Dockerfile .
+          docker build --platform linux/amd64 -t $IMAGE_URI -f ./src/SmartGlassesMiddleware/Dockerfile .
           docker push $IMAGE_URI
           echo "api_image=$IMAGE_URI" >> $GITHUB_OUTPUT
 
