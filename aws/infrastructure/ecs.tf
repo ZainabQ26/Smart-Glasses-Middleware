@@ -243,12 +243,9 @@ locals {
           value = var.deployment_id
         },
         {
-          # Only run EF migrations when RDS actually exists.
-          # When enable_rds=false (free-tier) the DB connection string is a
-          # placeholder; migrating against it causes a 30-second timeout that
-          # re-throws and crashes the process with exit code 139 (Npgsql SIGSEGV).
+          # Run EF migrations at startup – RDS is always available (db.t3.micro)
           name  = "MIGRATE_ON_STARTUP"
-          value = var.enable_rds ? "true" : "false"
+          value = "true"
         },
         {
           # Whisper SQS queue URL so the API can submit transcription jobs
