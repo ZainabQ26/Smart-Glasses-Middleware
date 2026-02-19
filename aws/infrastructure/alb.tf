@@ -57,6 +57,10 @@ resource "aws_lb_listener" "api_http" {
     type             = "forward"
     target_group_arn = aws_lb_target_group.api.arn
   }
+
+  lifecycle {
+    ignore_changes = all
+  }
 }
 
 # HTTPS Listener (only when a cert ARN is provided)

@@ -84,9 +84,10 @@ resource "aws_elasticache_replication_group" "redis" {
   }
 
   lifecycle {
-    ignore_changes  = [auth_token, security_group_ids]
-    # Replication group cannot be recreated in-place; ignore drift after initial import.
-    # Security groups and subnet group are managed via their own resources.
+    # Freeze the imported replication group: Terraform should never modify any
+    # attribute (including auth_token) or destroy it.  All runtime drift is
+    # accepted as-is.  Changes must be made out-of-band until a full re-provision.
+    ignore_changes  = all
     prevent_destroy = true
   }
 }
@@ -113,7 +114,8 @@ resource "aws_elasticache_cluster" "redis_single" {
   }
 
   lifecycle {
-    ignore_changes = [security_group_ids]
+    # Freeze the imported cluster (same reasoning as the replication group above)
+    ignore_changes = all
   }
 }
 
