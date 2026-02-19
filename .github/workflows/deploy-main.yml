@@ -111,6 +111,106 @@ jobs:
         with:
           terraform_version: 1.5.7
 
+      - name: Destroy existing dev resources (best-effort, non-fatal)
+        run: |
+          set -e
+          REGION=${AWS_REGION}
+          ENV=dev
+          PREFIX="smart-glasses-${ENV}"
+
+          echo "Starting best-effort deletion of existing resources with prefix ${PREFIX} in ${REGION}"
+
+          # non-fatal deletions
+          set +e
+
+          # ECR repositories
+          aws ecr describe-repositories --repository-names "${PREFIX}-api" --region "$REGION" >/dev/null 2>&1 && aws ecr delete-repository --repository-name "${PREFIX}-api" --force --region "$REGION" || true
+
+          # KMS aliases
+          for a in "alias/${PREFIX}-ecr" "alias/${PREFIX}-rds" "alias/${PREFIX}-s3"; do
+            aws kms list-aliases --region "$REGION" --query "Aliases[?AliasName=='$a']" --output text >/dev/null 2>&1 && aws kms delete-alias --alias-name "$a" --region "$REGION" || true
+          done
+
+          # CloudFront origin request policy
+          ORIGIN_POLICY_ID=$(aws cloudfront list-origin-request-policies --query "OriginRequestPolicyList.Items[?Name=='${PREFIX}-api-policy'].Id" --output text 2>/dev/null || true)
+          if [ -n "$ORIGIN_POLICY_ID" ]; then aws cloudfront delete-origin-request-policy --id "$ORIGIN_POLICY_ID" || true; fi
+
+          # CloudFront origin access control
+          OAC_ID=$(aws cloudfront list-origin-access-controls --query "OriginAccessControlList.Items[?Name=='${PREFIX}-frontend-oac'].Id" --output text 2>/dev/null || true)
+          if [ -n "$OAC_ID" ]; then aws cloudfront delete-origin-access-control --id "$OAC_ID" || true; fi
+
+          # CloudWatch Log Groups (examples from logs)
+          aws logs delete-log-group --log-group-name "/ecs/${PREFIX}/api" --region "$REGION" || true
+          aws logs delete-log-group --log-group-name "/aws/elasticache/${PREFIX}/slow-log" --region "$REGION" || true
+          aws logs delete-log-group --log-group-name "/aws/elasticache/${PREFIX}/engine-log" --region "$REGION" || true
+          aws logs delete-log-group --log-group-name "/aws/lambda/${PREFIX}-document-processor" --region "$REGION" || true
+
+          # IAM roles and policies (detach and delete)
+          delete_role() {
+            RNAME="$1"
+            ARN=$(aws iam get-role --role-name "$RNAME" --query 'Role.Arn' --output text 2>/dev/null || true)
+            if [ -n "$ARN" ]; then
+              # detach managed policies
+              for p in $(aws iam list-attached-role-policies --role-name "$RNAME" --query 'AttachedPolicies[].PolicyArn' --output text 2>/dev/null || true); do
+                aws iam detach-role-policy --role-name "$RNAME" --policy-arn "$p" || true
+              done
+              # delete inline policies
+              for ip in $(aws iam list-role-policies --role-name "$RNAME" --query 'PolicyNames[]' --output text 2>/dev/null || true); do
+                aws iam delete-role-policy --role-name "$RNAME" --policy-name "$ip" || true
+              done
+              aws iam delete-role --role-name "$RNAME" || true
+            fi
+          }
+
+          delete_role "${PREFIX}-ecs-task-execution-role"
+          delete_role "${PREFIX}-ecs-task-role"
+          delete_role "${PREFIX}-lambda-doc-processor-role"
+          delete_role "${PREFIX}-rds-monitoring-role"
+          delete_role "${PREFIX}-whisper-exec"
+
+          # IAM policies by name
+          for pname in "${PREFIX}-whisper-s3-access" "${PREFIX}-whisper-allow-sqs-send"; do
+            POL_ARN=$(aws iam list-policies --scope Local --query "Policies[?PolicyName=='$pname'].Arn" --output text 2>/dev/null || true)
+            if [ -n "$POL_ARN" ]; then aws iam delete-policy --policy-arn "$POL_ARN" || true; fi
+          done
+
+          # Parameter groups
+          aws elasticache describe-cache-parameter-groups --cache-parameter-group-name "${PREFIX}-redis-params" --region "$REGION" >/dev/null 2>&1 && aws elasticache delete-cache-parameter-group --cache-parameter-group-name "${PREFIX}-redis-params" --region "$REGION" || true
+          aws rds describe-db-cluster-parameter-groups --db-cluster-parameter-group-name "${PREFIX}-aurora-pg-params" --region "$REGION" >/dev/null 2>&1 && aws rds delete-db-cluster-parameter-group --db-cluster-parameter-group-name "${PREFIX}-aurora-pg-params" --region "$REGION" || true
+
+          # Attempt to remove VPC (best-effort). This will try to clean common attachments and delete the VPC tagged for this project/env.
+          VPC_ID=$(aws ec2 describe-vpcs --filters "Name=tag:Project,Values=SmartGlassesMiddleware" "Name=tag:Environment,Values=$ENV" --query 'Vpcs[0].VpcId' --output text 2>/dev/null || true)
+          if [ -n "$VPC_ID" ] && [ "$VPC_ID" != "None" ]; then
+            echo "Attempting to clean and delete VPC $VPC_ID"
+            # Delete NAT Gateways
+            for nat in $(aws ec2 describe-nat-gateways --filter Name=vpc-id,Values=$VPC_ID --query 'NatGateways[].NatGatewayId' --output text 2>/dev/null || true); do
+              aws ec2 delete-nat-gateway --nat-gateway-id $nat --region "$REGION" || true
+            done
+            # Detach and delete internet gateways
+            for igw in $(aws ec2 describe-internet-gateways --filters "Name=attachment.vpc-id,Values=$VPC_ID" --query 'InternetGateways[].InternetGatewayId' --output text 2>/dev/null || true); do
+              aws ec2 detach-internet-gateway --internet-gateway-id $igw --vpc-id $VPC_ID --region "$REGION" || true
+              aws ec2 delete-internet-gateway --internet-gateway-id $igw --region "$REGION" || true
+            done
+            # Delete subnets
+            for s in $(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" --query 'Subnets[].SubnetId' --output text 2>/dev/null || true); do
+              aws ec2 delete-subnet --subnet-id $s --region "$REGION" || true
+            done
+            # Delete route tables (non-main)
+            for rt in $(aws ec2 describe-route-tables --filters "Name=vpc-id,Values=$VPC_ID" --query 'RouteTables[?Associations[?Main==`false`]].RouteTableId' --output text 2>/dev/null || true); do
+              aws ec2 delete-route-table --route-table-id $rt --region "$REGION" || true
+            done
+            # Delete security groups (non-default)
+            for sg in $(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" --query 'SecurityGroups[?GroupName!=`default`].GroupId' --output text 2>/dev/null || true); do
+              aws ec2 delete-security-group --group-id $sg --region "$REGION" || true
+            done
+            # Finally attempt delete VPC
+            aws ec2 delete-vpc --vpc-id $VPC_ID --region "$REGION" || true
+          fi
+
+          set -e
+
+          echo "Best-effort deletion complete."
+
       - name: Write image variables for Terraform
         run: |
           cat > aws/infrastructure/tf_image_vars.auto.tfvars <<EOF
@@ -144,9 +244,15 @@ jobs:
       - name: Terraform init
         working-directory: aws/infrastructure
         run: |
-          # Remove old state files to force fresh state
+          # Create S3 backend bucket and DynamoDB lock table (if missing)
+          BUCKET_NAME="smart-glasses-terraform-state-dev"
+          DDB_NAME="smart-glasses-terraform-locks-dev"
+          aws s3api head-bucket --bucket "$BUCKET_NAME" --region "$AWS_REGION" >/dev/null 2>&1 || aws s3api create-bucket --bucket "$BUCKET_NAME" --region "$AWS_REGION" --create-bucket-configuration LocationConstraint=$AWS_REGION || true
+          aws dynamodb describe-table --table-name "$DDB_NAME" --region "$AWS_REGION" >/dev/null 2>&1 || aws dynamodb create-table --table-name "$DDB_NAME" --attribute-definitions AttributeName=LockID,AttributeType=S --key-schema AttributeName=LockID,KeyType=HASH --billing-mode PAY_PER_REQUEST --region "$AWS_REGION" || true
+
+          # Remove old local state files and initialize with S3 backend
           rm -rf .terraform.lock.hcl terraform.tfstate* 2>/dev/null || true
-          terraform init
+          terraform init -backend-config="bucket=${BUCKET_NAME}" -backend-config="key=state/terraform.tfstate" -backend-config="region=${AWS_REGION}" -backend-config="dynamodb_table=${DDB_NAME}"
 
       - name: Import critical resources into fresh state
         working-directory: aws/infrastructure
