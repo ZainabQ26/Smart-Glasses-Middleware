@@ -168,10 +168,6 @@ resource "aws_cloudwatch_log_group" "elasticache_engine_log" {
   lifecycle {
     prevent_destroy = true
   }
-
-  tags = {
-    Name = "${var.project_name}-${var.environment}-elasticache-engine-log"
-  }
 }
 
 # SNS Topic for ElastiCache notifications
