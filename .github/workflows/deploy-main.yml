@@ -127,6 +127,20 @@ jobs:
           name: lambda-document-zip
           path: .
 
+      - name: Place Document Processor zip into terraform path
+        run: |
+          mkdir -p aws/lambda-document-processor
+          if [ -f aws/lambda-document-processor/deployment.zip ]; then
+            echo "deployment.zip already in place"
+          elif [ -f deployment.zip ]; then
+            mv deployment.zip aws/lambda-document-processor/deployment.zip
+            echo "moved deployment.zip to aws/lambda-document-processor/deployment.zip"
+          else
+            echo "No deployment.zip found after download";
+            ls -la || true;
+            exit 1
+          fi
+
       - name: Terraform init
         working-directory: aws/infrastructure
         run: |
