@@ -164,7 +164,7 @@ public class ApplicationDbContext : DbContext
             {
                 // Configure vector column for pgvector similarity search
                 entity.Property(e => e.EmbeddingVector)
-                    .HasColumnType("vector(384)"); // 384-dimensional embeddings
+                    .HasColumnType("vector(1024)"); // 1024-dimensional embeddings (Amazon Titan Embed V2 default)
 
                 // Create index on vector column for efficient similarity search
                 entity.HasIndex(e => e.EmbeddingVector)

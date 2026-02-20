@@ -42,6 +42,15 @@ resource "aws_lb_target_group" "api" {
 
   deregistration_delay = 30
 
+  # Stickiness is required for SignalR WebSocket connections.
+  # Without it, reconnects can land on a different ECS task which has no
+  # knowledge of the existing hub connection (no Redis SignalR backplane).
+  stickiness {
+    enabled         = true
+    type            = "lb_cookie"
+    cookie_duration = 86400 # 1 day
+  }
+
   tags = {
     Name = "${var.project_name}-${var.environment}-api-tg"
   }
