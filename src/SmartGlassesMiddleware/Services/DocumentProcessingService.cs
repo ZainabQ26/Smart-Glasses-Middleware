@@ -147,7 +147,22 @@ public class DocumentProcessingService : IDocumentProcessingService
             metadata.TotalPages = chunks.Any() ? chunks.Max(c => c.PageNumber) : 0;
             metadata.IsProcessed = true;
             metadata.ProcessedAt = DateTime.UtcNow;
-            metadata.Chunks = chunks;
+
+            // Do NOT assign metadata.Chunks = chunks when the entity is already tracked by EF.
+            // Replacing a navigation collection on a tracked entity whose collection wasn't eagerly
+            // loaded causes 'Unexpected entry.EntityState: Detached'. Add chunks explicitly instead.
+            if (_context.Entry(metadata).State == Microsoft.EntityFrameworkCore.EntityState.Added)
+            {
+                // Brand-new entity: safe to set the collection directly
+                metadata.Chunks = chunks;
+            }
+            else
+            {
+                // Already-tracked entity: add chunks directly to avoid navigation-replacement error
+                foreach (var chunk in chunks)
+                    chunk.DocumentMetadataId = metadata.Id;
+                _context.DocumentChunks.AddRange(chunks);
+            }
 
             await _context.SaveChangesAsync();
             if (requestId != null && _monitoringService != null)

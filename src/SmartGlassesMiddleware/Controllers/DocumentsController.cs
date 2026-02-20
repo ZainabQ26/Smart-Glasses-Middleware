@@ -288,26 +288,38 @@ public class DocumentsController : ControllerBase
             // In-process fallback: if specific documents were requested but haven't been processed
             // by Lambda yet (IsProcessed=false, no EmbeddingVector chunks), process them now so the
             // query has something to work with. This handles the race between upload and query.
+            //
+            // IMPORTANT: Run each document through a fresh DI scope so the processing service gets
+            // its own ApplicationDbContext. The controller's _context already has these entities
+            // tracked (Unchanged). Sharing the same context causes 'Unexpected entry.EntityState:
+            // Detached' when DocumentProcessingService tries to set metadata.Chunks on the
+            // already-tracked entity.
             if (request.DocumentIds != null && request.DocumentIds.Any())
             {
-                var unprocessedDocs = await _context.DocumentMetadatas
+                // Use a plain list of IDs to avoid passing tracked entities across scope boundaries
+                var unprocessedIds = await _context.DocumentMetadatas
                     .Where(d => request.DocumentIds.Contains(d.Id) && !d.IsProcessed && d.StorageKey != null)
+                    .Select(d => new { d.Id, d.FileName, d.StorageKey })
                     .ToListAsync();
 
-                if (unprocessedDocs.Any())
+                if (unprocessedIds.Any())
                 {
                     _logger.LogInformation("Documents not yet processed by Lambda: {Ids}. Running in-process fallback.",
-                        string.Join(", ", unprocessedDocs.Select(d => d.Id)));
+                        string.Join(", ", unprocessedIds.Select(d => d.Id)));
                     await _monitoringService.UpdateRequestStatus(requestId!, "Processing",
-                        $"Processing {unprocessedDocs.Count} document(s) in-process (Lambda not yet complete)", 35);
+                        $"Processing {unprocessedIds.Count} document(s) in-process (Lambda not yet complete)", 35);
 
-                    foreach (var doc in unprocessedDocs)
+                    foreach (var doc in unprocessedIds)
                     {
                         try
                         {
+                            // Fresh scope = fresh DbContext: no tracking conflicts with the controller's context
+                            using var fallbackScope = _scopeFactory.CreateScope();
+                            var scopedProcessing = fallbackScope.ServiceProvider.GetRequiredService<IDocumentProcessingService>();
+                            var scopedRag = fallbackScope.ServiceProvider.GetRequiredService<IRAGService>();
                             using var pdfStream = await _mediaStorageService.DownloadFileAsync(doc.StorageKey!);
-                            await _processingService.ProcessDocumentAsync(pdfStream, doc.FileName, "application/pdf", requestId, doc.Id);
-                            await _ragService.GenerateEmbeddingsAsync(doc.Id);
+                            await scopedProcessing.ProcessDocumentAsync(pdfStream, doc.FileName, "application/pdf", requestId, doc.Id);
+                            await scopedRag.GenerateEmbeddingsAsync(doc.Id);
                             _logger.LogInformation("In-process fallback complete for document {DocumentId}", doc.Id);
                         }
                         catch (Exception ex)
