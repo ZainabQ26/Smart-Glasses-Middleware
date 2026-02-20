@@ -522,9 +522,9 @@ builder.Services.AddCors(options =>
         var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
             ?? new[] { "http://localhost:3000", "http://localhost:5000" };
 
-        if (builder.Environment.IsDevelopment())
+        if (builder.Environment.IsDevelopment() || allowedOrigins.Contains("*"))
         {
-            // In development, allow any origin for easier testing
+            // In development or when wildcard is configured, allow any origin
             policy.AllowAnyOrigin()
                   .AllowAnyMethod()
                   .AllowAnyHeader();

@@ -237,7 +237,7 @@ locals {
       environment = [
         {
           name  = "ASPNETCORE_ENVIRONMENT"
-          value = var.environment == "prod" ? "Production" : "Development"
+          value = var.environment == "prod" ? "Production" : "AWS"
         },
         {
           name  = "AWS_REGION"
