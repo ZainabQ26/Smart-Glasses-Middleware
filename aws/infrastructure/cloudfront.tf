@@ -47,6 +47,74 @@ resource "aws_cloudfront_distribution" "frontend" {
     compress               = true
   }
 
+  # Static assets served by ASP.NET Core wwwroot (admin panel, monitoring page, etc.)
+  # Must come before the default S3 behavior so these are routed to the ALB, not S3.
+  ordered_cache_behavior {
+    path_pattern     = "/*.html"
+    allowed_methods  = ["GET", "HEAD", "OPTIONS"]
+    cached_methods   = ["GET", "HEAD"]
+    target_origin_id = "ALB-API"
+
+    forwarded_values {
+      query_string = false
+      headers      = ["Host"]
+
+      cookies {
+        forward = "none"
+      }
+    }
+
+    viewer_protocol_policy = "redirect-to-https"
+    min_ttl                = 0
+    default_ttl            = 0
+    max_ttl                = 0
+    compress               = true
+  }
+
+  ordered_cache_behavior {
+    path_pattern     = "/*.js"
+    allowed_methods  = ["GET", "HEAD", "OPTIONS"]
+    cached_methods   = ["GET", "HEAD"]
+    target_origin_id = "ALB-API"
+
+    forwarded_values {
+      query_string = false
+      headers      = ["Host"]
+
+      cookies {
+        forward = "none"
+      }
+    }
+
+    viewer_protocol_policy = "redirect-to-https"
+    min_ttl                = 0
+    default_ttl            = 0
+    max_ttl                = 0
+    compress               = true
+  }
+
+  ordered_cache_behavior {
+    path_pattern     = "/*.css"
+    allowed_methods  = ["GET", "HEAD", "OPTIONS"]
+    cached_methods   = ["GET", "HEAD"]
+    target_origin_id = "ALB-API"
+
+    forwarded_values {
+      query_string = false
+      headers      = ["Host"]
+
+      cookies {
+        forward = "none"
+      }
+    }
+
+    viewer_protocol_policy = "redirect-to-https"
+    min_ttl                = 0
+    default_ttl            = 0
+    max_ttl                = 0
+    compress               = true
+  }
+
   # Cache behavior for API
   ordered_cache_behavior {
     path_pattern     = "/api/*"
@@ -60,6 +128,51 @@ resource "aws_cloudfront_distribution" "frontend" {
 
       cookies {
         forward = "all"
+      }
+    }
+
+    viewer_protocol_policy = "redirect-to-https"
+    min_ttl                = 0
+    default_ttl            = 0
+    max_ttl                = 0
+    compress               = true
+  }
+
+  # Health, swagger, and other top-level ALB-served endpoints
+  ordered_cache_behavior {
+    path_pattern     = "/health"
+    allowed_methods  = ["GET", "HEAD"]
+    cached_methods   = ["GET", "HEAD"]
+    target_origin_id = "ALB-API"
+
+    forwarded_values {
+      query_string = false
+      headers      = ["Host"]
+
+      cookies {
+        forward = "none"
+      }
+    }
+
+    viewer_protocol_policy = "redirect-to-https"
+    min_ttl                = 0
+    default_ttl            = 0
+    max_ttl                = 0
+    compress               = true
+  }
+
+  ordered_cache_behavior {
+    path_pattern     = "/swagger*"
+    allowed_methods  = ["GET", "HEAD", "OPTIONS"]
+    cached_methods   = ["GET", "HEAD"]
+    target_origin_id = "ALB-API"
+
+    forwarded_values {
+      query_string = true
+      headers      = ["Host"]
+
+      cookies {
+        forward = "none"
       }
     }
 
