@@ -269,6 +269,39 @@ public class DocumentsController : ControllerBase
             // Add user message to conversation
                 await _conversationService.AddMessageAsync(conversation.Id, "user", request.Query, null, request.DocumentIds);
 
+            // In-process fallback: if specific documents were requested but haven't been processed
+            // by Lambda yet (IsProcessed=false, no EmbeddingVector chunks), process them now so the
+            // query has something to work with. This handles the race between upload and query.
+            if (request.DocumentIds != null && request.DocumentIds.Any())
+            {
+                var unprocessedDocs = await _context.DocumentMetadatas
+                    .Where(d => request.DocumentIds.Contains(d.Id) && !d.IsProcessed && d.StorageKey != null)
+                    .ToListAsync();
+
+                if (unprocessedDocs.Any())
+                {
+                    _logger.LogInformation("Documents not yet processed by Lambda: {Ids}. Running in-process fallback.",
+                        string.Join(", ", unprocessedDocs.Select(d => d.Id)));
+                    await _monitoringService.UpdateRequestStatus(requestId!, "Processing",
+                        $"Processing {unprocessedDocs.Count} document(s) in-process (Lambda not yet complete)", 35);
+
+                    foreach (var doc in unprocessedDocs)
+                    {
+                        try
+                        {
+                            using var pdfStream = await _mediaStorageService.DownloadFileAsync(doc.StorageKey!);
+                            await _processingService.ProcessDocumentAsync(pdfStream, doc.FileName, "application/pdf", requestId, doc.Id);
+                            await _ragService.GenerateEmbeddingsAsync(doc.Id);
+                            _logger.LogInformation("In-process fallback complete for document {DocumentId}", doc.Id);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "In-process fallback failed for document {DocumentId} — query will proceed without it", doc.Id);
+                        }
+                    }
+                }
+            }
+
             _logger.LogInformation("Calling RAG service QueryDocumentsWithConversationAsync...");
             var result = await _ragService.QueryDocumentsWithConversationAsync(
                 request.Query,
