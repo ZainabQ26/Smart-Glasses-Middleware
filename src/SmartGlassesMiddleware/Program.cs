@@ -1091,7 +1091,7 @@ app.MapGet("/health", async (IServiceProvider services) =>
         minioError = ex.Message;
     }
     checks["minio"] = new { healthy = minioOk, error = minioError };
-    allHealthy &= minioOk;
+    // MinIO is a local-dev dependency only; production uses S3. Do not block health.
 
     // Check Ollama
     var ollamaOk = false;
@@ -1109,7 +1109,7 @@ app.MapGet("/health", async (IServiceProvider services) =>
         ollamaError = ex.Message;
     }
     checks["ollama"] = new { healthy = ollamaOk, error = ollamaError };
-    allHealthy &= ollamaOk;
+    // Ollama is a local-dev dependency only; production uses AWS Bedrock. Do not block health.
 
     // Check transcription service
     var transcriptionOk = false;
@@ -1127,7 +1127,7 @@ app.MapGet("/health", async (IServiceProvider services) =>
         transcriptionError = ex.Message;
     }
     checks["transcription-service"] = new { healthy = transcriptionOk, error = transcriptionError };
-    allHealthy &= transcriptionOk;
+    // Vosk transcriber is local-dev only; production uses Whisper Lambda via SQS. Do not block health.
 
     // Check Redis Pub/Sub bridge
     var bridgeOk = false;
