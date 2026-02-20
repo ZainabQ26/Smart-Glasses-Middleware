@@ -30,6 +30,8 @@
     <!-- Document processing packages -->
     <PackageReference Include="itext7" Version="8.0.5" />
     <PackageReference Include="itext7.pdfhtml" Version="5.0.5" />
+    <!-- Required by iText7 8.x for SmartModePdfObjectsSerializer (PdfWriter uses it unconditionally) -->
+    <PackageReference Include="itext7.bouncy-castle-adapter" Version="8.0.5" />
     <PackageReference Include="Portable.BouncyCastle" Version="1.9.0" />
     <PackageReference Include="QuestPDF" Version="2023.12.0" />
     <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="2.88.3" />
