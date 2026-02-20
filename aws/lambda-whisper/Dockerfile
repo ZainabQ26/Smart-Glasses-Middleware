@@ -26,9 +26,11 @@ WORKDIR /app
 
 COPY requirements.txt .
 # Ensure pip is recent, then install torch and other Python deps.
+# Use --prefer-binary to avoid source builds that require Rust/GCC toolchains
+# (tiktoken has prebuilt wheels; building from source needs rustc).
 RUN python -m pip install --upgrade pip && \
     pip install --no-cache-dir torch==2.0.0 --index-url https://download.pytorch.org/whl/cpu && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir --prefer-binary -r requirements.txt
 
 COPY handler.py .
 
