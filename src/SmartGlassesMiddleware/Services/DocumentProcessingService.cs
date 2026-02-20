@@ -245,11 +245,11 @@ public class DocumentProcessingService : IDocumentProcessingService
 
         try
         {
-            // SetUnethicalReading bypasses owner-password encryption (copy/print restrictions)
-            // without needing the password — the content is still readable for extraction.
+            // SetUnethicalReading bypasses owner-password encryption (copy/print restrictions).
+            // NOTE: this is called on the PdfReader instance, not ReaderProperties.
             pdfStream.Position = 0;
-            var readerProps = new ReaderProperties().SetUnethicalReading(true);
-            using var pdfReader = new PdfReader(pdfStream, readerProps);
+            using var pdfReader = new PdfReader(pdfStream);
+            pdfReader.SetUnethicalReading(true);
             using var pdfDocument = new PdfDocument(pdfReader);
 
             var outputStream = new MemoryStream();
@@ -257,7 +257,7 @@ public class DocumentProcessingService : IDocumentProcessingService
             writer.SetCloseStream(false);
             using var outPdf = new PdfDocument(writer);
 
-            // Copy all pages — this also strips any owner-password restriction from the output
+            // Copy all pages — also strips owner-password restriction from the output
             pdfDocument.CopyPagesTo(1, pdfDocument.GetNumberOfPages(), outPdf);
             outPdf.Close();
 
@@ -269,7 +269,7 @@ public class DocumentProcessingService : IDocumentProcessingService
             // If iText7 still can't open the PDF (e.g. user-password protected or corrupt),
             // fall back to forwarding the original bytes unchanged.  Lambda/Textract can
             // sometimes handle PDFs that iText7 cannot grok.
-            _logger.LogWarning(ex, "iText7 could not open PDF ({ExType}: {Msg}) — passing original bytes to Lambda unchanged", ex.GetType().Name, ex.Message);
+            _logger.LogWarning(ex, "iText7 could not open PDF ({ExType}: {Msg}) — forwarding original bytes to Lambda unchanged", ex.GetType().Name, ex.Message);
 
             pdfStream.Position = 0;
             var fallback = new MemoryStream();
