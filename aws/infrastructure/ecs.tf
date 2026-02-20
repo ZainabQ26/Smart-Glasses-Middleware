@@ -192,6 +192,16 @@ resource "aws_iam_role_policy" "ecs_task" {
           "sqs:GetQueueAttributes"
         ]
         Resource = aws_sqs_queue.whisper_queue.arn
+      },
+      {
+        # KMS permissions required for S3 SSE-KMS (PutObject needs GenerateDataKey, GetObject needs Decrypt)
+        Effect = "Allow"
+        Action = [
+          "kms:GenerateDataKey",
+          "kms:Decrypt",
+          "kms:DescribeKey"
+        ]
+        Resource = aws_kms_key.s3.arn
       }
     ]
   })
