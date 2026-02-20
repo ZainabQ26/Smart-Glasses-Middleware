@@ -26,6 +26,8 @@ using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Markdig;
 using HtmlAgilityPack;
+using iText.IO.Image;
+using iText.Html2pdf;
 
 namespace SmartGlassesMiddleware.Services;
 
@@ -283,33 +285,48 @@ public class DocumentProcessingService : IDocumentProcessingService
             using var pdf = new PdfDocument(writer);
             using var document = new iText.Layout.Document(pdf);
 
-            // Extract text from DOCX
+            // Extract text and images from DOCX, preserving document order
             using var doc = WordprocessingDocument.Open(docxStream, false);
-            var body = doc.MainDocumentPart?.Document?.Body;
+            var mainPart = doc.MainDocumentPart;
+            var body = mainPart?.Document?.Body;
 
-            if (body != null)
+            if (body != null && mainPart != null)
             {
-                foreach (var paragraph in body.Elements<DocumentFormat.OpenXml.Wordprocessing.Paragraph>())
+                foreach (var element in body.ChildElements)
                 {
-                    var text = paragraph.InnerText;
-                    if (!string.IsNullOrWhiteSpace(text))
+                    // Embed any images/charts/figures found in this element (in document order)
+                    foreach (var blip in element.Descendants<DocumentFormat.OpenXml.Drawing.Blip>())
                     {
-                        // Check if it's a heading based on style
-                        var pPr = paragraph.Elements<ParagraphProperties>().FirstOrDefault();
-                        var styleId = pPr?.ParagraphStyleId?.Val?.Value;
-                        
-                        if (styleId != null && styleId.StartsWith("Heading"))
+                        var relId = blip.Embed?.Value;
+                        if (relId == null) continue;
+                        try
                         {
-                            // Add as heading with larger font
-                            var para = new iText.Layout.Element.Paragraph(text)
-                                .SetFontSize(16)
-                                .SetBold();
-                            document.Add(para);
+                            var imagePart = (ImagePart)mainPart.GetPartById(relId);
+                            using var imgStream = imagePart.GetStream();
+                            var imageBytes = new byte[(int)imgStream.Length];
+                            _ = await imgStream.ReadAsync(imageBytes);
+                            var imageData = ImageDataFactory.Create(imageBytes);
+                            var img = new iText.Layout.Element.Image(imageData).SetAutoScale(true);
+                            document.Add(img);
                         }
-                        else
+                        catch (Exception imgEx)
                         {
-                            // Add as regular paragraph
-                            document.Add(new iText.Layout.Element.Paragraph(text));
+                            _logger.LogWarning(imgEx, "Skipping DOCX embedded image {RelId}", relId);
+                        }
+                    }
+
+                    // Add text content from paragraph elements
+                    if (element is DocumentFormat.OpenXml.Wordprocessing.Paragraph paragraph)
+                    {
+                        var text = paragraph.InnerText?.Trim();
+                        if (!string.IsNullOrWhiteSpace(text))
+                        {
+                            var styleId = paragraph.Elements<ParagraphProperties>().FirstOrDefault()
+                                ?.ParagraphStyleId?.Val?.Value;
+                            if (styleId?.StartsWith("Heading") == true)
+                                document.Add(new iText.Layout.Element.Paragraph(text).SetFontSize(16).SetBold());
+                            else
+                                document.Add(new iText.Layout.Element.Paragraph(text));
                         }
                     }
                 }
@@ -522,8 +539,13 @@ public class DocumentProcessingService : IDocumentProcessingService
             imageStream.Position = 0;
             using var image = await SixLabors.ImageSharp.Image.LoadAsync<Rgb24>(imageStream);
             var croppedImage = CropToPaper(image);
-            
-            // Perform OCR
+
+            // Save cropped image to bytes for visual embedding in PDF
+            var imgBytes = new MemoryStream();
+            await croppedImage.SaveAsPngAsync(imgBytes);
+            imgBytes.Position = 0;
+
+            // Perform OCR for searchable text layer
             var ocrText = await PerformOcrOnImageAsync(croppedImage);
 
             using var writer = CreatePdfWriter(outputStream);
@@ -531,15 +553,16 @@ public class DocumentProcessingService : IDocumentProcessingService
             using var pdf = new PdfDocument(writer);
             using var document = new iText.Layout.Document(pdf);
 
-            // Add OCR text to PDF
+            // Embed the image visually — preserves charts, diagrams, and figures
+            var imageData = ImageDataFactory.Create(imgBytes.ToArray());
+            var img = new iText.Layout.Element.Image(imageData).SetAutoScale(true);
+            document.Add(img);
+
+            // Add OCR text below as a searchable text layer (small, italic)
             if (!string.IsNullOrWhiteSpace(ocrText))
             {
-                document.Add(new iText.Layout.Element.Paragraph("Extracted Text (OCR)").SetFontSize(14).SetBold());
-                document.Add(new iText.Layout.Element.Paragraph(ocrText));
-            }
-            else
-            {
-                document.Add(new iText.Layout.Element.Paragraph("No text extracted from image"));
+                document.Add(new iText.Layout.Element.Paragraph("--- Extracted text ---").SetFontSize(8).SetItalic());
+                document.Add(new iText.Layout.Element.Paragraph(ocrText).SetFontSize(9));
             }
 
             document.Close();
@@ -568,36 +591,36 @@ public class DocumentProcessingService : IDocumentProcessingService
             using var reader = new StreamReader(htmlStream, Encoding.UTF8, true, 1024, true);
             var html = await reader.ReadToEndAsync();
 
-            // Parse HTML and extract visible text
-            var doc = new HtmlDocument();
-            doc.LoadHtml(html);
-
-            // Remove script/style/noscript nodes
-            var nodesToRemove = doc.DocumentNode.SelectNodes("//script|//style|//noscript");
-            if (nodesToRemove != null)
+            // Use iText HTML-to-PDF converter — preserves inline images, charts, tables, and CSS layout.
+            // Falls back to plain-text extraction if the HTML is malformed or HtmlConverter throws.
+            try
             {
-                foreach (var n in nodesToRemove) n.Remove();
+                HtmlConverter.ConvertToPdf(html, outputStream);
+                outputStream.Position = 0;
+                return outputStream;
+            }
+            catch (Exception htmlEx)
+            {
+                _logger.LogWarning(htmlEx, "iText HtmlConverter failed, falling back to text extraction");
+                outputStream = new MemoryStream();
             }
 
+            // Fallback: strip tags and convert plain text to PDF
+            var doc = new HtmlDocument();
+            doc.LoadHtml(html);
+            var nodesToRemove = doc.DocumentNode.SelectNodes("//script|//style|//noscript");
+            if (nodesToRemove != null)
+                foreach (var n in nodesToRemove) n.Remove();
             var title = doc.DocumentNode.SelectSingleNode("//title")?.InnerText?.Trim();
             var text = doc.DocumentNode.InnerText ?? string.Empty;
-
-            // Collapse whitespace
             text = Regex.Replace(text, "[\t\n\r]{1,}", "\n");
             text = Regex.Replace(text, "\n{2,}", "\n\n");
             text = text.Trim();
-
-            // Prepend title if present
             if (!string.IsNullOrWhiteSpace(title))
-            {
                 text = title + "\n\n" + text;
-            }
-
-            // Generate PDF from extracted text using text->PDF converter (uses iText with fallbacks)
             var textBytes = Encoding.UTF8.GetBytes(text);
             using var textStream = new MemoryStream(textBytes);
-            var converted = await ConvertTextToPdfAsync(textStream, pdfFileName, requestId);
-            return converted;
+            return await ConvertTextToPdfAsync(textStream, pdfFileName, requestId);
         }
         catch (Exception ex)
         {
