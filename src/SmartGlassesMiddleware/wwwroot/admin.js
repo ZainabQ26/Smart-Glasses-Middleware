@@ -3790,10 +3790,9 @@ async function init() {
                                 console.warn('[UPLOAD] Failed to resolve conversation group for file:', err);
                             }
                         }
-                        if (uploadGroupId) {
-                            formData.append('groupIds', uploadGroupId);
-                        }
-                        xhr.open('POST', '/api/documents/upload');
+                        // Pass groupIds as a query parameter (controller uses [FromQuery], not [FromForm])
+                        const uploadUrl = uploadGroupId ? `/api/documents/upload?groupIds=${encodeURIComponent(uploadGroupId)}` : '/api/documents/upload';
+                        xhr.open('POST', uploadUrl);
                         xhr.send(formData);
                         
                         const fileData = await uploadPromise;
@@ -3988,10 +3987,9 @@ async function init() {
                                     const conv = await (await fetch(`/api/conversations/${activeConversationId}`)).json().catch(() => null);
                                     uploadGroupId = conv?.resourceGroupId || conv?.ResourceGroupId || null;
                                 }
-                                if (uploadGroupId) {
-                                    fd.append('groupIds', uploadGroupId);
-                                }
-                                const upRes = await fetch('/api/documents/upload', { method: 'POST', body: fd });
+                                // Pass groupIds as a query parameter (controller uses [FromQuery], not [FromForm])
+                                const uploadUrlFallback = uploadGroupId ? `/api/documents/upload?groupIds=${encodeURIComponent(uploadGroupId)}` : '/api/documents/upload';
+                                const upRes = await fetch(uploadUrlFallback, { method: 'POST', body: fd });
                                 if (upRes.ok) {
                                     const fdJson = await upRes.json().catch(() => null);
                                     const newId = fdJson?.id || fdJson?.Id;
@@ -4070,9 +4068,11 @@ async function init() {
                         await syncActiveGroupFromConversation(responseConversationId);
                     }
 
-                    // Attach files to the conversation's group for persistence
+                    // Attach documents to the conversation's group for persistence and RAG scoping.
+                    // Uses POST /api/documents/{id}/move which operates on DocumentGroups (DocumentMetadata
+                    // system). The old /api/admin/groups/{groupId}/files/{fileId} endpoint operates on
+                    // ManagedFiles (different table/IDs) and would always return 404 here.
                     if (documentIdsAfterUpload && documentIdsAfterUpload.length > 0) {
-                        // Fetch conversation to determine its ResourceGroup and attach files to that group
                         try {
                             const convRes = await fetch(`/api/conversations/${responseConversationId}`);
                             const convJson = convRes.ok ? await convRes.json().catch(() => null) : null;
@@ -4080,14 +4080,18 @@ async function init() {
                             if (convGroupId) {
                                 for (const fileId of documentIdsAfterUpload) {
                                     try {
-                                        await fetch(`${API_BASE}/groups/${convGroupId}/files/${fileId}`, { method: 'POST' });
+                                        await fetch(`/api/documents/${fileId}/move`, {
+                                            method: 'POST',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({ groupIds: [convGroupId], regenerateEmbeddings: false })
+                                        });
                                     } catch (attachErr) {
-                                        console.warn('[SEND PROMPT] Failed to attach file to group:', attachErr);
+                                        console.warn('[SEND PROMPT] Failed to attach document to group:', attachErr);
                                     }
                                 }
                             }
                         } catch (err) {
-                            console.warn('[SEND PROMPT] Failed to attach files to conversation group:', err);
+                            console.warn('[SEND PROMPT] Failed to attach documents to conversation group:', err);
                         }
                     }
 
