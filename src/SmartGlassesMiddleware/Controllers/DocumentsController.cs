@@ -99,122 +99,59 @@ public class DocumentsController : ControllerBase
             _context.DocumentMetadatas.Add(placeholder);
             await _context.SaveChangesAsync();
 
-            // Decide whether to dispatch to Lambda or process in-process
-            var useLambda = _configuration.GetValue<bool>("RAG:UseLambdaProcessing");
-
-            // Fire-and-forget background task
+            // Fire-and-forget: convert to PDF then dispatch to Lambda via S3.
+            // Lambda handles Textract extraction, chunking and Bedrock embedding writes.
             _ = Task.Run(async () =>
             {
                 try
                 {
                     ms.Position = 0;
 
-                    if (useLambda)
+                    await _monitoringService.UpdateRequestStatus(requestId, "Processing", "Converting document to PDF for Lambda dispatch", 20);
+
+                    var (pdfStream, pdfFileName) = await _processingService.ConvertToPdfAsync(ms, file.FileName, file.ContentType, requestId);
+                    var uploadKey = $"uploads/{documentId}.pdf";
+                    pdfStream.Position = 0;
+
+                    await _mediaStorageService.UploadFileAsync(uploadKey, pdfStream, "application/pdf");
+
+                    // Update placeholder row with resolved filename and storage key
+                    var doc = await _context.DocumentMetadatas.FindAsync(documentId);
+                    if (doc != null)
                     {
-                        // ── Lambda path ──────────────────────────────────────────────
-                        // Convert to a searchable PDF in-process (lightweight), then
-                        // upload to the documents bucket under the 'uploads/' prefix.
-                        // The S3 event notification triggers the Lambda which handles
-                        // Textract extraction, chunking, Bedrock embeddings and DB writes.
-                        await _monitoringService.UpdateRequestStatus(requestId, "Processing", "Converting document to PDF for Lambda dispatch", 20);
-
-                        var (pdfStream, pdfFileName) = await _processingService.ConvertToPdfAsync(ms, file.FileName, file.ContentType, requestId);
-                        var uploadKey = $"uploads/{documentId}.pdf";
-                        pdfStream.Position = 0;
-
-                        await _mediaStorageService.UploadFileAsync(uploadKey, pdfStream, "application/pdf");
-
-                        // Update the placeholder row with the resolved filename and storage key
-                        var doc = await _context.DocumentMetadatas.FindAsync(documentId);
-                        if (doc != null)
-                        {
-                            doc.FileName = pdfFileName;
-                            doc.StorageKey = uploadKey;
-                            await _context.SaveChangesAsync();
-                        }
-
-                        // Apply any group associations immediately (Lambda will preserve them)
-                        if (groupIds != null && groupIds.Any() && doc != null)
-                        {
-                            foreach (var groupId in groupIds)
-                            {
-                                var group = await _context.ResourceGroups.FindAsync(groupId);
-                                if (group != null)
-                                {
-                                    doc.DocumentGroups.Add(new DocumentGroup
-                                    {
-                                        DocumentMetadataId = doc.Id,
-                                        ResourceGroupId = groupId
-                                    });
-                                }
-                            }
-                            await _context.SaveChangesAsync();
-                            await InvalidateGroupsCache();
-                            await NotifyGroupsChangedAsync();
-                        }
-
-                        try { await InvalidateFilesCache(); await NotifyFilesChangedAsync(); } catch { }
-
-                        _logger.LogInformation("Document {DocumentId} dispatched to Lambda via s3 key {Key}", documentId, uploadKey);
-                        await _monitoringService.CompleteRequest(requestId, true, $"Document {pdfFileName} dispatched to Lambda for processing");
+                        doc.FileName = pdfFileName;
+                        doc.StorageKey = uploadKey;
+                        await _context.SaveChangesAsync();
                     }
-                    else
+
+                    // Write group associations immediately so Lambda results are scoped correctly
+                    if (groupIds != null && groupIds.Any() && doc != null)
                     {
-                        // ── In-process path (local / dev) ─────────────────────────────
-                        var processed = await _processingService.ProcessDocumentAsync(ms, file.FileName, file.ContentType, requestId, documentId);
-
-                        // Attach to groups if specified
-                        if (groupIds != null && groupIds.Any())
+                        foreach (var groupId in groupIds)
                         {
-                            foreach (var groupId in groupIds)
+                            var group = await _context.ResourceGroups.FindAsync(groupId);
+                            if (group != null)
                             {
-                                var group = await _context.ResourceGroups.FindAsync(groupId);
-                                if (group != null)
+                                doc.DocumentGroups.Add(new DocumentGroup
                                 {
-                                    processed.DocumentGroups.Add(new DocumentGroup
-                                    {
-                                        DocumentMetadataId = processed.Id,
-                                        ResourceGroupId = groupId
-                                    });
-                                }
-                                else
-                                {
-                                    _logger.LogWarning("Group {GroupId} not found during background processing", groupId);
-                                }
+                                    DocumentMetadataId = doc.Id,
+                                    ResourceGroupId = groupId
+                                });
                             }
-                            await _context.SaveChangesAsync();
-                            await InvalidateGroupsCache();
-                            await NotifyGroupsChangedAsync();
                         }
-
-                        // Generate embeddings (best-effort)
-                        try
-                        {
-                            await _monitoringService.UpdateRequestStatus(requestId, "Processing", "Generating embeddings", 95);
-                            await _ragService.GenerateEmbeddingsAsync(processed.Id);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogError(ex, "Error generating embeddings for document {DocumentId} in background", processed.Id);
-                        }
-
-                        // Invalidate caches and notify UI
-                        try
-                        {
-                            await InvalidateFilesCache();
-                            await NotifyFilesChangedAsync();
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex, "Failed to invalidate files cache or notify clients after background document processing");
-                        }
-
-                        await _monitoringService.CompleteRequest(requestId, true, $"Document {processed.FileName} processed successfully");
+                        await _context.SaveChangesAsync();
+                        await InvalidateGroupsCache();
+                        await NotifyGroupsChangedAsync();
                     }
+
+                    try { await InvalidateFilesCache(); await NotifyFilesChangedAsync(); } catch { }
+
+                    _logger.LogInformation("Document {DocumentId} dispatched to Lambda via S3 key {Key}", documentId, uploadKey);
+                    await _monitoringService.CompleteRequest(requestId, true, $"Document {pdfFileName} dispatched to Lambda for processing");
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Background processing failed for uploaded document {FileName} (useLambda={UseLambda})", file.FileName, useLambda);
+                    _logger.LogError(ex, "Background processing failed for uploaded document {FileName}", file.FileName);
                     try { await _monitoringService.CompleteRequest(requestId, false, error: ex.Message); } catch { }
                 }
             });
