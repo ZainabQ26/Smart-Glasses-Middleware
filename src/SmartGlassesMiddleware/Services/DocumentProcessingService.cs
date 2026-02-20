@@ -245,27 +245,37 @@ public class DocumentProcessingService : IDocumentProcessingService
 
         try
         {
-            // Read the PDF and check if it has text layers
+            // SetUnethicalReading bypasses owner-password encryption (copy/print restrictions)
+            // without needing the password — the content is still readable for extraction.
             pdfStream.Position = 0;
-            using var pdfReader = new PdfReader(pdfStream);
+            var readerProps = new ReaderProperties().SetUnethicalReading(true);
+            using var pdfReader = new PdfReader(pdfStream, readerProps);
             using var pdfDocument = new PdfDocument(pdfReader);
-            
+
             var outputStream = new MemoryStream();
             using var writer = CreatePdfWriter(outputStream);
             writer.SetCloseStream(false);
             using var outPdf = new PdfDocument(writer);
-            
-            // Copy all pages to ensure they're properly formatted
+
+            // Copy all pages — this also strips any owner-password restriction from the output
             pdfDocument.CopyPagesTo(1, pdfDocument.GetNumberOfPages(), outPdf);
             outPdf.Close();
-            
+
             outputStream.Position = 0;
             return outputStream;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error ensuring PDF is text-based");
-            throw;
+            // If iText7 still can't open the PDF (e.g. user-password protected or corrupt),
+            // fall back to forwarding the original bytes unchanged.  Lambda/Textract can
+            // sometimes handle PDFs that iText7 cannot grok.
+            _logger.LogWarning(ex, "iText7 could not open PDF ({ExType}: {Msg}) — passing original bytes to Lambda unchanged", ex.GetType().Name, ex.Message);
+
+            pdfStream.Position = 0;
+            var fallback = new MemoryStream();
+            await pdfStream.CopyToAsync(fallback);
+            fallback.Position = 0;
+            return fallback;
         }
     }
 
