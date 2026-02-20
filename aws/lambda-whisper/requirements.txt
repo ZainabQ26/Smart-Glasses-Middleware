@@ -1,4 +1,6 @@
-torch==2.0.0+cpu -f https://download.pytorch.org/whl/torch_stable.html
+# torch is installed explicitly in the Dockerfile to use the PyTorch CPU index
 openai-whisper
 ffmpeg-python
 boto3
+# Pin numpy to 1.x: numpy 2.x requires GCC >= 9.3 which Amazon Linux 2 doesn't have
+numpy<2.0
