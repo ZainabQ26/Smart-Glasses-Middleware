@@ -125,17 +125,30 @@ else
 }
 
 // Configure S3-compatible storage client
-builder.Services.AddSingleton<IMinioClient>(sp =>
-{
-    var endpoint = builder.Configuration["MinIO:Endpoint"] ?? "localhost:9000";
-    var accessKey = builder.Configuration["MinIO:AccessKey"] ?? "minioadmin";
-    var secretKey = builder.Configuration["MinIO:SecretKey"] ?? "minioadmin";
+// In AWS (AI:UseBedrockAI=true) register the AWSSDK S3 client backed by the ECS task IAM role.
+// In local dev register the MinIO client (docker-compose provides the MinIO server).
+var useAwsStorage = builder.Configuration.GetValue<bool?>("AI:UseBedrockAI") ?? false;
 
-    return new MinioClient()
-        .WithEndpoint(endpoint)
-        .WithCredentials(accessKey, secretKey)
-        .Build();
-});
+if (useAwsStorage)
+{
+    var awsS3Region = builder.Configuration["AWS:Region"] ?? "us-east-1";
+    builder.Services.AddSingleton<Amazon.S3.IAmazonS3>(_ =>
+        new Amazon.S3.AmazonS3Client(Amazon.RegionEndpoint.GetBySystemName(awsS3Region)));
+}
+else
+{
+    builder.Services.AddSingleton<IMinioClient>(sp =>
+    {
+        var endpoint = builder.Configuration["MinIO:Endpoint"] ?? "localhost:9000";
+        var accessKey = builder.Configuration["MinIO:AccessKey"] ?? "minioadmin";
+        var secretKey = builder.Configuration["MinIO:SecretKey"] ?? "minioadmin";
+
+        return new MinioClient()
+            .WithEndpoint(endpoint)
+            .WithCredentials(accessKey, secretKey)
+            .Build();
+    });
+}
 
 // Configure AI model service with Semantic Kernel
 // When AI:UseBedrockAI=true (set in appsettings.AWS.json) the Bedrock Converse API is used.
@@ -199,7 +212,11 @@ builder.Services.AddHttpClient<IAIService, OllamaAIService>((sp, client) =>
 
 // Register application services
 builder.Services.AddScoped<IHistoryService, HistoryService>();
-builder.Services.AddScoped<IMediaStorageService, MinioMediaStorageService>();
+// Use native AWS S3 storage service on ECS; MinIO for local dev
+if (useAwsStorage)
+    builder.Services.AddScoped<IMediaStorageService, SmartGlassesMiddleware.Services.AwsS3MediaStorageService>();
+else
+    builder.Services.AddScoped<IMediaStorageService, MinioMediaStorageService>();
 // Register cache service: prefer Redis when configured, otherwise fall back to in-memory implementation
 if (!builder.Environment.IsEnvironment("Testing") && !string.IsNullOrWhiteSpace(redisConnection))
 {
