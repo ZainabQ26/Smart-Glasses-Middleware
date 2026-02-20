@@ -47,6 +47,7 @@ public class RAGService : IRAGService
     private readonly int _queryTimeoutSeconds;
     private readonly int _conversationMessageLimit;
     private readonly int _conversationHistoryPercentage;
+    private readonly int _embeddingDimension;
 
     public RAGService(
         ApplicationDbContext context,
@@ -75,6 +76,8 @@ public class RAGService : IRAGService
         _queryTimeoutSeconds = configuration.GetValue<int?>("RAG:QueryTimeoutSeconds") ?? 120;
         _conversationMessageLimit = configuration.GetValue<int?>("RAG:ConversationMessageLimit") ?? 5;
         _conversationHistoryPercentage = configuration.GetValue<int?>("RAG:ConversationHistoryPercentage") ?? 25;
+        // Read the expected pgvector column dimension from config (must match the EF Core migration and Lambda)
+        _embeddingDimension = configuration.GetValue<int?>("AWS:Bedrock:EmbeddingDimensions") ?? 1024;
     }
 
     public async Task<QueryResult> QueryDocumentsAsync(string query, int topK = 5, List<Guid>? groupIds = null, List<Guid>? documentIds = null, string? monitoringRequestId = null)
@@ -726,25 +729,32 @@ Answer:";
     public async Task<int> ReindexAllDocumentsAsync(bool force = false)
     {
         var docsQuery = _context.DocumentMetadatas.AsQueryable();
-        // Ensure DB vector column matches expected embedding dimension (attempt to set to 768)
+        // Verify the DB vector column dimension matches the configured embedding dimension.
+        // Do NOT attempt to ALTER to a smaller dimension — that would nullify all Lambda-stored
+        // 1024-dim vectors. Only ALTER if the column currently has a smaller type.
         try
         {
-            await _context.Database.ExecuteSqlRawAsync("ALTER TABLE \"DocumentChunks\" ALTER COLUMN \"EmbeddingVector\" TYPE vector(768);");
-            _logger.LogInformation("Ensured EmbeddingVector column type is vector(768)");
+            var currentDim = await _context.Database
+                .SqlQueryRaw<int>($"""SELECT (regexp_match(atttypmod::text, '\\d+'))[1]::int AS "Value"
+                                       FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
+                                       WHERE c.relname = 'DocumentChunks'
+                                         AND a.attname = 'EmbeddingVector'
+                                         AND a.attnum > 0""")
+                .FirstOrDefaultAsync();
+            if (currentDim > 0 && currentDim != _embeddingDimension)
+            {
+                _logger.LogInformation("EmbeddingVector column is vector({Current}), altering to vector({Target})", currentDim, _embeddingDimension);
+                await _context.Database.ExecuteSqlRawAsync(
+                    $"ALTER TABLE \"DocumentChunks\" ALTER COLUMN \"EmbeddingVector\" TYPE vector({_embeddingDimension}) USING NULL;");
+            }
+            else
+            {
+                _logger.LogInformation("EmbeddingVector column is already vector({Dim}), no ALTER needed", _embeddingDimension);
+            }
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Initial attempt to alter EmbeddingVector column failed. Attempting fallback ALTER using NULL to change dimension without converting existing vectors.");
-            try
-            {
-                await _context.Database.ExecuteSqlRawAsync("ALTER TABLE \"DocumentChunks\" ALTER COLUMN \"EmbeddingVector\" TYPE vector(768) USING NULL;");
-                _logger.LogInformation("Fallback ALTER succeeded: EmbeddingVector set to vector(768) with NULLed values");
-            }
-            catch (Exception ex2)
-            {
-                _logger.LogWarning(ex2, "Fallback ALTER also failed. pgvector column dimension remains unchanged; reindexing may fail.");
-        
-        }
+            _logger.LogWarning(ex, "Could not verify/alter EmbeddingVector column dimension; proceeding with reindex");
         }
         if (!force)
         {
@@ -799,18 +809,14 @@ Answer:";
                 chunk.Embedding = SerializeEmbedding(embedding);
                 chunk.EmbeddingDimension = embedding.Length;
 
-                // Try to store as pgvector Vector for efficient DB queries only when dimension matches DB expectation
-                // Many deployments use 384-dim vectors; avoid writing mismatched vectors which cause pgvector errors
-                const int expectedDbVectorDim = 384;
-                if (embedding.Length == expectedDbVectorDim)
+                // Always write to the pgvector column. The embedding dimension is determined by the
+                // configured model (AWS:Bedrock:EmbeddingDimensions, default 1024) and must match the
+                // DB column type set by the SwitchToBedrockEmbeddings_vector1024 migration.
+                if (embedding.Length != _embeddingDimension)
                 {
-                    chunk.EmbeddingVector = new Vector(embedding);
+                    _logger.LogWarning("Embedding dim {Dim} does not match configured DB dim {Expected} for chunk {ChunkId} — storing anyway", embedding.Length, _embeddingDimension, chunk.Id);
                 }
-                else
-                {
-                    chunk.EmbeddingVector = null; // leave pgvector column untouched to avoid dimension mismatch
-                    _logger.LogWarning("Skipping pgvector storage for chunk {ChunkId}: embedding dim {Dim} != expected DB dim {Expected}", chunk.Id, embedding.Length, expectedDbVectorDim);
-                }
+                chunk.EmbeddingVector = new Vector(embedding);
 
                 return true;
             }
