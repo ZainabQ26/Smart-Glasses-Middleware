@@ -1472,6 +1472,35 @@ window.togglePromptFileSelection = function(index) {
     updatePromptFilesList();
 };
 
+// After a file is uploaded, the server generates a slug asynchronously.
+// Poll until the server-assigned fileName differs from the original, then update the UI.
+function scheduleFileNameRefresh(fileObj, documentId, originalName) {
+    if (!documentId) return;
+    let attempts = 0;
+    const maxAttempts = 10;
+    const intervalMs = 4000;
+    const poll = async () => {
+        attempts++;
+        try {
+            const res = await fetch(`/api/documents/${documentId}`);
+            if (res.ok) {
+                const meta = await res.json().catch(() => null);
+                const serverName = (meta && (meta.fileName || meta.FileName)) || null;
+                if (serverName && serverName !== originalName) {
+                    fileObj.name = serverName;
+                    window.promptSelectedFiles = promptSelectedFiles;
+                    updatePromptFilesList();
+                    return; // Name updated — stop polling
+                }
+            }
+        } catch { /* noop */ }
+        if (attempts < maxAttempts) {
+            setTimeout(poll, intervalMs);
+        }
+    };
+    setTimeout(poll, 4000); // Give the background task a head-start
+}
+
 window.deleteSelectedPromptFiles = function() {
     const selectedCount = promptSelectedFiles.filter(f => f.selected).length;
     if (selectedCount === 0) {
@@ -1825,54 +1854,6 @@ async function loadGroups(reset = false) {
         const groupsData = result.data || result.Data || [];
         const pagination = result.pagination || result.Pagination || {};
         console.log('Groups data length:', groupsData.length);
-        
-        // Check for and delete empty groups
-        const emptyGroups = groupsData.filter(group => {
-            const description = getProp(group, 'description') || getProp(group, 'Description') || '';
-            if (description && description.toLowerCase() === 'reminder') {
-                return false;
-            }
-
-            const files = getProp(group, 'files') || [];
-            const documents = getProp(group, 'documents') || getProp(group, 'Documents') || [];
-            const prompts = getProp(group, 'prompts') || [];
-            const conversations = getProp(group, 'conversations') || [];
-            const fileCount = (Array.isArray(files) ? files.length : 0) + (Array.isArray(documents) ? documents.length : 0);
-            const promptCount = Array.isArray(prompts) ? prompts.length : 0;
-            const conversationCount = Array.isArray(conversations) ? conversations.length : 0;
-            return fileCount === 0 && promptCount === 0 && conversationCount === 0;
-        });
-        
-        // Auto-delete empty groups in parallel
-        if (emptyGroups.length > 0) {
-            console.log(`[AUTO-DELETE] Found ${emptyGroups.length} empty groups, deleting...`);
-            const deletePromises = emptyGroups.map(async (group) => {
-                const id = getProp(group, 'id');
-                const name = getProp(group, 'name') || 'Untitled';
-                console.log(`[AUTO-DELETE] Deleting empty group: ${name} (${id})`);
-                try {
-                    const deleteRes = await fetch(`${API_BASE}/groups/${id}`, { method: 'DELETE' });
-                    if (deleteRes.ok || deleteRes.status === 204) {
-                        console.log(`[AUTO-DELETE] Successfully deleted empty group: ${name}`);
-                        return id;
-                    } else {
-                        console.warn(`[AUTO-DELETE] Failed to delete empty group: ${name}`, deleteRes.status);
-                        return null;
-                    }
-                } catch (err) {
-                    console.error(`[AUTO-DELETE] Error deleting empty group: ${name}`, err);
-                    return null;
-                }
-            });
-            
-            const deletedIds = (await Promise.all(deletePromises)).filter(id => id !== null);
-            const deletedIdsSet = new Set(deletedIds);
-            
-            // Filter out deleted groups using Set for O(1) lookup
-            const validGroups = groupsData.filter(g => !deletedIdsSet.has(getProp(g, 'id')));
-            groupsData.length = 0;
-            groupsData.push(...validGroups);
-        }
         
         const list = document.getElementById('groups-list');
         
@@ -3479,6 +3460,14 @@ async function init() {
             }
         };
         
+        // Reset attach-file section to closed state on every page load
+        if (promptFileSection) {
+            promptFileSection.style.setProperty('display', 'none', 'important');
+            promptFileSection.style.setProperty('visibility', 'hidden', 'important');
+        }
+        const _initAttachBtn = document.getElementById('prompt-show-file-btn');
+        if (_initAttachBtn) _initAttachBtn.textContent = 'Attach file';
+
         updatePromptFilesList();
         
         // Show file section when clicking "add file+" button
@@ -3497,6 +3486,8 @@ async function init() {
                 promptFileSection.style.setProperty('display', 'block', 'important');
                 promptFileSection.style.setProperty('visibility', 'visible', 'important');
                 promptFileSection.style.setProperty('opacity', '1', 'important');
+                const _showBtn = document.getElementById('prompt-show-file-btn');
+                if (_showBtn) _showBtn.textContent = '✕ Close';
                 const previewPanel = document.getElementById('prompt-preview-panel');
                 const filesPanel = document.getElementById('prompt-files-panel');
                 if (previewPanel) previewPanel.style.setProperty('display', 'block', 'important');
@@ -3525,6 +3516,8 @@ async function init() {
                 promptFileSection.style.setProperty('display', 'none', 'important');
                 promptFileSection.style.setProperty('visibility', 'hidden', 'important');
                 promptFileSection.style.setProperty('opacity', '0', 'important');
+                const _closeBtn = document.getElementById('prompt-show-file-btn');
+                if (_closeBtn) _closeBtn.textContent = 'Attach file';
                 if (ADMIN_DEBUG) console.log('promptFileSection toggled -> hidden (computed):', window.getComputedStyle(promptFileSection).display, 'visibility:', window.getComputedStyle(promptFileSection).visibility);
                 // Try to restore file input to its original parent when hiding
                 try {
@@ -3581,6 +3574,8 @@ async function init() {
             
             // Update files list after showing the panel
             updatePromptFilesList();
+            const _paperclipShowBtn = document.getElementById('prompt-show-file-btn');
+            if (_paperclipShowBtn) _paperclipShowBtn.textContent = '✕ Close';
         });
         
         // Handle file selection - show preview and auto-upload
@@ -3806,6 +3801,9 @@ async function init() {
                             documentId: documentId
                         });
                         window.promptSelectedFiles = promptSelectedFiles;
+                        // Refresh name once server slug is assigned asynchronously
+                        const newEntry = promptSelectedFiles[promptSelectedFiles.length - 1];
+                        scheduleFileNameRefresh(newEntry, documentId, file.name);
                         updatePromptFilesList();
                         showMessage(`File "${file.name}" uploaded successfully`, 'success');
                         
@@ -3995,6 +3993,7 @@ async function init() {
                                     const newId = fdJson?.id || fdJson?.Id;
                                     if (newId) {
                                         f.documentId = newId;
+                                        scheduleFileNameRefresh(f, newId, f.name);
                                         console.log('[SEND PROMPT] Uploaded attached file', f.name, '=>', newId);
                                     }
                                 } else {
