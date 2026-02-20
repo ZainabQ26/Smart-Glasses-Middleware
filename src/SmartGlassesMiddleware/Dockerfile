@@ -8,7 +8,7 @@ RUN dotnet restore "src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj"
 # copy everything else and publish
 COPY . .
 RUN dotnet publish "src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj" -c Release -o /app/publish \
-	/p:PublishTrimmed=true /p:PublishReadyToRun=true /p:TrimMode=linker
+	/p:PublishReadyToRun=true
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 RUN apt-get update \
