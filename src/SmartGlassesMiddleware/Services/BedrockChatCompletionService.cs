@@ -24,7 +24,7 @@ public class BedrockChatCompletionService : IChatCompletionService
         ILogger<BedrockChatCompletionService> logger)
     {
         _bedrockRuntime = bedrockRuntime;
-        _modelId = config["AWS:Bedrock:ModelId"] ?? "anthropic.claude-3-sonnet-20240229-v1:0";
+        _modelId = config["AWS:Bedrock:ModelId"] ?? "us.amazon.nova-2-lite-v1:0";
         _logger = logger;
     }
 
