@@ -1608,5 +1608,64 @@ public class AdminController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Clear ALL history data: request monitoring, files, documents, conversations, AI logs, and transcription jobs.
+    /// Resource groups, prompts, and application configuration are preserved.
+    /// </summary>
+    [HttpPost("clear-all")]
+    public async Task<IActionResult> ClearAll()
+    {
+        _logger.LogWarning("ClearAll invoked — deleting all history data");
+        var counts = new Dictionary<string, int>();
+
+        try
+        {
+            // Clear monitoring in-memory state + RequestStatuses + RequestHistories
+            await _monitoringService.ClearAll();
+            counts["requestStatuses"] = 0; // already cleared by service
+
+            // Delete conversation-related data (FK order: attachments → messages → group mappings → conversations)
+            counts["chatMessageAttachments"] = await _context.ChatMessageAttachments.ExecuteDeleteAsync();
+            counts["chatMessages"] = await _context.ChatMessages.ExecuteDeleteAsync();
+            counts["groupConversationMappings"] = await _context.GroupConversationMappings.ExecuteDeleteAsync();
+            counts["conversations"] = await _context.Conversations.ExecuteDeleteAsync();
+
+            // Delete document-related data (FK order: chunks/groups → metadata)
+            counts["documentChunks"] = await _context.DocumentChunks.ExecuteDeleteAsync();
+            counts["documentGroups"] = await _context.DocumentGroups.ExecuteDeleteAsync();
+            counts["documentMetadatas"] = await _context.DocumentMetadatas.ExecuteDeleteAsync();
+
+            // Delete RAG entries and managed files
+            counts["ragEntries"] = await _context.RagEntries.ExecuteDeleteAsync();
+            counts["managedFiles"] = await _context.ManagedFiles.ExecuteDeleteAsync();
+
+            // Delete AI interaction logs and transcription jobs
+            counts["aiInteractionLogs"] = await _context.AIInteractionLogs.ExecuteDeleteAsync();
+            counts["transcriptionJobs"] = await _context.TranscriptionJobs.ExecuteDeleteAsync();
+
+            // Invalidate all caches so stale data doesn't surface
+            await InvalidateAllCaches();
+
+            // Notify connected clients that files/groups have changed
+            await Task.WhenAll(
+                NotifyFilesChangedAsync(),
+                NotifyGroupsChangedAsync()
+            );
+
+            _logger.LogWarning("ClearAll completed. Rows deleted: {Counts}", counts);
+            return Ok(new { success = true, deleted = counts });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "ClearAll failed");
+            return StatusCode(500, new ProblemDetails
+            {
+                Title = "Clear All Failed",
+                Detail = ex.Message,
+                Status = StatusCodes.Status500InternalServerError
+            });
+        }
+    }
+
     #endregion
 }

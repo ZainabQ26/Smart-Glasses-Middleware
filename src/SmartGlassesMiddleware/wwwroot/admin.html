@@ -1317,6 +1317,12 @@
         <h1>Smart Glasses - Admin Panel</h1>
         <div class="header-nav">
             <a href="/monitoring.html" data-testid="monitoring-link">📊 Request Monitoring</a>
+            <button id="btn-clear-all-header" data-testid="btn-clear-all-header"
+                style="font-size:0.85rem;font-weight:600;padding:6px 14px;background:#c0392b;color:white;border:none;border-radius:4px;cursor:pointer;transition:background 0.2s;"
+                onmouseover="this.style.background='#e74c3c'" onmouseout="this.style.background='#c0392b'"
+                title="Permanently delete all history: files, conversations, documents, monitoring records">
+                🗑 Clear All History
+            </button>
             <!-- SignalR indicator removed in favor of a top warning bar when disconnected -->
         </div>
     </header>

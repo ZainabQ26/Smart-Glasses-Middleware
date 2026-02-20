@@ -14,6 +14,7 @@ public interface IRequestMonitoringService
     Task AddActivity(string requestId, string activity, int? progress = null);
     Task CompleteRequest(string requestId, bool success, string? result = null, string? error = null);
     Task<List<RequestStatus>> GetRecentRequests(int count = 50);
+    Task ClearAll();
 }
 
 public class RequestMonitoringService : IRequestMonitoringService
@@ -177,6 +178,28 @@ public class RequestMonitoringService : IRequestMonitoringService
             
             _logger.LogInformation("Completed request {RequestId}: Success={Success}, Duration={Duration}ms", 
                 requestId, success, request.DurationMs);
+        }
+    }
+
+    public async Task ClearAll()
+    {
+        // Clear in-memory state
+        _activeRequests.Clear();
+        while (_recentRequests.TryDequeue(out _)) { }
+        _initialized = false; // force reload (from now-empty DB) on next access
+
+        // Delete persisted monitoring records from the database
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            await db.RequestStatuses.ExecuteDeleteAsync();
+            await db.RequestHistories.ExecuteDeleteAsync();
+            _logger.LogInformation("Cleared all request monitoring data from database");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to clear request monitoring data from database");
         }
     }
 

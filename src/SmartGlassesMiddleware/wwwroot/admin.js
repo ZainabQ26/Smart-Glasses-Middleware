@@ -4800,15 +4800,47 @@ async function init() {
 
         // Conversations are already persisted server-side via ConversationService
         // No need to auto-save to ManagedPrompts on unload/hidden
-        // window.addEventListener('beforeunload', () => {
-        //     autoSaveCurrentConversation('unload');
-        // });
 
-        // document.addEventListener('visibilitychange', () => {
-        //     if (document.hidden) {
-        //         autoSaveCurrentConversation('hidden');
-        //     }
-        // });
+        // --- Clear All History button (header) ---
+        const btnClearAllHeader = document.getElementById('btn-clear-all-header');
+        if (btnClearAllHeader) {
+            btnClearAllHeader.addEventListener('click', async () => {
+                if (!confirm(
+                    'This will permanently delete ALL history:\n\n' +
+                    '• Request monitoring records\n' +
+                    '• All uploaded files\n' +
+                    '• All conversations and messages\n' +
+                    '• All documents and RAG entries\n' +
+                    '• AI interaction logs\n\n' +
+                    'Resource groups and prompts will be preserved.\n\n' +
+                    'This cannot be undone. Continue?'
+                )) return;
+
+                btnClearAllHeader.disabled = true;
+                btnClearAllHeader.textContent = 'Clearing…';
+                try {
+                    const res = await fetch(`${API_BASE}/admin/clear-all`, { method: 'POST' });
+                    if (!res.ok) {
+                        const err = await res.json().catch(() => ({ title: res.statusText }));
+                        throw new Error(err.detail || err.title || 'Request failed');
+                    }
+                    showMessage('All history cleared successfully.', 'success');
+                    // Refresh all visible tabs so stale data is removed from UI
+                    await Promise.all([
+                        loadFiles(true),
+                        loadPrompts(true),
+                        loadGroups(true),
+                    ]).catch(() => {});
+                } catch (err) {
+                    console.error('[ClearAll] failed:', err);
+                    showMessage('Failed to clear history: ' + err.message, 'error');
+                } finally {
+                    btnClearAllHeader.disabled = false;
+                    btnClearAllHeader.textContent = '🗑 Clear All History';
+                }
+            });
+        }
+
     } catch (error) {
         console.error('[INIT] Error during initialization:', error);
         showMessage('Error loading initial data: ' + error.message, 'error');

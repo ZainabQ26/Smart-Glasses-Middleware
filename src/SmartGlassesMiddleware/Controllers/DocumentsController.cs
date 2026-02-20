@@ -77,8 +77,10 @@ public class DocumentsController : ControllerBase
 
         try
         {
-            // Read the uploaded file into memory (small files expected in tests)
-            using var ms = new MemoryStream();
+            // Read the uploaded file into memory (small files expected in tests).
+            // Do NOT use `using` here — the stream outlives this method and is consumed
+            // by the fire-and-forget Task.Run below; it will be disposed inside that task.
+            var ms = new MemoryStream();
             await file.CopyToAsync(ms);
             ms.Position = 0;
 
@@ -153,6 +155,11 @@ public class DocumentsController : ControllerBase
                 {
                     _logger.LogError(ex, "Background processing failed for uploaded document {FileName}", file.FileName);
                     try { await _monitoringService.CompleteRequest(requestId, false, error: ex.Message); } catch { }
+                }
+                finally
+                {
+                    // We own the stream lifetime here — dispose it now that processing is done.
+                    ms.Dispose();
                 }
             });
 
