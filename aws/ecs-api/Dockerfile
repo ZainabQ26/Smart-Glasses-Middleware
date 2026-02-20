@@ -13,7 +13,8 @@ RUN dotnet build "SmartGlassesMiddleware.csproj" -c Release -o /app/build
 
 # Publish stage
 FROM build AS publish
-RUN dotnet publish "SmartGlassesMiddleware.csproj" -c Release -o /app/publish /p:UseAppHost=false
+RUN dotnet publish "SmartGlassesMiddleware.csproj" -c Release -o /app/publish /p:UseAppHost=false \
+    /p:PublishTrimmed=true /p:PublishReadyToRun=true /p:TrimMode=linker
 
 # Runtime stage
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
@@ -21,9 +22,10 @@ WORKDIR /app
 
 # Install curl for health checks
 RUN apt-get update && \
-    apt-get install -y curl && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+    apt-get install -y --no-install-recommends \
+        curl \
+        ca-certificates && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Copy published app
 COPY --from=publish /app/publish .
