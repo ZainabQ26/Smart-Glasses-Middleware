@@ -339,6 +339,31 @@ jobs:
             --output text 2>/dev/null | tr '\t' '\n' | grep -v '^$' | head -1 || true)
           safe_import aws_cloudfront_origin_request_policy.api "$ORP_ID"
 
+          # Delete any stale disabled CloudFront distributions (https-only, broken)
+          # These are duplicates left over from earlier Terraform runs with wrong state.
+          echo "Checking for stale disabled CloudFront distributions..."
+          STALE_CF_DISTS=$(aws cloudfront list-distributions --output json 2>/dev/null | \
+            jq -r '.DistributionList.Items[] | select(.Enabled == false) | select(any(.Origins.Items[]; .Id == "ALB-API" and .CustomOriginConfig.OriginProtocolPolicy == "https-only")) | .Id' 2>/dev/null || true)
+          for STALE_ID in $STALE_CF_DISTS; do
+            echo "  Attempting to delete stale distribution: $STALE_ID"
+            CF_ETAG=$(aws cloudfront get-distribution --id "$STALE_ID" --query ETag --output text 2>/dev/null || true)
+            CF_STATUS=$(aws cloudfront get-distribution --id "$STALE_ID" --query 'Distribution.Status' --output text 2>/dev/null || true)
+            if [ "$CF_STATUS" = "Deployed" ] && [ -n "$CF_ETAG" ]; then
+              aws cloudfront delete-distribution --id "$STALE_ID" --if-match "$CF_ETAG" 2>/dev/null \
+                && echo "  Deleted $STALE_ID" || echo "  Could not delete $STALE_ID (skipping)"
+            else
+              echo "  $STALE_ID not yet fully disabled (status=$CF_STATUS), skipping"
+            fi
+          done
+
+          # Always import the CORRECT distribution (http-only ALB origin, most recently modified).
+          # Uses tf_import (state rm + import) to replace any stale/deleted distribution ID in state.
+          echo "Locating Terraform-managed CloudFront distribution (http-only)..."
+          CF_DIST_ID=$(aws cloudfront list-distributions --output json 2>/dev/null | \
+            jq -r '[.DistributionList.Items[] | select(.Enabled == true) | select(any(.Origins.Items[]; .Id == "ALB-API" and .CustomOriginConfig.OriginProtocolPolicy == "http-only"))] | sort_by(.LastModifiedTime) | last | .Id' 2>/dev/null || true)
+          echo "  Found distribution: $CF_DIST_ID"
+          tf_import aws_cloudfront_distribution.frontend "$CF_DIST_ID"
+
           # ── ElastiCache ───────────────────────────────────────────────────────
           safe_import aws_elasticache_parameter_group.redis   "${PREFIX}-redis-params"
           safe_import aws_elasticache_subnet_group.main       "${PREFIX}-elasticache-subnet-group"
