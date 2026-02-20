@@ -138,39 +138,51 @@ builder.Services.AddSingleton<IMinioClient>(sp =>
 });
 
 // Configure AI model service with Semantic Kernel
+// When AI:UseBedrockAI=true (set in appsettings.AWS.json) the Bedrock Converse API is used.
+// Otherwise falls back to Ollama via OpenAI-compatible endpoint (local dev default).
+var useBedrockAI = builder.Configuration.GetValue<bool?>("AI:UseBedrockAI") ?? false;
+
+if (useBedrockAI)
+{
+    // Register the Bedrock runtime client (uses default AWS credential chain — ECS task role on AWS)
+    var awsRegion = builder.Configuration["AWS:Region"] ?? "us-east-1";
+    builder.Services.AddSingleton<Amazon.BedrockRuntime.IAmazonBedrockRuntime>(_ =>
+        new Amazon.BedrockRuntime.AmazonBedrockRuntimeClient(
+            Amazon.RegionEndpoint.GetBySystemName(awsRegion)));
+}
+
 builder.Services.AddSingleton<Kernel>(sp =>
 {
     var kernelBuilder = Kernel.CreateBuilder();
 
-    var ollamaEndpoint = builder.Configuration["AI:OllamaEndpoint"] ?? "http://localhost:11434";
-    var ollamaModel = builder.Configuration["AI:OllamaModel"] ?? "llama2";
-    var ollamaEmbeddingModel = builder.Configuration["AI:OllamaEmbeddingModel"] ?? "nomic-embed-text";
-
-    // Configure chat completion service using OpenAI-compatible endpoint
-    const string notUsedPlaceholderApiKey = "not-needed";
-    
-    // Configure with timeout and attach a logging handler to capture outgoing requests
-    var chatHandler = new SmartGlassesMiddleware.Services.HttpLoggingHandler(_preLoggerFactory.CreateLogger("OllamaHttp")) { InnerHandler = new HttpClientHandler() };
-    var httpClient = new HttpClient(chatHandler)
+    if (useBedrockAI)
     {
-        Timeout = TimeSpan.FromSeconds(builder.Configuration.GetValue<int?>("AI:OllamaTimeoutSeconds") ?? 120)
-    };
-
-    kernelBuilder.AddOpenAIChatCompletion(
-        modelId: ollamaModel,
-        apiKey: notUsedPlaceholderApiKey,
-        endpoint: new Uri($"{ollamaEndpoint.TrimEnd('/')}/v1"),
-        httpClient: httpClient);
-    
-    // Configure embedding service
-    var embedHandler = new SmartGlassesMiddleware.Services.HttpLoggingHandler(_preLoggerFactory.CreateLogger("OllamaEmbedHttp")) { InnerHandler = new HttpClientHandler() };
-    var embeddingHttpClient = new HttpClient(embedHandler)
+        // Wire up the Bedrock chat completion service into the SK kernel
+        var bedrockRuntime = sp.GetRequiredService<Amazon.BedrockRuntime.IAmazonBedrockRuntime>();
+        var bedrockLogger = sp.GetRequiredService<ILoggerFactory>().CreateLogger<SmartGlassesMiddleware.Services.BedrockChatCompletionService>();
+        var bedrockChatService = new SmartGlassesMiddleware.Services.BedrockChatCompletionService(
+            bedrockRuntime, builder.Configuration, bedrockLogger);
+        kernelBuilder.Services.AddSingleton<Microsoft.SemanticKernel.ChatCompletion.IChatCompletionService>(bedrockChatService);
+    }
+    else
     {
-        Timeout = TimeSpan.FromSeconds(builder.Configuration.GetValue<int?>("AI:OllamaEmbeddingTimeoutSeconds") ?? 120)
-    };
+        var ollamaEndpoint = builder.Configuration["AI:OllamaEndpoint"] ?? "http://localhost:11434";
+        var ollamaModel = builder.Configuration["AI:OllamaModel"] ?? "llama2";
 
-    // Embeddings are provided via the typed IOllamaEmbeddingClient registered below (used by RAGService)
-    // Avoid calling AddOpenAIEmbeddingGenerator to keep compatibility with the installed SemanticKernel package
+        // Configure with timeout and attach a logging handler to capture outgoing requests
+        var chatHandler = new SmartGlassesMiddleware.Services.HttpLoggingHandler(
+            _preLoggerFactory.CreateLogger("OllamaHttp")) { InnerHandler = new HttpClientHandler() };
+        var httpClient = new HttpClient(chatHandler)
+        {
+            Timeout = TimeSpan.FromSeconds(builder.Configuration.GetValue<int?>("AI:OllamaTimeoutSeconds") ?? 120)
+        };
+
+        kernelBuilder.AddOpenAIChatCompletion(
+            modelId: ollamaModel,
+            apiKey: "not-needed",
+            endpoint: new Uri($"{ollamaEndpoint.TrimEnd('/')}/v1"),
+            httpClient: httpClient);
+    }
 
     return kernelBuilder.Build();
 });
@@ -201,14 +213,21 @@ else
 builder.Services.AddSingleton<IMetricsService, MetricsService>();
 builder.Services.AddSingleton<IRequestMonitoringService, RequestMonitoringService>();
 builder.Services.AddScoped<IRagService, RagService>();
-// Register embedding client
-builder.Services.AddHttpClient<IOllamaEmbeddingClient, OllamaEmbeddingClient>((sp, http) =>
+// Register embedding client — Bedrock (Titan Embed V2) or Ollama depending on config
+if (useBedrockAI)
 {
-    var cfg = sp.GetRequiredService<IConfiguration>();
-    var baseUrl = cfg["AI:OllamaEndpoint"] ?? "http://ollama:11434";
-    http.BaseAddress = new Uri(baseUrl);
-    http.Timeout = TimeSpan.FromSeconds(cfg.GetValue<int?>("AI:OllamaEmbeddingTimeoutSeconds") ?? 120);
-});
+    builder.Services.AddScoped<IOllamaEmbeddingClient, SmartGlassesMiddleware.Services.BedrockEmbeddingClient>();
+}
+else
+{
+    builder.Services.AddHttpClient<IOllamaEmbeddingClient, OllamaEmbeddingClient>((sp, http) =>
+    {
+        var cfg = sp.GetRequiredService<IConfiguration>();
+        var baseUrl = cfg["AI:OllamaEndpoint"] ?? "http://ollama:11434";
+        http.BaseAddress = new Uri(baseUrl);
+        http.Timeout = TimeSpan.FromSeconds(cfg.GetValue<int?>("AI:OllamaEmbeddingTimeoutSeconds") ?? 120);
+    });
+}
 // Document processing and RAG services
 builder.Services.AddScoped<IDocumentProcessingService, DocumentProcessingService>();
 builder.Services.AddScoped<IRAGService, RAGService>();

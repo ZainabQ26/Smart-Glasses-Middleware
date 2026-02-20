@@ -205,7 +205,7 @@ namespace SmartGlassesMiddleware.Migrations
                         .HasColumnType("integer");
 
                     b.Property<Vector>("EmbeddingVector")
-                        .HasColumnType("vector(384)");
+                        .HasColumnType("vector(1024)");
 
                     b.Property<double?>("Height")
                         .HasColumnType("double precision");
@@ -596,6 +596,54 @@ namespace SmartGlassesMiddleware.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("ResourceGroups");
+                });
+
+            modelBuilder.Entity("SmartGlassesMiddleware.Models.TranscriptionJob", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Error")
+                        .HasColumnType("text");
+
+                    b.Property<string>("JobId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<Guid?>("ManagedFileId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("S3Bucket")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<string>("S3Key")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("TranscriptStorageKey")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("JobId")
+                        .IsUnique();
+
+                    b.ToTable("TranscriptionJobs");
                 });
 
             modelBuilder.Entity("SmartGlassesMiddleware.Models.AIInteractionLog", b =>
