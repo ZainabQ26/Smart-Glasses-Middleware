@@ -25,6 +25,7 @@ public class DocumentsController : ControllerBase
     private readonly IGroupConversationMappingService? _groupConversationMappingService;
     private readonly ICacheService _cacheService;
     private readonly IHubContext<ResourceHub>? _resourceHub;
+    private readonly IServiceScopeFactory _scopeFactory;
     private const int DefaultPageSize = 20;
     private const int MaxPageSize = 100;
 
@@ -39,6 +40,7 @@ public class DocumentsController : ControllerBase
         IHistoryService historyService,
         IMediaStorageService mediaStorageService,
         IConversationService conversationService,
+        IServiceScopeFactory scopeFactory,
         IGroupConversationMappingService? groupConversationMappingService = null,
         ICacheService? cacheService = null,
         IHubContext<ResourceHub>? resourceHub = null)
@@ -53,6 +55,7 @@ public class DocumentsController : ControllerBase
         _historyService = historyService;
         _mediaStorageService = mediaStorageService;
         _conversationService = conversationService;
+        _scopeFactory = scopeFactory;
         _groupConversationMappingService = groupConversationMappingService;
         _cacheService = cacheService ?? new InMemoryCacheService(LoggerFactory.Create(b => b.AddConsole()).CreateLogger<InMemoryCacheService>());
         _resourceHub = resourceHub;
@@ -103,8 +106,13 @@ public class DocumentsController : ControllerBase
 
             // Fire-and-forget: convert to PDF then dispatch to Lambda via S3.
             // Lambda handles Textract extraction, chunking and Bedrock embedding writes.
+            // IMPORTANT: _context is scoped to the HTTP request and will be disposed when this
+            // method returns. Create a new DI scope for the background task so it gets its own
+            // ApplicationDbContext that won't be disposed underneath it.
             _ = Task.Run(async () =>
             {
+                using var scope = _scopeFactory.CreateScope();
+                var ctx = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
                 try
                 {
                     ms.Position = 0;
@@ -118,12 +126,12 @@ public class DocumentsController : ControllerBase
                     await _mediaStorageService.UploadFileAsync(uploadKey, pdfStream, "application/pdf");
 
                     // Update placeholder row with resolved filename and storage key
-                    var doc = await _context.DocumentMetadatas.FindAsync(documentId);
+                    var doc = await ctx.DocumentMetadatas.FindAsync(documentId);
                     if (doc != null)
                     {
                         doc.FileName = pdfFileName;
                         doc.StorageKey = uploadKey;
-                        await _context.SaveChangesAsync();
+                        await ctx.SaveChangesAsync();
                     }
 
                     // Write group associations immediately so Lambda results are scoped correctly
@@ -131,7 +139,7 @@ public class DocumentsController : ControllerBase
                     {
                         foreach (var groupId in groupIds)
                         {
-                            var group = await _context.ResourceGroups.FindAsync(groupId);
+                            var group = await ctx.ResourceGroups.FindAsync(groupId);
                             if (group != null)
                             {
                                 doc.DocumentGroups.Add(new DocumentGroup
@@ -141,12 +149,12 @@ public class DocumentsController : ControllerBase
                                 });
                             }
                         }
-                        await _context.SaveChangesAsync();
-                        await InvalidateGroupsCache();
+                        await ctx.SaveChangesAsync();
+                        await InvalidateGroupsCache(ctx);
                         await NotifyGroupsChangedAsync();
                     }
 
-                    try { await InvalidateFilesCache(); await NotifyFilesChangedAsync(); } catch { }
+                    try { await InvalidateFilesCache(ctx); await NotifyFilesChangedAsync(); } catch { }
 
                     _logger.LogInformation("Document {DocumentId} dispatched to Lambda via S3 key {Key}", documentId, uploadKey);
                     await _monitoringService.CompleteRequest(requestId, true, $"Document {pdfFileName} dispatched to Lambda for processing");
@@ -180,11 +188,12 @@ public class DocumentsController : ControllerBase
             : Task.CompletedTask;
     }
 
-    private async Task InvalidateFilesCache()
+    private async Task InvalidateFilesCache(ApplicationDbContext? ctx = null)
     {
         try
         {
-            var totalCount = await _context.ManagedFiles.CountAsync();
+            var db = ctx ?? _context;
+            var totalCount = await db.ManagedFiles.CountAsync();
             var totalPages = (int)Math.Ceiling(totalCount / (double)DefaultPageSize);
 
             var tasks = new List<Task>();
@@ -775,11 +784,12 @@ public class DocumentsController : ControllerBase
             : Task.CompletedTask;
     }
 
-    private async Task InvalidateGroupsCache()
+    private async Task InvalidateGroupsCache(ApplicationDbContext? ctx = null)
     {
         try
         {
-            var totalCount = await _context.ResourceGroups.CountAsync();
+            var db = ctx ?? _context;
+            var totalCount = await db.ResourceGroups.CountAsync();
             var totalPages = (int)Math.Ceiling(totalCount / (double)DefaultPageSize);
 
             var tasks = new List<Task>();
