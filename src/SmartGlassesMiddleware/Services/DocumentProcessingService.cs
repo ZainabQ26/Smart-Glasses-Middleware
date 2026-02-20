@@ -34,6 +34,12 @@ public interface IDocumentProcessingService
     Task<DocumentMetadata> ProcessDocumentAsync(Stream fileStream, string fileName, string contentType, string? requestId = null, Guid? documentId = null);
     Task<List<DocumentChunk>> ExtractChunksAsync(Guid documentId);
     Task<DocumentMetadata> ReprocessDocumentAsync(Guid documentId);
+
+    /// <summary>
+    /// Convert a document to a searchable PDF without any DB writes or embedding generation.
+    /// Used when Lambda is responsible for the extraction/embedding step.
+    /// </summary>
+    Task<(MemoryStream PdfStream, string PdfFileName)> ConvertToPdfAsync(Stream fileStream, string fileName, string contentType, string? requestId = null);
 }
 
 public class DocumentProcessingService : IDocumentProcessingService
@@ -172,6 +178,12 @@ public class DocumentProcessingService : IDocumentProcessingService
 
             throw;
         }
+    }
+
+    public async Task<(MemoryStream PdfStream, string PdfFileName)> ConvertToPdfAsync(Stream fileStream, string fileName, string contentType, string? requestId = null)
+    {
+        var documentType = DetermineDocumentType(fileName, contentType);
+        return await ConvertToTextPdfAsync(fileStream, fileName, documentType, requestId);
     }
 
     private async Task<(MemoryStream pdfStream, string pdfFileName)> ConvertToTextPdfAsync(Stream inputStream, string fileName, string documentType, string? requestId)
