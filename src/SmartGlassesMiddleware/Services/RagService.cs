@@ -735,11 +735,12 @@ Answer:";
         try
         {
             var currentDim = await _context.Database
-                .SqlQueryRaw<int>($"""SELECT (regexp_match(atttypmod::text, '\\d+'))[1]::int AS "Value"
-                                       FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
-                                       WHERE c.relname = 'DocumentChunks'
-                                         AND a.attname = 'EmbeddingVector'
-                                         AND a.attnum > 0""")
+                .SqlQueryRaw<int>(
+                    "SELECT (regexp_match(atttypmod::text, '\\d+'))[1]::int AS \"Value\"" +
+                    " FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid" +
+                    " WHERE c.relname = 'DocumentChunks'" +
+                    " AND a.attname = 'EmbeddingVector'" +
+                    " AND a.attnum > 0")
                 .FirstOrDefaultAsync();
             if (currentDim > 0 && currentDim != _embeddingDimension)
             {
