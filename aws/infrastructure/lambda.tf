@@ -52,22 +52,6 @@ resource "aws_iam_role_policy" "lambda_document_processor" {
       {
         Effect = "Allow"
         Action = [
-          "textract:DetectDocumentText",
-          "textract:AnalyzeDocument"
-        ]
-        Resource = "*"
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "comprehend:DetectEntities",
-          "comprehend:DetectKeyPhrases"
-        ]
-        Resource = "*"
-      },
-      {
-        Effect = "Allow"
-        Action = [
           "secretsmanager:GetSecretValue"
         ]
         Resource = [

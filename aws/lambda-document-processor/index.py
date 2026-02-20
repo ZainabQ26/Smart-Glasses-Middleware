@@ -2,6 +2,7 @@ import json
 import os
 import uuid
 import boto3
+import fitz  # PyMuPDF — extracts text from searchable PDFs without OCR
 import logging
 from typing import List, Dict, Any
 from urllib.parse import unquote_plus
@@ -12,7 +13,6 @@ from datetime import datetime, timezone
 # Initialize AWS clients
 s3_client = boto3.client('s3')
 bedrock_runtime = boto3.client('bedrock-runtime', region_name=os.environ['AWS_REGION'])
-textract_client = boto3.client('textract')
 secrets_client = boto3.client('secretsmanager')
 
 logger = logging.getLogger()
@@ -63,29 +63,26 @@ def get_db_connection():
 
 
 def extract_text_from_pdf(bucket: str, key: str) -> str:
-    """Extract text from PDF using Amazon Textract"""
-    try:
-        response = textract_client.detect_document_text(
-            Document={
-                'S3Object': {
-                    'Bucket': bucket,
-                    'Name': key
-                }
-            }
-        )
-        
-        # Extract text from blocks
-        text = []
-        for block in response['Blocks']:
-            if block['BlockType'] == 'LINE':
-                text.append(block['Text'])
-        
-        return '\n'.join(text)
-    except Exception as e:
-        logger.error(f"Error extracting text from PDF: {str(e)}")
-        # Fallback: download and use basic extraction
-        obj = s3_client.get_object(Bucket=bucket, Key=key)
-        return obj['Body'].read().decode('utf-8', errors='ignore')
+    """Extract text from a searchable PDF using PyMuPDF (no OCR, no Textract cost).
+
+    The file uploaded by the ECS container is already a searchable (text-based) PDF
+    produced by iText/LibreOffice, so all text is in the PDF's text layer and can
+    be read directly without any AWS API calls.
+    """
+    obj = s3_client.get_object(Bucket=bucket, Key=key)
+    pdf_bytes = obj['Body'].read()
+
+    text_parts = []
+    with fitz.open(stream=pdf_bytes, filetype='pdf') as doc:
+        for page in doc:
+            text_parts.append(page.get_text())
+
+    extracted = '\n'.join(text_parts).strip()
+
+    if not extracted:
+        logger.warning("PyMuPDF extracted no text from %s/%s — PDF may be image-only", bucket, key)
+
+    return extracted
 
 
 def chunk_text(text: str, max_chunk_size: int = MAX_CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> List[Dict[str, Any]]:
