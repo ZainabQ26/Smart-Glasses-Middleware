@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
-const RECORD_DURATION_MS = 5000;  // Record for 5 seconds after wake word
-const MIC_RELEASE_DELAY_MS = 250;  // Give SpeechRecognition time to release before getUserMedia
+const MIC_RELEASE_DELAY_MS  = 250;   // Give SpeechRecognition time to release before getUserMedia
+const SILENCE_THRESHOLD     = 12;    // RMS amplitude (0–255) below which we consider it silence
+const SILENCE_DURATION_MS   = 1800;  // Stop after this many ms of consecutive silence
+const MIN_RECORD_MS         = 500;   // Always capture at least this much audio
+const MAX_RECORD_MS         = 30000; // Hard cap to avoid indefinite recording
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 function blobToBase64(blob) {
@@ -88,10 +91,10 @@ export default function App() {
     }
   }, [status]);
 
-  // ── Recording ─────────────────────────────────────────────────────────────
+  // ── Recording (silence-detection based) ──────────────────────────────────
   const startRecording = async () => {
     setStatus('listening');
-    addLog(`🎤 Listening… speak your command (${RECORD_DURATION_MS / 1000}s)`, 'info');
+    addLog('🎤 Listening… speak your command', 'info');
 
     // Brief pause so SpeechRecognition fully releases the mic before getUserMedia.
     await new Promise(r => setTimeout(r, MIC_RELEASE_DELAY_MS));
@@ -105,35 +108,66 @@ export default function App() {
       setStatus('idle');
       return;
     }
-    streamRef.current = stream; // so unmount cleanup can stop tracks if user navigates away
+    streamRef.current = stream;
 
-    // Use the browser's actual MIME type (e.g. audio/webm;codecs=opus) so the
-    // Lambda receives a valid file that ffmpeg/Whisper can decode.
+    // ── Silence detection via Web Audio API ────────────────────────────────
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const source   = audioCtx.createMediaStreamSource(stream);
+    const analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 256;
+    source.connect(analyser);
+    const freqData = new Uint8Array(analyser.frequencyBinCount);
+
+    const startTime    = Date.now();
+    let lastSoundTime  = Date.now();
+    let spokenOnce     = false;
+
+    // Use the browser's native MIME type so ffmpeg/Whisper can decode it.
     const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
       ? 'audio/webm;codecs=opus'
-      : MediaRecorder.isTypeSupported('audio/webm')
-        ? 'audio/webm'
-        : '';
+      : MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '';
     const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
     mediaRecorderRef.current = recorder;
     audioChunksRef.current = [];
+
+    // Poll audio levels every 100 ms.
+    const pollInterval = setInterval(() => {
+      analyser.getByteFrequencyData(freqData);
+      const rms = Math.sqrt(freqData.reduce((s, v) => s + v * v, 0) / freqData.length);
+      const elapsed = Date.now() - startTime;
+
+      if (rms > SILENCE_THRESHOLD) {
+        lastSoundTime = Date.now();
+        if (!spokenOnce) {
+          spokenOnce = true;
+          addLog('🟢 Detected speech…', 'info');
+        }
+      }
+
+      const silent   = Date.now() - lastSoundTime > SILENCE_DURATION_MS;
+      const minMet   = elapsed >= MIN_RECORD_MS;
+      const maxHit   = elapsed >= MAX_RECORD_MS;
+
+      if ((silent && spokenOnce && minMet) || maxHit) {
+        clearInterval(pollInterval);
+        if (recorder.state === 'recording') recorder.stop();
+      }
+    }, 100);
 
     recorder.ondataavailable = (e) => {
       if (e.data.size > 0) audioChunksRef.current.push(e.data);
     };
 
     recorder.onstop = async () => {
+      clearInterval(pollInterval);
+      audioCtx.close();
       stream.getTracks().forEach(t => t.stop());
       streamRef.current = null;
-      // Use the recorder's actual mimeType — don't mislabel as audio/wav.
       const audioBlob = new Blob(audioChunksRef.current, { type: recorder.mimeType || 'audio/webm' });
       await sendAudioToBackend(audioBlob, recorder.mimeType);
     };
 
     recorder.start();
-    setTimeout(() => {
-      if (recorder.state === 'recording') recorder.stop();
-    }, RECORD_DURATION_MS);
   };
 
   // ── Send audio to /api/transcribe (Whisper Lambda on-demand) ─────────────

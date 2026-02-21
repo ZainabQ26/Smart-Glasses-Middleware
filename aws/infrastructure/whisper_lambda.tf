@@ -136,10 +136,6 @@ resource "aws_lambda_function" "whisper" {
       DEPLOYMENT_ID = var.deployment_id  # Force update on every deploy
     }
   }
-
-  lifecycle {
-    ignore_changes = [image_uri]
-  }
 }
 
 output "whisper_lambda_function_name" {
