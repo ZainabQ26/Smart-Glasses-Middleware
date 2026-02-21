@@ -1662,7 +1662,7 @@ public class AdminController : ControllerBase
 
     /// <summary>
     /// Clear ALL history data: request monitoring, files, documents, conversations, AI logs, and transcription jobs.
-    /// Resource groups, prompts, and application configuration are preserved.
+    /// Nothing is preserved — all user data is deleted.
     /// </summary>
     [HttpPost("clear-all")]
     public async Task<IActionResult> ClearAll()
@@ -1695,10 +1695,13 @@ public class AdminController : ControllerBase
             counts["aiInteractionLogs"] = await _context.AIInteractionLogs.ExecuteDeleteAsync();
             counts["transcriptionJobs"] = await _context.TranscriptionJobs.ExecuteDeleteAsync();
 
+            // Delete all prompt templates (ManagedPromptGroup join rows cascade from this)
+            counts["managedPrompts"] = await _context.ManagedPrompts.ExecuteDeleteAsync();
+
             // Delete all resource groups (including reminders).
             // ManagedFiles are already gone (cascaded ManagedFileGroup entries).
             // DocumentGroups already deleted. Conversations already deleted.
-            // ManagedPromptGroup entries cascade from ResourceGroup deletion via DB constraint.
+            // ManagedPromptGroup entries already gone (cascaded from ManagedPrompts deletion above).
             counts["resourceGroups"] = await _context.ResourceGroups.ExecuteDeleteAsync();
 
             // Invalidate all caches so stale data doesn't surface
