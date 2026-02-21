@@ -266,60 +266,27 @@ export default function App() {
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div style={styles.page}>
-      <header style={styles.header}>
-        <h1 style={styles.title}>👓 Smart Glasses AR Interface</h1>
-        <nav style={styles.nav}>
-          <a href="/admin.html" style={styles.navLink}>Admin</a>
-          <a href="/monitoring.html" style={styles.navLink}>Monitoring</a>
-        </nav>
-      </header>
+      <div style={styles.voiceIndicator}>
+        <span style={{ ...styles.statusDot, background: statusColor }} />
+        <div style={styles.statusText}>{statusLabel}</div>
+      </div>
 
       <main style={styles.main}>
 
-        {/* Wake-word status */}
-        <section style={styles.card}>
-          <h2 style={styles.sectionTitle}>Voice Control</h2>
-          <p style={styles.hint}>
-            Say <strong>"Activate"</strong> then speak your command.
-          </p>
-          <div style={{ ...styles.badge, background: statusColor }}>
-            {statusLabel}
-          </div>
-        </section>
+        {/* Voice control card removed; top-right indicator remains */}
 
-        {/* Document upload */}
-        <section style={styles.card}>
-          <h2 style={styles.sectionTitle}>Document Upload</h2>
-          <p style={styles.hint}>
-            PDFs, Word docs, images — processed and indexed the same way as Admin uploads.
-          </p>
-          <input
-            type="file"
-            ref={fileInputRef}
-            style={{ display: 'none' }}
-            accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg"
-            onChange={handleFileSelect}
-            disabled={docStatus === 'uploading'}
-          />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={docStatus === 'uploading'}
-            style={{ ...styles.uploadBtn, background: docColor }}
-          >
-            {docLabel}
-          </button>
-        </section>
+        {/* Document upload removed from home page */}
 
         {/* Activity log */}
-        <section style={{ ...styles.card, flex: 1 }}>
+        <section style={{ ...styles.card, flex: 1, background: '#000' }}>
           <h2 style={styles.sectionTitle}>Activity Log</h2>
           {logs.length === 0 ? (
-            <p style={styles.emptyLog}>No activity yet. Say "Activate" or upload a document.</p>
+            <p style={{ ...styles.emptyLog, color: '#aaa' }}>No activity yet. Say "Activate".</p>
           ) : (
             <ul style={styles.logList}>
               {logs.map(entry => (
-                <li key={entry.id} style={{ ...styles.logItem, borderLeftColor: logColor(entry.type) }}>
-                  <span style={styles.logTime}>{entry.ts}</span>
+                <li key={entry.id} style={{ ...styles.logItem, background: logColor(entry.type), color: '#fff', borderLeft: 'none' }}>
+                  <span style={{ ...styles.logTime, color: '#fff' }}>{entry.ts}</span>
                   <span>{entry.text}</span>
                 </li>
               ))}
@@ -346,7 +313,8 @@ function logColor(type) {
 const styles = {
   page: {
     minHeight: '100vh',
-    background: '#1a1a1a',
+    position: 'relative',
+    background: '#000000',
     color: '#e0e0e0',
     display: 'flex',
     flexDirection: 'column',
@@ -461,4 +429,29 @@ const styles = {
     paddingTop: 2,
     minWidth: 64,
   },
+};
+
+// New styles for voice indicator
+styles.voiceIndicator = {
+  position: 'absolute',
+  top: 16,
+  right: 16,
+  display: 'flex',
+  alignItems: 'center',
+  gap: 10,
+  zIndex: 40,
+};
+
+styles.statusDot = {
+  width: 14,
+  height: 14,
+  borderRadius: '50%',
+  boxShadow: '0 0 8px rgba(0,0,0,0.6)',
+  border: '2px solid rgba(255,255,255,0.08)'
+};
+
+styles.statusText = {
+  fontSize: '0.9rem',
+  fontWeight: 600,
+  color: '#e0e0e0'
 };
