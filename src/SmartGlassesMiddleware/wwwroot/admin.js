@@ -1492,6 +1492,11 @@ function scheduleFileNameRefresh(fileObj, documentId, originalName) {
                     fileObj.name = serverName;
                     window.promptSelectedFiles = promptSelectedFiles;
                     updatePromptFilesList();
+                    // Refresh groups silently so the card counter and modal reflect the
+                    // evicted duplicate ManagedFile (server removes it when doc is linked)
+                    if (typeof loadGroups === 'function') {
+                        loadGroups(true).catch(() => {});
+                    }
                     return; // Name updated — stop polling
                 }
             }

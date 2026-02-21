@@ -150,6 +150,50 @@ public class DocumentsController : ControllerBase
                             }
                         }
                         await ctx.SaveChangesAsync();
+
+                        // Evict any ManagedFile in the same groups whose FileName matches
+                        // this document's original filename (handles the case where the same
+                        // file was previously uploaded via the Files tab and also linked here).
+                        var originalName = doc.OriginalFileName;
+                        if (!string.IsNullOrEmpty(originalName))
+                        {
+                            var normalizedOriginal = originalName.ToLower();
+
+                            // Find ManagedFile IDs that are in these groups with a matching filename
+                            var dupFileIds = await ctx.ManagedFiles
+                                .Where(mf => mf.FileName.ToLower() == normalizedOriginal
+                                          && mf.FileGroups.Any(fg => groupIds.Contains(fg.ResourceGroupId)))
+                                .Select(mf => mf.Id)
+                                .ToListAsync();
+
+                            if (dupFileIds.Count > 0)
+                            {
+                                // Remove the join rows for these files in these groups
+                                await ctx.Set<ManagedFileGroup>()
+                                    .Where(fg => dupFileIds.Contains(fg.ManagedFileId)
+                                              && groupIds.Contains(fg.ResourceGroupId))
+                                    .ExecuteDeleteAsync();
+
+                                // Delete any ManagedFile that now has no remaining group memberships
+                                foreach (var mfId in dupFileIds)
+                                {
+                                    var remaining = await ctx.Set<ManagedFileGroup>()
+                                        .Where(fg => fg.ManagedFileId == mfId)
+                                        .CountAsync();
+                                    if (remaining == 0)
+                                    {
+                                        await ctx.ManagedFiles
+                                            .Where(mf => mf.Id == mfId)
+                                            .ExecuteDeleteAsync();
+                                    }
+                                }
+
+                                _logger.LogInformation(
+                                    "Evicted {Count} duplicate ManagedFile(s) from group(s) after document {DocId} was linked",
+                                    dupFileIds.Count, doc.Id);
+                            }
+                        }
+
                         await InvalidateGroupsCache(ctx);
                         await NotifyGroupsChangedAsync();
                     }
