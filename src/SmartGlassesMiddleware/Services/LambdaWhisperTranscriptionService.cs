@@ -51,7 +51,7 @@ public class LambdaWhisperTranscriptionService : ITranscriptionService
         string mimeType,
         CancellationToken cancellationToken = default)
     {
-        var result = await TranscribeAudioAsync(audioStream, cancellationToken);
+        var result = await TranscribeAudioAsync(audioStream, mimeType, cancellationToken);
         return string.IsNullOrEmpty(result) ? null : result;
     }
 
@@ -59,8 +59,24 @@ public class LambdaWhisperTranscriptionService : ITranscriptionService
     public async Task<string> TranscribeAudioAsync(
         Stream audioStream,
         CancellationToken cancellationToken = default)
+        => await TranscribeAudioAsync(audioStream, "audio/wav", cancellationToken);
+
+    private async Task<string> TranscribeAudioAsync(
+        Stream audioStream,
+        string mimeType,
+        CancellationToken cancellationToken = default)
     {
-        var s3Key = $"transcribe-temp/{Guid.NewGuid():N}.wav";
+        // Derive a sensible file extension from the MIME type so ffmpeg gets a format hint.
+        var ext = mimeType.Split(';')[0].Trim() switch
+        {
+            "audio/webm" => ".webm",
+            "audio/ogg"  => ".ogg",
+            "audio/mp4"  => ".mp4",
+            "audio/mpeg" => ".mp3",
+            "audio/wav"  => ".wav",
+            _            => ".webm",  // default to webm (most browsers)
+        };
+        var s3Key = $"transcribe-temp/{Guid.NewGuid():N}{ext}";
 
         try
         {
@@ -77,7 +93,7 @@ public class LambdaWhisperTranscriptionService : ITranscriptionService
                 BucketName = _mediaBucket,
                 Key = s3Key,
                 InputStream = buffered,
-                ContentType = "audio/wav",
+                ContentType = mimeType.Split(';')[0].Trim(),
             }, cancellationToken);
 
             var payload = JsonSerializer.Serialize(new { s3_bucket = _mediaBucket, s3_key = s3Key });

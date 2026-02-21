@@ -15,6 +15,9 @@ public class AudioRequest
     [StringLength(int.MaxValue, MinimumLength = 1, ErrorMessage = "Audio data cannot be empty")]
     public string AudioBase64 { get; set; } = string.Empty;
 
+    /// <summary>MIME type reported by the browser's MediaRecorder (e.g. "audio/webm;codecs=opus").</summary>
+    public string? MimeType { get; set; }
+
     [StringLength(10000, ErrorMessage = "Transcription must not exceed 10000 characters")]
     public string? Transcription { get; set; }
 }

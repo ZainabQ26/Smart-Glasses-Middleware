@@ -34,7 +34,6 @@ RUN python -m pip install --upgrade pip && \
 
 COPY handler.py .
 
-# Preserve existing behavior: run handler as a normal Python process inside the
-# container. If you intend to use this image as a Lambda container image, you
-# can change CMD to ["handler.lambda_handler"] to use the Lambda runtime entry.
-CMD ["/usr/local/bin/python", "handler.py"]
+# Invoke via the Lambda Runtime Interface Client (included in the base image).
+# This is the standard entry point for Lambda container images.
+CMD ["handler.lambda_handler"]

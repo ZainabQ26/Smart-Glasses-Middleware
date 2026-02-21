@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
-const RECORD_DURATION_MS = 5000; // Record for 5 seconds after wake word
+const RECORD_DURATION_MS = 5000;  // Record for 5 seconds after wake word
+const MIC_RELEASE_DELAY_MS = 250;  // Give SpeechRecognition time to release before getUserMedia
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 function blobToBase64(blob) {
@@ -19,12 +20,13 @@ function blobToBase64(blob) {
 
 // ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
 export default function App() {
-  const [status, setStatus] = useState('idle');      // idle | listening | processing | uploading
+  const [status, setStatus] = useState('idle');        // idle | listening | processing | uploading
   const [logs, setLogs] = useState([]);
   const [docStatus, setDocStatus] = useState('ready'); // ready | uploading | done | error
 
   const recognitionRef = useRef(null);
   const mediaRecorderRef = useRef(null);
+  const streamRef = useRef(null);       // active getUserMedia stream — released on unmount/navigation
   const audioChunksRef = useRef([]);
   const fileInputRef = useRef(null);
   const activatingRef = useRef(false); // guard against concurrent activations
@@ -35,12 +37,10 @@ export default function App() {
   }, []);
 
   // ── Speech recognition (wake-word listener) ───────────────────────────────
+  // Initialise the SpeechRecognition object once, but don't start it yet.
   useEffect(() => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) {
-      addLog('Web Speech API not available in this browser', 'warn');
-      return;
-    }
+    if (!SR) return; // handled in the toggle handler
 
     const rec = new SR();
     rec.continuous = true;
@@ -61,28 +61,40 @@ export default function App() {
     };
 
     rec.onerror = (e) => {
-      if (e.error !== 'no-speech') addLog(`Mic error: ${e.error}`, 'warn');
+      if (e.error !== 'no-speech' && e.error !== 'aborted')
+        addLog(`Mic error: ${e.error}`, 'warn');
     };
 
     recognitionRef.current = rec;
-    return () => { try { rec.stop(); } catch (_) {} };
+    // abort() immediately kills the underlying audio capture;
+    // stop() only ends recognition but the browser keeps the mic indicator lit.
+    return () => {
+      try { rec.abort(); } catch (_) {}
+      streamRef.current?.getTracks().forEach(t => t.stop());
+      streamRef.current = null;
+    };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Restart the wake-word listener whenever we return to idle
+  // Start/stop the wake-word listener when we go idle.
+  // admin.html and monitoring.html are separate HTML files — they never load
+  // this component and never acquire the microphone.
   useEffect(() => {
     const rec = recognitionRef.current;
     if (!rec) return;
     if (status === 'idle') {
       try { rec.start(); } catch (_) {}
     } else {
-      try { rec.stop(); } catch (_) {}
+      try { rec.abort(); } catch (_) {}
     }
   }, [status]);
 
   // ── Recording ─────────────────────────────────────────────────────────────
   const startRecording = async () => {
     setStatus('listening');
-    addLog("🎤 Listening… (recording for " + (RECORD_DURATION_MS / 1000) + "s)", 'info');
+    addLog(`🎤 Listening… speak your command (${RECORD_DURATION_MS / 1000}s)`, 'info');
+
+    // Brief pause so SpeechRecognition fully releases the mic before getUserMedia.
+    await new Promise(r => setTimeout(r, MIC_RELEASE_DELAY_MS));
 
     let stream;
     try {
@@ -93,8 +105,16 @@ export default function App() {
       setStatus('idle');
       return;
     }
+    streamRef.current = stream; // so unmount cleanup can stop tracks if user navigates away
 
-    const recorder = new MediaRecorder(stream);
+    // Use the browser's actual MIME type (e.g. audio/webm;codecs=opus) so the
+    // Lambda receives a valid file that ffmpeg/Whisper can decode.
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ? 'audio/webm;codecs=opus'
+      : MediaRecorder.isTypeSupported('audio/webm')
+        ? 'audio/webm'
+        : '';
+    const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
     mediaRecorderRef.current = recorder;
     audioChunksRef.current = [];
 
@@ -104,8 +124,10 @@ export default function App() {
 
     recorder.onstop = async () => {
       stream.getTracks().forEach(t => t.stop());
-      const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
-      await sendAudioToBackend(audioBlob);
+      streamRef.current = null;
+      // Use the recorder's actual mimeType — don't mislabel as audio/wav.
+      const audioBlob = new Blob(audioChunksRef.current, { type: recorder.mimeType || 'audio/webm' });
+      await sendAudioToBackend(audioBlob, recorder.mimeType);
     };
 
     recorder.start();
@@ -115,7 +137,7 @@ export default function App() {
   };
 
   // ── Send audio to /api/transcribe (Whisper Lambda on-demand) ─────────────
-  const sendAudioToBackend = async (audioBlob) => {
+  const sendAudioToBackend = async (audioBlob, mimeType) => {
     setStatus('processing');
     addLog('⏳ Transcribing via Whisper Lambda…', 'info');
 
@@ -125,7 +147,7 @@ export default function App() {
       const res = await fetch('/api/transcribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ audioBase64 }),
+        body: JSON.stringify({ audioBase64, mimeType: mimeType || 'audio/webm' }),
       });
 
       if (!res.ok) {
@@ -185,9 +207,9 @@ export default function App() {
 
   // ── Status label helpers ──────────────────────────────────────────────────
   const statusLabel = {
-    idle: "Say 'Activate'",
-    listening: '🎤 Listening…',
-    processing: '⏳ Processing…',
+    idle: 'Say "Activate"',
+    listening: '🎤 Recording…',
+    processing: '⏳ Transcribing…',
     uploading: '📤 Uploading…',
   }[status] ?? status;
 
@@ -220,10 +242,12 @@ export default function App() {
 
       <main style={styles.main}>
 
-        {/* Wake-word status badge */}
+        {/* Wake-word status */}
         <section style={styles.card}>
           <h2 style={styles.sectionTitle}>Voice Control</h2>
-          <p style={styles.hint}>Say <strong>"Activate"</strong> to start recording a voice command.</p>
+          <p style={styles.hint}>
+            Say <strong>"Activate"</strong> then speak your command.
+          </p>
           <div style={{ ...styles.badge, background: statusColor }}>
             {statusLabel}
           </div>

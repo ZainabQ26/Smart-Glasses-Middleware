@@ -37,7 +37,9 @@ def lambda_handler(event, context=None):
 
     tmp_path = None
     try:
-        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
+        # Derive a temp-file suffix from the S3 key so ffmpeg gets a format hint.
+        ext = os.path.splitext(s3_key)[1] or '.webm'
+        with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
             tmp_path = tmp.name
 
         _s3.download_file(s3_bucket, s3_key, tmp_path)
