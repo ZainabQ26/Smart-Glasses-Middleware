@@ -1,13 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useMicVAD, utils } from '@ricky0123/vad-react';
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
-const MIC_RELEASE_DELAY_MS  = 250;   // Give SpeechRecognition time to release before getUserMedia
-// Time-domain RMS: values represent peak deviation from 128 (silence = 0, max speech ~20-40).
-// Frequency-domain was unreliable (background noise spikes); time-domain is more accurate.
-const SILENCE_THRESHOLD     = 8;     // RMS amplitude below which we consider it silence
-const SILENCE_DURATION_MS   = 1500;  // Stop after this many ms of consecutive silence
-const MIN_RECORD_MS         = 1000;  // Always capture at least this much audio
-const MAX_RECORD_MS         = 30000; // Hard cap to avoid indefinite recording
+const MIC_RELEASE_DELAY_MS = 250; // give SpeechRecognition time to release mic before VAD acquires it
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 function blobToBase64(blob) {
@@ -30,9 +25,6 @@ export default function App() {
   const [docStatus, setDocStatus] = useState('ready'); // ready | uploading | done | error
 
   const recognitionRef = useRef(null);
-  const mediaRecorderRef = useRef(null);
-  const streamRef = useRef(null);       // active getUserMedia stream — released on unmount/navigation
-  const audioChunksRef = useRef([]);
   const fileInputRef = useRef(null);
   const activatingRef = useRef(false); // guard against concurrent activations
 
@@ -40,6 +32,30 @@ export default function App() {
   const addLog = useCallback((text, type = 'info') => {
     setLogs(prev => [{ id: Date.now() + Math.random(), text, type, ts: new Date().toLocaleTimeString() }, ...prev].slice(0, 50));
   }, []);
+
+  // ── Silero VAD — neural-network voice activity detection ──────────────────
+  // Runs the Silero VAD ONNX model in-browser. Fires onSpeechEnd with 16 kHz
+  // mono Float32Array; utils.encodeWAV converts that to WAV for Whisper.
+  const vad = useMicVAD({
+    startOnLoad: false,                         // we call vad.start() manually after wake-word
+    // Serve model/worklet files from site root (copied by vite-plugin-static-copy)
+    baseAssetPath: '/',
+    // numThreads=1 lets ONNX Runtime run without Cross-Origin-Isolation headers
+    ortConfig: (ort) => { ort.env.wasm.numThreads = 1; },
+    onSpeechStart: () => {
+      addLog('🟢 Detected speech…', 'info');
+    },
+    onSpeechEnd: (audio) => {
+      vad.pause(); // stop immediately — don't capture a second segment while processing
+      setStatus('processing');
+      addLog('⏳ Transcribing via Whisper Lambda…', 'info');
+      const wavBlob = utils.encodeWAV(audio); // 16 kHz mono WAV — optimal for Whisper
+      sendAudioToBackend(wavBlob, 'audio/wav');
+    },
+    onVADMisfire: () => {
+      addLog('(Background noise ignored, still listening…)', 'info');
+    },
+  });
 
   // ── Speech recognition (wake-word listener) ───────────────────────────────
   // Initialise the SpeechRecognition object once, but don't start it yet.
@@ -71,123 +87,43 @@ export default function App() {
     };
 
     recognitionRef.current = rec;
-    // abort() immediately kills the underlying audio capture;
-    // stop() only ends recognition but the browser keeps the mic indicator lit.
     return () => {
       try { rec.abort(); } catch (_) {}
-      streamRef.current?.getTracks().forEach(t => t.stop());
-      streamRef.current = null;
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Start/stop the wake-word listener when we go idle.
-  // admin.html and monitoring.html are separate HTML files — they never load
-  // this component and never acquire the microphone.
+  // When idle: start wake-word listener and ensure VAD is off.
+  // When anything else: SpeechRecognition off (VAD or processing are in charge).
   useEffect(() => {
     const rec = recognitionRef.current;
     if (!rec) return;
     if (status === 'idle') {
+      try { vad.pause(); } catch (_) {}
       try { rec.start(); } catch (_) {}
     } else {
       try { rec.abort(); } catch (_) {}
     }
-  }, [status]);
+  }, [status]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Recording (silence-detection based) ──────────────────────────────────
+  // ── Start VAD (called after wake-word detected) ────────────────────────
   const startRecording = async () => {
     setStatus('listening');
     addLog('🎤 Listening… speak your command', 'info');
-
-    // Brief pause so SpeechRecognition fully releases the mic before getUserMedia.
+    // Brief pause so SpeechRecognition fully releases the mic before VAD acquires it
     await new Promise(r => setTimeout(r, MIC_RELEASE_DELAY_MS));
-
-    let stream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch (err) {
-      addLog(`Microphone access denied: ${err.message}`, 'error');
-      activatingRef.current = false;
-      setStatus('idle');
-      return;
-    }
-    streamRef.current = stream;
-
-    // ── Silence detection via Web Audio API ────────────────────────────────
-    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const source   = audioCtx.createMediaStreamSource(stream);
-    const analyser = audioCtx.createAnalyser();
-    // fftSize 2048 gives 2048 time-domain samples — good frequency resolution isn't needed here.
-    analyser.fftSize = 2048;
-    source.connect(analyser);
-    // Use time-domain data: each sample is 0-255 where 128 = silence.
-    // RMS of (sample - 128) gives true amplitude regardless of background noise baseline.
-    const timeDomainData = new Uint8Array(analyser.fftSize);
-
-    const startTime    = Date.now();
-    let lastSoundTime  = Date.now();
-    let spokenOnce     = false;
-
-    // Use the browser's native MIME type so ffmpeg/Whisper can decode it.
-    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-      ? 'audio/webm;codecs=opus'
-      : MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '';
-    const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
-    mediaRecorderRef.current = recorder;
-    audioChunksRef.current = [];
-
-    // Poll audio levels every 100 ms.
-    const pollInterval = setInterval(() => {
-      analyser.getByteTimeDomainData(timeDomainData);
-      // Compute RMS of deviation from centre (128 = silence).
-      const rms = Math.sqrt(timeDomainData.reduce((s, v) => s + (v - 128) ** 2, 0) / timeDomainData.length);
-      const elapsed = Date.now() - startTime;
-
-      if (rms > SILENCE_THRESHOLD) {
-        lastSoundTime = Date.now();
-        if (!spokenOnce) {
-          spokenOnce = true;
-          addLog('🟢 Detected speech…', 'info');
-        }
-      }
-
-      const silent   = Date.now() - lastSoundTime > SILENCE_DURATION_MS;
-      const minMet   = elapsed >= MIN_RECORD_MS;
-      const maxHit   = elapsed >= MAX_RECORD_MS;
-
-      if ((silent && spokenOnce && minMet) || maxHit) {
-        clearInterval(pollInterval);
-        if (recorder.state === 'recording') recorder.stop();
-      }
-    }, 100);
-
-    recorder.ondataavailable = (e) => {
-      if (e.data.size > 0) audioChunksRef.current.push(e.data);
-    };
-
-    recorder.onstop = async () => {
-      clearInterval(pollInterval);
-      audioCtx.close();
-      stream.getTracks().forEach(t => t.stop());
-      streamRef.current = null;
-      const audioBlob = new Blob(audioChunksRef.current, { type: recorder.mimeType || 'audio/webm' });
-      await sendAudioToBackend(audioBlob, recorder.mimeType);
-    };
-
-    recorder.start();
+    vad.start();
   };
 
-  // ── Send audio to /api/transcribe (Whisper Lambda on-demand) ─────────────
+  // ── Send WAV to /api/transcribe (Whisper Lambda on-demand) ────────────────
+  // Called from onSpeechEnd — status is already 'processing' at this point.
   const sendAudioToBackend = async (audioBlob, mimeType) => {
-    setStatus('processing');
-    addLog('⏳ Transcribing via Whisper Lambda…', 'info');
-
     try {
       const audioBase64 = await blobToBase64(audioBlob);
 
       const res = await fetch('/api/transcribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ audioBase64, mimeType: mimeType || 'audio/webm' }),
+        body: JSON.stringify({ audioBase64, mimeType: mimeType || 'audio/wav' }),
       });
 
       if (!res.ok) {
@@ -246,9 +182,10 @@ export default function App() {
   };
 
   // ── Status label helpers ──────────────────────────────────────────────────
+  const listeningLabel = vad.userSpeaking ? '🗣️ Speaking…' : '🎤 Listening…';
   const statusLabel = {
     idle: 'Say "Activate"',
-    listening: '🎤 Recording…',
+    listening: listeningLabel,
     processing: '⏳ Transcribing…',
     uploading: '📤 Uploading…',
   }[status] ?? status;
