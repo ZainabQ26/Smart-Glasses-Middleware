@@ -146,3 +146,8 @@ aws/lambda-*/package/
 
 # LocalStack data
 .localstack/
+
+# Ignore client build output to avoid committing generated files that CI will build
+# Keep `admin.html` and `monitoring.html` in `wwwroot` tracked; only ignore generated files
+/src/SmartGlassesMiddleware/wwwroot/assets/
+/src/SmartGlassesMiddleware/wwwroot/index.html
