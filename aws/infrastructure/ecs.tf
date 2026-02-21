@@ -160,7 +160,10 @@ resource "aws_iam_role_policy" "ecs_task" {
         Action = [
           "lambda:InvokeFunction"
         ]
-        Resource = aws_lambda_function.document_processor.arn
+        Resource = [
+          aws_lambda_function.document_processor.arn,
+          aws_lambda_function.whisper.arn,
+        ]
       },
       {
         Effect = "Allow"

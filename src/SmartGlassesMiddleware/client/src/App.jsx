@@ -2,9 +2,11 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const MIC_RELEASE_DELAY_MS  = 250;   // Give SpeechRecognition time to release before getUserMedia
-const SILENCE_THRESHOLD     = 12;    // RMS amplitude (0–255) below which we consider it silence
-const SILENCE_DURATION_MS   = 1000;  // Stop after this many ms of consecutive silence
-const MIN_RECORD_MS         = 500;   // Always capture at least this much audio
+// Time-domain RMS: values represent peak deviation from 128 (silence = 0, max speech ~20-40).
+// Frequency-domain was unreliable (background noise spikes); time-domain is more accurate.
+const SILENCE_THRESHOLD     = 8;     // RMS amplitude below which we consider it silence
+const SILENCE_DURATION_MS   = 1500;  // Stop after this many ms of consecutive silence
+const MIN_RECORD_MS         = 1000;  // Always capture at least this much audio
 const MAX_RECORD_MS         = 30000; // Hard cap to avoid indefinite recording
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
@@ -114,9 +116,12 @@ export default function App() {
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     const source   = audioCtx.createMediaStreamSource(stream);
     const analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 256;
+    // fftSize 2048 gives 2048 time-domain samples — good frequency resolution isn't needed here.
+    analyser.fftSize = 2048;
     source.connect(analyser);
-    const freqData = new Uint8Array(analyser.frequencyBinCount);
+    // Use time-domain data: each sample is 0-255 where 128 = silence.
+    // RMS of (sample - 128) gives true amplitude regardless of background noise baseline.
+    const timeDomainData = new Uint8Array(analyser.fftSize);
 
     const startTime    = Date.now();
     let lastSoundTime  = Date.now();
@@ -132,8 +137,9 @@ export default function App() {
 
     // Poll audio levels every 100 ms.
     const pollInterval = setInterval(() => {
-      analyser.getByteFrequencyData(freqData);
-      const rms = Math.sqrt(freqData.reduce((s, v) => s + v * v, 0) / freqData.length);
+      analyser.getByteTimeDomainData(timeDomainData);
+      // Compute RMS of deviation from centre (128 = silence).
+      const rms = Math.sqrt(timeDomainData.reduce((s, v) => s + (v - 128) ** 2, 0) / timeDomainData.length);
       const elapsed = Date.now() - startTime;
 
       if (rms > SILENCE_THRESHOLD) {
