@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const MIC_RELEASE_DELAY_MS  = 250;   // Give SpeechRecognition time to release before getUserMedia
 const SILENCE_THRESHOLD     = 12;    // RMS amplitude (0–255) below which we consider it silence
-const SILENCE_DURATION_MS   = 1800;  // Stop after this many ms of consecutive silence
+const SILENCE_DURATION_MS   = 1000;  // Stop after this many ms of consecutive silence
 const MIN_RECORD_MS         = 500;   // Always capture at least this much audio
 const MAX_RECORD_MS         = 30000; // Hard cap to avoid indefinite recording
 
