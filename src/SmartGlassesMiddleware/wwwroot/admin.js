@@ -4839,13 +4839,37 @@ async function init() {
                     currentConversationHistory = [];
                     promptSelectedFiles = [];
                     window.promptSelectedFiles = [];
+                    state.allGroups = [];
                     updateActiveGroupStyles();
                     // Clear the conversation view
                     const responseContent = document.getElementById('response-content');
                     if (responseContent) {
                         responseContent.innerHTML = '<span style="color: #2f3a3f;">Enter a message and click Send to get a response</span>';
                     }
-                    // Refresh all visible tabs so stale data is removed from UI
+                    // Immediately wipe all tab containers and reset pagination/loading state so
+                    // the load functions below are not blocked by an in-progress loading guard
+                    // and the user sees empty state right away without waiting for the next fetch.
+                    const emptyGroups = '<div class="empty-state"><p>No groups created yet</p></div>';
+                    const emptyFiles  = '<div class="empty-state"><p>No files uploaded</p></div>';
+                    const emptyPrompts = '<div class="empty-state"><p>No prompts saved</p></div>';
+                    const emptyReminders = '<div class="empty-state"><p>No reminders</p></div>';
+                    const groupsEl   = document.getElementById('groups-list');
+                    const filesEl    = document.getElementById('files-list');
+                    const promptsEl  = document.getElementById('prompts-list');
+                    const remindersEl = document.getElementById('reminders-list');
+                    if (groupsEl)   groupsEl.innerHTML   = emptyGroups;
+                    if (filesEl)    filesEl.innerHTML    = emptyFiles;
+                    if (promptsEl)  promptsEl.innerHTML  = emptyPrompts;
+                    if (remindersEl) remindersEl.innerHTML = emptyReminders;
+                    // Reset all pagination state and force-clear loading guards so the
+                    // load functions below don't bail out due to an in-progress load.
+                    for (const key of ['files', 'prompts', 'groups', 'reminders']) {
+                        state[key].loading = false;
+                        state[key].data    = [];
+                        state[key].page    = 1;
+                        state[key].hasMore = true;
+                    }
+                    // Re-fetch from server to confirm empty state and update pagination
                     await Promise.all([
                         loadFiles(true),
                         loadPrompts(true),
