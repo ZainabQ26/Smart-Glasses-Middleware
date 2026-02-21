@@ -1480,12 +1480,15 @@ public class AdminController : ControllerBase
     {
         try
         {
-            // Invalidate cache pattern - remove all files cache keys in parallel
+            // Invalidate cache pattern - remove all files cache keys in parallel.
+            // Use Math.Max(..., 10) so that when called after bulk deletes (count = 0)
+            // we still clear at least 10 pages worth of stale cache entries.
             var totalCount = await _context.ManagedFiles.CountAsync();
             var totalPages = (int)Math.Ceiling(totalCount / (double)DefaultPageSize);
+            var maxPage = Math.Max(totalPages + 1, 10);
 
             var tasks = new List<Task>();
-            for (int page = 1; page <= totalPages + 1; page++)
+            for (int page = 1; page <= maxPage; page++)
             {
                 tasks.Add(_cacheService.RemoveAsync($"admin:files:page:{page}:size:{DefaultPageSize}"));
                 tasks.Add(_cacheService.RemoveAsync($"admin:files:page:{page}:size:{MaxPageSize}"));
@@ -1507,9 +1510,10 @@ public class AdminController : ControllerBase
         {
             var totalCount = await _context.ManagedPrompts.CountAsync();
             var totalPages = (int)Math.Ceiling(totalCount / (double)DefaultPageSize);
+            var maxPage = Math.Max(totalPages + 1, 10);
 
             var tasks = new List<Task>();
-            for (int page = 1; page <= totalPages + 1; page++)
+            for (int page = 1; page <= maxPage; page++)
             {
                 tasks.Add(_cacheService.RemoveAsync($"admin:prompts:page:{page}:size:{DefaultPageSize}"));
                 tasks.Add(_cacheService.RemoveAsync($"admin:prompts:page:{page}:size:{MaxPageSize}"));
@@ -1531,9 +1535,10 @@ public class AdminController : ControllerBase
         {
             var totalCount = await _context.ResourceGroups.CountAsync();
             var totalPages = (int)Math.Ceiling(totalCount / (double)DefaultPageSize);
+            var maxPage = Math.Max(totalPages + 1, 10);
 
             var tasks = new List<Task>();
-            for (int page = 1; page <= totalPages + 1; page++)
+            for (int page = 1; page <= maxPage; page++)
             {
                 tasks.Add(_cacheService.RemoveAsync($"admin:groups:page:{page}:size:{DefaultPageSize}"));
                 tasks.Add(_cacheService.RemoveAsync($"admin:groups:page:{page}:size:{MaxPageSize}"));
