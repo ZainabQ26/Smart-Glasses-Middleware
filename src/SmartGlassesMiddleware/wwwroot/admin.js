@@ -4818,15 +4818,16 @@ async function init() {
                     '• All conversations and messages\n' +
                     '• All documents and RAG entries\n' +
                     '• AI interaction logs\n' +
-                    '• All resource groups (including reminders)\n\n' +
-                    'Prompt templates are the only thing preserved.\n\n' +
+                    '• All resource groups (including reminders)\n' +
+                    '• All prompt templates\n\n' +
+                    'Nothing will be preserved.\n\n' +
                     'This cannot be undone. Continue?'
                 )) return;
 
                 btnClearAllHeader.disabled = true;
                 btnClearAllHeader.textContent = 'Clearing…';
                 try {
-                    const res = await fetch(`${API_BASE}/admin/clear-all`, { method: 'POST' });
+                    const res = await fetch(`${API_BASE}/clear-all`, { method: 'POST' });
                     if (!res.ok) {
                         const err = await res.json().catch(() => ({ title: res.statusText }));
                         throw new Error(err.detail || err.title || 'Request failed');
