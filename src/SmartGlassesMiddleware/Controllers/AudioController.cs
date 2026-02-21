@@ -130,8 +130,9 @@ public class AudioController : ControllerBase
                 }
                 
                 using var audioStream = new MemoryStream(audioBytes);
-                var fileName = $"audio_{DateTime.UtcNow:yyyyMMddHHmmss}.wav";
-                transcription = await _transcriptionService.TranscribeAsync(audioStream, fileName, "audio/wav");
+                var fileName = $"audio_{DateTime.UtcNow:yyyyMMddHHmmss}";
+                var mimeType = request.MimeType ?? "audio/wav";
+                transcription = await _transcriptionService.TranscribeAsync(audioStream, fileName, mimeType);
                 
                 if (_monitoringService != null && monitoringRequestId != null)
                 {
