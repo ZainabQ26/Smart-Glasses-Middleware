@@ -125,17 +125,18 @@ else
 }
 
 // Configure S3-compatible storage client
-// In AWS (AI:UseBedrockAI=true) register the AWSSDK S3 client backed by the ECS task IAM role.
+// Always register the AWS SDK clients (use default credential chain — ECS task role on AWS,
+// environment variables or ~/.aws in local dev). Calls gracefully fail at runtime if no creds.
+var awsRegion = builder.Configuration["AWS:Region"] ?? "us-east-1";
+var awsRegionEndpoint = Amazon.RegionEndpoint.GetBySystemName(awsRegion);
+builder.Services.AddSingleton<Amazon.S3.IAmazonS3>(_ => new Amazon.S3.AmazonS3Client(awsRegionEndpoint));
+builder.Services.AddSingleton<Amazon.Lambda.IAmazonLambda>(_ => new Amazon.Lambda.AmazonLambdaClient(awsRegionEndpoint));
+
+// In AWS (AI:UseBedrockAI=true) use native S3 for media storage.
 // In local dev register the MinIO client (docker-compose provides the MinIO server).
 var useAwsStorage = builder.Configuration.GetValue<bool?>("AI:UseBedrockAI") ?? false;
 
-if (useAwsStorage)
-{
-    var awsS3Region = builder.Configuration["AWS:Region"] ?? "us-east-1";
-    builder.Services.AddSingleton<Amazon.S3.IAmazonS3>(_ =>
-        new Amazon.S3.AmazonS3Client(Amazon.RegionEndpoint.GetBySystemName(awsS3Region)));
-}
-else
+if (!useAwsStorage)
 {
     builder.Services.AddSingleton<IMinioClient>(sp =>
     {
@@ -158,10 +159,8 @@ var useBedrockAI = builder.Configuration.GetValue<bool?>("AI:UseBedrockAI") ?? f
 if (useBedrockAI)
 {
     // Register the Bedrock runtime client (uses default AWS credential chain — ECS task role on AWS)
-    var awsRegion = builder.Configuration["AWS:Region"] ?? "us-east-1";
     builder.Services.AddSingleton<Amazon.BedrockRuntime.IAmazonBedrockRuntime>(_ =>
-        new Amazon.BedrockRuntime.AmazonBedrockRuntimeClient(
-            Amazon.RegionEndpoint.GetBySystemName(awsRegion)));
+        new Amazon.BedrockRuntime.AmazonBedrockRuntimeClient(awsRegionEndpoint));
 }
 
 builder.Services.AddSingleton<Kernel>(sp =>
@@ -252,8 +251,9 @@ builder.Services.AddScoped<IDocumentHighlightService, DocumentHighlightService>(
 builder.Services.AddScoped<IConversationService, ConversationService>();
 // Global mapping service for ResourceGroup -> Conversation
 builder.Services.AddScoped<IGroupConversationMappingService, GroupConversationMappingService>();
-// Transcription service
-builder.Services.AddScoped<ITranscriptionService, StubTranscriptionService>();
+// Transcription service: on-demand Whisper Lambda invocation.
+// In local dev without a Lambda the service logs a warning and returns empty string.
+builder.Services.AddScoped<ITranscriptionService, LambdaWhisperTranscriptionService>();
 
 // Auto-register ITaskHandler implementations from this assembly and optional plugin DLLs in the 'tasks' folder.
 

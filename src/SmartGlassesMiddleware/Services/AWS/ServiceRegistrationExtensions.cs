@@ -84,10 +84,9 @@ public static class ServiceRegistrationExtensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        // Use stub implementation
         if (!services.Any(s => s.ServiceType == typeof(ITranscriptionService)))
         {
-            services.AddScoped<ITranscriptionService, StubTranscriptionService>();
+            services.AddScoped<ITranscriptionService, LambdaWhisperTranscriptionService>();
         }
 
         return services;
