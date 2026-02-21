@@ -767,8 +767,10 @@ function createFileCard(file) {
     div.className = 'card';
     
     const id = getProp(file, 'id');
-    const label = getProp(file, 'label') || 'Untitled';
+    const rawLabel = getProp(file, 'label');
     const fileName = getProp(file, 'fileName') || 'unknown';
+    // Use the label only if it has a meaningful value; otherwise fall back to the file name
+    const label = (rawLabel && rawLabel !== 'Untitled') ? rawLabel : (fileName !== 'unknown' ? fileName : 'Untitled');
     const fileSize = getProp(file, 'fileSize') || 0;
     const uploadedAt = getProp(file, 'uploadedAt');
     const groups = getProp(file, 'groups') || [];
@@ -4805,13 +4807,14 @@ async function init() {
         if (btnClearAllHeader) {
             btnClearAllHeader.addEventListener('click', async () => {
                 if (!confirm(
-                    'This will permanently delete ALL history:\n\n' +
+                    'This will permanently delete ALL data:\n\n' +
                     '• Request monitoring records\n' +
                     '• All uploaded files\n' +
                     '• All conversations and messages\n' +
                     '• All documents and RAG entries\n' +
-                    '• AI interaction logs\n\n' +
-                    'Resource groups and prompts will be preserved.\n\n' +
+                    '• AI interaction logs\n' +
+                    '• All resource groups (including reminders)\n\n' +
+                    'Prompt templates are the only thing preserved.\n\n' +
                     'This cannot be undone. Continue?'
                 )) return;
 
@@ -4824,12 +4827,26 @@ async function init() {
                         throw new Error(err.detail || err.title || 'Request failed');
                     }
                     showMessage('All history cleared successfully.', 'success');
+                    // Reset active group/conversation state
+                    activePromptGroupId = null;
+                    activeConversationId = null;
+                    currentConversationHistory = [];
+                    promptSelectedFiles = [];
+                    window.promptSelectedFiles = [];
+                    updateActiveGroupStyles();
+                    // Clear the conversation view
+                    const responseContent = document.getElementById('response-content');
+                    if (responseContent) {
+                        responseContent.innerHTML = '<span style="color: #2f3a3f;">Enter a message and click Send to get a response</span>';
+                    }
                     // Refresh all visible tabs so stale data is removed from UI
                     await Promise.all([
                         loadFiles(true),
                         loadPrompts(true),
                         loadGroups(true),
+                        loadReminders(true),
                     ]).catch(() => {});
+                    updatePromptFilesList();
                 } catch (err) {
                     console.error('[ClearAll] failed:', err);
                     showMessage('Failed to clear history: ' + err.message, 'error');

@@ -723,13 +723,14 @@
             if (btnClearAll) {
                 btnClearAll.addEventListener('click', async () => {
                     if (!confirm(
-                        'This will permanently delete ALL history:\n\n' +
+                        'This will permanently delete ALL data:\n\n' +
                         '• Request monitoring records\n' +
                         '• All uploaded files\n' +
                         '• All conversations and messages\n' +
                         '• All documents and RAG entries\n' +
-                        '• AI interaction logs\n\n' +
-                        'Resource groups and prompts will be preserved.\n\n' +
+                        '• AI interaction logs\n' +
+                        '• All resource groups (including reminders)\n\n' +
+                        'Prompt templates are the only thing preserved.\n\n' +
                         'This cannot be undone. Continue?'
                     )) return;
 

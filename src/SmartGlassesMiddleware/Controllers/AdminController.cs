@@ -264,7 +264,7 @@ public class AdminController : ControllerBase
             {
                 Id = Guid.NewGuid(),
                     FileName = request.File.FileName ?? string.Empty,
-                Label = request.Label,
+                Label = string.IsNullOrWhiteSpace(request.Label) ? (request.File.FileName ?? "Untitled") : request.Label,
                 ContentType = contentType,
                 StorageKey = storageKey,
                 ContentHash = contentHash,
@@ -814,6 +814,7 @@ public class AdminController : ControllerBase
             .Include(g => g.DocumentGroups)
             .ThenInclude(dg => dg.DocumentMetadata)
             .Include(g => g.Conversations)
+            .ThenInclude(c => c.Messages)
             .OrderByDescending(g => g.CreatedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
@@ -1033,6 +1034,57 @@ public class AdminController : ControllerBase
         {
             requestId = await _monitoringService.StartRequest("GroupDelete", 
                 $"Deleting group: {group.Name}");
+
+            // Cascade-delete linked conversations and their messages before removing the group.
+            // (Conversation.ResourceGroupId has OnDelete=SetNull so EF won't auto-delete them.)
+            var conversationIds = await _context.Conversations
+                .Where(c => c.ResourceGroupId == id)
+                .Select(c => c.Id)
+                .ToListAsync();
+
+            if (conversationIds.Count > 0)
+            {
+                await _context.ChatMessageAttachments
+                    .Where(a => conversationIds.Contains(a.ChatMessage.ConversationId))
+                    .ExecuteDeleteAsync();
+                await _context.ChatMessages
+                    .Where(m => conversationIds.Contains(m.ConversationId))
+                    .ExecuteDeleteAsync();
+                await _context.GroupConversationMappings
+                    .Where(m => conversationIds.Contains(m.ConversationId))
+                    .ExecuteDeleteAsync();
+                await _context.Conversations
+                    .Where(c => conversationIds.Contains(c.Id))
+                    .ExecuteDeleteAsync();
+            }
+            else
+            {
+                // Clean up any orphaned mapping entries for this group even with no conversations
+                await _context.GroupConversationMappings
+                    .Where(m => m.ResourceGroupId == id)
+                    .ExecuteDeleteAsync();
+            }
+
+            // Delete linked DocumentMetadata entries that belong only to this group
+            var soloDocIds = await _context.DocumentGroups
+                .Where(dg => dg.ResourceGroupId == id)
+                .GroupBy(dg => dg.DocumentMetadataId)
+                .Where(g2 => g2.Count() == 1)  // only linked to this one group
+                .Select(g2 => g2.Key)
+                .ToListAsync();
+
+            if (soloDocIds.Count > 0)
+            {
+                await _context.DocumentChunks
+                    .Where(c => soloDocIds.Contains(c.DocumentMetadataId))
+                    .ExecuteDeleteAsync();
+                await _context.DocumentGroups
+                    .Where(dg => soloDocIds.Contains(dg.DocumentMetadataId))
+                    .ExecuteDeleteAsync();
+                await _context.DocumentMetadatas
+                    .Where(d => soloDocIds.Contains(d.Id))
+                    .ExecuteDeleteAsync();
+            }
             
             _context.ResourceGroups.Remove(group);
             await _context.SaveChangesAsync();
@@ -1642,6 +1694,12 @@ public class AdminController : ControllerBase
             // Delete AI interaction logs and transcription jobs
             counts["aiInteractionLogs"] = await _context.AIInteractionLogs.ExecuteDeleteAsync();
             counts["transcriptionJobs"] = await _context.TranscriptionJobs.ExecuteDeleteAsync();
+
+            // Delete all resource groups (including reminders).
+            // ManagedFiles are already gone (cascaded ManagedFileGroup entries).
+            // DocumentGroups already deleted. Conversations already deleted.
+            // ManagedPromptGroup entries cascade from ResourceGroup deletion via DB constraint.
+            counts["resourceGroups"] = await _context.ResourceGroups.ExecuteDeleteAsync();
 
             // Invalidate all caches so stale data doesn't surface
             await InvalidateAllCaches();
