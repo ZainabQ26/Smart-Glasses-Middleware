@@ -2,10 +2,10 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useMicVAD, utils } from '@ricky0123/vad-react';
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
-// Time to wait after aborting SpeechRecognition before starting VAD.
-// rec.abort() is synchronous on the JS side but the browser needs a moment to
-// actually release the mic track; 800 ms is reliable across Chrome/Edge/Firefox.
-const MIC_RELEASE_DELAY_MS = 800;
+// Time to wait after rec.onend fires before opening the VAD stream.
+// onend means SpeechRecognition has fully closed, but the OS mic track may
+// still be draining for one or two event-loop turns — 150 ms is sufficient.
+const MIC_RELEASE_DELAY_MS = 150;
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 function blobToBase64(blob) {
@@ -29,7 +29,9 @@ export default function App() {
 
   const recognitionRef = useRef(null);
   const fileInputRef = useRef(null);
-  const activatingRef = useRef(false); // guard against concurrent activations
+  const activatingRef = useRef(false);    // guard against concurrent activations
+  const pendingVADStartRef = useRef(false); // set true so rec.onend knows to start VAD
+  const vadRef = useRef(null);            // always-current vad handle for use in callbacks
 
   // ── Append an entry to the log list ────────────────────────────────────────
   const addLog = useCallback((text, type = 'info') => {
@@ -58,6 +60,9 @@ export default function App() {
     },
   });
 
+  // Keep vadRef current on every render so stale-closure callbacks use the latest vad.
+  vadRef.current = vad;
+
   // ── Speech recognition (wake-word listener) ───────────────────────────────
   // Initialise the SpeechRecognition object once, but don't start it yet.
   useEffect(() => {
@@ -77,16 +82,26 @@ export default function App() {
 
       if (transcript.includes('activate') && !activatingRef.current) {
         activatingRef.current = true;
-        // abort() releases the mic immediately (vs stop() which waits to flush
-        // remaining audio) so the VAD can acquire the mic after the delay below.
-        rec.abort();
-        startRecording();
+        // Signal onend to start VAD once the mic is definitively free.
+        pendingVADStartRef.current = true;
+        rec.abort(); // abort fires onend asynchronously after the mic is released
+        setStatus('listening');
+        addLog('🎤 Listening… speak your command', 'info');
       }
     };
 
     rec.onerror = (e) => {
       if (e.error !== 'no-speech' && e.error !== 'aborted')
         addLog(`Mic error: ${e.error}`, 'warn');
+    };
+
+    // onend fires after abort() — by this point the mic track is closed.
+    // If a VAD start is pending, wait a tiny extra moment then start it.
+    rec.onend = () => {
+      if (pendingVADStartRef.current) {
+        pendingVADStartRef.current = false;
+        setTimeout(() => vadRef.current.start(), MIC_RELEASE_DELAY_MS);
+      }
     };
 
     recognitionRef.current = rec;
@@ -107,17 +122,6 @@ export default function App() {
       try { rec.abort(); } catch (_) {}
     }
   }, [status]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── Start VAD (called after wake-word detected) ────────────────────────────
-  // We use rec.abort() before calling this, which releases the mic immediately.
-  // MIC_RELEASE_DELAY_MS gives the browser time to fully close the old track
-  // before the VAD opens a new getUserMedia stream.
-  const startRecording = async () => {
-    setStatus('listening');
-    addLog('🎤 Listening… speak your command', 'info');
-    await new Promise(r => setTimeout(r, MIC_RELEASE_DELAY_MS));
-    vad.start();
-  };
 
   // ── Send WAV to /api/transcribe (Whisper Lambda on-demand) ────────────────
   // Called from onSpeechEnd — status is already 'processing' at this point.
