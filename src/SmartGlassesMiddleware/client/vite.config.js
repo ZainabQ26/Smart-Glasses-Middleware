@@ -25,6 +25,11 @@ export default defineConfig({
           src: 'node_modules/onnxruntime-web/dist/*.wasm',
           dest: './',
         },
+        {
+          // .mjs companion files — ONNX Runtime loads these dynamically as ES modules
+          src: 'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded*.mjs',
+          dest: './',
+        },
       ],
     }),
   ],
