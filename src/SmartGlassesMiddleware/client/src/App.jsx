@@ -1,7 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useMicVAD, utils } from '@ricky0123/vad-react';
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
-const RECORD_DURATION_MS = 5000; // fixed 5-second recording window
+// Time to wait after aborting SpeechRecognition before starting VAD.
+// rec.abort() is synchronous on the JS side but the browser needs a moment to
+// actually release the mic track; 800 ms is reliable across Chrome/Edge/Firefox.
+const MIC_RELEASE_DELAY_MS = 800;
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 function blobToBase64(blob) {
@@ -26,13 +30,33 @@ export default function App() {
   const recognitionRef = useRef(null);
   const fileInputRef = useRef(null);
   const activatingRef = useRef(false); // guard against concurrent activations
-  const mediaRecorderRef = useRef(null);
-  const streamRef = useRef(null);
 
   // ── Append an entry to the log list ────────────────────────────────────────
   const addLog = useCallback((text, type = 'info') => {
     setLogs(prev => [{ id: Date.now() + Math.random(), text, type, ts: new Date().toLocaleTimeString() }, ...prev].slice(0, 50));
   }, []);
+
+  // ── Silero VAD — neural-network voice activity detection ──────────────────
+  // Runs the Silero VAD ONNX model in-browser. Fires onSpeechEnd with 16 kHz
+  // mono Float32Array; utils.encodeWAV converts that to WAV for Whisper.
+  const vad = useMicVAD({
+    startOnLoad: false,         // we call vad.start() manually after wake-word
+    baseAssetPath: '/',         // static files served from site root
+    ortConfig: (ort) => { ort.env.wasm.numThreads = 1; }, // avoids COOP header requirement
+    onSpeechStart: () => {
+      addLog('🟢 Detected speech…', 'info');
+    },
+    onSpeechEnd: (audio) => {
+      vad.pause();
+      setStatus('processing');
+      addLog('⏳ Transcribing via Whisper Lambda…', 'info');
+      const wavBlob = utils.encodeWAV(audio); // 16 kHz mono WAV — optimal for Whisper
+      sendAudioToBackend(wavBlob, 'audio/wav');
+    },
+    onVADMisfire: () => {
+      addLog('(Background noise ignored, still listening…)', 'info');
+    },
+  });
 
   // ── Speech recognition (wake-word listener) ───────────────────────────────
   // Initialise the SpeechRecognition object once, but don't start it yet.
@@ -53,7 +77,9 @@ export default function App() {
 
       if (transcript.includes('activate') && !activatingRef.current) {
         activatingRef.current = true;
-        rec.stop();
+        // abort() releases the mic immediately (vs stop() which waits to flush
+        // remaining audio) so the VAD can acquire the mic after the delay below.
+        rec.abort();
         startRecording();
       }
     };
@@ -69,58 +95,28 @@ export default function App() {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // When idle: start wake-word listener. When anything else: stop it.
+  // When idle: start wake-word listener and ensure VAD is off.
+  // When anything else: SpeechRecognition off (VAD is in charge).
   useEffect(() => {
     const rec = recognitionRef.current;
     if (!rec) return;
     if (status === 'idle') {
+      try { vad.pause(); } catch (_) {}
       try { rec.start(); } catch (_) {}
     } else {
       try { rec.abort(); } catch (_) {}
     }
   }, [status]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Start 5-second MediaRecorder recording (called after wake-word) ────────
+  // ── Start VAD (called after wake-word detected) ────────────────────────────
+  // We use rec.abort() before calling this, which releases the mic immediately.
+  // MIC_RELEASE_DELAY_MS gives the browser time to fully close the old track
+  // before the VAD opens a new getUserMedia stream.
   const startRecording = async () => {
     setStatus('listening');
-    addLog(`🎤 Recording for ${RECORD_DURATION_MS / 1000}s…`, 'info');
-
-    let stream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch (err) {
-      addLog(`❌ Mic access denied: ${err.message}`, 'error');
-      activatingRef.current = false;
-      setStatus('idle');
-      return;
-    }
-    streamRef.current = stream;
-
-    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-      ? 'audio/webm;codecs=opus'
-      : 'audio/webm';
-
-    const chunks = [];
-    const recorder = new MediaRecorder(stream, { mimeType });
-    mediaRecorderRef.current = recorder;
-
-    recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
-
-    recorder.onstop = () => {
-      // Release mic
-      stream.getTracks().forEach(t => t.stop());
-      streamRef.current = null;
-
-      const blob = new Blob(chunks, { type: mimeType });
-      setStatus('processing');
-      addLog('⏳ Transcribing via Whisper Lambda…', 'info');
-      sendAudioToBackend(blob, mimeType);
-    };
-
-    recorder.start();
-    setTimeout(() => {
-      if (recorder.state !== 'inactive') recorder.stop();
-    }, RECORD_DURATION_MS);
+    addLog('🎤 Listening… speak your command', 'info');
+    await new Promise(r => setTimeout(r, MIC_RELEASE_DELAY_MS));
+    vad.start();
   };
 
   // ── Send WAV to /api/transcribe (Whisper Lambda on-demand) ────────────────
@@ -191,9 +187,10 @@ export default function App() {
   };
 
   // ── Status label helpers ──────────────────────────────────────────────────
+  const listeningLabel = vad.userSpeaking ? '🗣️ Speaking…' : '🎤 Listening…';
   const statusLabel = {
     idle: 'Say "Activate"',
-    listening: '🎤 Recording…',
+    listening: listeningLabel,
     processing: '⏳ Transcribing…',
     uploading: '📤 Uploading…',
   }[status] ?? status;
