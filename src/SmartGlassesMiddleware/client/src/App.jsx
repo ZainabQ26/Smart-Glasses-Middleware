@@ -34,6 +34,8 @@ export default function App() {
   const recognitionRef = useRef(null);
   // Stable reference to the latest vad object so stale closures never call old handles.
   const vadRef = useRef(null);
+  // Timer that auto-resets the listening state if onSpeechEnd never fires.
+  const listeningTimeoutRef = useRef(null);
 
   const addLog = useCallback((text, type = "info") => {
     setLogs(prev =>
@@ -66,6 +68,17 @@ export default function App() {
 
   vadRef.current = vad;
 
+  // Surface VAD initialisation state in the activity log.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!vad.loading && !vad.errored) addLog("✅ Voice detection ready", "info");
+  }, [vad.loading]);
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (vad.errored) addLog(`❌ VAD error: ${vad.errored.message ?? "ONNX Runtime failed to load"}`, "error");
+  }, [vad.errored]);
+
   // ── SpeechRecognition — keyword-only, runs concurrently with VAD ──────────
   useEffect(() => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -90,8 +103,13 @@ export default function App() {
         rec.abort(); // release SR stream; VAD stream is already open
         setStatus("listening");
         addLog("🎤 Activated — speak your command", "info");
-        // VAD is already started (startOnLoad:true). If it was paused resume it.
-        vadRef.current.start();
+        // Safety net: reset if onSpeechEnd never fires (VAD error or prolonged silence).
+        if (listeningTimeoutRef.current) clearTimeout(listeningTimeoutRef.current);
+        listeningTimeoutRef.current = setTimeout(() => {
+          if (activatedRef.current) { addLog("⏱️ No speech detected — resetting.", "warn"); resumeListening(); }
+        }, 30000);
+        // VAD is already started (startOnLoad:true). If it was paused, resume it.
+        try { vadRef.current.start(); } catch (_) {}
       }
     };
 
@@ -116,9 +134,10 @@ export default function App() {
 
   // Once transcription is done, resume SR keyword listening.
   const resumeListening = useCallback(() => {
+    if (listeningTimeoutRef.current) { clearTimeout(listeningTimeoutRef.current); listeningTimeoutRef.current = null; }
     activatedRef.current = false;
     setStatus("idle");
-    vadRef.current.start(); // resume VAD (was paused during processing)
+    try { vadRef.current.start(); } catch (_) {} // resume VAD (was paused during processing)
     try { recognitionRef.current?.start(); } catch (_) {}
   }, []);
 
@@ -148,10 +167,15 @@ export default function App() {
       activatedRef.current = true;
       setStatus("listening");
       addLog("🎤 Listening… speak your command", "info");
-      vadRef.current.start();
+      if (listeningTimeoutRef.current) clearTimeout(listeningTimeoutRef.current);
+      listeningTimeoutRef.current = setTimeout(() => {
+        if (activatedRef.current) { addLog("⏱️ No speech detected — resetting.", "warn"); resumeListening(); }
+      }, 30000);
+      try { vadRef.current.start(); } catch (_) {}
     } else if (status === "listening") {
+      if (listeningTimeoutRef.current) { clearTimeout(listeningTimeoutRef.current); listeningTimeoutRef.current = null; }
       activatedRef.current = false;
-      vad.pause();
+      try { vad.pause(); } catch (_) {}
       setStatus("idle");
       addLog("Cancelled.", "info");
       try { recognitionRef.current?.start(); } catch (_) {}
@@ -165,8 +189,15 @@ export default function App() {
     ? "⏳ Transcribing…"
     : isListening
       ? (vad.userSpeaking ? "🗣️ Speaking…" : "🎤 Listening — tap to cancel")
-      : 'Say "Activate" or tap 🎤';
-  const btnColor = isProcessing ? "#6c757d" : isListening ? "#e67e22" : "#00b894";
+      : vad.loading
+        ? "⏱️ Loading voice detection…"
+        : vad.errored
+          ? '⚠️ VAD error — tap mic to retry'
+          : 'Say "Activate" or tap 🎤';
+  const btnColor = isProcessing ? "#6c757d"
+    : isListening ? "#e67e22"
+    : vad.errored ? "#e74c3c"
+    : "#00b894";
 
   return (
     <div style={styles.page}>
