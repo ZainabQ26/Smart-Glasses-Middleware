@@ -115,6 +115,76 @@ resource "aws_cloudfront_distribution" "frontend" {
     compress               = true
   }
 
+  # ONNX Runtime / Silero VAD static assets served by ASP.NET Core wwwroot.
+  # .mjs, .wasm, and .onnx files are NOT in S3 — they live in the container's wwwroot.
+  # Without explicit behaviors these fall to the S3 default, which 403s → custom error
+  # returns index.html (text/html) and the browser rejects them as wrong MIME type.
+  ordered_cache_behavior {
+    path_pattern     = "/*.mjs"
+    allowed_methods  = ["GET", "HEAD", "OPTIONS"]
+    cached_methods   = ["GET", "HEAD"]
+    target_origin_id = "ALB-API"
+
+    forwarded_values {
+      query_string = false
+      headers      = ["Host"]
+
+      cookies {
+        forward = "none"
+      }
+    }
+
+    viewer_protocol_policy = "redirect-to-https"
+    min_ttl                = 0
+    default_ttl            = 0
+    max_ttl                = 0
+    compress               = true
+  }
+
+  ordered_cache_behavior {
+    path_pattern     = "/*.wasm"
+    allowed_methods  = ["GET", "HEAD", "OPTIONS"]
+    cached_methods   = ["GET", "HEAD"]
+    target_origin_id = "ALB-API"
+
+    forwarded_values {
+      query_string = false
+      headers      = ["Host"]
+
+      cookies {
+        forward = "none"
+      }
+    }
+
+    viewer_protocol_policy = "redirect-to-https"
+    min_ttl                = 0
+    default_ttl            = 0
+    max_ttl                = 0
+    compress               = false
+  }
+
+  ordered_cache_behavior {
+    path_pattern     = "/*.onnx"
+    allowed_methods  = ["GET", "HEAD", "OPTIONS"]
+    cached_methods   = ["GET", "HEAD"]
+    target_origin_id = "ALB-API"
+
+    forwarded_values {
+      query_string = false
+      headers      = ["Host"]
+
+      cookies {
+        forward = "none"
+      }
+    }
+
+    viewer_protocol_policy = "redirect-to-https"
+    min_ttl                = 0
+    default_ttl            = 0
+    max_ttl                = 0
+    compress               = false
+  }
+
   # Cache behavior for API
   ordered_cache_behavior {
     path_pattern     = "/api/*"
