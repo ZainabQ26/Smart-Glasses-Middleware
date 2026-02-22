@@ -36,6 +36,8 @@ resource "aws_elasticache_parameter_group" "redis" {
 
 # ElastiCache Replication Group (Redis Cluster)
 resource "aws_elasticache_replication_group" "redis" {
+  count = local.enable_redis_effective && var.environment != "dev" ? 1 : 0
+
   replication_group_id       = "${var.project_name}-${var.environment}-redis"
   description                = "Redis cluster for Smart Glasses Middleware"
   engine                     = "redis"
@@ -59,7 +61,7 @@ resource "aws_elasticache_replication_group" "redis" {
   # Encryption
   at_rest_encryption_enabled = true
   transit_encryption_enabled = true
-  auth_token                 = random_password.redis_auth_token.result
+  auth_token                 = random_password.redis_auth_token[0].result
 
   # Notifications
   notification_topic_arn = aws_sns_topic.elasticache_notifications.arn
@@ -94,7 +96,7 @@ resource "aws_elasticache_replication_group" "redis" {
 
 # Note: For single-node deployment (dev/test), use aws_elasticache_cluster instead
 resource "aws_elasticache_cluster" "redis_single" {
-  count = var.environment == "dev" ? 1 : 0
+  count = local.enable_redis_effective && var.environment == "dev" ? 1 : 0
 
   cluster_id           = "${var.project_name}-${var.environment}-redis-single"
   engine               = "redis"
@@ -121,12 +123,14 @@ resource "aws_elasticache_cluster" "redis_single" {
 
 # Generate random auth token for Redis
 resource "random_password" "redis_auth_token" {
+  count   = local.enable_redis_effective ? 1 : 0
   length  = 32
   special = false # Redis auth token doesn't support special characters
 }
 
 # Store Redis credentials in Secrets Manager
 resource "aws_secretsmanager_secret" "redis_credentials" {
+  count       = local.enable_redis_effective ? 1 : 0
   name        = "${var.project_name}-${var.environment}-redis-credentials"
   description = "ElastiCache Redis credentials"
 
@@ -140,12 +144,13 @@ resource "aws_secretsmanager_secret" "redis_credentials" {
 }
 
 resource "aws_secretsmanager_secret_version" "redis_credentials" {
-  secret_id = aws_secretsmanager_secret.redis_credentials.id
+  count     = local.enable_redis_effective ? 1 : 0
+  secret_id = aws_secretsmanager_secret.redis_credentials[0].id
   secret_string = jsonencode({
-    auth_token        = random_password.redis_auth_token.result
-    endpoint          = var.environment == "prod" ? aws_elasticache_replication_group.redis.primary_endpoint_address : (var.environment == "dev" ? aws_elasticache_cluster.redis_single[0].cache_nodes[0].address : aws_elasticache_replication_group.redis.primary_endpoint_address)
+    auth_token        = random_password.redis_auth_token[0].result
+    endpoint          = var.environment == "dev" ? aws_elasticache_cluster.redis_single[0].cache_nodes[0].address : aws_elasticache_replication_group.redis[0].primary_endpoint_address
     port              = 6379
-    connection_string = var.environment == "prod" ? "${aws_elasticache_replication_group.redis.primary_endpoint_address}:6379,password=${random_password.redis_auth_token.result}" : (var.environment == "dev" ? "${aws_elasticache_cluster.redis_single[0].cache_nodes[0].address}:6379" : "${aws_elasticache_replication_group.redis.primary_endpoint_address}:6379,password=${random_password.redis_auth_token.result}")
+    connection_string = var.environment == "dev" ? "${aws_elasticache_cluster.redis_single[0].cache_nodes[0].address}:6379" : "${aws_elasticache_replication_group.redis[0].primary_endpoint_address}:6379,password=${random_password.redis_auth_token[0].result}"
   })
 
   depends_on = [

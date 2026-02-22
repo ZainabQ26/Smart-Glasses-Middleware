@@ -10,6 +10,12 @@ variable "enable_rds" {
   default     = true
 }
 
+variable "cost_optimized_non_prod" {
+  description = "When true, non-prod defaults favor minimum idle cost (ECS min/desired=0, Redis off, and reduced telemetry)."
+  type        = bool
+  default     = true
+}
+
 variable "environment" {
   description = "Environment name (dev, staging, prod)"
   type        = string
@@ -61,25 +67,88 @@ variable "elasticache_node_type" {
 variable "ecs_api_cpu" {
   description = "CPU units for API ECS task"
   type        = number
-  default     = 1024
+  default     = 512
 }
 
 variable "ecs_api_memory" {
   description = "Memory (MiB) for API ECS task"
   type        = number
-  default     = 2048
+  default     = 1024
 }
 
 variable "ecs_api_desired_count" {
   description = "Desired number of API ECS tasks"
   type        = number
-  default     = 2
+  default     = 0
+}
+
+variable "ecs_api_min_capacity" {
+  description = "Minimum ECS desired count for autoscaling"
+  type        = number
+  default     = 0
+}
+
+variable "ecs_api_max_capacity" {
+  description = "Maximum ECS desired count for autoscaling"
+  type        = number
+  default     = 4
+}
+
+variable "enable_container_insights" {
+  description = "Enable ECS Container Insights. Set null to use environment-aware defaults."
+  type        = bool
+  default     = null
+  nullable    = true
+}
+
+variable "enable_redis" {
+  description = "Enable Redis/ElastiCache resources. Set null to use environment-aware defaults."
+  type        = bool
+  default     = null
+  nullable    = true
 }
 
 variable "enable_nat_gateway" {
   description = "Enable NAT Gateway for private subnets"
   type        = bool
+  default     = false
+}
+
+variable "enable_vpc_interface_endpoints" {
+  description = "Enable interface VPC endpoints (ECR, Logs, Secrets Manager). Set null to use environment-aware defaults."
+  type        = bool
+  default     = null
+  nullable    = true
+}
+
+variable "enable_rds_performance_insights" {
+  description = "Enable RDS Performance Insights"
+  type        = bool
+  default     = false
+}
+
+variable "rds_monitoring_interval" {
+  description = "RDS Enhanced Monitoring interval in seconds (0 disables)"
+  type        = number
+  default     = 0
+}
+
+variable "enable_ecs_idle_autoscaler" {
+  description = "Enable CloudWatch/EventBridge/Lambda based wake-on-traffic and idle scale-to-zero for ECS API service."
+  type        = bool
   default     = true
+}
+
+variable "ecs_warm_desired_count" {
+  description = "Desired ECS task count to set when traffic is detected and service is sleeping."
+  type        = number
+  default     = 1
+}
+
+variable "ecs_idle_timeout_minutes" {
+  description = "Minutes of zero ALB requests before scaling ECS API service down to 0."
+  type        = number
+  default     = 15
 }
 
 variable "domain_name" {

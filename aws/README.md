@@ -49,6 +49,40 @@ For production deployment to real AWS (not LocalStack):
 3. Run `terraform apply` in the `infrastructure/` directory
 4. Deploy containers to ECS and Lambda functions
 
+### Cost-Optimized Non-Prod Defaults
+
+The Terraform in `aws/infrastructure` now defaults to lower idle cost for non-prod:
+- ECS API desired/min tasks default to `0`
+- Redis/ElastiCache is disabled by default in non-prod
+- ECS Container Insights is disabled by default in non-prod
+- RDS Performance Insights and Enhanced Monitoring default to disabled
+- NAT gateways default to disabled
+
+If you want always-on behavior, override these at apply time:
+
+```bash
+terraform apply \
+	-var="environment=dev" \
+	-var="cost_optimized_non_prod=false" \
+	-var="ecs_api_desired_count=1" \
+	-var="ecs_api_min_capacity=1" \
+	-var="enable_redis=true" \
+	-var="enable_nat_gateway=true"
+```
+
+### Automatic Wake On Access + Idle Sleep
+
+Terraform now includes an ECS idle autoscaler for the API service:
+- When ALB request traffic appears, CloudWatch alarm triggers a Lambda that sets ECS desired count to `ecs_warm_desired_count` (default `1`)
+- After `ecs_idle_timeout_minutes` of no traffic (default `15`), another alarm triggers Lambda to set desired count to `0`
+
+This gives near-zero compute cost while idle, with a brief cold-start delay on first request after sleep.
+
+Variables:
+- `enable_ecs_idle_autoscaler` (default: `true`)
+- `ecs_warm_desired_count` (default: `1`)
+- `ecs_idle_timeout_minutes` (default: `15`)
+
 ## Architecture
 
 ### LocalStack Services
