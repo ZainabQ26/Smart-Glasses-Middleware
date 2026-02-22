@@ -355,6 +355,19 @@ jobs:
           safe_import aws_cloudfront_distribution.frontend "$CF_DIST_ID"
 
           # ── ElastiCache ───────────────────────────────────────────────────────
+          # If the replication group or cluster no longer exists in AWS (e.g. was
+          # destroyed in a previous run), remove the stale Terraform state entries
+          # so Terraform plans a create rather than failing with CacheClusterNotFound.
+          REDIS_CLUSTER_EXISTS=$(aws elasticache describe-cache-clusters \
+            --cache-cluster-id "${PREFIX}-redis-single" \
+            --query 'CacheClusters[0].CacheClusterId' --output text 2>/dev/null || true)
+          if [ -z "$REDIS_CLUSTER_EXISTS" ] || [ "$REDIS_CLUSTER_EXISTS" = "None" ]; then
+            echo "  ElastiCache cluster not found in AWS — removing stale state entries"
+            terraform state rm "aws_elasticache_cluster.redis_single[0]"        2>/dev/null || true
+            terraform state rm aws_elasticache_replication_group.redis           2>/dev/null || true
+            terraform state rm aws_elasticache_subnet_group.main                 2>/dev/null || true
+            terraform state rm aws_elasticache_parameter_group.redis             2>/dev/null || true
+          fi
           safe_import aws_elasticache_parameter_group.redis   "${PREFIX}-redis-params"
           safe_import aws_elasticache_subnet_group.main       "${PREFIX}-elasticache-subnet-group"
           safe_import aws_elasticache_replication_group.redis "${PREFIX}-redis"
