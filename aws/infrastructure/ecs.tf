@@ -4,7 +4,7 @@ resource "aws_ecs_cluster" "main" {
 
   setting {
     name  = "containerInsights"
-    value = "enabled"
+    value = local.enable_container_insights_effective ? "enabled" : "disabled"
   }
 
   tags = {
@@ -79,12 +79,12 @@ resource "aws_iam_role_policy" "ecs_task_execution_secrets" {
           "secretsmanager:GetSecretValue",
           "kms:Decrypt"
         ]
-        Resource = [
+        Resource = concat([
           aws_secretsmanager_secret.app_secrets.arn,
           aws_secretsmanager_secret.db_credentials.arn,
-          aws_secretsmanager_secret.redis_credentials.arn,
           aws_kms_key.s3.arn
-        ]
+        ], local.enable_redis_effective ? [aws_secretsmanager_secret.redis_credentials[0].arn] : [])
+        
       }
     ]
   })
@@ -179,11 +179,10 @@ resource "aws_iam_role_policy" "ecs_task" {
         Action = [
           "secretsmanager:GetSecretValue"
         ]
-        Resource = [
+        Resource = concat([
           aws_secretsmanager_secret.app_secrets.arn,
-          aws_secretsmanager_secret.db_credentials.arn,
-          aws_secretsmanager_secret.redis_credentials.arn
-        ]
+          aws_secretsmanager_secret.db_credentials.arn
+        ], local.enable_redis_effective ? [aws_secretsmanager_secret.redis_credentials[0].arn] : [])
       },
       {
         # Allow the API to send audio jobs to the Whisper SQS queue
@@ -278,10 +277,6 @@ locals {
           valueFrom = "${aws_secretsmanager_secret.db_credentials.arn}:connection_string::"
         },
         {
-          name      = "ConnectionStrings__Redis"
-          valueFrom = "${aws_secretsmanager_secret.redis_credentials.arn}:connection_string::"
-        },
-        {
           name      = "AWS__S3__MediaBucket"
           valueFrom = "${aws_secretsmanager_secret.app_secrets.arn}:s3_media_bucket::"
         },
@@ -289,7 +284,10 @@ locals {
           name      = "AWS__S3__DocumentsBucket"
           valueFrom = "${aws_secretsmanager_secret.app_secrets.arn}:s3_documents_bucket::"
         }
-      ]
+      ] ++ (local.enable_redis_effective ? [{
+        name      = "ConnectionStrings__Redis"
+        valueFrom = "${aws_secretsmanager_secret.redis_credentials[0].arn}:connection_string::"
+      }] : [])
 
       logConfiguration = {
         logDriver = "awslogs"
@@ -362,8 +360,8 @@ resource "aws_ecs_service" "api" {
 
 # Auto Scaling for ECS Service
 resource "aws_appautoscaling_target" "ecs_api" {
-  max_capacity       = 10
-  min_capacity       = var.ecs_api_desired_count
+  max_capacity       = var.ecs_api_max_capacity
+  min_capacity       = var.ecs_api_min_capacity
   resource_id        = "service/${aws_ecs_cluster.main.name}/${aws_ecs_service.api.name}"
   scalable_dimension = "ecs:service:DesiredCount"
   service_namespace  = "ecs"

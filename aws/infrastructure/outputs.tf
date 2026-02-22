@@ -10,7 +10,7 @@ output "rds_endpoint" {
 
 output "elasticache_endpoint" {
   description = "ElastiCache Redis endpoint"
-  value       = aws_elasticache_replication_group.redis.primary_endpoint_address
+  value       = local.enable_redis_effective ? (var.environment == "dev" ? aws_elasticache_cluster.redis_single[0].cache_nodes[0].address : aws_elasticache_replication_group.redis[0].primary_endpoint_address) : null
 }
 
 output "s3_media_bucket" {

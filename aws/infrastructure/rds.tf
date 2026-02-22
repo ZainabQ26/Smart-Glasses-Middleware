@@ -112,11 +112,11 @@ resource "aws_db_instance" "main" {
   maintenance_window = "mon:04:00-mon:05:00"
 
   # Performance Insights (available on db.t3.micro, 7-day free retention)
-  performance_insights_enabled = true
+  performance_insights_enabled = var.enable_rds_performance_insights
 
   # Enhanced Monitoring
-  monitoring_interval = 60
-  monitoring_role_arn = aws_iam_role.rds_monitoring.arn
+  monitoring_interval = var.rds_monitoring_interval
+  monitoring_role_arn = var.rds_monitoring_interval > 0 ? aws_iam_role.rds_monitoring.arn : null
 
   deletion_protection = var.environment == "prod" ? true : false
   skip_final_snapshot = var.environment != "prod"
