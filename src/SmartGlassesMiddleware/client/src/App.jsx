@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useMicVAD, utils } from "@ricky0123/vad-react";
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
@@ -12,12 +12,28 @@ function blobToBase64(blob) {
 }
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
-// The VAD owns the mic exclusively — no SpeechRecognition, no mic conflict.
-// Flow: tap button → vad.start() → Silero VAD fires onSpeechEnd →
-//       encodeWAV → POST /api/transcribe → result logged → back to idle.
+//
+// KEY DESIGN: VAD acquires the mic stream ONCE at startup with startOnLoad:true
+// and keeps it open permanently. SpeechRecognition runs in parallel for keyword
+// detection — when "activate" fires we just flip a ref; no mic re-acquisition
+// happens so there is no race condition.
+//
+// Flow:
+//   [always] SpeechRecognition listening for "activate"
+//   "activate" heard → activatedRef=true, rec.abort(), status=listening
+//   VAD.onSpeechEnd fires → sees activatedRef=true → sends to Whisper
+//   Whisper returns → activatedRef=false, vad.start() resumes, SpeechRecognition restarts
+//
 export default function App() {
   const [status, setStatus] = useState("idle"); // idle | listening | processing
   const [logs, setLogs] = useState([]);
+
+  // Guard: onSpeechEnd only ships audio when we have been activated.
+  // vad.pause/start never touches activatedRef — they just gate VAD processing.
+  const activatedRef = useRef(false);
+  const recognitionRef = useRef(null);
+  // Stable reference to the latest vad object so stale closures never call old handles.
+  const vadRef = useRef(null);
 
   const addLog = useCallback((text, type = "info") => {
     setLogs(prev =>
@@ -25,38 +41,86 @@ export default function App() {
     );
   }, []);
 
-  // ── Silero VAD ───────────────────────────────────────────────────────────
+  // ── Silero VAD — owns the mic stream permanently ─────────────────────────
+  // startOnLoad:true → getUserMedia is called once on mount and kept open.
+  // SpeechRecognition opens its OWN concurrent stream; browsers allow this.
+  // When "activate" fires we flip activatedRef; VAD is already running.
   const vad = useMicVAD({
-    startOnLoad: false,
+    startOnLoad: true,
     baseAssetPath: "/",
     ortConfig: (ort) => { ort.env.wasm.numThreads = 1; },
     onSpeechStart: () => {
-      addLog("🟢 Speech detected…", "info");
+      if (activatedRef.current) addLog("🟢 Speech detected…", "info");
     },
     onSpeechEnd: (audio) => {
+      if (!activatedRef.current) return; // ignore background speech before activation
       vad.pause();
       setStatus("processing");
       addLog("⏳ Transcribing via Whisper Lambda…", "info");
       sendAudio(utils.encodeWAV(audio));
     },
     onVADMisfire: () => {
-      addLog("(Noise ignored, still listening…)", "info");
+      if (activatedRef.current) addLog("(Noise ignored, still listening…)", "info");
     },
   });
 
-  // ── Tap-to-listen toggle ─────────────────────────────────────────────────
-  const handleMicButton = () => {
-    if (status === "idle") {
-      setStatus("listening");
-      addLog("🎤 Listening… speak now", "info");
-      vad.start();
-    } else if (status === "listening") {
-      vad.pause();
-      setStatus("idle");
-      addLog("Cancelled.", "info");
+  vadRef.current = vad;
+
+  // ── SpeechRecognition — keyword-only, runs concurrently with VAD ──────────
+  useEffect(() => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+      addLog("⚠️ Wake-word not available — use the mic button below.", "warn");
+      return;
     }
-    // processing: button disabled
-  };
+
+    const rec = new SR();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = "en-US";
+
+    rec.onresult = (event) => {
+      const transcript = Array.from(event.results)
+        .map(r => r[0].transcript)
+        .join("")
+        .toLowerCase();
+
+      if (transcript.includes("activate") && !activatedRef.current) {
+        activatedRef.current = true;
+        rec.abort(); // release SR stream; VAD stream is already open
+        setStatus("listening");
+        addLog("🎤 Activated — speak your command", "info");
+        // VAD is already started (startOnLoad:true). If it was paused resume it.
+        vadRef.current.start();
+      }
+    };
+
+    rec.onerror = (e) => {
+      if (e.error !== "no-speech" && e.error !== "aborted")
+        addLog(`Mic error: ${e.error}`, "warn");
+    };
+
+    // After abort, restart SR so we keep listening for the next keyword.
+    // We only restart when not activated (i.e. the abort was from something
+    // other than the keyword flow — e.g. a timeout restart).
+    rec.onend = () => {
+      if (!activatedRef.current) {
+        try { rec.start(); } catch (_) {}
+      }
+    };
+
+    rec.start();
+    recognitionRef.current = rec;
+    return () => { try { rec.abort(); } catch (_) {} };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Once transcription is done, resume SR keyword listening.
+  const resumeListening = useCallback(() => {
+    activatedRef.current = false;
+    setStatus("idle");
+    vadRef.current.start(); // resume VAD (was paused during processing)
+    try { recognitionRef.current?.start(); } catch (_) {}
+  }, []);
 
   // ── Send WAV to /api/transcribe ──────────────────────────────────────────
   const sendAudio = async (wavBlob) => {
@@ -74,7 +138,23 @@ export default function App() {
     } catch (err) {
       addLog(`❌ ${err.message}`, "error");
     } finally {
+      resumeListening();
+    }
+  };
+
+  // ── Manual tap button (fallback / supplement to wake-word) ───────────────
+  const handleMicButton = () => {
+    if (status === "idle") {
+      activatedRef.current = true;
+      setStatus("listening");
+      addLog("🎤 Listening… speak your command", "info");
+      vadRef.current.start();
+    } else if (status === "listening") {
+      activatedRef.current = false;
+      vad.pause();
       setStatus("idle");
+      addLog("Cancelled.", "info");
+      try { recognitionRef.current?.start(); } catch (_) {}
     }
   };
 
@@ -85,7 +165,7 @@ export default function App() {
     ? "⏳ Transcribing…"
     : isListening
       ? (vad.userSpeaking ? "🗣️ Speaking…" : "🎤 Listening — tap to cancel")
-      : "🎤 Tap to Listen";
+      : 'Say "Activate" or tap 🎤';
   const btnColor = isProcessing ? "#6c757d" : isListening ? "#e67e22" : "#00b894";
 
   return (
@@ -110,7 +190,7 @@ export default function App() {
         <section style={{ ...styles.card, flex: 1 }}>
           <h2 style={styles.sectionTitle}>Activity Log</h2>
           {logs.length === 0 ? (
-            <p style={styles.emptyLog}>No activity yet. Tap the mic to start.</p>
+            <p style={styles.emptyLog}>No activity yet. Say "Activate" or tap the mic.</p>
           ) : (
             <ul style={styles.logList}>
               {logs.map(entry => (
