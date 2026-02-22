@@ -730,7 +730,16 @@ app.Use(async (context, next) =>
     await next();
 });
 
-app.UseStaticFiles();
+// Register MIME types that ASP.NET Core doesn't include by default but are
+// required for the Silero VAD / ONNX Runtime WASM assets served from wwwroot.
+var contentTypeProvider = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider();
+contentTypeProvider.Mappings[".wasm"] = "application/wasm";
+contentTypeProvider.Mappings[".mjs"]  = "application/javascript";
+contentTypeProvider.Mappings[".onnx"] = "application/octet-stream";
+app.UseStaticFiles(new StaticFileOptions
+{
+    ContentTypeProvider = contentTypeProvider,
+});
 
 // Diagnostic middleware: capture raw request body for /api/ask for troubleshooting
 app.Use(async (context, next) =>
