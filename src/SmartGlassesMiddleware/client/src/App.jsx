@@ -148,7 +148,7 @@ export default function App() {
     try { recognitionRef.current?.start(); } catch (_) {}
   }, []);
 
-  // ── Send WAV to /api/transcribe ──────────────────────────────────────────
+  // ── Send WAV to /api/transcribe (async — polls /api/tasks/{id}) ──────────
   const sendAudio = async (wavBlob) => {
     try {
       const audioBase64 = await blobToBase64(wavBlob);
@@ -158,9 +158,35 @@ export default function App() {
         body: JSON.stringify({ audioBase64, mimeType: "audio/wav" }),
       });
       if (!res.ok) throw new Error(`Server ${res.status}: ${await res.text()}`);
-      const { transcription } = await res.json();
-      const text = transcription?.trim();
-      addLog(text ? `🗣️ "${text}"` : "(No speech detected)", text ? "voice" : "warn");
+      const { taskId } = await res.json();
+      if (!taskId) throw new Error("No taskId returned from server");
+
+      // Poll /api/tasks/{taskId} until completed, failed, or timeout
+      addLog("⏳ Transcribing…", "info");
+      const POLL_INTERVAL_MS = 2500;
+      const TIMEOUT_MS = 120_000;
+      const deadline = Date.now() + TIMEOUT_MS;
+
+      while (Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+        const pollRes = await fetch(`/api/tasks/${taskId}`);
+        if (!pollRes.ok && pollRes.status !== 202 && pollRes.status !== 500) {
+          throw new Error(`Poll error ${pollRes.status}`);
+        }
+        const data = await pollRes.json();
+        const taskStatus = data.status?.toLowerCase();
+
+        if (taskStatus === "completed") {
+          const transcription = data.result?.transcription?.trim();
+          addLog(transcription ? `🗣️ "${transcription}"` : "(No speech detected)", transcription ? "voice" : "warn");
+          return;
+        }
+        if (taskStatus === "failed") {
+          throw new Error(data.error ?? "Transcription failed");
+        }
+        // still queued/processing — keep polling
+      }
+      throw new Error("Transcription timed out after 120 s");
     } catch (err) {
       addLog(`❌ ${err.message}`, "error");
     } finally {

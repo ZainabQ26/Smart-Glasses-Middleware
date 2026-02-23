@@ -16,29 +16,36 @@ public class AudioController : ControllerBase
     private readonly IHistoryService _historyService;
     private readonly ILogger<AudioController> _logger;
     private readonly IRequestMonitoringService? _monitoringService;
+    private readonly IBackgroundTaskQueue _taskQueue;
+    private readonly IServiceScopeFactory _scopeFactory;
 
-        public AudioController(
+    public AudioController(
         ITranscriptionService transcriptionService,
         IHistoryService historyService,
         ILogger<AudioController> logger,
+        IBackgroundTaskQueue taskQueue,
+        IServiceScopeFactory scopeFactory,
         IRequestMonitoringService? monitoringService = null)
     {
         _transcriptionService = transcriptionService;
         _historyService = historyService;
         _logger = logger;
+        _taskQueue = taskQueue;
+        _scopeFactory = scopeFactory;
         _monitoringService = monitoringService;
     }
 
     /// <summary>
-    /// Transcribes audio from base64-encoded data
+    /// Transcribes audio from base64-encoded data. Returns immediately with a task ID;
+    /// poll GET /api/tasks/{id} for the result.
     /// </summary>
     /// <param name="request">Audio request containing base64-encoded audio data</param>
-    /// <returns>Transcription result with request ID</returns>
-    /// <response code="200">Audio successfully transcribed</response>
+    /// <returns>202 Accepted with taskId for polling</returns>
+    /// <response code="202">Task queued — poll /api/tasks/{taskId} for result</response>
     /// <response code="400">Invalid audio data or request format</response>
     /// <response code="500">Internal server error during processing</response>
     [HttpPost]
-    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status202Accepted)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult> ProcessAudio([FromBody] AudioRequest request)
@@ -120,72 +127,89 @@ public class AudioController : ControllerBase
                 return BadRequest(pd);
             }
 
-            // Transcribe directly from memory stream (DO NOT STORE AUDIO FILE)
-            string? transcription = null;
-            try
+            // Queue transcription as a background task and return 202 immediately
+            // so we never block longer than CloudFront's 60 s origin timeout.
+            var entry = new BackgroundTaskEntry
             {
-                if (_monitoringService != null && monitoringRequestId != null)
-                {
-                    await _monitoringService.UpdateRequestStatus(monitoringRequestId, "Processing", "Transcribing audio", 30);
-                }
-                
-                using var audioStream = new MemoryStream(audioBytes);
-                var fileName = $"audio_{DateTime.UtcNow:yyyyMMddHHmmss}";
-                var mimeType = request.MimeType ?? "audio/wav";
-                transcription = await _transcriptionService.TranscribeAsync(audioStream, fileName, mimeType);
-                
-                if (_monitoringService != null && monitoringRequestId != null)
-                {
-                    await _monitoringService.UpdateRequestStatus(monitoringRequestId, "Processing", "Transcription completed", 70);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Transcription failed");
-                if (monitoringRequestId != null && _monitoringService != null)
-                {
-                    await _monitoringService.CompleteRequest(monitoringRequestId, false, error: "Transcription failed");
-                }
-                throw;
-            }
+                Status = BackgroundTaskStatus.Queued,
+                MonitoringRequestId = monitoringRequestId,
+                PromptText = request.MimeType ?? "audio/wav",   // re-use for mime type
+            };
 
-            // Save only the transcription text to history (no audio file storage)
-            try
-            {
-                if (_monitoringService != null && monitoringRequestId != null)
-                {
-                    await _monitoringService.UpdateRequestStatus(monitoringRequestId, "Processing", "Saving transcription", 90);
-                }
-                
-                var history = new RequestHistory
-                {
-                    RequestType = "AudioTranscription",
-                    InputText = transcription ?? string.Empty,
-                    MediaStorageKey = null // No audio file stored
-                };
-                if (!string.IsNullOrWhiteSpace(monitoringRequestId)) history.CorrelationId = monitoringRequestId;
-                history = await _historyService.SaveRequestAsync(history);
-                
-                if (!string.IsNullOrWhiteSpace(monitoringRequestId) && _monitoringService != null)
-                {
-                    var preview = !string.IsNullOrEmpty(transcription) && transcription.Length > 50 
-                        ? transcription.Substring(0, 50) + "..."
-                        : transcription ?? "";
-                    await _monitoringService.CompleteRequest(monitoringRequestId, true, result: $"Transcribed: {preview}");
-                }
+            // Persist the entry so /api/tasks/{id} can find it before work starts
+            await _taskQueue.UpdateAsync(entry);
 
-                return Ok(new { 
-                    transcription, 
-                    requestId = history.Id,
-                    monitoringRequestId,
-                    message = "Audio transcribed successfully. Audio file was not stored, only the transcription text."
-                });
-            }
-            catch (Exception ex)
+            if (_monitoringService != null && monitoringRequestId != null)
+                await _monitoringService.UpdateRequestStatus(monitoringRequestId, "Queued", "Transcription queued", 10);
+
+            // Capture values for the closure
+            var taskId = entry.Id;
+            var audioBytesCopy = audioBytes;
+            var mimeType = request.MimeType ?? "audio/wav";
+            var scopeFactory = _scopeFactory;
+            var logger = _logger;
+
+            _ = Task.Run(async () =>
             {
-                _logger.LogWarning(ex, "Failed to save transcription history");
-                return Ok(new { transcription, message = "Transcription succeeded but history save failed" });
-            }
+                try
+                {
+                    using var scope = scopeFactory.CreateScope();
+                    var transcriptionSvc = scope.ServiceProvider.GetRequiredService<ITranscriptionService>();
+                    var historySvc = scope.ServiceProvider.GetRequiredService<IHistoryService>();
+                    var queue = scope.ServiceProvider.GetRequiredService<IBackgroundTaskQueue>();
+
+                    // Fetch the stored entry so we update the same object in the store
+                    var taskEntry = queue.Get(taskId) ?? new BackgroundTaskEntry { Id = taskId };
+                    taskEntry.Status = BackgroundTaskStatus.Processing;
+                    taskEntry.UpdatedAt = DateTime.UtcNow;
+                    await queue.UpdateAsync(taskEntry);
+
+                    var fileName = $"audio_{DateTime.UtcNow:yyyyMMddHHmmss}";
+                    using var audioStream = new MemoryStream(audioBytesCopy);
+                    var transcription = await transcriptionSvc.TranscribeAsync(audioStream, fileName, mimeType);
+
+                    // Save history
+                    try
+                    {
+                        var history = new RequestHistory
+                        {
+                            RequestType = "AudioTranscription",
+                            InputText = transcription ?? string.Empty,
+                            MediaStorageKey = null
+                        };
+                        if (!string.IsNullOrWhiteSpace(monitoringRequestId))
+                            history.CorrelationId = monitoringRequestId;
+                        await historySvc.SaveRequestAsync(history);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogWarning(ex, "Failed to save transcription history for task {TaskId}", taskId);
+                    }
+
+                    taskEntry.Result = new { transcription };
+                    taskEntry.Status = BackgroundTaskStatus.Completed;
+                    taskEntry.UpdatedAt = DateTime.UtcNow;
+                    await queue.UpdateAsync(taskEntry);
+                    logger.LogInformation("Async transcription task {TaskId} completed", taskId);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Async transcription task {TaskId} failed", taskId);
+                    try
+                    {
+                        using var scope = scopeFactory.CreateScope();
+                        var queue = scope.ServiceProvider.GetRequiredService<IBackgroundTaskQueue>();
+                        var taskEntry = queue.Get(taskId) ?? new BackgroundTaskEntry { Id = taskId };
+                        taskEntry.Error = ex.Message;
+                        taskEntry.Status = BackgroundTaskStatus.Failed;
+                        taskEntry.UpdatedAt = DateTime.UtcNow;
+                        await queue.UpdateAsync(taskEntry);
+                    }
+                    catch { /* best-effort */ }
+                }
+            });
+
+            return Accepted($"/api/tasks/{taskId}", new { taskId });
         }
         catch (Exception ex)
         {
