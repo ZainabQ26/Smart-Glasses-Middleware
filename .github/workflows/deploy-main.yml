@@ -238,7 +238,7 @@ jobs:
           aws iam put-role-policy \
             --role-name "$ROLE_NAME" \
             --policy-name "$POLICY_NAME" \
-            --policy-document '{"Version":"2012-10-17","Statement":[{"Sid":"AppAutoScaling","Effect":"Allow","Action":["application-autoscaling:*"],"Resource":"*"},{"Sid":"CloudWatchAlarms","Effect":"Allow","Action":["cloudwatch:PutMetricAlarm","cloudwatch:DeleteAlarms","cloudwatch:DescribeAlarms","cloudwatch:DescribeAlarmsForMetric","cloudwatch:EnableAlarmActions","cloudwatch:DisableAlarmActions"],"Resource":"*"},{"Sid":"EventBridge","Effect":"Allow","Action":["events:PutRule","events:PutTargets","events:DeleteRule","events:RemoveTargets","events:DescribeRule","events:ListTargetsByRule","events:ListRuleNamesByTarget","events:TagResource","events:UntagResource","events:ListTagsForResource"],"Resource":"*"}]}' \
+            --policy-document '{"Version":"2012-10-17","Statement":[{"Sid":"AppAutoScaling","Effect":"Allow","Action":["application-autoscaling:*"],"Resource":"*"},{"Sid":"CloudWatchAlarms","Effect":"Allow","Action":["cloudwatch:PutMetricAlarm","cloudwatch:DeleteAlarms","cloudwatch:DescribeAlarms","cloudwatch:DescribeAlarmsForMetric","cloudwatch:EnableAlarmActions","cloudwatch:DisableAlarmActions","cloudwatch:ListTagsForResource","cloudwatch:TagResource","cloudwatch:UntagResource"],"Resource":"*"},{"Sid":"EventBridge","Effect":"Allow","Action":["events:PutRule","events:PutTargets","events:DeleteRule","events:RemoveTargets","events:DescribeRule","events:ListTargetsByRule","events:ListRuleNamesByTarget","events:TagResource","events:UntagResource","events:ListTagsForResource"],"Resource":"*"}]}' \
             2>/dev/null || echo "Warning: could not patch IAM role $ROLE_NAME (may not exist or lack permission)"
 
       - name: Terraform init
@@ -557,11 +557,12 @@ jobs:
               # out of state and causes "conflicting DNS domain" on apply.
               safe_import "$TF_NAME" "$VPCE_ID"
             }
-            import_vpce aws_vpc_endpoint.s3             "com.amazonaws.${REGION}.s3"
-            import_vpce aws_vpc_endpoint.ecr_api        "com.amazonaws.${REGION}.ecr.api"
-            import_vpce aws_vpc_endpoint.ecr_dkr        "com.amazonaws.${REGION}.ecr.dkr"
-            import_vpce aws_vpc_endpoint.logs           "com.amazonaws.${REGION}.logs"
-            import_vpce aws_vpc_endpoint.secretsmanager "com.amazonaws.${REGION}.secretsmanager"
+            import_vpce aws_vpc_endpoint.s3                  "com.amazonaws.${REGION}.s3"
+            # ecr/logs/secretsmanager endpoints have count=1, so TF address is [0]
+            import_vpce "aws_vpc_endpoint.ecr_api[0]"         "com.amazonaws.${REGION}.ecr.api"
+            import_vpce "aws_vpc_endpoint.ecr_dkr[0]"         "com.amazonaws.${REGION}.ecr.dkr"
+            import_vpce "aws_vpc_endpoint.logs[0]"            "com.amazonaws.${REGION}.logs"
+            import_vpce "aws_vpc_endpoint.secretsmanager[0]"  "com.amazonaws.${REGION}.secretsmanager"
           else
             echo "No existing project VPC found – Terraform will create a new one."
           fi
