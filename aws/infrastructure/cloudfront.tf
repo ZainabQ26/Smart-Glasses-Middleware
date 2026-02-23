@@ -1,3 +1,26 @@
+# Response headers policy that enables cross-origin isolation.
+# Required so browsers allow SharedArrayBuffer, which onnxruntime-web's
+# threaded WASM build calls during initialisation (before ortConfig runs).
+resource "aws_cloudfront_response_headers_policy" "coop_coep" {
+  name    = "${var.project_name}-${var.environment}-coop-coep"
+  comment = "COOP + COEP for SharedArrayBuffer / ONNX Runtime threaded WASM"
+
+  custom_headers_config {
+    items {
+      header   = "Cross-Origin-Opener-Policy"
+      value    = "same-origin"
+      override = true
+    }
+    items {
+      # credentialless: page is cross-origin isolated but assets don't need
+      # explicit Cross-Origin-Resource-Policy headers (simpler than require-corp)
+      header   = "Cross-Origin-Embedder-Policy"
+      value    = "credentialless"
+      override = true
+    }
+  }
+}
+
 # CloudFront Distribution for Frontend
 resource "aws_cloudfront_distribution" "frontend" {
   enabled             = true
@@ -40,11 +63,12 @@ resource "aws_cloudfront_distribution" "frontend" {
       }
     }
 
-    viewer_protocol_policy = "redirect-to-https"
-    min_ttl                = 0
-    default_ttl            = 3600
-    max_ttl                = 86400
-    compress               = true
+    viewer_protocol_policy    = "redirect-to-https"
+    min_ttl                   = 0
+    default_ttl               = 3600
+    max_ttl                   = 86400
+    compress                  = true
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.coop_coep.id
   }
 
   # Static assets served by ASP.NET Core wwwroot (admin panel, monitoring page, etc.)
@@ -64,11 +88,12 @@ resource "aws_cloudfront_distribution" "frontend" {
       }
     }
 
-    viewer_protocol_policy = "redirect-to-https"
-    min_ttl                = 0
-    default_ttl            = 0
-    max_ttl                = 0
-    compress               = true
+    viewer_protocol_policy     = "redirect-to-https"
+    min_ttl                    = 0
+    default_ttl                = 0
+    max_ttl                    = 0
+    compress                   = true
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.coop_coep.id
   }
 
   ordered_cache_behavior {
