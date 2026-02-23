@@ -198,7 +198,6 @@ resource "aws_cloudwatch_metric_alarm" "ecs_wake_on_traffic" {
     expression  = "m1+m2"
     label       = "TotalRequests"
     return_data = true
-    period      = 60
   }
 }
 
