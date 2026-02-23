@@ -48,6 +48,16 @@ output "bedrock_model_id" {
   value       = "anthropic.claude-3-sonnet-20240229-v1:0"
 }
 
+output "frontend_bucket_name" {
+  description = "S3 bucket name for the frontend static files"
+  value       = aws_s3_bucket.frontend.id
+}
+
+output "cloudfront_distribution_id" {
+  description = "CloudFront distribution ID (used for cache invalidation)"
+  value       = aws_cloudfront_distribution.frontend.id
+}
+
 output "secrets_manager_arn" {
   description = "Secrets Manager secret ARN"
   value       = aws_secretsmanager_secret.app_secrets.arn
