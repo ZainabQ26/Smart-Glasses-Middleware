@@ -271,23 +271,26 @@ locals {
         }
       ]
 
-      secrets = [
-        {
-          name      = "ConnectionStrings__DefaultConnection"
-          valueFrom = "${aws_secretsmanager_secret.db_credentials.arn}:connection_string::"
-        },
-        {
-          name      = "AWS__S3__MediaBucket"
-          valueFrom = "${aws_secretsmanager_secret.app_secrets.arn}:s3_media_bucket::"
-        },
-        {
-          name      = "AWS__S3__DocumentsBucket"
-          valueFrom = "${aws_secretsmanager_secret.app_secrets.arn}:s3_documents_bucket::"
-        }
-      ] ++ (local.enable_redis_effective ? [{
-        name      = "ConnectionStrings__Redis"
-        valueFrom = "${aws_secretsmanager_secret.redis_credentials[0].arn}:connection_string::"
-      }] : [])
+      secrets = concat(
+        [
+          {
+            name      = "ConnectionStrings__DefaultConnection"
+            valueFrom = "${aws_secretsmanager_secret.db_credentials.arn}:connection_string::"
+          },
+          {
+            name      = "AWS__S3__MediaBucket"
+            valueFrom = "${aws_secretsmanager_secret.app_secrets.arn}:s3_media_bucket::"
+          },
+          {
+            name      = "AWS__S3__DocumentsBucket"
+            valueFrom = "${aws_secretsmanager_secret.app_secrets.arn}:s3_documents_bucket::"
+          }
+        ],
+        local.enable_redis_effective ? [{
+          name      = "ConnectionStrings__Redis"
+          valueFrom = "${aws_secretsmanager_secret.redis_credentials[0].arn}:connection_string::"
+        }] : []
+      )
 
       logConfiguration = {
         logDriver = "awslogs"
