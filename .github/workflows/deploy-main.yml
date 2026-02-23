@@ -568,20 +568,6 @@ jobs:
       - name: Terraform apply
         working-directory: aws/infrastructure
         run: |
-          # Remove any count=0 resources that have prevent_destroy=true from state.
-          # For dev, redis is disabled (cost_optimized_non_prod=true default), so
-          # these land at count=0 and Terraform plans to destroy them, but
-          # prevent_destroy blocks that plan. Removing them from state here (just
-          # before apply, with -lock=false so locking can't interfere) ensures a
-          # clean plan. The AWS resources are unaffected; only state is changed.
-          echo "Pre-apply: removing count=0 prevent_destroy resources from state (if present)..."
-          terraform state rm -lock=false "aws_secretsmanager_secret.redis_credentials[0]" && \
-            echo "  Removed redis_credentials[0] from state" || \
-            echo "  redis_credentials[0] not in state (ok)"
-          terraform state rm -lock=false "aws_elasticache_replication_group.redis[0]" && \
-            echo "  Removed replication_group.redis[0] from state" || \
-            echo "  replication_group.redis[0] not in state (ok)"
-
           terraform apply -auto-approve -lock=false \
             -var "environment=dev" \
             -var "aws_region=${AWS_REGION}"

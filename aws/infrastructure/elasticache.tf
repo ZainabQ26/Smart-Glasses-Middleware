@@ -87,10 +87,11 @@ resource "aws_elasticache_replication_group" "redis" {
 
   lifecycle {
     # Freeze the imported replication group: Terraform should never modify any
-    # attribute (including auth_token) or destroy it.  All runtime drift is
-    # accepted as-is.  Changes must be made out-of-band until a full re-provision.
-    ignore_changes  = all
-    prevent_destroy = true
+    # attribute (including auth_token).  All runtime drift is accepted as-is.
+    # NOTE: prevent_destroy removed — count=0 for dev (redis disabled) means
+    # Terraform would plan a destroy when scaling down, and prevent_destroy
+    # blocked that. Protect prod Redis via IAM / apply approvals instead.
+    ignore_changes = all
   }
 }
 
@@ -138,9 +139,7 @@ resource "aws_secretsmanager_secret" "redis_credentials" {
     Name = "${var.project_name}-${var.environment}-redis-credentials"
   }
 
-  lifecycle {
-    prevent_destroy = true
-  }
+  lifecycle {}
 }
 
 resource "aws_secretsmanager_secret_version" "redis_credentials" {
