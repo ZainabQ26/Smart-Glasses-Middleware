@@ -62,7 +62,11 @@ export default function App() {
       vad.pause();
       setStatus("processing");
       addLog("⏳ Transcribing via Whisper Lambda…", "info");
-      sendAudio(utils.encodeWAV(audio));
+      // encodeWAV may return ArrayBuffer, Uint8Array, or Blob depending on vad-web version.
+      // Normalise to Blob so FileReader.readAsDataURL always gets the right type.
+      const wav = utils.encodeWAV(audio);
+      const wavBlob = wav instanceof Blob ? wav : new Blob([wav], { type: "audio/wav" });
+      sendAudio(wavBlob);
     },
     onVADMisfire: () => {
       if (activatedRef.current) addLog("(Noise ignored, still listening…)", "info");
