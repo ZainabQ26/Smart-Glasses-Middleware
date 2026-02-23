@@ -54,7 +54,10 @@ resource "aws_cloudfront_distribution" "frontend" {
     custom_origin_config {
       http_port              = 80
       https_port             = 443
-      origin_protocol_policy = "http-only"
+      # Use HTTPS so the ALB marks its stickiness cookies (AWSALB/AWSALBCORS)
+      # with the Secure flag. With http-only the ALB strips Secure from cookies
+      # which browsers reject on HTTPS pages, breaking SignalR sticky sessions.
+      origin_protocol_policy = "https-only"
       origin_ssl_protocols   = ["TLSv1.2"]
       # CloudFront max origin_read_timeout without a quota increase is 60s.
       # Whisper cold starts can exceed this; the ECS API must handle the Lambda
