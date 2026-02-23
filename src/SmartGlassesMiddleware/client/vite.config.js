@@ -47,5 +47,10 @@ export default defineConfig({
       },
     },
   },
+  // Bundle Web Workers as ES modules so `import` statements inside the worker
+  // (e.g. @xenova/transformers) are handled correctly by Rollup.
+  worker: {
+    format: 'es',
+  },
   base: '/',
 })
