@@ -334,7 +334,14 @@ jobs:
           }
           import_secret aws_secretsmanager_secret.app_secrets       "${PREFIX}-app-secrets"
           import_secret aws_secretsmanager_secret.db_credentials    "${PREFIX}-db-credentials"
-          import_secret aws_secretsmanager_secret.redis_credentials "${PREFIX}-redis-credentials"
+          # redis_credentials count=0 for dev (cost_optimized_non_prod=true disables redis).
+          # Importing it would leave a count=0 resource in state, causing a
+          # prevent_destroy-blocked destroy on apply. Remove from state instead.
+          if [ "$ENV" = "dev" ]; then
+            terraform state rm "aws_secretsmanager_secret.redis_credentials[0]" 2>/dev/null || true
+          else
+            import_secret aws_secretsmanager_secret.redis_credentials "${PREFIX}-redis-credentials"
+          fi
 
           # ── CloudFront ────────────────────────────────────────────────────────
           OAC_ID=$(aws cloudfront list-origin-access-controls \
@@ -364,13 +371,20 @@ jobs:
           if [ -z "$REDIS_CLUSTER_EXISTS" ] || [ "$REDIS_CLUSTER_EXISTS" = "None" ]; then
             echo "  ElastiCache cluster not found in AWS — removing stale state entries"
             terraform state rm "aws_elasticache_cluster.redis_single[0]"        2>/dev/null || true
+            terraform state rm "aws_elasticache_replication_group.redis[0]"     2>/dev/null || true
             terraform state rm aws_elasticache_replication_group.redis           2>/dev/null || true
             terraform state rm aws_elasticache_subnet_group.main                 2>/dev/null || true
             terraform state rm aws_elasticache_parameter_group.redis             2>/dev/null || true
           fi
+          # For dev: replication group has count=0 always (its count expr uses != "dev").
+          # Remove any previously-imported entry to prevent a prevent_destroy conflict.
+          if [ "$ENV" = "dev" ]; then
+            terraform state rm "aws_elasticache_replication_group.redis[0]" 2>/dev/null || true
+          fi
           safe_import aws_elasticache_parameter_group.redis   "${PREFIX}-redis-params"
           safe_import aws_elasticache_subnet_group.main       "${PREFIX}-elasticache-subnet-group"
-          safe_import aws_elasticache_replication_group.redis "${PREFIX}-redis"
+          # Only import the replication group for non-dev envs (count>0 only outside dev)
+          [ "$ENV" != "dev" ] && safe_import "aws_elasticache_replication_group.redis[0]" "${PREFIX}-redis"
           safe_import "aws_elasticache_cluster.redis_single[0]" "${PREFIX}-redis-single"
 
           # ── RDS ───────────────────────────────────────────────────────────────
