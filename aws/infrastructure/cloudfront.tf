@@ -1,3 +1,12 @@
+locals {
+  # Use an explicitly-provided certificate ARN first; fall back to the one
+  # created in route53.tf when only a domain name is supplied.
+  # try() prevents a plan error when the validation resource doesn't exist yet.
+  effective_certificate_arn = var.certificate_arn != "" ? var.certificate_arn : (
+    var.domain_name != "" ? try(aws_acm_certificate_validation.cloudfront[0].certificate_arn, "") : ""
+  )
+}
+
 # CloudFront Distribution for Frontend
 resource "aws_cloudfront_distribution" "frontend" {
   enabled             = true
@@ -5,6 +14,7 @@ resource "aws_cloudfront_distribution" "frontend" {
   comment             = "CloudFront distribution for ${var.project_name} ${var.environment} frontend"
   default_root_object = "index.html"
   price_class         = var.environment == "prod" ? "PriceClass_All" : "PriceClass_100"
+  aliases             = var.domain_name != "" ? [var.domain_name] : []
 
   # S3 Origin for static frontend
   origin {
@@ -293,10 +303,10 @@ resource "aws_cloudfront_distribution" "frontend" {
   }
 
   viewer_certificate {
-    cloudfront_default_certificate = var.certificate_arn == "" && var.domain_name == ""
-    acm_certificate_arn            = var.certificate_arn != "" ? var.certificate_arn : null
-    ssl_support_method             = var.certificate_arn != "" ? "sni-only" : null
-    minimum_protocol_version       = "TLSv1.2_2021"
+    cloudfront_default_certificate = local.effective_certificate_arn == ""
+    acm_certificate_arn            = local.effective_certificate_arn != "" ? local.effective_certificate_arn : null
+    ssl_support_method             = local.effective_certificate_arn != "" ? "sni-only" : null
+    minimum_protocol_version       = local.effective_certificate_arn != "" ? "TLSv1.2_2021" : "TLSv1"
   }
 
   tags = {
