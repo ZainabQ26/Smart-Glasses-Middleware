@@ -28,6 +28,11 @@ output "cloudfront_distribution_domain" {
   value       = aws_cloudfront_distribution.frontend.domain_name
 }
 
+output "website_url" {
+  description = "Website URL (custom domain if configured, otherwise CloudFront domain)"
+  value       = var.domain_name != "" ? "https://${var.domain_name}" : "https://${aws_cloudfront_distribution.frontend.domain_name}"
+}
+
 output "api_alb_dns" {
   description = "API Application Load Balancer DNS name"
   value       = aws_lb.api.dns_name
