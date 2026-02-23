@@ -206,7 +206,6 @@ jobs:
           lambda_image = "${REGISTRY}/whisper-lambda:${SHA}"
           lambda_document_image = ""
           deployment_id = "${{ github.run_id }}"
-          domain_name = "capstone.robertb.me"
           EOF
 
       - name: Download Document Processor zip
