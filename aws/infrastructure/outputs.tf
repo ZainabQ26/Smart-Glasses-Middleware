@@ -28,6 +28,11 @@ output "cloudfront_distribution_domain" {
   value       = aws_cloudfront_distribution.frontend.domain_name
 }
 
+output "website_url" {
+  description = "Website URL (custom domain if configured, otherwise CloudFront domain)"
+  value       = var.domain_name != "" ? "https://${var.domain_name}" : "https://${aws_cloudfront_distribution.frontend.domain_name}"
+}
+
 output "api_alb_dns" {
   description = "API Application Load Balancer DNS name"
   value       = aws_lb.api.dns_name
@@ -46,6 +51,16 @@ output "lambda_document_processor_arn" {
 output "bedrock_model_id" {
   description = "Bedrock model ID for LLM"
   value       = "anthropic.claude-3-sonnet-20240229-v1:0"
+}
+
+output "frontend_bucket_name" {
+  description = "S3 bucket name for the frontend static files"
+  value       = aws_s3_bucket.frontend.id
+}
+
+output "cloudfront_distribution_id" {
+  description = "CloudFront distribution ID (used for cache invalidation)"
+  value       = aws_cloudfront_distribution.frontend.id
 }
 
 output "secrets_manager_arn" {
