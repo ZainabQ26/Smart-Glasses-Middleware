@@ -56,6 +56,10 @@ resource "aws_cloudfront_distribution" "frontend" {
       https_port             = 443
       origin_protocol_policy = "http-only"
       origin_ssl_protocols   = ["TLSv1.2"]
+      # Whisper Lambda cold start + model load + transcription can take 60-120s.
+      # CloudFront default is 30s which causes 504s. Max allowed is 180s.
+      origin_read_timeout    = 180
+      origin_keepalive_timeout = 60
     }
   }
 
