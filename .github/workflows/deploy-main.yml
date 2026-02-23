@@ -23,32 +23,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
-      
-      - name: Restore dependencies
-        run: dotnet restore
-      
-      - name: Build
-        run: dotnet build --no-restore --configuration Release
-
-  build-and-push:
-    needs: build
+  # Validates .NET compilation AND builds+pushes the API Docker image.
+  # Docker layer caching avoids re-running dotnet restore / npm ci when
+  # dependencies are unchanged — typically saves 3-5 minutes per run.
+  build-api:
     runs-on: ubuntu-latest
     permissions:
       id-token: write
       contents: read
-    outputs:
-      api-image: ${{ steps.api.outputs.api_image }}
-      lambda-whisper-image: ${{ steps.lambda-whisper.outputs.lambda_image }}
-      lambda-document-image: ${{ steps.lambda-document.outputs.lambda_image }}
     steps:
       - uses: actions/checkout@v4
 
@@ -57,29 +39,86 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ secrets.AWS_REGION }}
-          # Don't mask the account ID so it can appear in job outputs without being blanked
           mask-aws-account-id: false
 
       - name: Login to ECR
         id: ecr-login
         uses: aws-actions/amazon-ecr-login@v1
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers (API)
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache-api
+          key: ${{ runner.os }}-buildx-api-${{ hashFiles('src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj', 'src/SmartGlassesMiddleware/client/package-lock.json', 'src/SmartGlassesMiddleware/Dockerfile') }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-api-
+
       - name: Build & push API image
-        id: api
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./src/SmartGlassesMiddleware/Dockerfile
+          push: true
+          tags: ${{ steps.ecr-login.outputs.registry }}/smart-glasses-api:${{ github.sha }}
+          platforms: linux/amd64
+          cache-from: type=local,src=/tmp/.buildx-cache-api
+          cache-to: type=local,dest=/tmp/.buildx-cache-api-new,mode=max
+
+      - name: Rotate build cache
         run: |
-          # Use the registry URL from the ECR login action output (no secret masking)
-          IMAGE_URI=${{ steps.ecr-login.outputs.registry }}/smart-glasses-api:${{ github.sha }}
-          docker build --platform linux/amd64 -t $IMAGE_URI -f ./src/SmartGlassesMiddleware/Dockerfile .
-          docker push $IMAGE_URI
-          echo "api_image=$IMAGE_URI" >> $GITHUB_OUTPUT
+          rm -rf /tmp/.buildx-cache-api
+          mv /tmp/.buildx-cache-api-new /tmp/.buildx-cache-api 2>/dev/null || true
+
+  # Builds and pushes the Whisper Lambda image and packages the Document
+  # Processor Lambda zip. Runs in PARALLEL with build-api — no shared deps.
+  build-lambda:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          mask-aws-account-id: false
+
+      - name: Login to ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers (Whisper)
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache-whisper
+          key: ${{ runner.os }}-buildx-whisper-${{ hashFiles('aws/lambda-whisper/requirements.txt', 'aws/lambda-whisper/Dockerfile') }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-whisper-
 
       - name: Build & push Whisper Lambda image
-        id: lambda-whisper
+        uses: docker/build-push-action@v5
+        with:
+          context: ./aws/lambda-whisper
+          push: true
+          tags: ${{ steps.ecr-login.outputs.registry }}/whisper-lambda:${{ github.sha }}
+          platforms: linux/amd64
+          provenance: false
+          cache-from: type=local,src=/tmp/.buildx-cache-whisper
+          cache-to: type=local,dest=/tmp/.buildx-cache-whisper-new,mode=max
+
+      - name: Rotate build cache
         run: |
-          IMAGE_URI=${{ steps.ecr-login.outputs.registry }}/whisper-lambda:${{ github.sha }}
-          docker build --platform linux/amd64 --provenance=false -t $IMAGE_URI ./aws/lambda-whisper
-          docker push $IMAGE_URI
-          echo "lambda_image=$IMAGE_URI" >> $GITHUB_OUTPUT
+          rm -rf /tmp/.buildx-cache-whisper
+          mv /tmp/.buildx-cache-whisper-new /tmp/.buildx-cache-whisper 2>/dev/null || true
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -87,12 +126,10 @@ jobs:
           python-version: '3.12'
 
       - name: Build Document Processor Lambda zip
-        id: lambda-document
         run: |
           cd aws/lambda-document-processor
           chmod +x build.sh
           ./build.sh
-          echo "lambda_zip=aws/lambda-document-processor/deployment.zip" >> $GITHUB_OUTPUT
 
       - name: Upload Document Processor zip
         uses: actions/upload-artifact@v4
@@ -101,7 +138,7 @@ jobs:
           path: aws/lambda-document-processor/deployment.zip
 
   terraform-apply:
-    needs: build-and-push
+    needs: [build-api, build-lambda]
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -278,17 +315,25 @@ jobs:
 
           echo "=== Importing pre-existing AWS resources ==="
 
+          # Fetch the full state list once so safe_import can check membership
+          # with a fast grep instead of an individual round-trip per resource.
+          echo "  Fetching Terraform state list..."
+          EXISTING_STATE=$(terraform state list 2>/dev/null || echo "")
+
           # safe_import: skip if already in TF state (avoids "Resource already
           # managed by Terraform" abort).  Used for global/stable resources.
           safe_import() {
             local TF_RES="$1" IMPORT_ID="$2"
             [ -z "$IMPORT_ID" ] || [ "$IMPORT_ID" = "None" ] || [ "$IMPORT_ID" = "null" ] && return 0
-            if terraform state show "$TF_RES" >/dev/null 2>&1; then
+            if echo "$EXISTING_STATE" | grep -qxF "$TF_RES"; then
               echo "  Already in state: $TF_RES (skipping)"
             else
               terraform import "$TF_RES" "$IMPORT_ID" || true
+              # Keep the in-memory list current so later calls in the same run are accurate
+              EXISTING_STATE="${EXISTING_STATE}${NEWLINE}${TF_RES}"
             fi
           }
+          NEWLINE=$'\n'
 
           # tf_import: always state rm then import.  Used for ALL VPC sub-resources
           # so stale wrong-VPC entries are always replaced with the correct one.
@@ -744,17 +789,22 @@ jobs:
           # Use a longer poll loop instead of the default 10-min waiter
           STABLE=false
           for attempt in $(seq 1 30); do
-            RUNNING=$(aws ecs describe-services \
+            # Single API call per iteration (was 3 separate calls before)
+            ECS_JSON=$(aws ecs describe-services \
               --cluster "$CLUSTER" --services "$SERVICE" --region "$AWS_REGION" \
-              --query 'services[0].runningCount' --output text 2>/dev/null || echo 0)
-            DESIRED=$(aws ecs describe-services \
-              --cluster "$CLUSTER" --services "$SERVICE" --region "$AWS_REGION" \
-              --query 'services[0].desiredCount' --output text 2>/dev/null || echo 1)
-            PENDING=$(aws ecs describe-services \
-              --cluster "$CLUSTER" --services "$SERVICE" --region "$AWS_REGION" \
-              --query 'services[0].pendingCount' --output text 2>/dev/null || echo 99)
+              --query 'services[0].{running:runningCount,desired:desiredCount,pending:pendingCount}' \
+              --output json 2>/dev/null || echo '{}')
+            RUNNING=$(echo "$ECS_JSON" | jq -r '.running // 0')
+            DESIRED=$(echo "$ECS_JSON" | jq -r '.desired // 1')
+            PENDING=$(echo "$ECS_JSON" | jq -r '.pending // 99')
             echo "Attempt $attempt/30: running=$RUNNING desired=$DESIRED pending=$PENDING"
-            if [ "$RUNNING" = "$DESIRED" ] && [ "$PENDING" = "0" ] && [ "$DESIRED" != "0" ]; then
+            # desired=0 is valid: scale-to-zero is active, deployment is complete
+            if [ "$DESIRED" = "0" ]; then
+              echo "ECS service desired=0 (scale-to-zero active) — deployment complete."
+              STABLE=true
+              break
+            fi
+            if [ "$RUNNING" = "$DESIRED" ] && [ "$PENDING" = "0" ]; then
               echo "ECS service is stable."
               STABLE=true
               break
