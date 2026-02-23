@@ -48,7 +48,7 @@ export default function App() {
   // SpeechRecognition opens its OWN concurrent stream; browsers allow this.
   // When "activate" fires we flip activatedRef; VAD is already running.
   const vad = useMicVAD({
-    startOnLoad: true,
+    startOnLoad: false, // Changed from true: only start VAD after activation word
     // baseAssetPath: "/", // Removed to allow loading from CDN
     ortConfig: (ort) => { ort.env.wasm.numThreads = 1; },
     onSpeechStart: () => {
@@ -68,10 +68,9 @@ export default function App() {
 
   vadRef.current = vad;
 
-  // Surface VAD initialisation state in the activity log.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // On load, confirm VAD is ready but idle
   useEffect(() => {
-    if (!vad.loading && !vad.errored) addLog("✅ Voice detection ready", "info");
+    if (!vad.loading && !vad.errored) addLog("✅ Voice detection linked", "info");
   }, [vad.loading]);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -101,6 +100,7 @@ export default function App() {
       if (transcript.includes("activate") && !activatedRef.current) {
         activatedRef.current = true;
         rec.stop(); // Gracefully stop SR stream
+        vad.start(); // Start listening for the actual command NOW
         setStatus("listening");
         addLog("🎤 Activated — speak your command", "info");
         // Safety net: reset if onSpeechEnd never fires (VAD error or prolonged silence).
@@ -165,6 +165,7 @@ export default function App() {
   const handleMicButton = () => {
     if (status === "idle") {
       activatedRef.current = true;
+      try { vad.start(); } catch (_) {}
       setStatus("listening");
       addLog("🎤 Listening… speak your command", "info");
       if (listeningTimeoutRef.current) clearTimeout(listeningTimeoutRef.current);
