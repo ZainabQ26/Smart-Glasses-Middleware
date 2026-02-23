@@ -238,7 +238,7 @@ jobs:
           aws iam put-role-policy \
             --role-name "$ROLE_NAME" \
             --policy-name "$POLICY_NAME" \
-            --policy-document '{"Version":"2012-10-17","Statement":[{"Sid":"AppAutoScaling","Effect":"Allow","Action":["application-autoscaling:*"],"Resource":"*"}]}' \
+            --policy-document '{"Version":"2012-10-17","Statement":[{"Sid":"AppAutoScaling","Effect":"Allow","Action":["application-autoscaling:*"],"Resource":"*"},{"Sid":"CloudWatchAlarms","Effect":"Allow","Action":["cloudwatch:PutMetricAlarm","cloudwatch:DeleteAlarms","cloudwatch:DescribeAlarms","cloudwatch:DescribeAlarmsForMetric","cloudwatch:EnableAlarmActions","cloudwatch:DisableAlarmActions"],"Resource":"*"},{"Sid":"EventBridge","Effect":"Allow","Action":["events:PutRule","events:PutTargets","events:DeleteRule","events:RemoveTargets","events:DescribeRule","events:ListTargetsByRule","events:ListRuleNamesByTarget","events:TagResource","events:UntagResource","events:ListTagsForResource"],"Resource":"*"}]}' \
             2>/dev/null || echo "Warning: could not patch IAM role $ROLE_NAME (may not exist or lack permission)"
 
       - name: Terraform init
@@ -551,7 +551,11 @@ jobs:
                 --filters "Name=vpc-id,Values=$VPC_ID" "Name=service-name,Values=$SVC_NAME" \
                           "Name=vpc-endpoint-state,Values=available" \
                 --query 'VpcEndpoints[0].VpcEndpointId' --output text --region "$REGION" 2>/dev/null || true)
-              tf_import "$TF_NAME" "$VPCE_ID"
+              echo "  VPCE $SVC_NAME → ${VPCE_ID:-<not found in VPC>}"
+              # Use safe_import (not tf_import) so an existing state entry is never
+              # removed then silently fails to re-import, which leaves the resource
+              # out of state and causes "conflicting DNS domain" on apply.
+              safe_import "$TF_NAME" "$VPCE_ID"
             }
             import_vpce aws_vpc_endpoint.s3             "com.amazonaws.${REGION}.s3"
             import_vpce aws_vpc_endpoint.ecr_api        "com.amazonaws.${REGION}.ecr.api"
