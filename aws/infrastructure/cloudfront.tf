@@ -54,10 +54,16 @@ resource "aws_cloudfront_distribution" "frontend" {
     custom_origin_config {
       http_port              = 80
       https_port             = 443
-      # Use HTTPS so the ALB marks its stickiness cookies (AWSALB/AWSALBCORS)
-      # with the Secure flag. With http-only the ALB strips Secure from cookies
-      # which browsers reject on HTTPS pages, breaking SignalR sticky sessions.
-      origin_protocol_policy = "https-only"
+      # HTTP is used for CF→ALB because the ALB TLS certificate covers the
+      # custom domain (capstone.robertb.me) but not the raw ELB hostname that
+      # CloudFront uses for the origin. CloudFront validates the certificate
+      # against the origin hostname, so https-only causes 502 errors.
+      # The viewer-facing HTTPS (CF→browser) is unaffected; the app still sees
+      # X-Forwarded-Proto:https from CloudFront and sets Secure on app cookies.
+      # AWSALB stickiness cookies set by the ALB lack the Secure flag in HTTP
+      # mode, but browsers still send them on HTTPS pages (SameSite=Lax default),
+      # so SignalR sticky sessions continue to work.
+      origin_protocol_policy = "http-only"
       origin_ssl_protocols   = ["TLSv1.2"]
       # CloudFront max origin_read_timeout without a quota increase is 60s.
       # Whisper cold starts can exceed this; the ECS API must handle the Lambda
