@@ -5,8 +5,8 @@ import { viteStaticCopy } from 'vite-plugin-static-copy'
 export default defineConfig({
   plugins: [
     react(),
-    // Copy the Silero VAD model and ONNX Runtime WASM files into the build output
-    // so they're served as static assets at /silero_vad.onnx, /vad.worklet.bundle.min.js, etc.
+    // We are now loading VAD files from the CDN by removing baseAssetPath="/" in App.jsx
+    // So we don't strictly need to copy them locally anymore, but keeping them as backup is fine.
     viteStaticCopy({
       targets: [
         {

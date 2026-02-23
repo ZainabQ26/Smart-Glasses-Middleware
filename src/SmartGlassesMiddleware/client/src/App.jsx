@@ -49,7 +49,7 @@ export default function App() {
   // When "activate" fires we flip activatedRef; VAD is already running.
   const vad = useMicVAD({
     startOnLoad: true,
-    baseAssetPath: "/",
+    // baseAssetPath: "/", // Removed to allow loading from CDN
     ortConfig: (ort) => { ort.env.wasm.numThreads = 1; },
     onSpeechStart: () => {
       if (activatedRef.current) addLog("🟢 Speech detected…", "info");
@@ -100,7 +100,7 @@ export default function App() {
 
       if (transcript.includes("activate") && !activatedRef.current) {
         activatedRef.current = true;
-        rec.abort(); // release SR stream; VAD stream is already open
+        rec.stop(); // Gracefully stop SR stream
         setStatus("listening");
         addLog("🎤 Activated — speak your command", "info");
         // Safety net: reset if onSpeechEnd never fires (VAD error or prolonged silence).

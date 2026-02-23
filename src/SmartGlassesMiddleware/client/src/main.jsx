@@ -5,9 +5,8 @@ import App from './App.jsx'
 import WakeupGate from './WakeupGate.jsx'
 
 createRoot(document.getElementById('root')).render(
-  <StrictMode>
+  // Removed StrictMode to prevent double-mounting which VAD dislikes
     <WakeupGate>
       <App />
-    </WakeupGate>
-  </StrictMode>,
+    </WakeupGate>,
 )
