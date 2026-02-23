@@ -151,18 +151,54 @@ resource "aws_lambda_function" "ecs_idle_scaler" {
 resource "aws_cloudwatch_metric_alarm" "ecs_wake_on_traffic" {
   count               = local.enable_ecs_idle_autoscaler_effective ? 1 : 0
   alarm_name          = "${var.project_name}-${var.environment}-ecs-wake-on-traffic"
-  alarm_description   = "Wake ECS API service when ALB sees traffic"
+  alarm_description   = "Wake ECS when any traffic hits the ALB (works even at 0 healthy targets)"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 1
   threshold           = 0
-  metric_name         = "RequestCount"
-  namespace           = "AWS/ApplicationELB"
-  period              = 60
-  statistic           = "Sum"
   treat_missing_data  = "notBreaching"
 
-  dimensions = {
-    LoadBalancer = aws_lb.api.arn_suffix
+  # RequestCount only counts requests forwarded to healthy targets — it is 0 when
+  # ECS has no running tasks.  HTTPCode_ELB_5XX_Count counts 503s the ALB itself
+  # generates when there are no healthy targets.  Summing both ensures the alarm
+  # fires on ANY traffic regardless of ECS state.
+  metric_query {
+    id          = "m1"
+    return_data = false
+
+    metric {
+      namespace   = "AWS/ApplicationELB"
+      metric_name = "RequestCount"
+      period      = 60
+      stat        = "Sum"
+
+      dimensions = {
+        LoadBalancer = aws_lb.api.arn_suffix
+      }
+    }
+  }
+
+  metric_query {
+    id          = "m2"
+    return_data = false
+
+    metric {
+      namespace   = "AWS/ApplicationELB"
+      metric_name = "HTTPCode_ELB_5XX_Count"
+      period      = 60
+      stat        = "Sum"
+
+      dimensions = {
+        LoadBalancer = aws_lb.api.arn_suffix
+      }
+    }
+  }
+
+  metric_query {
+    id          = "total"
+    expression  = "m1+m2"
+    label       = "TotalRequests"
+    return_data = true
+    period      = 60
   }
 }
 

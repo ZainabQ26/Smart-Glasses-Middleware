@@ -639,9 +639,83 @@ jobs:
           name: tf-outputs
           path: aws/infrastructure/tf_outputs.json
 
+  deploy-frontend:
+    name: Build & deploy frontend to S3
+    needs: terraform-apply
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_TERRAFORM_ROLE }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          mask-aws-account-id: false
+
+      - name: Download tf outputs
+        uses: actions/download-artifact@v4
+        with:
+          name: tf-outputs
+          path: ./tf
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: src/SmartGlassesMiddleware/client/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: src/SmartGlassesMiddleware/client
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: src/SmartGlassesMiddleware/client
+        run: npm run build
+
+      - name: Sync to S3
+        run: |
+          BUCKET=$(jq -r '.frontend_bucket_name.value // "smart-glasses-dev-frontend"' ./tf/tf_outputs.json 2>/dev/null || echo "smart-glasses-dev-frontend")
+          WWWROOT="src/SmartGlassesMiddleware/wwwroot"
+          echo "Deploying frontend to s3://$BUCKET"
+
+          # index.html — never cache so stale markup is never served
+          aws s3 cp "$WWWROOT/index.html" "s3://$BUCKET/index.html" \
+            --cache-control "no-cache,no-store,must-revalidate" \
+            --content-type "text/html"
+
+          # Hashed JS/CSS assets — immutable, long TTL
+          aws s3 sync "$WWWROOT/assets/" "s3://$BUCKET/assets/" \
+            --cache-control "public,max-age=31536000,immutable" \
+            --delete
+
+          # Large binary files (wasm, onnx, mjs) at root — long TTL
+          aws s3 sync "$WWWROOT/" "s3://$BUCKET/" \
+            --exclude "index.html" \
+            --exclude "assets/*" \
+            --cache-control "public,max-age=31536000,immutable" \
+            --delete
+
+      - name: Invalidate CloudFront cache
+        run: |
+          CF_ID=$(jq -r '.cloudfront_distribution_id.value // "E12GGOP46L2E8U"' ./tf/tf_outputs.json 2>/dev/null || echo "E12GGOP46L2E8U")
+          echo "Invalidating CloudFront distribution $CF_ID"
+          RESULT=$(aws cloudfront create-invalidation \
+            --distribution-id "$CF_ID" \
+            --paths "/index.html" "/*.html" \
+            --query "Invalidation.{Id:Id,Status:Status}" \
+            --output json)
+          echo "Invalidation: $RESULT"
+
   verify-deployment:
     name: Wait for ECS service stability
-    needs: terraform-apply
+    needs: [terraform-apply, deploy-frontend]
     runs-on: ubuntu-latest
     permissions:
       id-token: write

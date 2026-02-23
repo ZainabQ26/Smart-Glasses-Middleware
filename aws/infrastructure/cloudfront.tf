@@ -47,17 +47,19 @@ resource "aws_cloudfront_distribution" "frontend" {
     compress               = true
   }
 
-  # Static assets served by ASP.NET Core wwwroot (admin panel, monitoring page, etc.)
-  # Must come before the default S3 behavior so these are routed to the ALB, not S3.
+  # Static assets — served from S3 so the app is always available even when ECS is at 0 tasks.
+  # index.html loads from S3, which contains the WakeupGate that polls /health to wake ECS.
+  # Only /api/*, /health, /swagger*, and /hubs/* still route to the ALB.
+  # NOTE: Do NOT forward the Host header to S3. Forwarding Host sends the CloudFront domain
+  # (d3t5kcvyyonw8d.cloudfront.net) to S3, which breaks OAC SigV4 signing and returns 404.
   ordered_cache_behavior {
     path_pattern     = "/*.html"
     allowed_methods  = ["GET", "HEAD", "OPTIONS"]
     cached_methods   = ["GET", "HEAD"]
-    target_origin_id = "ALB-API"
+    target_origin_id = "S3-${aws_s3_bucket.frontend.id}"
 
     forwarded_values {
       query_string = false
-      headers      = ["Host"]
 
       cookies {
         forward = "none"
@@ -75,11 +77,10 @@ resource "aws_cloudfront_distribution" "frontend" {
     path_pattern     = "/*.js"
     allowed_methods  = ["GET", "HEAD", "OPTIONS"]
     cached_methods   = ["GET", "HEAD"]
-    target_origin_id = "ALB-API"
+    target_origin_id = "S3-${aws_s3_bucket.frontend.id}"
 
     forwarded_values {
       query_string = false
-      headers      = ["Host"]
 
       cookies {
         forward = "none"
@@ -97,11 +98,10 @@ resource "aws_cloudfront_distribution" "frontend" {
     path_pattern     = "/*.css"
     allowed_methods  = ["GET", "HEAD", "OPTIONS"]
     cached_methods   = ["GET", "HEAD"]
-    target_origin_id = "ALB-API"
+    target_origin_id = "S3-${aws_s3_bucket.frontend.id}"
 
     forwarded_values {
       query_string = false
-      headers      = ["Host"]
 
       cookies {
         forward = "none"
@@ -123,11 +123,10 @@ resource "aws_cloudfront_distribution" "frontend" {
     path_pattern     = "/*.mjs"
     allowed_methods  = ["GET", "HEAD", "OPTIONS"]
     cached_methods   = ["GET", "HEAD"]
-    target_origin_id = "ALB-API"
+    target_origin_id = "S3-${aws_s3_bucket.frontend.id}"
 
     forwarded_values {
       query_string = false
-      headers      = ["Host"]
 
       cookies {
         forward = "none"
@@ -145,11 +144,10 @@ resource "aws_cloudfront_distribution" "frontend" {
     path_pattern     = "/*.wasm"
     allowed_methods  = ["GET", "HEAD", "OPTIONS"]
     cached_methods   = ["GET", "HEAD"]
-    target_origin_id = "ALB-API"
+    target_origin_id = "S3-${aws_s3_bucket.frontend.id}"
 
     forwarded_values {
       query_string = false
-      headers      = ["Host"]
 
       cookies {
         forward = "none"
@@ -167,11 +165,10 @@ resource "aws_cloudfront_distribution" "frontend" {
     path_pattern     = "/*.onnx"
     allowed_methods  = ["GET", "HEAD", "OPTIONS"]
     cached_methods   = ["GET", "HEAD"]
-    target_origin_id = "ALB-API"
+    target_origin_id = "S3-${aws_s3_bucket.frontend.id}"
 
     forwarded_values {
       query_string = false
-      headers      = ["Host"]
 
       cookies {
         forward = "none"

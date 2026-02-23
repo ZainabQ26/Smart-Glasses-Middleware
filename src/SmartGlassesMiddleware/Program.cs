@@ -884,11 +884,16 @@ static IAsyncPolicy<HttpResponseMessage> GetCircuitBreakerPolicy()
 }
 
 // Health endpoint to allow Docker healthchecks to verify service dependencies
-app.MapGet("/health", async (IServiceProvider services) =>
+// Cache-Control: no-store ensures CloudFront never caches this response — if it did,
+// a cached 200 could be served while ECS is sleeping, preventing the wake alarm from firing.
+app.MapGet("/health", async (IServiceProvider services, HttpContext context) =>
 {
+    context.Response.Headers.CacheControl = "no-store, no-cache, must-revalidate";
+    context.Response.Headers.Pragma = "no-cache";
     using var scope = services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-    var redis = scope.ServiceProvider.GetRequiredService<IConnectionMultiplexer>();
+    // Redis is optional — not registered when enable_redis=false (dev/cost-optimised)
+    var redis = scope.ServiceProvider.GetService<IConnectionMultiplexer>();
     var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
 
     var checks = new Dictionary<string, object>();
@@ -937,44 +942,52 @@ app.MapGet("/health", async (IServiceProvider services) =>
         checks["migrations"] = new { pending = false, pendingCount = 0, error = migrationsError };
     }
 
-    // Check Redis
-    var redisOk = false;
-    string? redisError = null;
-    try
+    // Check Redis (skipped when not configured — intentionally disabled in cost-optimised environments)
+    if (redis != null)
     {
-        await redis.GetDatabase().PingAsync();
-        redisOk = true;
-    }
-    catch (Exception ex)
-    {
-        redisError = ex.Message;
-    }
-    checks["redis"] = new { healthy = redisOk, error = redisError };
-    allHealthy &= redisOk;
+        var redisOk = false;
+        string? redisError = null;
+        try
+        {
+            await redis.GetDatabase().PingAsync();
+            redisOk = true;
+        }
+        catch (Exception ex)
+        {
+            redisError = ex.Message;
+        }
+        checks["redis"] = new { healthy = redisOk, error = redisError };
+        allHealthy &= redisOk;
 
-    // Check Redis Pub/Sub bridge
-    var bridgeOk = false;
-    string? bridgeError = null;
-    try
-    {
-        var bridgeStatus = scope.ServiceProvider.GetService<RedisPubSubBridgeStatus>();
-        if (bridgeStatus != null)
+        // Check Redis Pub/Sub bridge (only relevant when Redis is configured)
+        var bridgeOk = false;
+        string? bridgeError = null;
+        try
         {
-            bridgeOk = bridgeStatus.IsSubscribed;
-            bridgeError = bridgeStatus.LastError;
+            var bridgeStatus = scope.ServiceProvider.GetService<RedisPubSubBridgeStatus>();
+            if (bridgeStatus != null)
+            {
+                bridgeOk = bridgeStatus.IsSubscribed;
+                bridgeError = bridgeStatus.LastError;
+            }
+            else
+            {
+                bridgeOk = false;
+                bridgeError = "RedisPubSubBridgeStatus not registered";
+            }
         }
-        else
+        catch (Exception ex)
         {
-            bridgeOk = false;
-            bridgeError = "RedisPubSubBridgeStatus not registered";
+            bridgeError = ex.Message;
         }
+        checks["redis-pubsub-bridge"] = new { healthy = bridgeOk, error = bridgeError };
+        allHealthy &= bridgeOk;
     }
-    catch (Exception ex)
+    else
     {
-        bridgeError = ex.Message;
+        checks["redis"] = new { healthy = (object)true, configured = false, note = "Redis disabled (not configured)" };
+        checks["redis-pubsub-bridge"] = new { healthy = (object)true, configured = false, note = "Redis disabled (not configured)" };
     }
-    checks["redis-pubsub-bridge"] = new { healthy = bridgeOk, error = bridgeError };
-    allHealthy &= bridgeOk;
 
     var result = new
     {
