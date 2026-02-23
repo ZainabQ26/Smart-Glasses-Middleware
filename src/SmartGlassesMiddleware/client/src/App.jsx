@@ -49,8 +49,11 @@ export default function App() {
   // When "activate" fires we flip activatedRef; VAD is already running.
   const vad = useMicVAD({
     startOnLoad: false, // Changed from true: only start VAD after activation word
-    // baseAssetPath: "/", // Removed to allow loading from CDN
-    ortConfig: (ort) => { ort.env.wasm.numThreads = 1; },
+    baseAssetPath: "/", // Silero .onnx model and vad.worklet.bundle.min.js live at wwwroot root
+    ortConfig: (ort) => {
+      ort.env.wasm.wasmPaths = "/"; // WASM/MJS files are at wwwroot root, not /assets/
+      ort.env.wasm.numThreads = 1;  // avoid SharedArrayBuffer requirement as belt-and-suspenders
+    },
     onSpeechStart: () => {
       if (activatedRef.current) addLog("🟢 Speech detected…", "info");
     },
