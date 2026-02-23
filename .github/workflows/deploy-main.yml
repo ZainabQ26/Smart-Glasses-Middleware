@@ -341,7 +341,11 @@ jobs:
             local TF_RES="$1" IMPORT_ID="$2"
             [ -z "$IMPORT_ID" ] || [ "$IMPORT_ID" = "None" ] || [ "$IMPORT_ID" = "null" ] && return 0
             terraform state rm "$TF_RES" 2>/dev/null || true
+            # Invalidate in-memory cache so the resource is not skipped if safe_import
+            # is called for it later in the same run.
+            EXISTING_STATE=$(printf '%s\n' "$EXISTING_STATE" | grep -vxF "$TF_RES" || true)
             terraform import "$TF_RES" "$IMPORT_ID" || true
+            EXISTING_STATE="${EXISTING_STATE}${NEWLINE}${TF_RES}"
           }
 
           # ── Remove old Aurora resources from state (migrated to standard RDS) ─
@@ -384,6 +388,7 @@ jobs:
           # prevent_destroy-blocked destroy on apply. Remove from state instead.
           if [ "$ENV" = "dev" ]; then
             terraform state rm "aws_secretsmanager_secret.redis_credentials[0]" 2>/dev/null || true
+            EXISTING_STATE=$(printf '%s\n' "$EXISTING_STATE" | grep -vxF "aws_secretsmanager_secret.redis_credentials[0]" || true)
           else
             import_secret aws_secretsmanager_secret.redis_credentials "${PREFIX}-redis-credentials"
           fi
@@ -420,11 +425,22 @@ jobs:
             terraform state rm aws_elasticache_replication_group.redis           2>/dev/null || true
             terraform state rm aws_elasticache_subnet_group.main                 2>/dev/null || true
             terraform state rm aws_elasticache_parameter_group.redis             2>/dev/null || true
+            # Invalidate in-memory cache for all rm'd resources so safe_import
+            # correctly re-imports them instead of skipping them.
+            for _rmres in \
+              "aws_elasticache_cluster.redis_single[0]" \
+              "aws_elasticache_replication_group.redis[0]" \
+              "aws_elasticache_replication_group.redis" \
+              "aws_elasticache_subnet_group.main" \
+              "aws_elasticache_parameter_group.redis"; do
+              EXISTING_STATE=$(printf '%s\n' "$EXISTING_STATE" | grep -vxF "$_rmres" || true)
+            done
           fi
           # For dev: replication group has count=0 always (its count expr uses != "dev").
           # Remove any previously-imported entry to prevent a prevent_destroy conflict.
           if [ "$ENV" = "dev" ]; then
             terraform state rm "aws_elasticache_replication_group.redis[0]" 2>/dev/null || true
+            EXISTING_STATE=$(printf '%s\n' "$EXISTING_STATE" | grep -vxF "aws_elasticache_replication_group.redis[0]" || true)
           fi
           safe_import aws_elasticache_parameter_group.redis   "${PREFIX}-redis-params"
           safe_import aws_elasticache_subnet_group.main       "${PREFIX}-elasticache-subnet-group"
