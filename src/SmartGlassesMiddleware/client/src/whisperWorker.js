@@ -10,13 +10,25 @@
  */
 import { pipeline, env } from '@xenova/transformers';
 
+// ── Global error capture ────────────────────────────────────────────────
+// Catch WASM init failures and unhandled promise rejections that occur before
+// the message handler is reached (e.g. onnxruntime SIMD crash on first load).
+self.addEventListener('error', (e) => {
+  self.postMessage({ type: 'error', message: `Worker error: ${e.message} (${e.filename}:${e.lineno})` });
+});
+self.addEventListener('unhandledrejection', (e) => {
+  self.postMessage({ type: 'error', message: `Worker async error: ${e.reason?.message ?? e.reason}` });
+});
+
 // ── Environment ---------------------------------------------------------
 // Disable local-model lookup; pull from the HuggingFace Hub CDN and cache
 // in the browser's Cache Storage (persists across page reloads).
 env.allowLocalModels  = false;
 env.useBrowserCache   = true;
-// Restrict ONNX to 1 thread so we don't need SharedArrayBuffer / COOP-COEP
-// headers (same strategy already used by the VAD worker).
+// Force single-threaded ONNX WASM. When COEP is absent (as in our CloudFront
+// config), SharedArrayBuffer is unavailable and ONNX already falls back to the
+// single-threaded binary automatically. Setting numThreads=1 here is a
+// belt-and-suspenders guard in case headers change in future.
 env.backends.onnx.wasm.numThreads = 1;
 
 // ── Model ----------------------------------------------------------------

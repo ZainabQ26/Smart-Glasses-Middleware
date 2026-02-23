@@ -148,7 +148,9 @@ export default function App() {
     };
 
     worker.onerror = (err) => {
-      addLog(`❌ Whisper worker crashed: ${err.message ?? err}`, "error");
+      // err is an ErrorEvent; .message is sometimes empty so fall back to other fields
+      const msg = err.message || (err.filename ? `${err.filename}:${err.lineno}` : err.type) || "unknown error";
+      addLog(`❌ Whisper worker crashed: ${msg}`, "error");
       resumeListeningRef.current();
     };
 

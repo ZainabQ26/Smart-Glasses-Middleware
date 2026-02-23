@@ -3,19 +3,12 @@
 # threaded WASM build calls during initialisation (before ortConfig runs).
 resource "aws_cloudfront_response_headers_policy" "coop_coep" {
   name    = "${var.project_name}-${var.environment}-coop-coep"
-  comment = "COOP + COEP for SharedArrayBuffer / ONNX Runtime threaded WASM"
+  comment = "COOP for iframe clickjacking protection. COEP intentionally omitted: COEP+COOP together enable SharedArrayBuffer, which makes onnxruntime-web load its threaded SIMD WASM binary. That binary crashes on some hardware (cpuinfo returns unknown CPU vendor). Without COEP, SharedArrayBuffer is unavailable and ONNX falls back to the non-threaded WASM, which works everywhere. The Silero VAD ships its own bundled WASM so is unaffected."
 
   custom_headers_config {
     items {
       header   = "Cross-Origin-Opener-Policy"
       value    = "same-origin"
-      override = true
-    }
-    items {
-      # credentialless: page is cross-origin isolated but assets don't need
-      # explicit Cross-Origin-Resource-Policy headers (simpler than require-corp)
-      header   = "Cross-Origin-Embedder-Policy"
-      value    = "credentialless"
       override = true
     }
   }
