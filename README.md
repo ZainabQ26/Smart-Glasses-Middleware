@@ -1,195 +1,202 @@
-# Smart-Glasses-Middleware
+# Smart Glasses Middleware
 
-This repository contains the backend middleware for a smart glasses application. It provides a powerful, multi-modal API for interacting with AI models, processing documents, and managing tasks. The system is designed to be extensible, allowing developers to add new capabilities with ease.
+Backend middleware and frontend for a smart glasses application. Provides a multi-modal API for AI interaction, document processing, audio transcription, and task management, deployed to AWS ECS Fargate with automatic scale-to-zero when idle.
 
-## Deployment with AWS LocalStack
+## Stack
 
-This application is designed to deploy to AWS using LocalStack for local development and testing before deploying to production AWS environments.
+| Layer | Technology |
+|-------|-----------|
+| API | ASP.NET Core (.NET 10), C# |
+| Frontend | React 18 + Vite, served from S3 via CloudFront |
+| AI | AWS Bedrock (Nova / Titan Embed) or Ollama (local dev) |
+| Audio transcription | Whisper Lambda (containerised, invoked via SQS) |
+| Document processing | Lambda (Python), iText7, Tesseract OCR, pgvector RAG |
+| Database | PostgreSQL 16 + pgvector (RDS db.t3.micro) |
+| Cache / pub-sub | Redis (ElastiCache, optional) |
+| Object storage | AWS S3 (prod) or MinIO (local dev) |
+| Real-time | SignalR over WebSocket |
+| Infrastructure | Terraform, ECS Fargate, CloudFront, ALB, Secrets Manager |
+| CI/CD | GitHub Actions → Terraform apply → ECR push → ECS deploy |
 
-### What is LocalStack?
+## Architecture Overview
 
-LocalStack is a fully functional local AWS cloud stack that allows you to develop and test cloud applications offline. It provides a testing environment for AWS services including S3, Lambda, Secrets Manager, RDS, ElastiCache, and more.
+```
+Browser
+  └─► CloudFront (HTTPS, COOP+COEP headers)
+        ├─► S3  —— static frontend (React SPA, ONNX/WASM assets)
+        └─► ALB —— /api/*, /health, /hubs/*, /swagger*
+              └─► ECS Fargate (ASP.NET Core, port 5000)
+                    ├─► RDS PostgreSQL (pgvector)
+                    ├─► ElastiCache Redis (optional)
+                    ├─► S3 (media + documents)
+                    ├─► Bedrock (LLM + embeddings)
+                    └─► SQS → Whisper Lambda (transcription)
+```
+
+### Scale-to-zero
+
+The ECS service scales to 0 tasks when idle (default: 15 minutes of no traffic) and wakes on demand:
+
+1. Browser loads the React SPA from S3 (always available)
+2. `WakeupGate` component polls `/health` — on first non-200, immediately `POST /wake`
+3. `/wake` (CloudFront → Lambda Function URL) sets `desiredCount=1` in **< 1 second**
+4. ECS task starts; ALB health checks pass in ~20 s; app is serving in **~35–45 s total**
+5. The CloudWatch alarm (ALB + CloudFront 5xx metrics) provides a parallel wake signal
+
+Cost while idle: **$0** (Fargate billing stops when `desiredCount=0`).
+
+## Local Development
 
 ### Prerequisites
 
-- Docker and Docker Compose installed
-- AWS CLI v2 installed
-- .NET 8.0 SDK (or later)
-- VS Code with AWS Toolkit extension (optional but recommended)
+- Docker Desktop
+- .NET 10 SDK
+- Node.js 22
+- AWS CLI v2
 
-### Quick Start with LocalStack
-
-1. **Start LocalStack with all required services:**
+### Start with LocalStack
 
 ```bash
+# Start LocalStack + PostgreSQL + MinIO + Redis
 docker-compose -f docker-compose.localstack.yml up -d
+
+# Verify LocalStack
+curl http://localhost:4566/_localstack/health
 ```
 
-2. **Verify LocalStack is running:**
+### Run the API
 
 ```bash
-# Check LocalStack health
-curl http://localhost:4566/_localstack/health
-
-# List S3 buckets (should see 3 buckets created automatically)
-aws --endpoint-url=http://localhost:4566 s3 ls
+cd src/SmartGlassesMiddleware
+dotnet run
 ```
 
-3. **Access the application:**
+API available at `http://localhost:5000`. Swagger UI at `http://localhost:5000/swagger`.
 
-The API will be available at `http://localhost:5000` after the containers start.
+`appsettings.Development.json` enables `MigrateOnStartup: true` so EF migrations run automatically against the local database on first start.
 
-### VS Code AWS Toolkit Setup
+### Run the Frontend (standalone)
 
-For the best development experience with LocalStack, you can configure VS Code AWS Toolkit.
+```bash
+cd src/SmartGlassesMiddleware/client
+npm install
+npm run dev   # Vite dev server at http://localhost:5173
+```
 
-📚 **For complete VS Code AWS Toolkit setup instructions, see:** [VSCODE_AWS_TOOLKIT_SETUP.md](VSCODE_AWS_TOOLKIT_SETUP.md)
+### Build the Docker image locally
 
-**Quick Setup:**
-1. Create a LocalStack AWS profile: `aws configure set aws_access_key_id test --profile localstack`
-2. Set region: `aws configure set region us-east-1 --profile localstack`
-3. Connect AWS Toolkit to the `localstack` profile in VS Code
-4. Use AWS CLI with LocalStack endpoint: `aws --endpoint-url=http://localhost:4566 s3 ls`
+```bash
+# Must use repo root as context so tasks/ folder is included in the build
+docker build -f src/SmartGlassesMiddleware/Dockerfile -t smart-glasses-api:local .
+```
 
-📚 **For detailed LocalStack testing and deployment information, see:** [aws/LOCALSTACK.md](aws/LOCALSTACK.md)
+## Configuration
 
-## Features
+### Local dev (`appsettings.json` + `appsettings.Development.json`)
 
-- **Multi-format Document Processing**: Extracts text and layout information from PDFs (digital and scanned), DOCX, TXT, and various image formats.
-- **Vector Embeddings**: Generates embeddings for document chunks using configurable models and stores them in PostgreSQL with `pgvector` for efficient similarity searches.
-- **Semantic Querying**: Understands the meaning behind your questions to find the most relevant information.
-- **Document Highlighting**: Pinpoints and highlights the exact location of information within your documents.
-- **Resource Groups**: Organize documents and prompts into groups for targeted querying.
-- **PostgreSQL**: For storing request history, document metadata, and vector embeddings.
-- **S3-Compatible Storage**: For scalable storage of media files (images, videos, audio) and documents (using AWS S3 or LocalStack S3).
-- **Redis**: For response caching and pub/sub messaging.
+| Key | Default | Description |
+|-----|---------|-------------|
+| `ConnectionStrings:DefaultConnection` | `Host=localhost;...` | PostgreSQL |
+| `ConnectionStrings:Redis` | `localhost:6379` | Redis (optional) |
+| `MinIO:Endpoint` | `localhost:9000` | MinIO endpoint |
+| `AI:OllamaEndpoint` | `http://localhost:11434` | Ollama API |
+| `AI:OllamaModel` | `llama3:latest` | Chat model |
+| `AI:UseBedrockAI` | `false` | Switch to Bedrock |
+| `MigrateOnStartup` | `true` (dev) / `false` (AWS) | Run EF migrations on boot |
 
-## Architecture
+### AWS (`appsettings.AWS.json`)
 
-The application is built on a modern .NET 8 stack, with a focus on modularity and scalability.
+Secrets (DB connection string, S3 bucket names, Redis URL) are injected at runtime from AWS Secrets Manager via ECS task secret references — no plaintext credentials in the image.
 
-- **ASP.NET Core Web API**: Provides the core framework for the RESTful API.
-- **Microsoft Semantic Kernel**: For AI orchestration, prompt engineering, and service connections.
-- **AWS Bedrock**: AI model services (or LocalStack mock for local testing).
-- **PostgreSQL + pgvector**: For relational data storage and efficient vector similarity search.
-- **AWS S3 / LocalStack S3**: S3-compatible object storage for all media and document files.
-- **Redis**: For caching, background task management, and real-time messaging.
-- **SignalR**: For pushing real-time notifications to connected clients.
+`AI:UseBedrockAI=true` switches the LLM and embedding client to Bedrock (Nova / Titan Embed V2). The ECS task role grants the necessary `bedrock:InvokeModel` permissions.
 
 ## Database Migrations
 
-The application applies Entity Framework Core migrations at startup when `MigrateOnStartup` is enabled.
+Migrations are **only applied during CI deployment**, not at container startup, to eliminate cold-start latency and migration lock risk.
 
-For production deployments, it's recommended to run migrations explicitly:
+**CI flow:** `terraform-apply` → `run-migrations` (one-shot Fargate task with `MIGRATE_ONLY=true`) → `verify-deployment`
 
+The `run-migrations` CI job:
+1. Launches a Fargate task using the just-deployed image with env override `MIGRATE_ONLY=true`
+2. The container runs `db.Database.Migrate()` then exits cleanly (exit code 0)
+3. CI waits, checks the exit code, and prints CloudWatch logs on failure
+
+**For local development**, `MigrateOnStartup: true` in `appsettings.Development.json` applies migrations on `dotnet run`.
+
+**Manual migration** (if needed):
 ```bash
 dotnet ef database update --project src/SmartGlassesMiddleware
 ```
 
-You can control migration-on-startup behavior using the `MigrateOnStartup` configuration key in `appsettings.json` or the `MIGRATE_ON_STARTUP` environment variable.
+## Task Handlers
 
-## Configuration
+The middleware dispatches AI-classified requests to typed task handlers. Handlers are written in C# and implement `ITaskHandler`.
 
-The application uses environment variables for configuration. See `.env.example` for all available options.
+### Built-in handlers (`tasks/`)
 
-### Key Configuration for LocalStack
+| Handler | Task name | Description |
+|---------|-----------|-------------|
+| `TimeTaskHandler` | `time` | Returns current date/time |
+| `ReminderTaskHandler` | `reminder` | Saves a reminder to the DB |
+| `DeleteReminderTaskHandler` | `delete-reminder` | Deletes a reminder by matching text |
+| `EditReminderTaskHandler` | `edit-reminder` | Edits an existing reminder |
+| `DocumentSearchTaskHandler` | `document-search` | Finds text in documents, returns page/position |
+| `DocumentHighlightTaskHandler` | `document-highlight` | Highlights text in a document |
+| `DocumentQueryTaskHandler` | `document-query` | Semantic RAG query over uploaded documents |
+| `OCRTaskHandler` | `ocr` | Runs OCR on an image or scanned PDF page |
+| `OCRRetryTaskHandler` | `ocr-retry` | Retries a failed OCR job |
+| `AdvancedTaskHandler` | `advanced` | Forwards to a configurable external model endpoint |
+| `TemplateTaskHandler` | `template` | Starter template for new handlers |
 
-When running with LocalStack, the following environment variables are automatically set by docker-compose.localstack.yml:
+### Adding a custom handler
 
-- `AWS_REGION=us-east-1`
-- `AWS_ACCESS_KEY_ID=test`
-- `AWS_SECRET_ACCESS_KEY=test`
-- `AWS_ENDPOINT_URL=http://localstack:4566`
-- `AWS__UseLocalStack=true`
-- `AWS__S3__Endpoint=http://localstack:4566`
-- `AWS__Bedrock__Endpoint=http://localstack:4566`
+1. Create a `.cs` file implementing `ITaskHandler` in the `tasks/` folder
+2. It is compiled into `SmartGlassesMiddleware.dll` at `dotnet publish` time via `<Compile Include>` in the `.csproj`
+3. Alternatively, drop a compiled `.dll` into a `tasks/` directory alongside the running binary for runtime hot-loading (local dev only)
 
 ## API Endpoints
 
-The application exposes a comprehensive set of RESTful API endpoints. For a complete and interactive API specification, run the application and navigate to `/swagger`.
+Run the application and visit `/swagger` for the full interactive spec.
 
-### Main Endpoints
+| Group | Endpoints |
+|-------|-----------|
+| AI interaction | `POST /api/ai/interact` — text/task dispatch |
+| Audio | `POST /api/audio/transcribe` |
+| Documents | `POST /api/documents/upload`, `POST /api/documents/query`, `GET/DELETE /api/documents/{id}` |
+| Media | `POST /api/media/upload`, `GET /api/media/{id}` |
+| Conversations | `GET/POST/DELETE /api/conversations` |
+| History | `GET /api/history` |
+| Tasks | `GET /api/tasks/{id}` — background task status |
+| Admin | `GET/POST/PUT/DELETE /api/admin/files`, `/api/admin/prompts`, `/api/admin/groups` |
+| Monitoring | `GET /api/monitoring/metrics` |
+| Health | `GET /health` — Postgres + Redis liveness |
 
-- `POST /api/text`: Submit a text-based query
-- `POST /api/transcribe`: Submit an audio file for transcription and processing
-- `POST /api/ask`: Submit a media file (image/video) with a prompt
-- `GET /api/history`: Retrieve request history
+## CI/CD Pipeline
 
-### Document (RAG) Endpoints
+Every push to `main` triggers:
 
-- `POST /api/documents/upload`: Upload a document for processing
-- `POST /api/documents/query`: Query your documents
-- `GET /api/documents`: List uploaded documents
-- `GET /api/documents/{id}`: Get details for a specific document
-
-### Admin Endpoints
-
-- `GET, POST, PUT, DELETE /api/admin/files`: Manage uploaded files
-- `GET, POST, PUT, DELETE /api/admin/prompts`: Manage saved prompts
-- `GET, POST, PUT, DELETE /api/admin/groups`: Manage resource groups
-
-### Task Management
-
-- `GET /api/tasks/{id}`: Get the status of a background task
-
-## Task Handlers
-
-The middleware can be extended with custom task handlers. These are C# classes that implement the `ITaskHandler` interface. The system automatically discovers and registers any `ITaskHandler` implementations found in `.cs` or `.dll` files in the `tasks` directory at startup.
-
-### Creating a Task Handler
-
-1. Create a new C# class that implements `SmartGlassesMiddleware.Services.ITaskHandler`
-2. Implement the `CanHandle` method to specify which tasks your handler can process
-3. Implement the `HandleAsync` method to perform the task's logic
-4. Place the `.cs` file (or compiled `.dll`) in the `tasks` directory
-
-The application will automatically pick up your new handler on the next restart. See the existing handlers in the `tasks` directory for examples.
-
-## Development
-
-### Prerequisites
-
-- .NET 8.0 SDK (or later)
-- Docker (for LocalStack and dependencies)
-- AWS CLI v2
-
-### Build
-
-```bash
-dotnet build
+```
+build-api ──────────┐
+build-lambda ───────┼──► terraform-apply ──► run-migrations ──┐
+                    │         │                                 ├──► verify-deployment
+                    │         └──► deploy-frontend ────────────┘
+                    │
+                    └── (Docker images pushed to ECR with SHA tag)
 ```
 
-### Run Tests
+- **`build-api`** — builds the React frontend (Vite) and the .NET API into a single Docker image, pushes to ECR
+- **`build-lambda`** — builds the Whisper Lambda container image and the document processor Lambda ZIP
+- **`terraform-apply`** — runs `terraform apply` (via Docker) with the new image SHA as a variable; manages all AWS infrastructure
+- **`run-migrations`** — one-shot Fargate task applies EF Core migrations against RDS
+- **`deploy-frontend`** — syncs built assets to S3, invalidates CloudFront cache
+- **`verify-deployment`** — waits for ECS service stability, fetches container logs, smoke-tests `/health`
 
-```bash
-dotnet test
-```
+Infrastructure is defined in `aws/infrastructure/` (Terraform). Local testing uses `aws/LOCALSTACK.md`.
 
-### Run Application Locally
+## Infrastructure Notes
 
-```bash
-# Start LocalStack
-docker-compose -f docker-compose.localstack.yml up -d
+- **CloudFront → ALB protocol**: HTTP (not HTTPS) for the origin connection. The ALB TLS certificate covers the custom domain only; CloudFront validates against the ELB hostname which doesn't match, causing 502s with `https-only`.
+- **COOP + COEP headers**: Set by a CloudFront response headers policy to enable `SharedArrayBuffer` in the browser, required for `@huggingface/transformers` v3 (ONNX Runtime threaded WASM).
+- **ECS CPU**: 1 vCPU (1024 units) to reduce .NET 10 JIT cold-start time. Cost impact is negligible with scale-to-zero.
+- **ALB health check interval**: 10 s, `healthy_threshold=2` — ALB marks the target healthy ~20 s after the container is listening.
 
-# Run the application
-dotnet run --project src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj
-```
-
-## Production Deployment to AWS
-
-For production deployment to AWS (not LocalStack), you'll need to:
-
-1. Set up AWS infrastructure (VPC, RDS, ElastiCache, S3, ECR, ECS/Lambda)
-2. Configure production environment variables
-3. Deploy the application container to ECS Fargate or Lambda
-4. Configure proper security groups, IAM roles, and secrets management
-
-See [aws/LOCALSTACK.md](aws/LOCALSTACK.md) for testing with LocalStack before deploying to production.
-
-## Support
-
-For issues or questions:
-- Check LocalStack logs: `docker-compose -f docker-compose.localstack.yml logs`
-- Review AWS CLI configuration
-- Verify network connectivity
-- Consult LocalStack documentation: https://docs.localstack.cloud/

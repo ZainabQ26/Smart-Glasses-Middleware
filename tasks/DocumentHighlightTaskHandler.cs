@@ -6,7 +6,6 @@ namespace SmartGlassesMiddleware.Services;
 
 /// <summary>
 /// Local task handler for highlighting specific text in documents and returning the highlighted copy.
-/// Uses Ollama for local processing.
 /// </summary>
 public class DocumentHighlightTaskHandler : ITaskHandler
 {

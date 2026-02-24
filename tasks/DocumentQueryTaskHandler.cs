@@ -6,7 +6,6 @@ namespace SmartGlassesMiddleware.Services;
 
 /// <summary>
 /// Local task handler for RAG-based document queries.
-/// Uses Ollama for local processing with document context.
 /// </summary>
 public class DocumentQueryTaskHandler : ITaskHandler
 {
@@ -49,7 +48,7 @@ public class DocumentQueryTaskHandler : ITaskHandler
             }
             else
             {
-                response += $"\n🏠 Processed locally with Ollama";
+                response += $"\n🏠 Processed locally";
             }
 
             if (result.TokenCount > 0)

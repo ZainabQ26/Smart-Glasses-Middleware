@@ -2,21 +2,21 @@
 ===============================
 
 ## Overview
-This folder contains all task handlers that execute locally using Ollama. Any task handler placed in this folder will be compiled and loaded at runtime, making them easy to edit and customize without rebuilding the main application.
+This folder contains all task handlers that execute locally. Any task handler placed in this folder will be compiled and loaded at runtime, making them easy to edit and customize without rebuilding the main application.
 
 **Architecture:**
-- ✅ Tasks in `tasks/` folder → Execute locally with Ollama
-- ❌ Tasks NOT in `tasks/` folder → Route to external REST API (advanced model)
+- ✅ Tasks in `tasks/` folder → Registered and dispatched by the task system
+- ❌ Unknown tasks → Route to external REST API (advanced model, if configured)
 
 The application automatically:
 1. Compiles `.cs` files in this folder at startup
 2. Loads `.dll` plugin files from this folder
 3. Registers all `ITaskHandler` implementations with dependency injection
-4. Uses Ollama to classify requests and route to appropriate handlers
+4. Uses the configured AI model (Ollama locally, or AWS Bedrock in production) to classify requests and route to appropriate handlers
 
 ## Available Task Handlers
 
-### Core Local Tasks (Ollama-based)
+### Core Local Tasks
 
 **TimeTaskHandler.cs** - `task: time`
 - Returns current date and time
@@ -26,11 +26,19 @@ The application automatically:
 - Saves reminders to database
 - Local task with database persistence
 
+**DeleteReminderTaskHandler.cs** - `task: delete-reminder`
+- Deletes an existing reminder from the database by matching text
+- Usage: "delete my reminder about [text]" or "remove [text] reminder"
+
+**EditReminderTaskHandler.cs** - `task: edit-reminder`
+- Updates the text of an existing reminder
+- Usage: "change my reminder about [old text] to [new text]"
+
 **TemplateTaskHandler.cs** - `task: template`
 - Template/example for creating new handlers
 - Copy and modify to create custom tasks
 
-### Document Processing Tasks (Local)
+### Document Processing Tasks
 
 **DocumentSearchTaskHandler.cs** - `task: document-search`
 - Finds text in documents and returns exact locations
@@ -44,8 +52,13 @@ The application automatically:
 
 **OCRTaskHandler.cs** - `task: ocr`
 - OCR (Optical Character Recognition) for images
-- Placeholder implementation (requires Tesseract setup)
+- Reprocesses a document and regenerates embeddings when given a document ID
+- Full OCR requires Tesseract to be configured
 - Usage: "ocr [document-id]"
+
+**OCRRetryTaskHandler.cs** - `task: ocr-retry`
+- Explicitly retries OCR and embedding generation for an existing document
+- Usage: provide a document ID (GUID)
 
 **DocumentQueryTaskHandler.cs** - `task: document-query`
 - RAG-based intelligent document queries
@@ -55,22 +68,22 @@ The application automatically:
 ### Advanced Model (External REST API)
 
 **AdvancedTaskHandler.cs** - `task: advanced`
-- Routes complex requests to external REST API
+- Routes complex requests to an external REST API endpoint
 - Configured via `AI:AdvancedModelEndpoint` in appsettings.json
-- Automatically used for unknown tasks or complex queries
+- Automatically used for unknown tasks or complex queries when `AI:UseAdvancedModel` is `true`
 
 ## How It Works
 
 1. **User sends request** → "What time is it?"
-2. **Ollama detects task** → Classifies as "time" task
+2. **AI model detects task** → Classifies as "time" task
 3. **System checks handlers** → Finds TimeTaskHandler in tasks/
-4. **Executes locally** → Uses Ollama to process
+4. **Executes handler** → Processes the request
 5. **Returns response** → "The current time is 2:30 PM..."
 
 If no handler matches:
 1. **Unknown task detected**
-2. **Routes to AdvancedTaskHandler**
-3. **Calls external REST API** (e.g., GPT-4, Claude)
+2. **Routes to AdvancedTaskHandler** (if `AI:UseAdvancedModel` is `true`)
+3. **Calls external REST API** (configured via `AI:AdvancedModelEndpoint`)
 4. **Returns advanced model response**
 
 ## Creating Custom Tasks
@@ -106,10 +119,20 @@ public class WeatherTaskHandler : ITaskHandler
 
 ## Configuration
 
+**Known Tasks (controls which tasks the AI classifier considers):**
+```json
+{
+  "AI": {
+    "KnownTasks": [ "time", "reminder", "edit-reminder", "delete-reminder", "template" ]
+  }
+}
+```
+
 **Advanced Model Endpoint:**
 ```json
 {
   "AI": {
+    "UseAdvancedModel": true,
     "AdvancedModelEndpoint": "https://api.openai.com/v1/chat/completions",
     "AdvancedModelName": "gpt-4"
   }
@@ -174,7 +197,7 @@ public class MyTaskHandler : ITaskHandler
 3. **Log extensively** - Help debugging with good logging
 4. **Handle errors gracefully** - Always catch exceptions and return user-friendly messages
 5. **Document usage** - Add comments explaining input format
-6. **Test locally** - Use Ollama for fast iteration
+6. **Test locally** - Iterate quickly using a local Ollama instance
 
 ## Examples of Good vs Bad Task Names
 

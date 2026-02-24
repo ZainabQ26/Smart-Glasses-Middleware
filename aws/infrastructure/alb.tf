@@ -34,7 +34,7 @@ resource "aws_lb_target_group" "api" {
     healthy_threshold   = 2
     unhealthy_threshold = 3
     timeout             = 5
-    interval            = 30
+    interval            = 10  # reduced from 30 s → 2 consecutive passes now take ~20 s instead of ~60 s
     path                = "/health"
     protocol            = "HTTP"
     matcher             = "200"

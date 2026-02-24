@@ -605,21 +605,24 @@ using (var scope = app.Services.CreateScope())
         // Check configuration key first, then environment variable. Default: disabled.
         var migrateSetting = configuration.GetValue<bool?>("MigrateOnStartup");
         var migrateEnv = Environment.GetEnvironmentVariable("MIGRATE_ON_STARTUP");
-        var shouldMigrate = migrateSetting ?? string.Equals(migrateEnv, "true", StringComparison.OrdinalIgnoreCase);
+        // MIGRATE_ONLY=true is set by the CI run-migrations job; it forces migration
+        // and then exits cleanly so no HTTP server starts.
+        var migrateOnly = string.Equals(Environment.GetEnvironmentVariable("MIGRATE_ONLY"), "true", StringComparison.OrdinalIgnoreCase);
+        var shouldMigrate = migrateOnly || (migrateSetting ?? string.Equals(migrateEnv, "true", StringComparison.OrdinalIgnoreCase));
 
         if (shouldMigrate)
         {
             logger?.LogInformation("Starting database migration...");
-            
+
             // Run migration with a timeout to prevent indefinite hangs on lock acquisition
             var migrationTask = Task.Run(() => db.Database.Migrate());
-            var timeoutTask = Task.Delay(TimeSpan.FromSeconds(30));
-            
+            var timeoutTask = Task.Delay(TimeSpan.FromSeconds(120)); // CI task needs more time
+
             var completedTask = await Task.WhenAny(migrationTask, timeoutTask);
-            
+
             if (completedTask == timeoutTask)
             {
-                var errorMessage = "Database migration timed out after 30 seconds. " +
+                var errorMessage = "Database migration timed out after 120 seconds. " +
                     "This usually means another instance is holding the migration lock. " +
                     "Application startup aborted to prevent schema issues.";
                 logger?.LogCritical(errorMessage);
@@ -631,10 +634,18 @@ using (var scope = app.Services.CreateScope())
                 await migrationTask;
                 logger?.LogInformation("Database migration completed successfully.");
             }
+
+            // When MIGRATE_ONLY is set the container is a one-shot CI task — exit cleanly
+            // so ECS marks it as stopped with exit code 0 and the CI job succeeds.
+            if (migrateOnly)
+            {
+                _startupLogger.LogInformation("MIGRATE_ONLY=true — migrations complete, exiting.");
+                return;
+            }
         }
         else
         {
-            logger?.LogInformation("Skipping database migration on startup (MigrateOnStartup not enabled).");
+            logger?.LogInformation("Skipping database migration on startup (MIGRATE_ON_STARTUP not set).");
         }
     }
     catch (InvalidOperationException ex)
@@ -912,35 +923,6 @@ app.MapGet("/health", async (IServiceProvider services, HttpContext context) =>
     }
     checks["postgres"] = new { healthy = dbOk, error = dbError };
     allHealthy &= dbOk;
-
-    // Check for pending EF Core migrations
-    var migrationsPending = false;
-    int pendingMigrationsCount = 0;
-    string? migrationsError = null;
-    try
-    {
-        var pending = db.Database.GetPendingMigrations();
-        pendingMigrationsCount = pending.Count();
-        migrationsPending = pendingMigrationsCount > 0;
-
-        // Determine whether automatic migration-on-startup is enabled
-        var migrateSetting = configuration.GetValue<bool?>("MigrateOnStartup");
-        var migrateEnv = Environment.GetEnvironmentVariable("MIGRATE_ON_STARTUP");
-        var autoMigrateEnabled = migrateSetting ?? string.Equals(migrateEnv, "true", StringComparison.OrdinalIgnoreCase);
-
-        checks["migrations"] = new { pending = migrationsPending, pendingCount = pendingMigrationsCount, autoApplyOnStartup = autoMigrateEnabled };
-
-        // Consider unhealthy if there are pending migrations and they will not be applied automatically
-        if (migrationsPending && !autoMigrateEnabled)
-        {
-            allHealthy &= false;
-        }
-    }
-    catch (Exception ex)
-    {
-        migrationsError = ex.Message;
-        checks["migrations"] = new { pending = false, pendingCount = 0, error = migrationsError };
-    }
 
     // Check Redis (skipped when not configured — intentionally disabled in cost-optimised environments)
     if (redis != null)

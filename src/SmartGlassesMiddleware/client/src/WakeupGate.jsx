@@ -7,9 +7,10 @@ const WAKE_TIMEOUT_MS    = 180_000; // give up after 3 min and show error
  * WakeupGate — polls /health before mounting the main App.
  *
  * On first access the ECS service may have 0 running tasks (scaled to zero
- * when idle).  Calling /health generates an ALB RequestCount metric that
- * triggers the CloudWatch "wake" alarm → EventBridge → Lambda which sets
- * ECS desiredCount=1.  The task takes ~60-90 s to pass its health check.
+ * when idle).  On the first non-200 /health response this component fires a
+ * POST to /wake which invokes the ECS idle-scaler Lambda directly — no
+ * CloudWatch metric pipeline delay.  The task takes ~60-90 s to pass its
+ * health check.
  *
  * States
  *   checking  – first probe, transitions quickly to "ready" if already up
@@ -26,6 +27,7 @@ export default function WakeupGate({ children }) {
   const timerRef     = useRef(null);
   const dotsRef      = useRef(null);
   const cancelledRef = useRef(false);
+  const wakePostedRef = useRef(false); // fire-and-forget POST /wake once per gate mount
 
   useEffect(() => {
     cancelledRef.current = false;
@@ -63,10 +65,22 @@ export default function WakeupGate({ children }) {
             return; // done — stop polling
           }
           // 503 / 5xx  →  server starting up or no tasks yet
+          if (!wakePostedRef.current) {
+            wakePostedRef.current = true;
+            // Directly invoke the ECS idle-scaler Lambda via the /wake CF behavior.
+            // Fire-and-forget — we keep polling /health independently.
+            fetch("/wake", { method: "POST" }).catch(() => {});
+          }
           setPhase("waking");
         }
       } catch {
-        if (!cancelledRef.current) setPhase("waking");
+        if (!cancelledRef.current) {
+          if (!wakePostedRef.current) {
+            wakePostedRef.current = true;
+            fetch("/wake", { method: "POST" }).catch(() => {});
+          }
+          setPhase("waking");
+        }
       }
 
       if (!cancelledRef.current) {

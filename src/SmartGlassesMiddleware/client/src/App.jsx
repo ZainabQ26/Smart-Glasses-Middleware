@@ -1,41 +1,28 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { useMicVAD, utils } from "@ricky0123/vad-react";
-
-// ─── HELPERS ──────────────────────────────────────────────────────────────────
-function blobToBase64(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result.split(",")[1]);
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
-}
+import { useMicVAD } from "@ricky0123/vad-react";
+import WhisperWorker from "./whisperWorker?worker";
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 //
-// KEY DESIGN: VAD acquires the mic stream ONCE at startup with startOnLoad:true
-// and keeps it open permanently. SpeechRecognition runs in parallel for keyword
-// detection — when "activate" fires we just flip a ref; no mic re-acquisition
-// happens so there is no race condition.
+// VAD: Silero VAD v5 — the same neural model used by whisper.cpp internally.
+//      Shipped by @ricky0123/vad-web; ONNX files are copied to wwwroot at build
+//      time (see vite.config.js).  Runs entirely in the browser.
 //
 // Flow:
 //   [always] SpeechRecognition listening for "activate"
-//   "activate" heard → activatedRef=true, rec.abort(), status=listening
-//   VAD.onSpeechEnd fires → sees activatedRef=true → sends to Whisper
-//   Whisper returns → activatedRef=false, vad.start() resumes, SpeechRecognition restarts
+//   "activate" heard → vad.start(), status=listening
+//   Silero VAD.onSpeechEnd fires → 16 kHz Float32Array sent to Whisper Worker
+//   Whisper Worker returns transcript → vad.pause(), SR restarts, status=idle
 //
 export default function App() {
   const [status, setStatus] = useState("idle"); // idle | listening | processing
-  const [logs, setLogs] = useState([]);
+  const [logs, setLogs]     = useState([]);
 
-  // Guard: onSpeechEnd only ships audio when we have been activated.
-  // vad.pause/start never touches activatedRef — they just gate VAD processing.
-  const activatedRef = useRef(false);
-  const recognitionRef = useRef(null);
-  // Stable reference to the latest vad object so stale closures never call old handles.
-  const vadRef = useRef(null);
-  // Timer that auto-resets the listening state if onSpeechEnd never fires.
+  const activatedRef        = useRef(false);
+  const recognitionRef      = useRef(null);
+  const vadRef              = useRef(null);   // stable handle — avoids stale closures
   const listeningTimeoutRef = useRef(null);
+  const workerRef           = useRef(null);
 
   const addLog = useCallback((text, type = "info") => {
     setLogs(prev =>
@@ -43,49 +30,58 @@ export default function App() {
     );
   }, []);
 
-  // ── Silero VAD — owns the mic stream permanently ─────────────────────────
-  // startOnLoad:true → getUserMedia is called once on mount and kept open.
-  // SpeechRecognition opens its OWN concurrent stream; browsers allow this.
-  // When "activate" fires we flip activatedRef; VAD is already running.
+  // ── Silero VAD (whisper.cpp model) ────────────────────────────────────────
+  // startOnLoad:false → mic is only acquired after the wake word.
+  // The Silero v5 .onnx model and worklet bundle are served from wwwroot root
+  // (copied there by viteStaticCopy in vite.config.js).
   const vad = useMicVAD({
-    startOnLoad: false, // Changed from true: only start VAD after activation word
-    baseAssetPath: "/", // Silero .onnx model and vad.worklet.bundle.min.js live at wwwroot root
+    startOnLoad: false,
+    baseAssetPath: "/",
     ortConfig: (ort) => {
-      ort.env.wasm.wasmPaths = "/"; // WASM/MJS files are at wwwroot root, not /assets/
-      ort.env.wasm.numThreads = 1;  // avoid SharedArrayBuffer requirement as belt-and-suspenders
+      ort.env.wasm.wasmPaths = "/";
+      ort.env.wasm.numThreads = 1; // no SharedArrayBuffer/COOP-COEP headers needed
     },
     onSpeechStart: () => {
       if (activatedRef.current) addLog("🟢 Speech detected…", "info");
     },
     onSpeechEnd: (audio) => {
-      if (!activatedRef.current) return; // ignore background speech before activation
-      vad.pause();
+      // `audio` is a 16 kHz mono Float32Array — exactly what Whisper expects.
+      if (!activatedRef.current) return;
+      vadRef.current?.pause();
       setStatus("processing");
-      addLog("⏳ Transcribing via Whisper Lambda…", "info");
-      // encodeWAV may return ArrayBuffer, Uint8Array, or Blob depending on vad-web version.
-      // Normalise to Blob so FileReader.readAsDataURL always gets the right type.
-      const wav = utils.encodeWAV(audio);
-      const wavBlob = wav instanceof Blob ? wav : new Blob([wav], { type: "audio/wav" });
-      sendAudio(wavBlob);
+      addLog("⏳ Transcribing with Whisper (browser)…", "info");
+      // Transfer the buffer zero-copy; worker owns it from here.
+      workerRef.current?.postMessage({ type: "transcribe", audio }, [audio.buffer]);
     },
     onVADMisfire: () => {
       if (activatedRef.current) addLog("(Noise ignored, still listening…)", "info");
     },
   });
 
+  // Keep vadRef in sync so callbacks always call the current instance.
   vadRef.current = vad;
 
-  // On load, confirm VAD is ready but idle
   useEffect(() => {
-    if (!vad.loading && !vad.errored) addLog("✅ Voice detection linked", "info");
-  }, [vad.loading]);
+    if (!vad.loading && !vad.errored) addLog("✅ Silero VAD ready", "info");
+  }, [vad.loading]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (vad.errored) addLog(`❌ VAD error: ${vad.errored.message ?? "ONNX Runtime failed to load"}`, "error");
-  }, [vad.errored]);
+    if (vad.errored) addLog(`❌ VAD error: ${vad.errored.message ?? "Silero model failed to load"}`, "error");
+  }, [vad.errored]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── SpeechRecognition — keyword-only, runs concurrently with VAD ──────────
+  // ── Resume SR keyword listening ───────────────────────────────────────────
+  const resumeListening = useCallback(() => {
+    if (listeningTimeoutRef.current) { clearTimeout(listeningTimeoutRef.current); listeningTimeoutRef.current = null; }
+    activatedRef.current = false;
+    setStatus("idle");
+    try { vadRef.current?.pause(); } catch (_) {}
+    try { recognitionRef.current?.start(); } catch (_) {}
+  }, []);
+
+  const resumeListeningRef = useRef(resumeListening);
+  useEffect(() => { resumeListeningRef.current = resumeListening; }, [resumeListening]);
+
+  // ── SpeechRecognition — "activate" keyword only ───────────────────────────
   useEffect(() => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) {
@@ -94,9 +90,9 @@ export default function App() {
     }
 
     const rec = new SR();
-    rec.continuous = true;
+    rec.continuous     = true;
     rec.interimResults = true;
-    rec.lang = "en-US";
+    rec.lang           = "en-US";
 
     rec.onresult = (event) => {
       const transcript = Array.from(event.results)
@@ -106,16 +102,15 @@ export default function App() {
 
       if (transcript.includes("activate") && !activatedRef.current) {
         activatedRef.current = true;
-        rec.stop(); // Gracefully stop SR stream
-        vad.start(); // Start listening for the actual command NOW
+        rec.stop();
         setStatus("listening");
         addLog("🎤 Activated — speak your command", "info");
-        // Safety net: reset if onSpeechEnd never fires (VAD error or prolonged silence).
+
         if (listeningTimeoutRef.current) clearTimeout(listeningTimeoutRef.current);
         listeningTimeoutRef.current = setTimeout(() => {
-          if (activatedRef.current) { addLog("⏱️ No speech detected — resetting.", "warn"); resumeListening(); }
-        }, 30000);
-        // VAD is already started (startOnLoad:true). If it was paused, resume it.
+          if (activatedRef.current) { addLog("⏱️ No speech detected — resetting.", "warn"); resumeListeningRef.current(); }
+        }, 30_000);
+
         try { vadRef.current.start(); } catch (_) {}
       }
     };
@@ -125,13 +120,8 @@ export default function App() {
         addLog(`Mic error: ${e.error}`, "warn");
     };
 
-    // After abort, restart SR so we keep listening for the next keyword.
-    // We only restart when not activated (i.e. the abort was from something
-    // other than the keyword flow — e.g. a timeout restart).
     rec.onend = () => {
-      if (!activatedRef.current) {
-        try { rec.start(); } catch (_) {}
-      }
+      if (!activatedRef.current) { try { rec.start(); } catch (_) {} }
     };
 
     rec.start();
@@ -139,77 +129,49 @@ export default function App() {
     return () => { try { rec.abort(); } catch (_) {} };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Once transcription is done, resume SR keyword listening.
-  const resumeListening = useCallback(() => {
-    if (listeningTimeoutRef.current) { clearTimeout(listeningTimeoutRef.current); listeningTimeoutRef.current = null; }
-    activatedRef.current = false;
-    setStatus("idle");
-    try { vadRef.current.start(); } catch (_) {} // resume VAD (was paused during processing)
-    try { recognitionRef.current?.start(); } catch (_) {}
-  }, []);
+  // ── Whisper Web Worker ────────────────────────────────────────────────────
+  useEffect(() => {
+    const worker = new WhisperWorker();
+    workerRef.current = worker;
 
-  // ── Send WAV to /api/transcribe (async — polls /api/tasks/{id}) ──────────
-  const sendAudio = async (wavBlob) => {
-    try {
-      const audioBase64 = await blobToBase64(wavBlob);
-      const res = await fetch("/api/transcribe", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ audioBase64, mimeType: "audio/wav" }),
-      });
-      if (!res.ok) throw new Error(`Server ${res.status}: ${await res.text()}`);
-      const { taskId } = await res.json();
-      if (!taskId) throw new Error("No taskId returned from server");
-
-      // Poll /api/tasks/{taskId} until completed, failed, or timeout
-      addLog("⏳ Transcribing…", "info");
-      const POLL_INTERVAL_MS = 2500;
-      const TIMEOUT_MS = 120_000;
-      const deadline = Date.now() + TIMEOUT_MS;
-
-      while (Date.now() < deadline) {
-        await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
-        const pollRes = await fetch(`/api/tasks/${taskId}`);
-        if (!pollRes.ok && pollRes.status !== 202 && pollRes.status !== 500) {
-          throw new Error(`Poll error ${pollRes.status}`);
-        }
-        const data = await pollRes.json();
-        const taskStatus = data.status?.toLowerCase();
-
-        if (taskStatus === "completed") {
-          const transcription = data.result?.transcription?.trim();
-          addLog(transcription ? `🗣️ "${transcription}"` : "(No speech detected)", transcription ? "voice" : "warn");
-          return;
-        }
-        if (taskStatus === "failed") {
-          throw new Error(data.error ?? "Transcription failed");
-        }
-        // still queued/processing — keep polling
+    worker.onmessage = (e) => {
+      const { type, text, message } = e.data;
+      if (type === "loading") {
+        addLog(`⏳ ${message}`, "info");
+      } else if (type === "result") {
+        addLog(text ? `🗣️ "${text}"` : "(No speech detected)", text ? "voice" : "warn");
+        resumeListeningRef.current();
+      } else if (type === "error") {
+        addLog(`❌ Whisper: ${message}`, "error");
+        resumeListeningRef.current();
       }
-      throw new Error("Transcription timed out after 120 s");
-    } catch (err) {
-      addLog(`❌ ${err.message}`, "error");
-    } finally {
-      resumeListening();
-    }
-  };
+    };
 
-  // ── Manual tap button (fallback / supplement to wake-word) ───────────────
+    worker.onerror = (err) => {
+      // err is an ErrorEvent; .message is sometimes empty so fall back to other fields
+      const msg = err.message || (err.filename ? `${err.filename}:${err.lineno}` : err.type) || "unknown error";
+      addLog(`❌ Whisper worker crashed: ${msg}`, "error");
+      resumeListeningRef.current();
+    };
+
+    return () => worker.terminate();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Manual tap button ─────────────────────────────────────────────────────
   const handleMicButton = () => {
     if (status === "idle") {
       activatedRef.current = true;
-      try { vad.start(); } catch (_) {}
       setStatus("listening");
       addLog("🎤 Listening… speak your command", "info");
       if (listeningTimeoutRef.current) clearTimeout(listeningTimeoutRef.current);
       listeningTimeoutRef.current = setTimeout(() => {
         if (activatedRef.current) { addLog("⏱️ No speech detected — resetting.", "warn"); resumeListening(); }
-      }, 30000);
+      }, 30_000);
       try { vadRef.current.start(); } catch (_) {}
     } else if (status === "listening") {
       if (listeningTimeoutRef.current) { clearTimeout(listeningTimeoutRef.current); listeningTimeoutRef.current = null; }
       activatedRef.current = false;
-      try { vad.pause(); } catch (_) {}
+      try { vadRef.current?.pause(); } catch (_) {}
       setStatus("idle");
       addLog("Cancelled.", "info");
       try { recognitionRef.current?.start(); } catch (_) {}
@@ -217,20 +179,20 @@ export default function App() {
   };
 
   // ── Render ────────────────────────────────────────────────────────────────
-  const isListening = status === "listening";
+  const isListening  = status === "listening";
   const isProcessing = status === "processing";
   const btnLabel = isProcessing
     ? "⏳ Transcribing…"
     : isListening
       ? (vad.userSpeaking ? "🗣️ Speaking…" : "🎤 Listening — tap to cancel")
       : vad.loading
-        ? "⏱️ Loading voice detection…"
+        ? "⏱️ Loading Silero VAD…"
         : vad.errored
-          ? '⚠️ VAD error — tap mic to retry'
+          ? "⚠️ VAD error — tap mic to retry"
           : 'Say "Activate" or tap 🎤';
   const btnColor = isProcessing ? "#6c757d"
-    : isListening ? "#e67e22"
-    : vad.errored ? "#e74c3c"
+    : isListening  ? "#e67e22"
+    : vad.errored  ? "#e74c3c"
     : "#00b894";
 
   return (

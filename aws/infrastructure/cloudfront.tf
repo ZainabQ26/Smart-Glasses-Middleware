@@ -1,6 +1,9 @@
 # Response headers policy that enables cross-origin isolation.
-# Required so browsers allow SharedArrayBuffer, which onnxruntime-web's
-# threaded WASM build calls during initialisation (before ortConfig runs).
+# COOP + COEP together enable SharedArrayBuffer in the browser, which allows
+# onnxruntime-web to use its threaded SIMD WASM build for faster inference.
+# @huggingface/transformers v3 (replacing @xenova/transformers v2) bundles
+# onnxruntime-web 1.21+ which fixes the "Unknown CPU vendor" crash that
+# previously forced us to remove COEP.
 resource "aws_cloudfront_response_headers_policy" "coop_coep" {
   name    = "${var.project_name}-${var.environment}-coop-coep"
   comment = "COOP + COEP for SharedArrayBuffer / ONNX Runtime threaded WASM"
@@ -12,8 +15,8 @@ resource "aws_cloudfront_response_headers_policy" "coop_coep" {
       override = true
     }
     items {
-      # credentialless: page is cross-origin isolated but assets don't need
-      # explicit Cross-Origin-Resource-Policy headers (simpler than require-corp)
+      # credentialless: cross-origin isolated without requiring explicit
+      # Cross-Origin-Resource-Policy on every asset (simpler than require-corp)
       header   = "Cross-Origin-Embedder-Policy"
       value    = "credentialless"
       override = true
@@ -54,6 +57,15 @@ resource "aws_cloudfront_distribution" "frontend" {
     custom_origin_config {
       http_port              = 80
       https_port             = 443
+      # HTTP is used for CF→ALB because the ALB TLS certificate covers the
+      # custom domain (capstone.robertb.me) but not the raw ELB hostname that
+      # CloudFront uses for the origin. CloudFront validates the certificate
+      # against the origin hostname, so https-only causes 502 errors.
+      # The viewer-facing HTTPS (CF→browser) is unaffected; the app still sees
+      # X-Forwarded-Proto:https from CloudFront and sets Secure on app cookies.
+      # AWSALB stickiness cookies set by the ALB lack the Secure flag in HTTP
+      # mode, but browsers still send them on HTTPS pages (SameSite=Lax default),
+      # so SignalR sticky sessions continue to work.
       origin_protocol_policy = "http-only"
       origin_ssl_protocols   = ["TLSv1.2"]
       # CloudFront max origin_read_timeout without a quota increase is 60s.
@@ -61,6 +73,25 @@ resource "aws_cloudfront_distribution" "frontend" {
       # invocation asynchronously if needed, but 60s covers warm invocations.
       origin_read_timeout      = 60
       origin_keepalive_timeout = 60
+    }
+  }
+
+  # Lambda Function URL origin — used by the /wake behavior for instant ECS scale-up.
+  # Only added when the ECS idle autoscaler is enabled (FURL resource has count conditional).
+  dynamic "origin" {
+    for_each = local.enable_ecs_idle_autoscaler_effective ? [aws_lambda_function_url.ecs_idle_scaler[0].function_url] : []
+
+    content {
+      # Strip "https://" and trailing "/" to get bare hostname for CF origin
+      domain_name = trimsuffix(trimprefix(origin.value, "https://"), "/")
+      origin_id   = "Lambda-Wake"
+
+      custom_origin_config {
+        http_port              = 80
+        https_port             = 443
+        origin_protocol_policy = "https-only"
+        origin_ssl_protocols   = ["TLSv1.2"]
+      }
     }
   }
 
@@ -84,6 +115,35 @@ resource "aws_cloudfront_distribution" "frontend" {
     max_ttl                   = 86400
     compress                  = true
     response_headers_policy_id = aws_cloudfront_response_headers_policy.coop_coep.id
+  }
+
+  # /wake behavior — direct Lambda invocation for instant ECS scale-up.
+  # The browser WakeupGate POSTs here on the first non-200 /health response;
+  # the Lambda immediately sets ECS desiredCount=1 without waiting for the
+  # CloudWatch metric pipeline (~5 min delay for CF 5xxErrorRate to propagate).
+  dynamic "ordered_cache_behavior" {
+    for_each = local.enable_ecs_idle_autoscaler_effective ? [1] : []
+
+    content {
+      path_pattern     = "/wake"
+      allowed_methods  = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
+      cached_methods   = ["GET", "HEAD"]
+      target_origin_id = "Lambda-Wake"
+
+      forwarded_values {
+        query_string = false
+
+        cookies {
+          forward = "none"
+        }
+      }
+
+      viewer_protocol_policy = "redirect-to-https"
+      min_ttl                = 0
+      default_ttl            = 0
+      max_ttl                = 0
+      compress               = false
+    }
   }
 
   # Static assets — served from S3 so the app is always available even when ECS is at 0 tasks.
