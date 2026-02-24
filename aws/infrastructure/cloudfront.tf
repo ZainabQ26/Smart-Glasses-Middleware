@@ -192,6 +192,7 @@ resource "aws_cloudfront_distribution" "frontend" {
     default_ttl            = 0
     max_ttl                = 0
     compress               = true
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.coop_coep.id
   }
 
   ordered_cache_behavior {
@@ -213,6 +214,7 @@ resource "aws_cloudfront_distribution" "frontend" {
     default_ttl            = 0
     max_ttl                = 0
     compress               = true
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.coop_coep.id
   }
 
   # ONNX Runtime / Silero VAD static assets served by ASP.NET Core wwwroot.
@@ -238,6 +240,7 @@ resource "aws_cloudfront_distribution" "frontend" {
     default_ttl            = 0
     max_ttl                = 0
     compress               = true
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.coop_coep.id
   }
 
   ordered_cache_behavior {
@@ -259,6 +262,7 @@ resource "aws_cloudfront_distribution" "frontend" {
     default_ttl            = 0
     max_ttl                = 0
     compress               = false
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.coop_coep.id
   }
 
   ordered_cache_behavior {
@@ -303,6 +307,7 @@ resource "aws_cloudfront_distribution" "frontend" {
     default_ttl            = 0
     max_ttl                = 0
     compress               = true
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.coop_coep.id
   }
 
   # Health, swagger, and other top-level ALB-served endpoints

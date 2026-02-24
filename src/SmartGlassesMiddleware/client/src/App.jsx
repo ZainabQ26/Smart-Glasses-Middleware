@@ -47,6 +47,10 @@ export default function App() {
     onSpeechEnd: (audio) => {
       // `audio` is a 16 kHz mono Float32Array — exactly what Whisper expects.
       if (!activatedRef.current) return;
+      if (listeningTimeoutRef.current) {
+        clearTimeout(listeningTimeoutRef.current);
+        listeningTimeoutRef.current = null;
+      }
       vadRef.current?.pause();
       setStatus("processing");
       addLog("⏳ Transcribing with Whisper (browser)…", "info");
@@ -156,6 +160,15 @@ export default function App() {
 
     return () => worker.terminate();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    return () => {
+      if (listeningTimeoutRef.current) {
+        clearTimeout(listeningTimeoutRef.current);
+        listeningTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   // ── Manual tap button ─────────────────────────────────────────────────────
   const handleMicButton = () => {
