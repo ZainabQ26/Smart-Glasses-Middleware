@@ -162,7 +162,6 @@ resource "aws_iam_role_policy" "ecs_task" {
         ]
         Resource = [
           aws_lambda_function.document_processor.arn,
-          aws_lambda_function.whisper.arn,
         ]
       },
       {
@@ -183,17 +182,6 @@ resource "aws_iam_role_policy" "ecs_task" {
           aws_secretsmanager_secret.app_secrets.arn,
           aws_secretsmanager_secret.db_credentials.arn
         ], local.enable_redis_effective ? [aws_secretsmanager_secret.redis_credentials[0].arn] : [])
-      },
-      {
-        # Allow the API to send audio jobs to the Whisper SQS queue
-        Effect = "Allow"
-        Action = [
-          "sqs:SendMessage",
-          "sqs:SendMessageBatch",
-          "sqs:GetQueueUrl",
-          "sqs:GetQueueAttributes"
-        ]
-        Resource = aws_sqs_queue.whisper_queue.arn
       },
       {
         # KMS permissions required for S3 SSE-KMS (PutObject needs GenerateDataKey, GetObject needs Decrypt)
@@ -266,11 +254,6 @@ locals {
           name  = "MIGRATE_ON_STARTUP"
           value = "false"
         },
-        {
-          # Whisper SQS queue URL so the API can submit transcription jobs
-          name  = "AWS__WhisperQueueUrl"
-          value = aws_sqs_queue.whisper_queue.id
-        }
       ]
 
       secrets = concat(
