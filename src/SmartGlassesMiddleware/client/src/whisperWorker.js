@@ -27,7 +27,11 @@ async function ensureTransformers() {
   const { pipeline, env } = await import('@huggingface/transformers');
   pipelineFn = pipeline;
 
-  env.allowLocalModels = false;
+  // Allow loading model files from the local site (wwwroot). We'll provide
+  // a `scripts/download_model.ps1` helper to fetch the model into
+  // `wwwroot/models/Xenova/whisper-tiny.en` so the browser can load it
+  // without hitting the network at runtime.
+  env.allowLocalModels = true;
   env.useBrowserCache = true;
 
   // Choose ONNX WASM thread count dynamically (cap at 8).
@@ -60,9 +64,11 @@ async function ensureTransformers() {
 
 // ── Model ----------------------------------------------------------------
 // whisper-tiny.en — English-only, ~39 MB, fast on mid-range hardware.
-// Swap for 'Xenova/whisper-base.en' (~74 MB) or 'Xenova/whisper-small.en'
-// (~244 MB) if you need better accuracy.
-const MODEL_ID = 'Xenova/whisper-tiny.en';
+// When running fully offline we serve model files from `wwwroot/models/...`.
+// Run `scripts/download_model.ps1` to populate `wwwroot/models/Xenova/whisper-tiny.en`.
+// Swap for a larger local checkpoint if desired (place it under the same
+// `wwwroot/models/<repo>` path).
+const MODEL_ID = '/models/Xenova/whisper-tiny.en';
 
 let transcriber = null;
 
