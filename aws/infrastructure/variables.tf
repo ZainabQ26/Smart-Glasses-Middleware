@@ -67,7 +67,7 @@ variable "elasticache_node_type" {
 variable "ecs_api_cpu" {
   description = "CPU units for API ECS task"
   type        = number
-  default     = 512
+  default     = 1024  # 1 vCPU (up from 0.5); halves .NET JIT / EF migration time on cold start
 }
 
 variable "ecs_api_memory" {
