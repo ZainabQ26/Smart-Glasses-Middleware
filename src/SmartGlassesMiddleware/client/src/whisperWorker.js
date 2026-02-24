@@ -87,8 +87,8 @@ self.onmessage = async (event) => {
     // `audio` is a Float32Array of 16 kHz mono PCM — exactly what Whisper
     // expects, so no WAV encoding / decoding is needed.
     const result = await model(audio, {
-      task: 'transcribe',
-      // Disable temperature sampling for deterministic output
+      // English-only model: avoid task/language generation options that are
+      // only valid for multilingual checkpoints.
       do_sample: false,
     });
 
