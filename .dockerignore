@@ -1,0 +1,44 @@
+# Version control
+.git/
+.gitignore
+
+# IDE / editor
+.vscode/
+.idea/
+*.user
+*.suo
+
+# .NET build outputs — the multi-stage build compiles from source.
+# Excluding these keeps the COPY . . layer small and avoids putting
+# stale Release/Debug outputs into the build context.
+src/SmartGlassesMiddleware/bin/
+src/SmartGlassesMiddleware/obj/
+tests/
+tools/
+
+# Node / frontend build outputs
+src/SmartGlassesMiddleware/client/node_modules/
+src/SmartGlassesMiddleware/client/.vite/
+src/SmartGlassesMiddleware/wwwroot/assets/
+
+# AWS / Terraform state (never needed in image builds)
+aws/
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfvars
+
+# CI / scripts (not needed at runtime)
+.github/
+scripts/
+playwright-report/
+test-results/
+
+# Docker compose files (not needed in image)
+docker-compose*.yml
+
+# Misc
+*.md
+*.http
+dotnet-tools.json
+openapi.json
