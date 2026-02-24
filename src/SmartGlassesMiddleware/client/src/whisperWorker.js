@@ -8,8 +8,6 @@
  *   { type: 'result',   text: string }             // final transcript
  *   { type: 'error',    message: string }          // something went wrong
  */
-import { pipeline, env } from '@huggingface/transformers';
-
 // ── Global error capture ────────────────────────────────────────────────
 // Catch WASM init failures and unhandled promise rejections that occur before
 // the message handler is reached (e.g. onnxruntime SIMD crash on first load).
@@ -21,15 +19,23 @@ self.addEventListener('unhandledrejection', (e) => {
 });
 
 // ── Environment ---------------------------------------------------------
-env.allowLocalModels  = false;
-env.useBrowserCache   = true;
+let pipelineFn = null;
 
-// Force single-threaded ONNX WASM.
-// ort-wasm-simd-threaded requires SharedArrayBuffer, which needs COOP+COEP on
-// the page.  CloudFront propagates header changes slowly across edge nodes, so
-// there's always a window where the threaded build crashes on init.
-// whisper-tiny.en is fast enough single-threaded so this is no practical loss.
-env.backends.onnx.wasm.numThreads = 1;
+async function ensureTransformers() {
+  if (pipelineFn) return;
+
+  const { pipeline, env } = await import('@huggingface/transformers');
+  pipelineFn = pipeline;
+
+  env.allowLocalModels = false;
+  env.useBrowserCache = true;
+
+  // Force single-threaded ONNX WASM.
+  // ort-wasm-simd-threaded requires SharedArrayBuffer, which needs COOP+COEP on
+  // the page. CloudFront header propagation and browser policy edge-cases can
+  // cause startup failures; single-threaded whisper-tiny is still fast enough.
+  env.backends.onnx.wasm.numThreads = 1;
+}
 
 // ── Model ----------------------------------------------------------------
 // whisper-tiny.en — English-only, ~39 MB, fast on mid-range hardware.
@@ -42,9 +48,11 @@ let transcriber = null;
 async function getTranscriber() {
   if (transcriber) return transcriber;
 
+  await ensureTransformers();
+
   self.postMessage({ type: 'loading', message: 'Loading Whisper model…' });
 
-  transcriber = await pipeline(
+  transcriber = await pipelineFn(
     'automatic-speech-recognition',
     MODEL_ID,
     {
