@@ -260,9 +260,11 @@ locals {
           value = var.deployment_id
         },
         {
-          # Run EF migrations at startup – RDS is always available (db.t3.micro)
+          # Migrations are applied by the CI run-migrations job (one-shot Fargate task
+          # with MIGRATE_ONLY=true) before new tasks handle traffic. No migration on
+          # every cold start.
           name  = "MIGRATE_ON_STARTUP"
-          value = "true"
+          value = "false"
         },
         {
           # Whisper SQS queue URL so the API can submit transcription jobs
