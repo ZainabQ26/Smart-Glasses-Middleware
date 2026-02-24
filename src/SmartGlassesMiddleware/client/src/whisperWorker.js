@@ -23,10 +23,13 @@ self.addEventListener('unhandledrejection', (e) => {
 // ── Environment ---------------------------------------------------------
 env.allowLocalModels  = false;
 env.useBrowserCache   = true;
-// COOP+COEP headers on the page enable SharedArrayBuffer, so onnxruntime-web
-// will use its threaded SIMD WASM (ort-wasm-simd-threaded) automatically.
-// @huggingface/transformers v3 bundles onnxruntime-web 1.21+ which has the
-// CPU vendor detection bug fixed (was crashing with "Unknown CPU vendor: 0").
+
+// Force single-threaded ONNX WASM.
+// ort-wasm-simd-threaded requires SharedArrayBuffer, which needs COOP+COEP on
+// the page.  CloudFront propagates header changes slowly across edge nodes, so
+// there's always a window where the threaded build crashes on init.
+// whisper-tiny.en is fast enough single-threaded so this is no practical loss.
+env.backends.onnx.wasm.numThreads = 1;
 
 // ── Model ----------------------------------------------------------------
 // whisper-tiny.en — English-only, ~39 MB, fast on mid-range hardware.
