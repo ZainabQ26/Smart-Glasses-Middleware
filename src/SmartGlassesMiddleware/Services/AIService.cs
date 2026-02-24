@@ -200,8 +200,15 @@ Task:";
         {
             var chatService = _kernel.GetRequiredService<IChatCompletionService>();
             var result = await chatService.GetChatMessageContentAsync(prompt, cancellationToken: cancellationToken);
-            var taskName = result.Content?.Trim().ToLower() ?? "unknown";
-            return _knownTasks.Contains(taskName) ? taskName : "unknown";
+            var raw = result.Content?.Trim().ToLower() ?? "unknown";
+            // Exact match
+            if (_knownTasks.Contains(raw)) return raw;
+            // Normalize: 'select document' -> 'select-document'
+            var normalized = raw.Replace(" ", "-");
+            if (_knownTasks.Contains(normalized)) return normalized;
+            // Partial match
+            var partial = _knownTasks.FirstOrDefault(t => t == normalized || normalized.StartsWith(t) || t.StartsWith(normalized));
+            return partial ?? "unknown";
         }
         catch { return "unknown"; }
     }
