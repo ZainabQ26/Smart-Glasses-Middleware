@@ -34,6 +34,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Download Whisper model into wwwroot (for browser worker)
+        if: always()
+        run: |
+          echo "Downloading Whisper model into src/SmartGlassesMiddleware/wwwroot/models/..."
+          pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/download_model.ps1 -Model "Xenova/whisper-tiny.en" -Dest "src/SmartGlassesMiddleware/wwwroot/models/Xenova/whisper-tiny.en" || true
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
