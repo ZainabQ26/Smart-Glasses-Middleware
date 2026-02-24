@@ -4121,6 +4121,28 @@ async function init() {
                 }
 
                 const answer = result.answer || result.Answer || result.AnswerText || result?.AnswerHtml || result?.answerText || 'No response received';
+
+                // Intercept file picker action
+                if (answer.trim() === '__ACTION:OPEN_FILE_PICKER__') {
+                    const fileInput = document.getElementById('file-input');
+                    if (fileInput) fileInput.click();
+                    return;
+                }
+
+                // Intercept select document action — navigate to Files tab and open preview
+                if (answer.trim().startsWith('__ACTION:SELECT_DOCUMENT:')) {
+                    const parts = answer.trim().split(':');
+                    // format: __ACTION:SELECT_DOCUMENT:<id>:<filename>
+                    const fileId = parts[2];
+                    const fileName = parts.slice(3).join(':'); // handle colons in filenames
+                    // Switch to the Files tab
+                    const filesTab = document.querySelector('[data-tab="files"]') || document.getElementById('files-tab');
+                    if (filesTab) filesTab.click();
+                    // Wait briefly for tab to render then open preview
+                    setTimeout(() => previewFile(fileId, fileName), 200);
+                    return;
+                }
+
                 const sources = result.referencedSources || result.ReferencedSources || result.sources || result.Sources || [];
 
                 // Get current attached files
