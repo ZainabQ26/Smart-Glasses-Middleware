@@ -14,7 +14,6 @@ namespace SmartGlassesMiddleware.Controllers;
 public class MediaController : ControllerBase
 {
     private readonly IMediaStorageService _mediaStorageService;
-    private readonly ITranscriptionService _transcriptionService;
     private readonly ILogger<MediaController> _logger;
     private readonly IAIService _aiService;
     private readonly IHistoryService _historyService;
@@ -26,7 +25,6 @@ public class MediaController : ControllerBase
 
     public MediaController(
         IMediaStorageService mediaStorageService,
-        ITranscriptionService transcriptionService,
         IAIService aiService,
         IHistoryService historyService,
         IBackgroundTaskQueue backgroundQueue,
@@ -37,7 +35,6 @@ public class MediaController : ControllerBase
         IRequestMonitoringService? monitoringService = null)
     {
         _mediaStorageService = mediaStorageService;
-        _transcriptionService = transcriptionService;
         _aiService = aiService;
         _historyService = historyService;
         _backgroundQueue = backgroundQueue;
@@ -142,24 +139,21 @@ public class MediaController : ControllerBase
                 inputText = request.Transcription;
             }
 
-            // If a prompt audio file was uploaded as `promptAudio`, enforce exclusivity with text prompt, transcribe it, and remove it from uploads
+            // Reject audio files - audio transcription is handled entirely in the browser via WebWorker
             var promptAudioFile = form?.Files?.FirstOrDefault(f => string.Equals(f.Name, "promptAudio", StringComparison.OrdinalIgnoreCase));
             if (promptAudioFile != null)
             {
-                // If both a text prompt and promptAudio are provided, reject the request
-                if (!string.IsNullOrWhiteSpace(request.Prompt))
+                var fileExt = Path.GetExtension(promptAudioFile.FileName).ToLowerInvariant();
+                var promptAudioExtensions = new[] { ".wav", ".mp3", ".m4a", ".ogg", ".webm", ".flac", ".aac" };
+                
+                if (promptAudioExtensions.Contains(fileExt) || promptAudioFile.ContentType?.StartsWith("audio/") == true)
                 {
-                    var errors = new Dictionary<string, string[]>
-                    {
-                        ["prompt"] = new[] { "Mutually exclusive with promptAudio" }
-                    };
-
-                    var pd = new ValidationProblemDetails(errors)
+                    var pd = new ValidationProblemDetails
                     {
                         Type = "https://tools.ietf.org/html/rfc7231#section-6.5.1",
-                        Title = "Validation Failed",
+                        Title = "Unsupported File Type",
                         Status = StatusCodes.Status400BadRequest,
-                        Detail = "Provide either 'prompt' (text) or 'promptAudio' (file), not both.",
+                        Detail = "Audio files are not accepted. Audio transcription is handled in-browser.",
                         Instance = HttpContext?.Request?.Path
                     };
 
@@ -169,29 +163,7 @@ public class MediaController : ControllerBase
                     return BadRequest(pd);
                 }
 
-                // If input transcription is already provided, skip transcription to avoid unnecessary processing
-                if (string.IsNullOrWhiteSpace(inputText))
-                {
-                    try
-                    {
-                        using var promptStream = promptAudioFile.OpenReadStream();
-                        var contentType = promptAudioFile.ContentType ?? string.Empty;
-                        // Use CancellationToken with 15s timeout to prevent hanging on the transcription service
-                        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-                        var transcribedPrompt = await _transcriptionService.TranscribeAsync(promptStream, promptAudioFile.FileName, contentType, cts.Token);
-                        if (!string.IsNullOrWhiteSpace(transcribedPrompt)) promptAudioTranscription = transcribedPrompt;
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        _logger.LogWarning("Transcription timeout for prompt audio");
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to transcribe prompt audio");
-                    }
-                }
-
-                // Ensure promptAudio is not treated as a normal media file to upload
+                // If file is not audio, remove it from the uploads list (it will be processed normally)
                 files.RemoveAll(f => string.Equals(f.Name, "promptAudio", StringComparison.OrdinalIgnoreCase));
             }
 
@@ -322,32 +294,10 @@ public class MediaController : ControllerBase
                 orderedFiles = files;
             }
 
-            // If any uploaded file is an audio file and a text prompt exists, transcribe the
-            // first audio file and treat it as promptAudio (do not store the audio file).
+            // If any uploaded file is an audio file, filter it out since audio transcription 
+            // is handled in-browser via WebWorker
             var audioExtensions = new[] { ".wav", ".mp3", ".m4a", ".flac", ".aac" };
-            if (!string.IsNullOrWhiteSpace(request.Prompt) && orderedFiles.Any(f => audioExtensions.Contains(Path.GetExtension(f.FileName).ToLowerInvariant())))
-            {
-                var audioFile = orderedFiles.First(f => audioExtensions.Contains(Path.GetExtension(f.FileName).ToLowerInvariant()));
-                try
-                {
-                    using var promptStream = audioFile.OpenReadStream();
-                    var contentType = audioFile.ContentType ?? string.Empty;
-                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-                    var transcribedPrompt = await _transcriptionService.TranscribeAsync(promptStream, audioFile.FileName, contentType, cts.Token);
-                    if (!string.IsNullOrWhiteSpace(transcribedPrompt)) promptAudioTranscription = transcribedPrompt;
-                }
-                catch (OperationCanceledException)
-                {
-                    _logger.LogWarning("Transcription timeout for inline prompt audio");
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to transcribe inline prompt audio");
-                }
-
-                // Remove any audio files from the upload so they are not stored
-                orderedFiles = orderedFiles.Where(f => !audioExtensions.Contains(Path.GetExtension(f.FileName).ToLowerInvariant())).ToList();
-            }
+            orderedFiles = orderedFiles.Where(f => !audioExtensions.Contains(Path.GetExtension(f.FileName).ToLowerInvariant())).ToList();
 
             // Parse per-file transcriptions JSON if provided
             Dictionary<string, string>? perFileTrans = null;

@@ -3666,10 +3666,9 @@ async function init() {
                             progressBar.style.width = '0%';
                         }
                         
-                        // Note: Audio transcription is now performed in-browser via the Whisper worker
-                        // Audio files are not accepted by the admin panel
+                        // Audio files are not supported
                         if (['wav', 'mp3', 'm4a', 'ogg', 'webm'].includes(ext)) {
-                            showMessage('Audio files are not accepted in the admin panel. Use the main app for voice input.', 'error');
+                            showMessage('File type not supported', 'error');
                             promptFileInput.value = '';
                             return;
                         }

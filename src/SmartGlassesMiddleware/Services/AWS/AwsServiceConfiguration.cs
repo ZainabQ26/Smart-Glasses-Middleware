@@ -80,8 +80,7 @@ public static class AwsServiceConfiguration
         services.AddScoped<IMediaStorageService, S3MediaStorageService>();
         services.AddScoped<IAIService, BedrockAIService>();
 
-        // Transcription service: synchronous on-demand Whisper Lambda invocation
-        services.AddScoped<ITranscriptionService, LambdaWhisperTranscriptionService>();
+        // Transcription service removed: audio transcription is now handled entirely in-browser via WebWorker
 
         return services;
     }
