@@ -73,7 +73,7 @@ variable "ecs_api_cpu" {
 variable "ecs_api_memory" {
   description = "Memory (MiB) for API ECS task"
   type        = number
-  default     = 1024
+  default     = 2048  # Fargate minimum for 1024 CPU (1 vCPU) is 2048 MiB
 }
 
 variable "ecs_api_desired_count" {
