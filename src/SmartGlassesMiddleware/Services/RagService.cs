@@ -341,6 +341,27 @@ Answer:";
     {
         try
         {
+            // Check for task handler commands FIRST using the raw query,
+            // before RAG wraps it in a long prompt that confuses the classifier.
+            // Normalize: "select document" -> "select-document", "open file" -> "open-file"
+            var normalizedQuery = query.Trim().ToLower().Replace(" ", "-");
+            var taskDispatcherEarly = _serviceProvider.GetRequiredService<ITaskDispatcher>();
+            if (taskDispatcherEarly.KnownTasks.Contains(normalizedQuery))
+            {
+                var (handled, handlerResp) = await taskDispatcherEarly.TryHandleAsync(normalizedQuery, query);
+                if (handled && !string.IsNullOrEmpty(handlerResp))
+                {
+                    return new QueryResult
+                    {
+                        Answer = handlerResp,
+                        Sources = new List<DocumentSource>(),
+                        UsedAdvancedModel = false,
+                        ModelUsed = "local",
+                        TokenCount = 0
+                    };
+                }
+            }
+
             // Get recent conversation messages
             var recentMessages = await _context.ChatMessages
                 .Where(m => m.ConversationId == conversationId)
