@@ -177,12 +177,14 @@ export default function App() {
       if (type === "loading") {
         addLog(`⏳ ${message}`, "info");
       } else if (type === "result") {
-        if (text) {
-          addLog(`🗣️ "${text}"`, "voice");
-          setTranscript(text);
+        const cleaned = (text || "").trim();
+        const meaningful = cleaned.length >= 2 && /[A-Za-z0-9]/.test(cleaned);
+        if (meaningful) {
+          addLog(`🗣️ "${cleaned}"`, "voice");
+          setTranscript(cleaned);
           setAiResponse(null);
           setStatus("sending");
-          sendToAIRef.current?.(text);
+          sendToAIRef.current?.(cleaned);
         } else {
           addLog("(No speech detected)", "warn");
           resumeListeningRef.current();
@@ -244,12 +246,12 @@ export default function App() {
     : isProcessing
       ? "⏳ Transcribing…"
       : isListening
-        ? (vad.userSpeaking ? "🗣️ Speaking…" : "🎤 Listening — tap to cancel")
+        ? (vad.userSpeaking ? "🗣️ Speaking…" : "🎤 Listening")
         : vad.loading
           ? "⏱️ Loading Silero VAD…"
           : vad.errored
-            ? "⚠️ VAD error — tap mic to retry"
-            : 'Say "Activate" or tap 🎤';
+            ? "⚠️ VAD error — say Activate to retry"
+            : 'Say "Activate"';
   const dotColor = isSending    ? "#3498db"
     : isProcessing ? "#9b59b6"
     : isListening  ? "#e67e22"
@@ -264,16 +266,6 @@ export default function App() {
       </div>
 
       <main style={styles.main}>
-        <div style={styles.btnWrap}>
-          <button
-            onClick={handleMicButton}
-            disabled={isProcessing || isSending}
-            style={{ ...styles.micBtn, background: dotColor, opacity: (isProcessing || isSending) ? 0.6 : 1 }}
-          >
-            {isSending ? "🤖" : isProcessing ? "⏳" : isListening ? "⏹" : "🎤"}
-          </button>
-          <p style={styles.btnHint}>{btnLabel}</p>
-        </div>
 
         {(transcript || isSending) && (
           <section style={styles.conversationArea}>
@@ -309,7 +301,7 @@ export default function App() {
         <div style={styles.logPanel}>
           <h2 style={styles.sectionTitle}>Activity Log</h2>
           {logs.length === 0 ? (
-            <p style={styles.emptyLog}>No activity yet. Say "Activate" or tap the mic.</p>
+            <p style={styles.emptyLog}>No activity yet. Say "Activate".</p>
           ) : (
             <ul style={styles.logList}>
               {logs.map(entry => (
