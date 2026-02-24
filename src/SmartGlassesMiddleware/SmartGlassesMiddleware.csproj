@@ -11,7 +11,10 @@
   <ItemGroup>
     <PackageReference Include="Markdig" Version="0.45.0" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.2" />
-    <PackageReference Include="Microsoft.CodeAnalysis.Common" Version="4.14.0" />
+    <!-- Roslyn is used only for runtime .cs plugin drops (local dev).
+         ExcludeAssets=runtime keeps both packages out of the published image;
+         tasks/*.cs are compiled into the binary at build time via <Compile Include>. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.Common" Version="4.14.0" ExcludeAssets="runtime" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.0">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
@@ -22,7 +25,7 @@
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.0" />
     <PackageReference Include="Polly.Extensions.Http" Version="3.0.0" />
     <PackageReference Include="StackExchange.Redis" Version="2.8.16" />
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" ExcludeAssets="runtime" />
     <PackageReference Include="Microsoft.CodeAnalysis.NetAnalyzers" Version="10.0.102">
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
