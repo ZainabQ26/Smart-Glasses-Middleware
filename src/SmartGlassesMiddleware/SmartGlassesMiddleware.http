@@ -10,13 +10,9 @@ Content-Type: application/json
 
 ###
 
-### Audio Request Example
-POST {{SmartGlassesMiddleware_HostAddress}}/api/transcribe
-Content-Type: application/json
-
-{
-  "audioBase64": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA="
-}
+### Audio transcription endpoint has been removed
+### Audio transcription is now performed in-browser via the Whisper worker
+### See /api/conversations for conversation management
 
 ###
 
