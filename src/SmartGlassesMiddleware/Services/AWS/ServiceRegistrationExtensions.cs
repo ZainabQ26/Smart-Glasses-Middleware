@@ -78,21 +78,8 @@ public static class ServiceRegistrationExtensions
     }
 
     /// <summary>
-    /// Register transcription services
+    /// Transcription services removed: audio transcription is now handled entirely in-browser via WebWorker
     /// </summary>
-    public static IServiceCollection AddTranscriptionServices(
-        this IServiceCollection services,
-        IConfiguration configuration)
-    {
-        if (!services.Any(s => s.ServiceType == typeof(ITranscriptionService)))
-        {
-            services.AddScoped<ITranscriptionService, LambdaWhisperTranscriptionService>();
-        }
-
-        return services;
-    }
-
-    /// <summary>
     /// Register embedding services
     /// </summary>
     public static IServiceCollection AddEmbeddingServices(

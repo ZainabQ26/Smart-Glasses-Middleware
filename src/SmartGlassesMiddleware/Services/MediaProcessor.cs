@@ -7,7 +7,6 @@ namespace SmartGlassesMiddleware.Services;
 public class MediaProcessor : IMediaProcessor
 {
     private readonly IMediaStorageService _mediaStorageService;
-    private readonly ITranscriptionService _transcriptionService;
     private readonly IAIService _aiService;
     private readonly IHistoryService _historyService;
     private readonly int _backgroundAiTimeoutSeconds;
@@ -15,10 +14,9 @@ public class MediaProcessor : IMediaProcessor
     private readonly IRagService _mediaRagService;
     private readonly IRequestMonitoringService? _monitoringService;
 
-    public MediaProcessor(IMediaStorageService mediaStorageService, ITranscriptionService transcriptionService, IAIService aiService, IHistoryService historyService, IRagService mediaRagService, IConfiguration configuration, ILogger<MediaProcessor> logger, IRequestMonitoringService? monitoringService = null)
+    public MediaProcessor(IMediaStorageService mediaStorageService, IAIService aiService, IHistoryService historyService, IRagService mediaRagService, IConfiguration configuration, ILogger<MediaProcessor> logger, IRequestMonitoringService? monitoringService = null)
     {
         _mediaStorageService = mediaStorageService;
-        _transcriptionService = transcriptionService;
         _aiService = aiService;
         _historyService = historyService;
         _mediaRagService = mediaRagService;
@@ -42,38 +40,8 @@ public class MediaProcessor : IMediaProcessor
 
     public async Task<object> ProcessBackgroundTaskAsync(BackgroundTaskEntry entry, CancellationToken ct = default)
     {
-        // Transcribe any audio media items that don't have transcription yet
-        var audioExt = new[] { ".wav", ".mp3", ".m4a", ".flac", ".aac" };
-        var itemsToTranscribe = entry.MediaItems.Where(i => string.IsNullOrWhiteSpace(i.Transcription) && (audioExt.Contains(Path.GetExtension(i.FileName).ToLowerInvariant()) || (i.ContentType?.StartsWith("audio/") == true))).ToList();
-        var totalToTranscribe = itemsToTranscribe.Count;
-        var transcribedCount = 0;
-        foreach (var item in entry.MediaItems)
-        {
-            if (!string.IsNullOrWhiteSpace(item.Transcription)) continue;
-            var ext = Path.GetExtension(item.FileName).ToLowerInvariant();
-            if (audioExt.Contains(ext) || (item.ContentType?.StartsWith("audio/") == true))
-            {
-                try
-                {
-                    using var stream = await _mediaStorageService.DownloadMediaAsync(item.StorageKey);
-                    var contentType = item.ContentType ?? string.Empty;
-                    item.Transcription = await _transcriptionService.TranscribeAsync(stream, item.FileName, contentType);
-                    transcribedCount++;
-                    if (totalToTranscribe > 0)
-                    {
-                        var percent = 10 + (int)Math.Round((transcribedCount / (double)totalToTranscribe) * 20);
-                        ReportProgress(entry.MonitoringRequestId, percent, "Transcribing", $"Transcribed {transcribedCount}/{totalToTranscribe}");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to transcribe background media {Key}", item.StorageKey);
-                }
-            }
-        }
-
-        // Mark transcription phase done
-        ReportProgress(entry.MonitoringRequestId, 30, "Transcription", "Transcription phase complete");
+        // Audio transcription is now handled entirely in-browser via WebWorker
+        // Skip any audio files - only process images and documents
 
         // Build parts for AI
         var partsForAi = new List<string>();

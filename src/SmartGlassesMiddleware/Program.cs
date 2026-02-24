@@ -251,9 +251,7 @@ builder.Services.AddScoped<IDocumentHighlightService, DocumentHighlightService>(
 builder.Services.AddScoped<IConversationService, ConversationService>();
 // Global mapping service for ResourceGroup -> Conversation
 builder.Services.AddScoped<IGroupConversationMappingService, GroupConversationMappingService>();
-// Transcription service: on-demand Whisper Lambda invocation.
-// In local dev without a Lambda the service logs a warning and returns empty string.
-builder.Services.AddScoped<ITranscriptionService, LambdaWhisperTranscriptionService>();
+// Audio transcription service removed: transcription now handled entirely in-browser via Whisper worker
 
 // Auto-register ITaskHandler implementations from this assembly and optional plugin DLLs in the 'tasks' folder.
 

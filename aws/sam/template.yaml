@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: SAM template for Smart Glasses Lambda functions (document processor + whisper)
+Description: SAM template for Smart Glasses Lambda functions (document processor)
 
 Globals:
   Function:
@@ -53,33 +53,7 @@ Resources:
                   - bedrock-runtime:InvokeModel
                 Resource: "*"
 
-  WhisperFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: smart-glasses-whisper
-      Handler: lambda_handler
-      CodeUri: ../lambda-whisper/
-      Environment:
-        Variables:
-          AWS_REGION: !Ref "AWS::Region"
-          WHISPER_MODEL: tiny
-      Policies:
-        - AWSLambdaBasicExecutionRole
-        - PolicyName: WhisperInlinePolicy
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - s3:PutObject
-                  - s3:DeleteObject
-                Resource: !Sub arn:aws:s3:::${DocumentsBucket}/*
-
 Outputs:
   DocumentProcessorFunctionArn:
     Description: ARN of the Document Processor Lambda
     Value: !GetAtt DocumentProcessorFunction.Arn
-  WhisperFunctionArn:
-    Description: ARN of the Whisper Lambda
-    Value: !GetAtt WhisperFunction.Arn
