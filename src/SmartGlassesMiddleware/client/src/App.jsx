@@ -258,10 +258,13 @@ export default function App() {
     : vad.errored  ? "#e74c3c"
     : "#00b894";
 
+  const shouldPulse = vad.loading || isProcessing || isSending;
+  const dotStyle = { ...styles.dot, background: dotColor, ...(shouldPulse ? { animation: "pulse 1s ease-in-out infinite" } : {}) };
+
   return (
     <div style={styles.page}>
       <div style={styles.indicator}>
-        <span style={{ ...styles.dot, background: dotColor }} />
+        <span style={dotStyle} />
         <span style={styles.indicatorText}>{btnLabel}</span>
       </div>
 
@@ -482,3 +485,11 @@ const styles = {
     minWidth: 60,
   },
 };
+
+// Inject pulse keyframe once
+if (typeof document !== "undefined" && !document.getElementById("app-pulse-style")) {
+  const style = document.createElement("style");
+  style.id = "app-pulse-style";
+  style.textContent = "@keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.35); } 100% { transform: scale(1); } }";
+  document.head.appendChild(style);
+}
