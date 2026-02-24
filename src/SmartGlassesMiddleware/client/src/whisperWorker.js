@@ -8,7 +8,7 @@
  *   { type: 'result',   text: string }             // final transcript
  *   { type: 'error',    message: string }          // something went wrong
  */
-import { pipeline, env } from '@xenova/transformers';
+import { pipeline, env } from '@huggingface/transformers';
 
 // ── Global error capture ────────────────────────────────────────────────
 // Catch WASM init failures and unhandled promise rejections that occur before
@@ -21,15 +21,12 @@ self.addEventListener('unhandledrejection', (e) => {
 });
 
 // ── Environment ---------------------------------------------------------
-// Disable local-model lookup; pull from the HuggingFace Hub CDN and cache
-// in the browser's Cache Storage (persists across page reloads).
 env.allowLocalModels  = false;
 env.useBrowserCache   = true;
-// Force single-threaded ONNX WASM. When COEP is absent (as in our CloudFront
-// config), SharedArrayBuffer is unavailable and ONNX already falls back to the
-// single-threaded binary automatically. Setting numThreads=1 here is a
-// belt-and-suspenders guard in case headers change in future.
-env.backends.onnx.wasm.numThreads = 1;
+// COOP+COEP headers on the page enable SharedArrayBuffer, so onnxruntime-web
+// will use its threaded SIMD WASM (ort-wasm-simd-threaded) automatically.
+// @huggingface/transformers v3 bundles onnxruntime-web 1.21+ which has the
+// CPU vendor detection bug fixed (was crashing with "Unknown CPU vendor: 0").
 
 // ── Model ----------------------------------------------------------------
 // whisper-tiny.en — English-only, ~39 MB, fast on mid-range hardware.

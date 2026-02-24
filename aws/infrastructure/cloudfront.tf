@@ -1,14 +1,24 @@
 # Response headers policy that enables cross-origin isolation.
-# Required so browsers allow SharedArrayBuffer, which onnxruntime-web's
-# threaded WASM build calls during initialisation (before ortConfig runs).
+# COOP + COEP together enable SharedArrayBuffer in the browser, which allows
+# onnxruntime-web to use its threaded SIMD WASM build for faster inference.
+# @huggingface/transformers v3 (replacing @xenova/transformers v2) bundles
+# onnxruntime-web 1.21+ which fixes the "Unknown CPU vendor" crash that
+# previously forced us to remove COEP.
 resource "aws_cloudfront_response_headers_policy" "coop_coep" {
   name    = "${var.project_name}-${var.environment}-coop-coep"
-  comment = "COOP for iframe clickjacking protection. COEP intentionally omitted: COEP+COOP together enable SharedArrayBuffer, which makes onnxruntime-web load its threaded SIMD WASM binary. That binary crashes on some hardware (cpuinfo returns unknown CPU vendor). Without COEP, SharedArrayBuffer is unavailable and ONNX falls back to the non-threaded WASM, which works everywhere. The Silero VAD ships its own bundled WASM so is unaffected."
+  comment = "COOP + COEP for SharedArrayBuffer / ONNX Runtime threaded WASM"
 
   custom_headers_config {
     items {
       header   = "Cross-Origin-Opener-Policy"
       value    = "same-origin"
+      override = true
+    }
+    items {
+      # credentialless: cross-origin isolated without requiring explicit
+      # Cross-Origin-Resource-Policy on every asset (simpler than require-corp)
+      header   = "Cross-Origin-Embedder-Policy"
+      value    = "credentialless"
       override = true
     }
   }
