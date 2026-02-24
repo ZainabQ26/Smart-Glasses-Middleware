@@ -88,11 +88,19 @@ public class RAGService : IRAGService
             var stopwatch = Stopwatch.StartNew();
 
             // Classify the raw query FIRST — skip RAG entirely for known task commands.
-            var taskName = await _aiService.ClassifyOnlyAsync(query, cts.Token);
-            if (taskName != "unknown")
+
+            // Step 1: Zero-cost direct match (e.g. "select document" -> "select-document")
+            var directTaskNameQ = query.Trim().ToLower().Replace(" ", "-");
+            var taskDispatcherQ = _serviceProvider.GetRequiredService<ITaskDispatcher>();
+            if (!taskDispatcherQ.KnownTasks.Contains(directTaskNameQ))
             {
-                var taskDispatcherEarly = _serviceProvider.GetRequiredService<ITaskDispatcher>();
-                var (handled, handlerResp) = await taskDispatcherEarly.TryHandleAsync(taskName, query);
+                // Step 2: AI classify on raw input
+                directTaskNameQ = await _aiService.ClassifyOnlyAsync(query, cts.Token);
+            }
+
+            if (directTaskNameQ != "unknown" && !string.IsNullOrEmpty(directTaskNameQ))
+            {
+                var (handled, handlerResp) = await taskDispatcherQ.TryHandleAsync(directTaskNameQ, query);
                 if (handled && !string.IsNullOrEmpty(handlerResp))
                 {
                     return new QueryResult
@@ -363,11 +371,19 @@ Answer:";
             // Classify the raw query FIRST before RAG wraps it in a long prompt.
             // This ensures task handlers (time, reminder, select-document, open-file, etc.)
             // are caught regardless of how the user phrases it.
-            var taskName = await _aiService.ClassifyOnlyAsync(query);
-            if (taskName != "unknown")
+
+            // Step 1: Zero-cost direct match (e.g. "select document" -> "select-document")
+            var directTaskName = query.Trim().ToLower().Replace(" ", "-");
+            var taskDispatcherEarly = _serviceProvider.GetRequiredService<ITaskDispatcher>();
+            if (!taskDispatcherEarly.KnownTasks.Contains(directTaskName))
             {
-                var taskDispatcherEarly = _serviceProvider.GetRequiredService<ITaskDispatcher>();
-                var (handled, handlerResp) = await taskDispatcherEarly.TryHandleAsync(taskName, query);
+                // Step 2: AI classify on raw input
+                directTaskName = await _aiService.ClassifyOnlyAsync(query);
+            }
+
+            if (directTaskName != "unknown" && !string.IsNullOrEmpty(directTaskName))
+            {
+                var (handled, handlerResp) = await taskDispatcherEarly.TryHandleAsync(directTaskName, query);
                 if (handled && !string.IsNullOrEmpty(handlerResp))
                 {
                     return new QueryResult
