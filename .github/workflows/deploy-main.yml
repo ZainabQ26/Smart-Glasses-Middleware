@@ -29,38 +29,40 @@ jobs:
   build-api:
     runs-on: ubuntu-latest
     permissions:
+      actions: write
       id-token: write
       contents: read
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache Whisper model
-        uses: actions/cache@v4
-        with:
-          path: src/SmartGlassesMiddleware/wwwroot/models/Xenova
-          key: ${{ runner.os }}-whisper-Xenova-whisper-tiny-en-v1
-          restore-keys: |
-            ${{ runner.os }}-whisper-
-
-      - name: Restore or download Whisper model into wwwroot (for browser worker)
+      - name: Delete invalid old Actions caches
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          MODEL_DIR=src/SmartGlassesMiddleware/wwwroot/models/Xenova
-          echo "MODEL_DIR=$MODEL_DIR"
-          if [ -d "$MODEL_DIR" ] && [ "$(ls -A $MODEL_DIR)" ]; then
-            echo "Model files present (cache hit)"
-          else
-            echo "Model not found — attempting download via PowerShell"
-            pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/download_model.ps1 -Model "Xenova/whisper-tiny.en" -Dest "$MODEL_DIR"
-          fi
+          set +e
+          REPO="${GITHUB_REPOSITORY}"
+          PREFIXES=(
+            "Linux-whisper-"
+            "Linux-buildx-whisper-"
+            "Linux-whisper-Xenova-"
+          )
 
-      - name: Verify Whisper model presence
-        run: |
-          MODEL_DIR=src/SmartGlassesMiddleware/wwwroot/models/Xenova
-          if [ ! -d "$MODEL_DIR" ] || [ -z "$(ls -A $MODEL_DIR 2>/dev/null)" ]; then
-            echo "Whisper model missing in $MODEL_DIR"
-            ls -la src/SmartGlassesMiddleware/wwwroot/models || true
-            exit 1
-          fi
+          echo "Scanning Actions caches for invalid legacy keys..."
+          for prefix in "${PREFIXES[@]}"; do
+            echo "Checking prefix: $prefix"
+            IDS=$(gh api "repos/${REPO}/actions/caches" --paginate \
+              --jq ".actions_caches[] | select(.key | startswith(\"${prefix}\")) | .id")
+
+            if [ -z "$IDS" ]; then
+              echo "  No caches found for prefix $prefix"
+              continue
+            fi
+
+            for id in $IDS; do
+              echo "  Deleting cache id=$id (prefix=$prefix)"
+              gh api -X DELETE "repos/${REPO}/actions/caches/${id}" >/dev/null 2>&1 || true
+            done
+          done
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
