@@ -71,8 +71,15 @@ public class BedrockAIService : IAIService
     public async Task<string> ClassifyOnlyAsync(string input, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(input)) return "unknown";
-        var taskName = await ClassifyTaskAsync(input, cancellationToken);
-        return _knownTasks.Contains(taskName) ? taskName : "unknown";
+        var raw = await ClassifyTaskAsync(input, cancellationToken);
+        // Exact match first
+        if (_knownTasks.Contains(raw)) return raw;
+        // Normalize: 'select document' -> 'select-document'
+        var normalized = raw.Replace(" ", "-");
+        if (_knownTasks.Contains(normalized)) return normalized;
+        // Partial match: check if any known task starts with or equals
+        var partial = _knownTasks.FirstOrDefault(t => t == normalized || normalized.StartsWith(t) || t.StartsWith(normalized));
+        return partial ?? "unknown";
     }
 
     private async Task<string> ClassifyTaskAsync(string input, CancellationToken cancellationToken)
