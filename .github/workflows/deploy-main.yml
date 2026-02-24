@@ -34,11 +34,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download Whisper model into wwwroot (for browser worker)
-        if: always()
+      - name: Cache Whisper model
+        uses: actions/cache@v4
+        with:
+          path: src/SmartGlassesMiddleware/wwwroot/models/Xenova
+          key: ${{ runner.os }}-whisper-Xenova-whisper-tiny-en-v1
+          restore-keys: |
+            ${{ runner.os }}-whisper-
+
+      - name: Restore or download Whisper model into wwwroot (for browser worker)
         run: |
-          echo "Downloading Whisper model into src/SmartGlassesMiddleware/wwwroot/models/..."
-          pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/download_model.ps1 -Model "Xenova/whisper-tiny.en" -Dest "src/SmartGlassesMiddleware/wwwroot/models/Xenova/whisper-tiny.en" || true
+          MODEL_DIR=src/SmartGlassesMiddleware/wwwroot/models/Xenova
+          echo "MODEL_DIR=$MODEL_DIR"
+          if [ -d "$MODEL_DIR" ] && [ "$(ls -A $MODEL_DIR)" ]; then
+            echo "Model files present (cache hit)"
+          else
+            echo "Model not found — attempting download via PowerShell"
+            pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/download_model.ps1 -Model "Xenova/whisper-tiny.en" -Dest "$MODEL_DIR"
+          fi
+
+      - name: Verify Whisper model presence
+        run: |
+          MODEL_DIR=src/SmartGlassesMiddleware/wwwroot/models/Xenova
+          if [ ! -d "$MODEL_DIR" ] || [ -z "$(ls -A $MODEL_DIR 2>/dev/null)" ]; then
+            echo "Whisper model missing in $MODEL_DIR"
+            ls -la src/SmartGlassesMiddleware/wwwroot/models || true
+            exit 1
+          fi
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
