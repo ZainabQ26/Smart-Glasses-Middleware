@@ -30,11 +30,32 @@ async function ensureTransformers() {
   env.allowLocalModels = false;
   env.useBrowserCache = true;
 
-  // Force single-threaded ONNX WASM.
-  // ort-wasm-simd-threaded requires SharedArrayBuffer, which needs COOP+COEP on
-  // the page. CloudFront header propagation and browser policy edge-cases can
-  // cause startup failures; single-threaded whisper-tiny is still fast enough.
-  env.backends.onnx.wasm.numThreads = 1;
+  // Choose ONNX WASM thread count dynamically (cap at 8).
+  // Threads require SharedArrayBuffer/WebAssembly threads (and COOP+COEP when
+  // running in the browser). Mobile browsers and webviews may not support
+  // this — when unavailable we fall back to 1 thread for maximum compatibility.
+  let desiredThreads = 1;
+  try {
+    const hw = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) ? navigator.hardwareConcurrency : 2;
+    if (typeof SharedArrayBuffer !== 'undefined' && typeof MessageChannel !== 'undefined') {
+      try {
+        // Quick runtime probe: try posting a tiny SharedArrayBuffer to ensure
+        // SharedArrayBuffer is usable in this context (will throw if blocked).
+        const mc = new MessageChannel();
+        mc.port1.postMessage(new SharedArrayBuffer(1));
+
+        // Use a conservative fraction of logical cores and cap at 8.
+        // For phones, half the cores is a safe default (e.g. 2 on 4-core devices).
+        desiredThreads = Math.min(8, Math.max(1, Math.floor(hw / 2)));
+      } catch (e) {
+        desiredThreads = 1;
+      }
+    }
+  } catch (e) {
+    desiredThreads = 1;
+  }
+
+  env.backends.onnx.wasm.numThreads = desiredThreads;
 }
 
 // ── Model ----------------------------------------------------------------
