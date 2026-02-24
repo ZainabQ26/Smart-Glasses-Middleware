@@ -15,14 +15,18 @@ import WhisperWorker from "./whisperWorker?worker";
 //   Whisper Worker returns transcript → vad.pause(), SR restarts, status=idle
 //
 export default function App() {
-  const [status, setStatus] = useState("idle"); // idle | listening | processing
-  const [logs, setLogs]     = useState([]);
+  const [status, setStatus]       = useState("idle"); // idle | listening | processing | sending
+  const [logs, setLogs]           = useState([]);
+  const [transcript, setTranscript] = useState(null);
+  const [aiResponse, setAiResponse] = useState(null);
+  const [logOpen, setLogOpen]     = useState(false);
 
   const activatedRef        = useRef(false);
   const recognitionRef      = useRef(null);
   const vadRef              = useRef(null);   // stable handle — avoids stale closures
   const listeningTimeoutRef = useRef(null);
   const workerRef           = useRef(null);
+  const sendToAIRef         = useRef(null);
 
   const addLog = useCallback((text, type = "info") => {
     setLogs(prev =>
@@ -91,6 +95,30 @@ export default function App() {
   const resumeListeningRef = useRef(resumeListening);
   useEffect(() => { resumeListeningRef.current = resumeListening; }, [resumeListening]);
 
+  // ── Send transcript to AI ─────────────────────────────────────────────────
+  const sendToAI = useCallback(async (text) => {
+    try {
+      addLog("🤖 Sending to AI…", "info");
+      const res = await fetch("/api/process", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ input: text }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      addLog(`💡 AI: "${data.response}"`, "voice");
+      setAiResponse(data.response);
+    } catch (err) {
+      addLog(`❌ AI error: ${err.message}`, "error");
+      setAiResponse(null);
+    } finally {
+      resumeListeningRef.current();
+    }
+  }, [addLog]);
+
+  sendToAIRef.current = sendToAI;
+  useEffect(() => { sendToAIRef.current = sendToAI; }, [sendToAI]);
+
   // ── SpeechRecognition — "activate" keyword only ───────────────────────────
   useEffect(() => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -149,8 +177,16 @@ export default function App() {
       if (type === "loading") {
         addLog(`⏳ ${message}`, "info");
       } else if (type === "result") {
-        addLog(text ? `🗣️ "${text}"` : "(No speech detected)", text ? "voice" : "warn");
-        resumeListeningRef.current();
+        if (text) {
+          addLog(`🗣️ "${text}"`, "voice");
+          setTranscript(text);
+          setAiResponse(null);
+          setStatus("sending");
+          sendToAIRef.current?.(text);
+        } else {
+          addLog("(No speech detected)", "warn");
+          resumeListeningRef.current();
+        }
       } else if (type === "error") {
         addLog(`❌ Whisper: ${message}`, "error");
         resumeListeningRef.current();
@@ -181,6 +217,8 @@ export default function App() {
     if (status === "idle") {
       activatedRef.current = true;
       setStatus("listening");
+      setTranscript(null);
+      setAiResponse(null);
       addLog("🎤 Listening… speak your command", "info");
       if (listeningTimeoutRef.current) clearTimeout(listeningTimeoutRef.current);
       listeningTimeoutRef.current = setTimeout(() => {
@@ -200,16 +238,20 @@ export default function App() {
   // ── Render ────────────────────────────────────────────────────────────────
   const isListening  = status === "listening";
   const isProcessing = status === "processing";
-  const btnLabel = isProcessing
-    ? "⏳ Transcribing…"
-    : isListening
-      ? (vad.userSpeaking ? "🗣️ Speaking…" : "🎤 Listening — tap to cancel")
-      : vad.loading
-        ? "⏱️ Loading Silero VAD…"
-        : vad.errored
-          ? "⚠️ VAD error — tap mic to retry"
-          : 'Say "Activate" or tap 🎤';
-  const btnColor = isProcessing ? "#6c757d"
+  const isSending    = status === "sending";
+  const btnLabel = isSending
+    ? "🤖 Sending to AI…"
+    : isProcessing
+      ? "⏳ Transcribing…"
+      : isListening
+        ? (vad.userSpeaking ? "🗣️ Speaking…" : "🎤 Listening — tap to cancel")
+        : vad.loading
+          ? "⏱️ Loading Silero VAD…"
+          : vad.errored
+            ? "⚠️ VAD error — tap mic to retry"
+            : 'Say "Activate" or tap 🎤';
+  const dotColor = isSending    ? "#3498db"
+    : isProcessing ? "#9b59b6"
     : isListening  ? "#e67e22"
     : vad.errored  ? "#e74c3c"
     : "#00b894";
@@ -217,7 +259,7 @@ export default function App() {
   return (
     <div style={styles.page}>
       <div style={styles.indicator}>
-        <span style={{ ...styles.dot, background: btnColor }} />
+        <span style={{ ...styles.dot, background: dotColor }} />
         <span style={styles.indicatorText}>{btnLabel}</span>
       </div>
 
@@ -225,15 +267,46 @@ export default function App() {
         <div style={styles.btnWrap}>
           <button
             onClick={handleMicButton}
-            disabled={isProcessing}
-            style={{ ...styles.micBtn, background: btnColor, opacity: isProcessing ? 0.6 : 1 }}
+            disabled={isProcessing || isSending}
+            style={{ ...styles.micBtn, background: dotColor, opacity: (isProcessing || isSending) ? 0.6 : 1 }}
           >
-            {isProcessing ? "⏳" : isListening ? "⏹" : "🎤"}
+            {isSending ? "🤖" : isProcessing ? "⏳" : isListening ? "⏹" : "🎤"}
           </button>
           <p style={styles.btnHint}>{btnLabel}</p>
         </div>
 
-        <section style={{ ...styles.card, flex: 1 }}>
+        {(transcript || isSending) && (
+          <section style={styles.conversationArea}>
+            {transcript && (
+              <div style={styles.transcriptBubble}>
+                <span style={styles.bubbleLabel}>You</span>
+                <p style={styles.bubbleText}>{transcript}</p>
+              </div>
+            )}
+            {isSending && !aiResponse && (
+              <div style={styles.thinkingBubble}>
+                <span style={styles.thinkingText}>AI is thinking…</span>
+              </div>
+            )}
+            {aiResponse && (
+              <div style={styles.aiBubble}>
+                <span style={styles.bubbleLabel}>AI</span>
+                <p style={styles.bubbleText}>{aiResponse}</p>
+              </div>
+            )}
+          </section>
+        )}
+      </main>
+
+      <button
+        style={styles.logToggleBtn}
+        onClick={() => setLogOpen(prev => !prev)}
+      >
+        {logOpen ? "✕ Close Log" : "📋 Activity Log"}
+      </button>
+
+      {logOpen && (
+        <div style={styles.logPanel}>
           <h2 style={styles.sectionTitle}>Activity Log</h2>
           {logs.length === 0 ? (
             <p style={styles.emptyLog}>No activity yet. Say "Activate" or tap the mic.</p>
@@ -247,8 +320,8 @@ export default function App() {
               ))}
             </ul>
           )}
-        </section>
-      </main>
+        </div>
+      )}
     </div>
   );
 }
@@ -306,13 +379,81 @@ const styles = {
     boxShadow: "0 4px 24px rgba(0,0,0,0.5)",
   },
   btnHint: { margin: 0, color: "#aaa", fontSize: "0.95rem" },
-  card: {
+  conversationArea: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 12,
+    padding: "0 4px",
+  },
+  transcriptBubble: {
+    background: "#1e3a5f",
+    borderRadius: 12,
+    padding: "12px 16px",
+    alignSelf: "flex-end",
+    maxWidth: "85%",
+  },
+  aiBubble: {
+    background: "#1a3a2a",
+    borderRadius: 12,
+    padding: "12px 16px",
+    alignSelf: "flex-start",
+    maxWidth: "85%",
+  },
+  thinkingBubble: {
+    background: "#1a1a2e",
+    borderRadius: 12,
+    padding: "12px 16px",
+    alignSelf: "flex-start",
+  },
+  bubbleLabel: {
+    fontSize: "0.7rem",
+    fontWeight: 700,
+    textTransform: "uppercase",
+    color: "rgba(255,255,255,0.5)",
+    letterSpacing: "0.08em",
+    display: "block",
+    marginBottom: 4,
+  },
+  bubbleText: {
+    margin: 0,
+    fontSize: "1rem",
+    lineHeight: 1.5,
+    color: "#e0e0e0",
+  },
+  thinkingText: {
+    fontSize: "0.9rem",
+    color: "#888",
+    fontStyle: "italic",
+  },
+  logToggleBtn: {
+    position: "fixed",
+    bottom: 20,
+    right: 20,
+    background: "#222",
+    color: "#ccc",
+    border: "1px solid #444",
+    borderRadius: 8,
+    padding: "8px 16px",
+    fontSize: "0.85rem",
+    cursor: "pointer",
+    zIndex: 50,
+  },
+  logPanel: {
+    position: "fixed",
+    bottom: 60,
+    right: 20,
+    width: 360,
+    maxHeight: 400,
     background: "#111",
     borderRadius: 12,
-    padding: 20,
+    padding: 16,
     display: "flex",
     flexDirection: "column",
     gap: 10,
+    zIndex: 45,
+    boxShadow: "0 4px 24px rgba(0,0,0,0.7)",
+    border: "1px solid #333",
+    overflowY: "auto",
   },
   sectionTitle: {
     fontSize: "0.85rem",
@@ -330,8 +471,6 @@ const styles = {
     display: "flex",
     flexDirection: "column",
     gap: 6,
-    maxHeight: 400,
-    overflowY: "auto",
   },
   logItem: {
     borderRadius: 6,
