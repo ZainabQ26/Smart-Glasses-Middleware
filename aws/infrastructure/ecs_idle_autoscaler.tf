@@ -148,6 +148,23 @@ resource "aws_lambda_function" "ecs_idle_scaler" {
   }
 }
 
+# Lambda Function URL — allows the browser WakeupGate to POST /wake directly
+# (through CloudFront) and trigger an immediate ECS scale-up, bypassing the
+# CloudWatch metric pipeline (~5 min delay for CF 5xxErrorRate to propagate).
+resource "aws_lambda_function_url" "ecs_idle_scaler" {
+  count              = local.enable_ecs_idle_autoscaler_effective ? 1 : 0
+  function_name      = aws_lambda_function.ecs_idle_scaler[0].function_name
+  authorization_type = "NONE"
+
+  cors {
+    allow_credentials = false
+    allow_origins     = ["*"]
+    allow_methods     = ["POST", "GET"]
+    allow_headers     = ["content-type"]
+    max_age           = 86400
+  }
+}
+
 resource "aws_cloudwatch_metric_alarm" "ecs_wake_on_traffic" {
   count               = local.enable_ecs_idle_autoscaler_effective ? 1 : 0
   alarm_name          = "${var.project_name}-${var.environment}-ecs-wake-on-traffic"
