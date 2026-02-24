@@ -7,7 +7,6 @@ namespace SmartGlassesMiddleware.Services;
 
 /// <summary>
 /// Local task handler for finding text in documents and returning location information.
-/// Uses Ollama for local processing.
 /// </summary>
 public class DocumentSearchTaskHandler : ITaskHandler
 {
