@@ -74,12 +74,18 @@ export default function App() {
   }, [vad.errored]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Resume SR keyword listening ───────────────────────────────────────────
+  // Delay before restarting the mic on iOS Safari: gives the browser GC time
+  // to reclaim the ONNX/WASM memory freed by the Whisper worker before a new
+  // audio session is opened, preventing the "content process terminated" /
+  // page-refresh crash that iOS triggers under memory pressure.
+  // 300 ms is enough for one GC cycle while being imperceptible to the user.
+  const RESUME_DELAY_MS = 300;
   const resumeListening = useCallback(() => {
     if (listeningTimeoutRef.current) { clearTimeout(listeningTimeoutRef.current); listeningTimeoutRef.current = null; }
     activatedRef.current = false;
     setStatus("idle");
     try { vadRef.current?.pause(); } catch (_) {}
-    try { recognitionRef.current?.start(); } catch (_) {}
+    setTimeout(() => { try { recognitionRef.current?.start(); } catch (_) {} }, RESUME_DELAY_MS);
   }, []);
 
   const resumeListeningRef = useRef(resumeListening);
