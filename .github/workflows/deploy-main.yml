@@ -631,12 +631,31 @@ jobs:
           echo "=== Import step complete ==="
           set -e
 
+      - name: Remove stale domain/ACM state entries
+        working-directory: aws/infrastructure
+        run: |
+          # domain_name is not used in CI (no custom domain configured).
+          # If the state contains route53/ACM resources from a previous run that
+          # had domain_name set, Terraform will try to refresh the Route53 data
+          # source and fail with "no matching Hosted Zone found".
+          # Remove these entries so Terraform treats them as not managed.
+          for RES in \
+            "data.aws_route53_zone.main" \
+            "data.aws_route53_zone.main[0]" \
+            "aws_acm_certificate.cloudfront[0]" \
+            "aws_acm_certificate_validation.cloudfront[0]" \
+            "aws_route53_record.cert_validation" \
+            "aws_route53_record.cloudfront_alias[0]"; do
+            terraform state rm "$RES" 2>/dev/null && echo "  Removed $RES" || true
+          done
+
       - name: Terraform apply
         working-directory: aws/infrastructure
         run: |
           terraform apply -auto-approve -lock=false \
             -var "environment=dev" \
             -var "aws_region=${AWS_REGION}" \
+            -var "domain_name=" \
             -var "certificate_arn=${CERTIFICATE_ARN}"
 
       - name: Seed empty Secrets Manager secrets with placeholder values
