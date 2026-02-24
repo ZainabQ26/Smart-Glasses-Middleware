@@ -5,7 +5,18 @@ param(
 
 Write-Host "Downloading model $Model -> $Dest"
 
-$tmp = Join-Path $env:TEMP ([System.Guid]::NewGuid().ToString())
+$tmpRoot = $env:RUNNER_TEMP
+if ([string]::IsNullOrWhiteSpace($tmpRoot)) {
+    $tmpRoot = $env:TEMP
+}
+if ([string]::IsNullOrWhiteSpace($tmpRoot)) {
+    $tmpRoot = [System.IO.Path]::GetTempPath()
+}
+if ([string]::IsNullOrWhiteSpace($tmpRoot)) {
+    throw "Unable to resolve a temporary directory (RUNNER_TEMP/TEMP/GetTempPath all empty)."
+}
+
+$tmp = Join-Path $tmpRoot ([System.Guid]::NewGuid().ToString())
 New-Item -ItemType Directory -Path $tmp -Force | Out-Null
 
 try {
