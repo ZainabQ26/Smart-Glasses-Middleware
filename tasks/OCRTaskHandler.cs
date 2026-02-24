@@ -4,8 +4,7 @@ namespace SmartGlassesMiddleware.Services;
 
 /// <summary>
 /// Local task handler for OCR (Optical Character Recognition) of images.
-/// Uses Ollama for local processing.
-/// Note: This is a placeholder implementation. Full OCR requires Tesseract setup.
+/// Note: Full OCR requires Tesseract setup.
 /// </summary>
 public class OCRTaskHandler : ITaskHandler
 {
