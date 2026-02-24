@@ -10,6 +10,8 @@ namespace SmartGlassesMiddleware.Services;
 public interface IAIService
 {
     Task<(string task, string response, bool usedAdvancedModel)> ProcessRequestAsync(string input, CancellationToken cancellationToken = default);
+    /// <summary>Classify only — returns the task name or "unknown". No response generated.</summary>
+    Task<string> ClassifyOnlyAsync(string input, CancellationToken cancellationToken = default);
 }
 
 public class OllamaAIService : IAIService
@@ -179,6 +181,29 @@ Please provide a helpful and concise response:";
             _logger.LogError(ex, "Error processing request with AI service");
             return ("error", "An unexpected error occurred while processing your request. Please try again later.", false);
         }
+    }
+
+    public async Task<string> ClassifyOnlyAsync(string input, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return "unknown";
+        if (_knownTasks.Count == 0)
+        {
+            try { _knownTasks.AddRange(_dispatcher.KnownTasks); } catch { }
+        }
+        var prompt = $@"You are a task classifier. Analyze the following input and determine if it matches one of these known tasks:
+{string.Join(", ", _knownTasks)}.
+If it matches a known task, respond with just the task name.
+If it doesn't match any known task, respond with 'UNKNOWN'.
+Input: {input}
+Task:";
+        try
+        {
+            var chatService = _kernel.GetRequiredService<IChatCompletionService>();
+            var result = await chatService.GetChatMessageContentAsync(prompt, cancellationToken: cancellationToken);
+            var taskName = result.Content?.Trim().ToLower() ?? "unknown";
+            return _knownTasks.Contains(taskName) ? taskName : "unknown";
+        }
+        catch { return "unknown"; }
     }
 
     private async Task<string> CallAdvancedModelAsync(string input)
