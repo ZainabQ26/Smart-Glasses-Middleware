@@ -924,31 +924,6 @@ app.MapGet("/health", async (IServiceProvider services, HttpContext context) =>
     checks["postgres"] = new { healthy = dbOk, error = dbError };
     allHealthy &= dbOk;
 
-    // Check for pending EF Core migrations
-    var migrationsPending = false;
-    int pendingMigrationsCount = 0;
-    string? migrationsError = null;
-    try
-    {
-        var pending = db.Database.GetPendingMigrations();
-        pendingMigrationsCount = pending.Count();
-        migrationsPending = pendingMigrationsCount > 0;
-
-        // Determine whether automatic migration-on-startup is enabled
-        var migrateSetting = configuration.GetValue<bool?>("MigrateOnStartup");
-        var migrateEnv = Environment.GetEnvironmentVariable("MIGRATE_ON_STARTUP");
-        var autoMigrateEnabled = migrateSetting ?? string.Equals(migrateEnv, "true", StringComparison.OrdinalIgnoreCase);
-
-        checks["migrations"] = new { pending = migrationsPending, pendingCount = pendingMigrationsCount, autoApplyOnStartup = autoMigrateEnabled };
-        // Pending migrations are not treated as unhealthy: they are applied by the CI
-        // run-migrations job before new ECS tasks become active.
-    }
-    catch (Exception ex)
-    {
-        migrationsError = ex.Message;
-        checks["migrations"] = new { pending = false, pendingCount = 0, error = migrationsError };
-    }
-
     // Check Redis (skipped when not configured — intentionally disabled in cost-optimised environments)
     if (redis != null)
     {
