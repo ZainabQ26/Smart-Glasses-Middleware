@@ -116,6 +116,11 @@ self.onmessage = async (event) => {
     });
 
     self.postMessage({ type: 'result', text: (result.text ?? '').trim() });
+    // Release the pipeline after each transcription so that iOS Safari can
+    // reclaim the ONNX/WASM memory before the mic is restarted.  The model
+    // weights remain in the browser cache (Cache API / IndexedDB) and reload
+    // quickly (~1-2 s) on the next activation without a network round-trip.
+    transcriber = null;
   } catch (err) {
     self.postMessage({ type: 'error', message: err?.message ?? String(err) });
   }
