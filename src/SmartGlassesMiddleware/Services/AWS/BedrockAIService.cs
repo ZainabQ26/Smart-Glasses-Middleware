@@ -68,6 +68,13 @@ public class BedrockAIService : IAIService
         }
     }
 
+    public async Task<string> ClassifyOnlyAsync(string input, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return "unknown";
+        var taskName = await ClassifyTaskAsync(input, cancellationToken);
+        return _knownTasks.Contains(taskName) ? taskName : "unknown";
+    }
+
     private async Task<string> ClassifyTaskAsync(string input, CancellationToken cancellationToken)
     {
         var prompt = $"""
