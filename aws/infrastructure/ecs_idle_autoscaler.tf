@@ -148,19 +148,33 @@ resource "aws_lambda_function" "ecs_idle_scaler" {
   }
 }
 
+# Lambda Function URL — allows the browser WakeupGate to POST /wake directly
+# (through CloudFront) and trigger an immediate ECS scale-up, bypassing the
+# CloudWatch metric pipeline (~5 min delay for CF 5xxErrorRate to propagate).
+resource "aws_lambda_function_url" "ecs_idle_scaler" {
+  count              = local.enable_ecs_idle_autoscaler_effective ? 1 : 0
+  function_name      = aws_lambda_function.ecs_idle_scaler[0].function_name
+  authorization_type = "NONE"
+
+  cors {
+    allow_credentials = false
+    allow_origins     = ["*"]
+    allow_methods     = ["POST", "GET"]
+    allow_headers     = ["content-type"]
+    max_age           = 86400
+  }
+}
+
 resource "aws_cloudwatch_metric_alarm" "ecs_wake_on_traffic" {
   count               = local.enable_ecs_idle_autoscaler_effective ? 1 : 0
   alarm_name          = "${var.project_name}-${var.environment}-ecs-wake-on-traffic"
-  alarm_description   = "Wake ECS when any traffic hits the ALB (works even at 0 healthy targets)"
+  alarm_description   = "Wake ECS on any traffic: ALB request/5xx counts OR CloudFront 5xx rate. CloudFront generates its own 504 (bypassing ALB metrics) when ECS is at 0 tasks, so both signals are needed."
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 1
   threshold           = 0
   treat_missing_data  = "notBreaching"
 
-  # RequestCount only counts requests forwarded to healthy targets — it is 0 when
-  # ECS has no running tasks.  HTTPCode_ELB_5XX_Count counts 503s the ALB itself
-  # generates when there are no healthy targets.  Summing both ensures the alarm
-  # fires on ANY traffic regardless of ECS state.
+  # m1: ALB requests forwarded to healthy targets
   metric_query {
     id          = "m1"
     return_data = false
@@ -177,6 +191,7 @@ resource "aws_cloudwatch_metric_alarm" "ecs_wake_on_traffic" {
     }
   }
 
+  # m2: ALB-generated 5XX (503 when target group is empty)
   metric_query {
     id          = "m2"
     return_data = false
@@ -193,10 +208,31 @@ resource "aws_cloudwatch_metric_alarm" "ecs_wake_on_traffic" {
     }
   }
 
+  # m3: CloudFront 5xx error rate (%). CloudFront generates its own 504 when it
+  # cannot reach the ALB origin (connection timeout with 0 ECS tasks), so the
+  # ALB never logs a request. This metric fires in that case.
+  metric_query {
+    id          = "m3"
+    return_data = false
+
+    metric {
+      namespace   = "AWS/CloudFront"
+      metric_name = "5xxErrorRate"
+      period      = 60
+      stat        = "Average"
+
+      dimensions = {
+        DistributionId = aws_cloudfront_distribution.frontend.id
+        Region         = "Global"
+      }
+    }
+  }
+
+  # Fire if ALB sees any traffic (m1+m2 > 0) OR CloudFront sees any 5xx (m3 > 0).
   metric_query {
     id          = "total"
-    expression  = "m1+m2"
-    label       = "TotalRequests"
+    expression  = "m1+m2+m3"
+    label       = "TotalTrafficSignal"
     return_data = true
   }
 }
