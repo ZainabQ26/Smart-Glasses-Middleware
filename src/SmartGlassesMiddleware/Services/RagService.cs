@@ -87,6 +87,25 @@ public class RAGService : IRAGService
         {
             var stopwatch = Stopwatch.StartNew();
 
+            // Classify the raw query FIRST — skip RAG entirely for known task commands.
+            var taskName = await _aiService.ClassifyOnlyAsync(query, cts.Token);
+            if (taskName != "unknown")
+            {
+                var taskDispatcherEarly = _serviceProvider.GetRequiredService<ITaskDispatcher>();
+                var (handled, handlerResp) = await taskDispatcherEarly.TryHandleAsync(taskName, query);
+                if (handled && !string.IsNullOrEmpty(handlerResp))
+                {
+                    return new QueryResult
+                    {
+                        Answer = handlerResp,
+                        Sources = new List<DocumentSource>(),
+                        UsedAdvancedModel = false,
+                        ModelUsed = "local",
+                        TokenCount = 0
+                    };
+                }
+            }
+
             // Search for relevant chunks
             try { if (!string.IsNullOrEmpty(monitoringRequestId)) { _monitoringService?.UpdateRequestStatus(monitoringRequestId, "Searching", "Searching document chunks", 20); } } catch {}
             var relevantChunks = await SearchChunksAsync(query, topK, groupIds, documentIds);
@@ -341,14 +360,14 @@ Answer:";
     {
         try
         {
-            // Check for task handler commands FIRST using the raw query,
-            // before RAG wraps it in a long prompt that confuses the classifier.
-            // Normalize: "select document" -> "select-document", "open file" -> "open-file"
-            var normalizedQuery = query.Trim().ToLower().Replace(" ", "-");
-            var taskDispatcherEarly = _serviceProvider.GetRequiredService<ITaskDispatcher>();
-            if (taskDispatcherEarly.KnownTasks.Contains(normalizedQuery))
+            // Classify the raw query FIRST before RAG wraps it in a long prompt.
+            // This ensures task handlers (time, reminder, select-document, open-file, etc.)
+            // are caught regardless of how the user phrases it.
+            var taskName = await _aiService.ClassifyOnlyAsync(query);
+            if (taskName != "unknown")
             {
-                var (handled, handlerResp) = await taskDispatcherEarly.TryHandleAsync(normalizedQuery, query);
+                var taskDispatcherEarly = _serviceProvider.GetRequiredService<ITaskDispatcher>();
+                var (handled, handlerResp) = await taskDispatcherEarly.TryHandleAsync(taskName, query);
                 if (handled && !string.IsNullOrEmpty(handlerResp))
                 {
                     return new QueryResult
