@@ -19,6 +19,7 @@ export default function App() {
   const [logs, setLogs]           = useState([]);
   const [transcript, setTranscript] = useState(null);
   const [aiResponse, setAiResponse] = useState(null);
+  const [pendingAction, setPendingAction] = useState(null); // { type: "OPEN_FILE_PICKER" } | { type: "SELECT_DOCUMENT", id, name } | null
   const [logOpen, setLogOpen]     = useState(false);
 
   const activatedRef        = useRef(false);
@@ -27,6 +28,7 @@ export default function App() {
   const listeningTimeoutRef = useRef(null);
   const workerRef           = useRef(null);
   const sendToAIRef         = useRef(null);
+  const fileInputRef        = useRef(null);
 
   const addLog = useCallback((text, type = "info") => {
     setLogs(prev =>
@@ -106,11 +108,29 @@ export default function App() {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      addLog(`💡 AI: "${data.response}"`, "voice");
-      setAiResponse(data.response);
+      const answer = (data.response || "").trim();
+
+      // ── Action token interception ────────────────────────────────────────
+      if (answer === "__ACTION:OPEN_FILE_PICKER__") {
+        addLog("📂 Command: open file picker", "voice");
+        setAiResponse(null);
+        setPendingAction({ type: "OPEN_FILE_PICKER" });
+      } else if (answer.startsWith("__ACTION:SELECT_DOCUMENT:")) {
+        const parts = answer.split(":");
+        const docId   = parts[2];
+        const docName = parts.slice(3).join(":");
+        addLog(`📄 Command: select document "${docName}"`, "voice");
+        setAiResponse(null);
+        setPendingAction({ type: "SELECT_DOCUMENT", id: docId, name: docName });
+      } else {
+        addLog(`💡 AI: "${answer}"`, "voice");
+        setPendingAction(null);
+        setAiResponse(answer);
+      }
     } catch (err) {
       addLog(`❌ AI error: ${err.message}`, "error");
       setAiResponse(null);
+      setPendingAction(null);
     } finally {
       resumeListeningRef.current();
     }
@@ -183,6 +203,7 @@ export default function App() {
           addLog(`🗣️ "${cleaned}"`, "voice");
           setTranscript(cleaned);
           setAiResponse(null);
+          setPendingAction(null);
           setStatus("sending");
           sendToAIRef.current?.(cleaned);
         } else {
@@ -263,6 +284,19 @@ export default function App() {
 
   return (
     <div style={styles.page}>
+      {/* Hidden file input — triggered by tap after "open file" command */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        style={{ display: "none" }}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) addLog(`📎 File selected: ${file.name}`, "info");
+          setPendingAction(null);
+          e.target.value = "";
+        }}
+      />
+
       <div style={styles.indicator}>
         <span style={dotStyle} />
         <span style={styles.indicatorText}>{btnLabel}</span>
@@ -278,15 +312,42 @@ export default function App() {
                 <p style={styles.bubbleText}>{transcript}</p>
               </div>
             )}
-            {isSending && !aiResponse && (
+            {isSending && !aiResponse && !pendingAction && (
               <div style={styles.thinkingBubble}>
                 <span style={styles.thinkingText}>AI is thinking…</span>
               </div>
             )}
-            {aiResponse && (
+            {aiResponse && !pendingAction && (
               <div style={styles.aiBubble}>
                 <span style={styles.bubbleLabel}>AI</span>
                 <p style={styles.bubbleText}>{aiResponse}</p>
+              </div>
+            )}
+            {pendingAction?.type === "OPEN_FILE_PICKER" && (
+              <div style={styles.actionCard}>
+                <p style={styles.actionCardTitle}>📂 Open File</p>
+                <p style={styles.actionCardHint}>Tap the button below to open the file picker</p>
+                <button
+                  style={styles.actionBtn}
+                  onClick={() => { fileInputRef.current?.click(); }}
+                >
+                  Browse Files
+                </button>
+              </div>
+            )}
+            {pendingAction?.type === "SELECT_DOCUMENT" && (
+              <div style={styles.actionCard}>
+                <p style={styles.actionCardTitle}>📄 Last Uploaded Document</p>
+                <p style={styles.actionCardDoc}>{pendingAction.name}</p>
+                <button
+                  style={styles.actionBtnSecondary}
+                  onClick={() => {
+                    window.open(`/admin.html`, "_blank");
+                    setPendingAction(null);
+                  }}
+                >
+                  View in Admin Panel →
+                </button>
               </div>
             )}
           </section>
@@ -419,6 +480,58 @@ const styles = {
     fontSize: "0.9rem",
     color: "#888",
     fontStyle: "italic",
+  },
+  actionCard: {
+    background: "#1a2a3a",
+    border: "1px solid #2a4a6a",
+    borderRadius: 12,
+    padding: "16px 20px",
+    alignSelf: "flex-start",
+    maxWidth: "85%",
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+  },
+  actionCardTitle: {
+    margin: 0,
+    fontSize: "0.95rem",
+    fontWeight: 700,
+    color: "#7ec8e3",
+  },
+  actionCardHint: {
+    margin: 0,
+    fontSize: "0.85rem",
+    color: "#aaa",
+  },
+  actionCardDoc: {
+    margin: 0,
+    fontSize: "1rem",
+    color: "#e0e0e0",
+    fontWeight: 600,
+    wordBreak: "break-all",
+  },
+  actionBtn: {
+    marginTop: 4,
+    padding: "10px 20px",
+    background: "#2a7ae2",
+    color: "#fff",
+    border: "none",
+    borderRadius: 8,
+    fontSize: "0.95rem",
+    fontWeight: 600,
+    cursor: "pointer",
+    alignSelf: "flex-start",
+  },
+  actionBtnSecondary: {
+    marginTop: 4,
+    padding: "8px 16px",
+    background: "transparent",
+    color: "#7ec8e3",
+    border: "1px solid #2a4a6a",
+    borderRadius: 8,
+    fontSize: "0.85rem",
+    cursor: "pointer",
+    alignSelf: "flex-start",
   },
   logToggleBtn: {
     position: "fixed",
