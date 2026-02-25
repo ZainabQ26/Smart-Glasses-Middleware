@@ -199,15 +199,45 @@ Please provide a helpful and concise response:";
         }
     }
 
+    private static readonly Dictionary<string, string> TaskDescriptions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["time"]               = "user wants to know the current time or date",
+        ["reminder"]           = "user wants to set, add, or create a new reminder or alarm",
+        ["edit-reminder"]      = "user wants to change or update an existing reminder",
+        ["delete-reminder"]    = "user wants to remove, cancel, or delete a reminder",
+        ["document-search"]    = "user wants to search through their documents",
+        ["document-query"]     = "user wants to ask a question about the contents of a document",
+        ["document-highlight"] = "user wants to highlight text or a section in a document",
+        ["ocr"]                = "user wants to scan text, read text from an image, or perform OCR",
+        ["ocr-retry"]          = "user wants to retry or redo an OCR scan",
+        ["open-file"]          = "user wants to open, browse, pick, upload, or choose a file from their device",
+        ["select-document"]    = "user wants to select, view, preview, or load a previously uploaded document",
+        ["advanced"]           = "user wants advanced features, settings, or RAG document processing",
+        ["template"]           = "user wants to use or fill in a template",
+    };
+
     public async Task<string> ClassifyOnlyAsync(string input, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(input)) return "unknown";
         EnsureKnownTasksLoaded();
-        var prompt = $@"You are a task classifier. Analyze the following input and determine if it matches one of these known tasks:
-{string.Join(", ", _knownTasks)}.
-If it matches a known task, respond with just the task name.
-If it doesn't match any known task, respond with 'UNKNOWN'.
-Input: {input}
+
+        var taskLines = _knownTasks
+            .Select(t => TaskDescriptions.TryGetValue(t, out var desc)
+                ? $"- {t}: {desc}"
+                : $"- {t}")
+            .ToList();
+
+        var prompt = $@"You are a voice command classifier for smart glasses. Match the user's request to the most fitting task by INTENT, not exact wording.
+
+Available tasks:
+{string.Join("\n", taskLines)}
+
+Rules:
+- Respond with ONLY the task name (e.g. open-file). No explanation.
+- If none match, respond with UNKNOWN.
+- Interpret variations: ""can you open a file"" → open-file, ""what's the time"" → time, ""pick a document"" → select-document, etc.
+
+User request: {input}
 Task:";
         try
         {
