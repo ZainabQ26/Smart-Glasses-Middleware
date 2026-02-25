@@ -16,6 +16,21 @@ public interface IAIService
 
 public class OllamaAIService : IAIService
 {
+    private static readonly Dictionary<string, string> TaskSummaryMap = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["time"] = "Returns the current date and time.",
+        ["reminder"] = "Creates and saves a reminder.",
+        ["delete-reminder"] = "Deletes a reminder that matches provided text.",
+        ["edit-reminder"] = "Updates an existing reminder.",
+        ["template"] = "Template/example task handler.",
+        ["document-search"] = "Finds text in documents with location details.",
+        ["document-highlight"] = "Highlights requested text in a document.",
+        ["ocr"] = "Runs OCR for a document or image.",
+        ["ocr-retry"] = "Retries OCR and embedding generation for a document.",
+        ["document-query"] = "Answers semantic questions over documents (RAG).",
+        ["advanced"] = "Routes complex requests to an external advanced model endpoint."
+    };
+
     private readonly Kernel _kernel;
     private readonly HttpClient _httpClient;
     private readonly ILogger<OllamaAIService> _logger;
@@ -65,17 +80,7 @@ public class OllamaAIService : IAIService
                 return ("unknown", "Please provide a request.", false);
             }
 
-            if (_knownTasks.Count == 0)
-            {
-                try
-                {
-                    _knownTasks.AddRange(_dispatcher.KnownTasks);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug(ex, "Failed to load known tasks lazily");
-                }
-            }
+            EnsureKnownTasksLoaded();
 
             _logger.LogInformation("IAIService.ProcessRequestAsync entered; inputLength={L}", input.Length);
             // Use AI model to detect the task
@@ -98,7 +103,7 @@ Task:";
                 var sw = Stopwatch.StartNew();
                 var taskResult = await chatService.GetChatMessageContentAsync(taskDetectionPrompt, cancellationToken: cancellationToken);
                 sw.Stop();
-                detectedTask = taskResult.Content?.Trim().ToLower() ?? "unknown";
+                detectedTask = taskResult.Content?.Trim().ToLowerInvariant() ?? "unknown";
                 _logger.LogInformation("Detected task: {Task} for input: {Input} (taskDetectionMs={Ms}, responseLen={Len})", detectedTask, input, sw.ElapsedMilliseconds, taskResult.Content?.Length ?? 0);
             }
             catch (OperationCanceledException)
@@ -112,23 +117,40 @@ Task:";
                 detectedTask = "unknown";
             }
 
+            detectedTask = NormalizeDetectedTask(detectedTask);
+
             // If there are configured known tasks, unknown detections should go to the advanced model
             // When no known tasks are configured (common in dev), prefer local model processing.
             if (_knownTasks.Count > 0 && (detectedTask == "unknown" || !_knownTasks.Contains(detectedTask)))
             {
-                if (_useAdvancedModel)
+                var hasAdvancedTask = _knownTasks.Contains("advanced");
+                if (_useAdvancedModel && hasAdvancedTask)
                 {
-                    _logger.LogInformation("Task is unknown (with known tasks configured), forwarding to advanced model");
+                    _logger.LogInformation("Task is unknown (with known tasks configured), forwarding to advanced task handler");
                     try
                     {
-                        var advancedResponse = await CallAdvancedModelAsync(input);
-                        return ("unknown", advancedResponse, true);
+                        var (handled, advancedResponse) = await _dispatcher.TryHandleAsync("advanced", input);
+                        if (handled && !string.IsNullOrWhiteSpace(advancedResponse))
+                        {
+                            if (IsAdvancedUnavailableResponse(advancedResponse))
+                            {
+                                return ("advanced", BuildAdvancedUnavailableResponse(), false);
+                            }
+
+                            return ("advanced", advancedResponse, true);
+                        }
+
+                        _logger.LogInformation("Advanced task handler was available but did not handle request; falling back to local model processing");
                     }
                     catch (Exception ex)
                     {
                         _logger.LogError(ex, "Advanced model failed, falling back to local model");
                         // Fall through to use local model as fallback
                     }
+                }
+                else if (_useAdvancedModel && !hasAdvancedTask)
+                {
+                    _logger.LogInformation("Advanced model requested but no 'advanced' task handler is registered");
                 }
                 else
                 {
@@ -186,10 +208,7 @@ Please provide a helpful and concise response:";
     public async Task<string> ClassifyOnlyAsync(string input, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(input)) return "unknown";
-        if (_knownTasks.Count == 0)
-        {
-            try { _knownTasks.AddRange(_dispatcher.KnownTasks); } catch { }
-        }
+        EnsureKnownTasksLoaded();
         var prompt = $@"You are a task classifier. Analyze the following input and determine if it matches one of these known tasks:
 {string.Join(", ", _knownTasks)}.
 If it matches a known task, respond with just the task name.
@@ -200,40 +219,83 @@ Task:";
         {
             var chatService = _kernel.GetRequiredService<IChatCompletionService>();
             var result = await chatService.GetChatMessageContentAsync(prompt, cancellationToken: cancellationToken);
-            var raw = result.Content?.Trim().ToLower() ?? "unknown";
-            // Exact match
-            if (_knownTasks.Contains(raw)) return raw;
-            // Normalize: 'select document' -> 'select-document'
-            var normalized = raw.Replace(" ", "-");
-            if (_knownTasks.Contains(normalized)) return normalized;
-            // Partial match
-            var partial = _knownTasks.FirstOrDefault(t => t == normalized || normalized.StartsWith(t) || t.StartsWith(normalized));
-            return partial ?? "unknown";
+            var raw = result.Content?.Trim().ToLowerInvariant() ?? "unknown";
+            return NormalizeDetectedTask(raw);
         }
         catch { return "unknown"; }
     }
 
-    private async Task<string> CallAdvancedModelAsync(string input)
+    private void EnsureKnownTasksLoaded()
     {
-        /*
-         Temporary advanced-model stub (commented out).
-         Uncomment or implement a real advanced-model HTTP call here
-         when the advanced endpoint is available.
-
+        if (_knownTasks.Count > 0) return;
         try
         {
-            _logger.LogInformation("Advanced model stub invoked for input length {L}", input?.Length ?? 0);
-            await Task.Delay(10); // small async yield to keep behavior async
-            return "[Advanced model placeholder response] Using advanced model (temporary stub).";
+            var uniqueKnownTasks = _dispatcher.KnownTasks
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .Select(t => t.Trim().ToLowerInvariant())
+                .Distinct();
+            _knownTasks.AddRange(uniqueKnownTasks);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Advanced model stub failed");
-            return "I'm having trouble connecting to the advanced model. Please try again later.";
+            _logger.LogDebug(ex, "Failed to load known tasks lazily");
         }
-        */
+    }
 
-        _logger.LogInformation("Advanced model call is currently disabled (stub commented out).");
-        return "Advanced model is currently disabled. Please enable the advanced endpoint to use it.";
+    private string NormalizeDetectedTask(string rawTask)
+    {
+        if (string.IsNullOrWhiteSpace(rawTask)) return "unknown";
+        var raw = rawTask.Trim().ToLowerInvariant();
+        if (_knownTasks.Count == 0)
+        {
+            return raw;
+        }
+
+        if (_knownTasks.Contains(raw)) return raw;
+
+        var normalized = raw.Replace(" ", "-");
+        if (_knownTasks.Contains(normalized)) return normalized;
+
+        var partial = _knownTasks.FirstOrDefault(t =>
+            t == normalized || normalized.StartsWith(t, StringComparison.OrdinalIgnoreCase) || t.StartsWith(normalized, StringComparison.OrdinalIgnoreCase));
+
+        return partial ?? "unknown";
+    }
+
+    private static bool IsAdvancedUnavailableResponse(string response)
+    {
+        if (string.IsNullOrWhiteSpace(response)) return true;
+        var lowered = response.ToLowerInvariant();
+        return lowered.Contains("not configured")
+            || lowered.Contains("error calling advanced model")
+            || lowered.Contains("unavailable")
+            || lowered.Contains("returned 4")
+            || lowered.Contains("returned 5");
+    }
+
+    private string BuildAdvancedUnavailableResponse()
+    {
+        var availableTasks = _knownTasks
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .Where(t => !string.Equals(t, "advanced", StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(t => t)
+            .ToList();
+
+        if (availableTasks.Count == 0)
+        {
+            return "Advanced tasks are unavailable right now. No local tasks are currently registered.";
+        }
+
+        var taskLines = availableTasks.Select(task =>
+        {
+            if (TaskSummaryMap.TryGetValue(task, out var summary) && !string.IsNullOrWhiteSpace(summary))
+            {
+                return $"- {task}: {summary}";
+            }
+            return $"- {task}: Available local task handler.";
+        });
+
+        return "Advanced tasks are unavailable right now. Available tasks:\n" + string.Join("\n", taskLines);
     }
 }

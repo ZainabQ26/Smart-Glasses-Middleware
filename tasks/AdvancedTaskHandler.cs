@@ -23,10 +23,10 @@ public class AdvancedTaskHandler : ITaskHandler
         var endpoint = _configuration["AI:AdvancedModelEndpoint"];
         var model = _configuration["AI:AdvancedModelName"] ?? string.Empty;
 
-        if (string.IsNullOrEmpty(endpoint))
+        if (string.IsNullOrWhiteSpace(endpoint))
         {
             _logger.LogWarning("Advanced model endpoint not configured (AI:AdvancedModelEndpoint)");
-            return "Advanced model endpoint is not configured.";
+            return "Advanced tasks are unavailable: endpoint is not configured.";
         }
 
         try
@@ -39,7 +39,7 @@ public class AdvancedTaskHandler : ITaskHandler
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning("Advanced model returned {Status} for endpoint {Endpoint}", response.StatusCode, endpoint);
-                return $"Advanced model returned {(int)response.StatusCode}: {response.ReasonPhrase}";
+                return $"Advanced tasks are unavailable: endpoint returned {(int)response.StatusCode} ({response.ReasonPhrase}).";
             }
 
             var body = await response.Content.ReadAsStringAsync();
@@ -58,7 +58,7 @@ public class AdvancedTaskHandler : ITaskHandler
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error calling advanced model endpoint");
-            return "Error calling advanced model.";
+            return "Advanced tasks are unavailable: failed to reach the endpoint.";
         }
     }
 }
