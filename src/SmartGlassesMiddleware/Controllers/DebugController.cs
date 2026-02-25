@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using SmartGlassesMiddleware.Services;
 
 namespace SmartGlassesMiddleware.Controllers;
 
@@ -6,6 +7,63 @@ namespace SmartGlassesMiddleware.Controllers;
 [Route("api/debug")]
 public class DebugController : ControllerBase
 {
+    private readonly ITaskDispatcher _taskDispatcher;
+    private readonly IConfiguration _configuration;
+
+    public DebugController(ITaskDispatcher taskDispatcher, IConfiguration configuration)
+    {
+        _taskDispatcher = taskDispatcher;
+        _configuration = configuration;
+    }
+
+    [HttpGet("tasks/status")]
+    public IActionResult TaskStatus()
+    {
+        var knownTasks = _taskDispatcher.KnownTasks
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .Select(t => t.Trim().ToLowerInvariant())
+            .Distinct()
+            .OrderBy(t => t)
+            .ToList();
+
+        var handlerMap = _taskDispatcher.GetHandlerTypeMap();
+        var handlerTasks = handlerMap.Keys
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .Select(t => t.Trim().ToLowerInvariant())
+            .Distinct()
+            .OrderBy(t => t)
+            .ToList();
+
+        var missingHandlersForKnown = knownTasks
+            .Where(t => !handlerMap.ContainsKey(t))
+            .ToList();
+
+        var handlersNotInKnown = handlerTasks
+            .Where(t => !knownTasks.Contains(t))
+            .ToList();
+
+        var useAdvancedModel = _configuration.GetValue<bool?>("AI:UseAdvancedModel") ?? false;
+        var advancedEndpoint = _configuration["AI:AdvancedModelEndpoint"];
+        var advancedEndpointConfigured = !string.IsNullOrWhiteSpace(advancedEndpoint);
+
+        return Ok(new
+        {
+            knownTaskCount = knownTasks.Count,
+            handlerTaskCount = handlerTasks.Count,
+            allKnownTasksHaveHandlers = missingHandlersForKnown.Count == 0,
+            knownTasks,
+            missingHandlersForKnown,
+            handlersNotInKnown,
+            handlerMap,
+            advanced = new
+            {
+                useAdvancedModel,
+                advancedEndpointConfigured,
+                advancedTaskRegistered = handlerMap.ContainsKey("advanced")
+            }
+        });
+    }
+
     [HttpPost("echo-form")]
     public async Task<IActionResult> EchoForm()
     {
