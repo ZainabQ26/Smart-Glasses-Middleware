@@ -43,11 +43,11 @@ public class BedrockAIService : IAIService
         {
             _logger.LogInformation("Processing request with Bedrock: {Input}", input);
 
-            // Classify the task
-            var task = await ClassifyTaskAsync(input, cancellationToken);
+            // Classify with intent-aware prompt + normalization (reuse ClassifyOnlyAsync)
+            var task = await ClassifyOnlyAsync(input, cancellationToken);
             
-            // If task is recognized, dispatch to handler
-            if (_knownTasks.Contains(task.ToLower()))
+            // If task is a known handler, dispatch to it
+            if (task != "unknown" && task != "general")
             {
                 _logger.LogInformation("Dispatching known task: {Task}", task);
                 var (handled, handlerResponse) = await _dispatcher.TryHandleAsync(task, input);
