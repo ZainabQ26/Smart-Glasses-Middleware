@@ -119,14 +119,12 @@ Task:";
 
             detectedTask = NormalizeDetectedTask(detectedTask);
 
-            // If there are configured known tasks, unknown detections should go to the advanced model
-            // When no known tasks are configured (common in dev), prefer local model processing.
-            if (_knownTasks.Count > 0 && (detectedTask == "unknown" || !_knownTasks.Contains(detectedTask)))
+            // Route anything not explicitly listed in known tasks to the advanced handler.
+            if (detectedTask == "unknown" || !_knownTasks.Contains(detectedTask))
             {
-                var hasAdvancedTask = _knownTasks.Contains("advanced");
-                if (_useAdvancedModel && hasAdvancedTask)
+                if (_useAdvancedModel)
                 {
-                    _logger.LogInformation("Task is unknown (with known tasks configured), forwarding to advanced task handler");
+                    _logger.LogInformation("Task is not in known tasks, forwarding to advanced task handler");
                     try
                     {
                         var (handled, advancedResponse) = await _dispatcher.TryHandleAsync("advanced", input);
@@ -147,10 +145,6 @@ Task:";
                         _logger.LogError(ex, "Advanced model failed, falling back to local model");
                         // Fall through to use local model as fallback
                     }
-                }
-                else if (_useAdvancedModel && !hasAdvancedTask)
-                {
-                    _logger.LogInformation("Advanced model requested but no 'advanced' task handler is registered");
                 }
                 else
                 {
