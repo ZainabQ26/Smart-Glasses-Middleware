@@ -83,28 +83,15 @@ public class OllamaAIService : IAIService
             EnsureKnownTasksLoaded();
 
             _logger.LogInformation("IAIService.ProcessRequestAsync entered; inputLength={L}", input.Length);
-            // Use AI model to detect the task
-            var taskDetectionPrompt = $@"
-You are a task classifier. Analyze the following input and determine if it matches one of these known tasks: 
-{string.Join(", ", _knownTasks)}.
 
-If it matches a known task, respond with just the task name. 
-If it doesn't match any known task, respond with 'UNKNOWN'.
-
-Input: {input}
-
-Task:";
-
+            // Classify with intent-aware prompt + normalization (reuse ClassifyOnlyAsync)
             string detectedTask;
             try
             {
-                var chatService = _kernel.GetRequiredService<IChatCompletionService>();
-                _logger.LogInformation("Invoking chatService.GetChatMessageContentAsync for task detection (info)");
                 var sw = Stopwatch.StartNew();
-                var taskResult = await chatService.GetChatMessageContentAsync(taskDetectionPrompt, cancellationToken: cancellationToken);
+                detectedTask = await ClassifyOnlyAsync(input, cancellationToken);
                 sw.Stop();
-                detectedTask = taskResult.Content?.Trim().ToLowerInvariant() ?? "unknown";
-                _logger.LogInformation("Detected task: {Task} for input: {Input} (taskDetectionMs={Ms}, responseLen={Len})", detectedTask, input, sw.ElapsedMilliseconds, taskResult.Content?.Length ?? 0);
+                _logger.LogInformation("Detected task: {Task} for input: {Input} (taskDetectionMs={Ms})", detectedTask, input, sw.ElapsedMilliseconds);
             }
             catch (OperationCanceledException)
             {
@@ -113,11 +100,9 @@ Task:";
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to detect task using local model, defaulting to unknown");
+                _logger.LogWarning(ex, "Failed to detect task, defaulting to unknown");
                 detectedTask = "unknown";
             }
-
-            detectedTask = NormalizeDetectedTask(detectedTask);
 
             // Route anything not explicitly listed in known tasks to the advanced handler.
             if (detectedTask == "unknown" || !_knownTasks.Contains(detectedTask))
