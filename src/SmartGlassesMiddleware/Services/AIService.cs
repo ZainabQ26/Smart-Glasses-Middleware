@@ -113,6 +113,8 @@ public class OllamaAIService : IAIService
                     try
                     {
                         var (handled, advancedResponse) = await _dispatcher.TryHandleAsync("advanced", input);
+
+                        // If the advanced handler returned a response, respect it (and mark it).
                         if (handled && !string.IsNullOrWhiteSpace(advancedResponse))
                         {
                             if (IsAdvancedUnavailableResponse(advancedResponse))
@@ -120,15 +122,21 @@ public class OllamaAIService : IAIService
                                 return ("advanced", BuildAdvancedUnavailableResponse(), false);
                             }
 
-                            return ("advanced", advancedResponse, true);
+                            const string advancedSymbol = " ⚡";
+                            return ("advanced", advancedResponse + advancedSymbol, true);
                         }
 
-                        _logger.LogInformation("Advanced task handler was available but did not handle request; falling back to local model processing");
+                        // If we reached here, the advanced handler didn't handle the request.
+                        // The system is configured to use the advanced model, so treat this
+                        // as an unavailable advanced model and return an error message
+                        // instead of falling back to the local model.
+                        _logger.LogWarning("Advanced model handler did not handle request; returning unavailable response (no fallback)");
+                        return ("advanced", BuildAdvancedUnavailableResponse(), false);
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, "Advanced model failed, falling back to local model");
-                        // Fall through to use local model as fallback
+                        _logger.LogError(ex, "Advanced model call failed; returning unavailable response (no fallback)");
+                        return ("advanced", BuildAdvancedUnavailableResponse(), false);
                     }
                 }
                 else
