@@ -7,13 +7,13 @@ namespace SmartGlassesMiddleware.Services;
 
 /// <summary>
 /// Embedding client backed by Amazon Bedrock (Titan Text Embeddings V2).
-/// Implements IOllamaEmbeddingClient so it can be used as a drop-in replacement
-/// without changing the RAGService or any consumers.
+/// Implements IEmbeddingClient so it can be used as a drop-in replacement
+/// in the RAGService and any consumers.
 ///
 /// Titan Embed V2 supports output dimensions: 256, 512, or 1024 (default 1024).
 /// The pgvector column must match — see ApplicationDbContext vector(1024).
 /// </summary>
-public class BedrockEmbeddingClient : IOllamaEmbeddingClient
+public class BedrockEmbeddingClient : IEmbeddingClient
 {
     private readonly IAmazonBedrockRuntime _bedrockRuntime;
     private readonly string _modelId;

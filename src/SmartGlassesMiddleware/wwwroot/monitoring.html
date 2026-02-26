@@ -594,6 +594,12 @@
                     if (histProgress.length) progress = Math.max(...histProgress);
                 }
 
+                // Use the animated current value if available to prevent backward visual jumps
+                // when renderRequests() re-renders while the animator is mid-animation
+                const displayPct = typeof progressCurrent[group.id] === 'number'
+                    ? Math.max(0, Math.min(100, Math.round(progressCurrent[group.id])))
+                    : Math.max(0, Math.min(100, progress || 0));
+
                 const stageLabel = formatStageLabel(primary?.status, primary?.details);
                 const stageDetails = primary?.details ? String(primary.details) : '';
 
@@ -618,9 +624,9 @@
                         ${primary?.error ? `<div class="request-error"><strong>Error:</strong> ${escapeHtml(primary.error)}</div>` : ''}
                         ${primary?.result ? `<div class="request-result"><strong>Result:</strong> ${escapeHtml(primary.result)}</div>` : ''}
                                 <div class="progress-track">
-                                    <div class="progress-fill" style="width:${Math.max(0, Math.min(100, progress || 0))}%" data-progress-id="${escapeHtml(group.id)}" data-testid="request-progress" role="progressbar" aria-label="Request progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.max(0, Math.min(100, progress || 0))}"></div>
+                                    <div class="progress-fill" style="width:${displayPct}%" data-progress-id="${escapeHtml(group.id)}" data-testid="request-progress" role="progressbar" aria-label="Request progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${displayPct}"></div>
                                 </div>
-                                <div class="progress-percent" data-progress-id="${escapeHtml(group.id)}" data-testid="request-progress-label" style="font-size:0.85rem;color:#2f3a3f;margin-top:6px">Progress: ${progress || 0}%</div>
+                                <div class="progress-percent" data-progress-id="${escapeHtml(group.id)}" data-testid="request-progress-label" style="font-size:0.85rem;color:#2f3a3f;margin-top:6px">Progress: ${displayPct}%</div>
                         ${renderHistoryForRequest(group.id)}
                     </div>
                 `;
@@ -696,6 +702,14 @@
                 if (monRes.ok) {
                     const data = await monRes.json();
                     requests = data;
+                    // Seed progressCurrent so bars start at the correct position
+                    requests.forEach(r => {
+                        const id = r.correlationId || r.requestId;
+                        if (id && typeof r.progress === 'number') {
+                            progressCurrent[id] = r.progress;
+                            progressTargets[id] = r.progress;
+                        }
+                    });
                     renderRequests();
                     updateStats();
                 }
