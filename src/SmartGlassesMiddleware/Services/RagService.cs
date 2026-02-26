@@ -906,9 +906,7 @@ Answer:";
                 {
                     _logger.LogInformation("Using IEmbeddingClient for embeddings");
                     var sw = Stopwatch.StartNew();
-                    var cfg = _serviceProvider.GetService(typeof(IConfiguration)) as IConfiguration;
-                    var model = cfg?.GetValue<string>("AI:EmbeddingModel") ?? "nomic-embed-text:latest";
-                    var embedding = await client.GenerateEmbeddingAsync(model, text);
+                    var embedding = await client.GenerateEmbeddingAsync(text);
                     sw.Stop();
                     _logger.LogInformation("Successfully generated embedding (dimension: {Dimension}) in {Ms}ms", embedding.Length, sw.ElapsedMilliseconds);
                     return embedding;
