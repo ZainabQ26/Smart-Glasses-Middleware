@@ -3890,7 +3890,7 @@ async function init() {
                     if (id) documentIds.push(id);
                 }
                 const includeAllGroups = document.getElementById('prompt-include-all')?.checked;
-                const payload = { Query: promptText, TopK: 5 };
+                const payload = { Query: promptText, TopK: 5, RequestId: requestId };
                 if (documentIds.length > 0) {
                     payload.DocumentIds = documentIds;
                 }

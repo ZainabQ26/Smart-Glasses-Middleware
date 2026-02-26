@@ -901,14 +901,12 @@ Answer:";
             // Try to use embedding client if registered in DI
             try
             {
-                var client = _serviceProvider.GetService(typeof(IOllamaEmbeddingClient)) as IOllamaEmbeddingClient;
+                var client = _serviceProvider.GetService(typeof(IEmbeddingClient)) as IEmbeddingClient;
                 if (client != null)
                 {
-                    _logger.LogInformation("Using IOllamaEmbeddingClient for embeddings");
+                    _logger.LogInformation("Using IEmbeddingClient for embeddings");
                     var sw = Stopwatch.StartNew();
-                    var cfg = _serviceProvider.GetService(typeof(IConfiguration)) as IConfiguration;
-                    var model = cfg?.GetValue<string>("AI:OllamaEmbeddingModel") ?? "nomic-embed-text:latest";
-                    var embedding = await client.GenerateEmbeddingAsync(model, text);
+                    var embedding = await client.GenerateEmbeddingAsync(text);
                     sw.Stop();
                     _logger.LogInformation("Successfully generated embedding (dimension: {Dimension}) in {Ms}ms", embedding.Length, sw.ElapsedMilliseconds);
                     return embedding;
@@ -916,7 +914,7 @@ Answer:";
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "IOllamaEmbeddingClient failed, will fallback to kernel/service-based embedding");
+                _logger.LogWarning(ex, "IEmbeddingClient failed, will fallback to kernel/service-based embedding");
             }
 
             var embeddingService = _kernel.Services.GetService(typeof(IEmbeddingGenerator<string, Embedding<float>>))
@@ -1335,7 +1333,7 @@ Answer:";
                 Answer = answer,
                 Sources = sources,
                 UsedAdvancedModel = false,
-                ModelUsed = "local-ollama",
+                ModelUsed = "local-model",
                 TokenCount = EstimateTokens(prompt + answer)
             };
         }
@@ -1437,7 +1435,7 @@ Answer:";
                     Answer = answer,
                     Sources = combinedSources,
                     UsedAdvancedModel = false,
-                    ModelUsed = "local-ollama",
+                    ModelUsed = "local-model",
                     TokenCount = EstimateTokens(combinedPrompt + answer)
                 };
             }

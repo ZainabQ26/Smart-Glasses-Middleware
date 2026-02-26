@@ -16,7 +16,7 @@ public interface IAIService
     Task<bool> WillUseAdvancedModelAsync(string input, CancellationToken cancellationToken = default);
 }
 
-public class OllamaAIService : IAIService
+public class AIService : IAIService
 {
     private static readonly Dictionary<string, string> TaskSummaryMap = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -35,14 +35,13 @@ public class OllamaAIService : IAIService
 
     private readonly Kernel _kernel;
     private readonly HttpClient _httpClient;
-    private readonly ILogger<OllamaAIService> _logger;
+    private readonly ILogger<AIService> _logger;
     private readonly string _advancedModelEndpoint;
-    private readonly string _advancedModelName;
     private readonly bool _useAdvancedModel;
     private readonly List<string> _knownTasks;
     private readonly ITaskDispatcher _dispatcher;
 
-    public OllamaAIService(Kernel kernel, HttpClient httpClient, IConfiguration configuration, ILogger<OllamaAIService> logger, ITaskDispatcher dispatcher)
+    public AIService(Kernel kernel, HttpClient httpClient, IConfiguration configuration, ILogger<AIService> logger, ITaskDispatcher dispatcher)
     {
         _kernel = kernel;
         _httpClient = httpClient;
@@ -50,13 +49,11 @@ public class OllamaAIService : IAIService
         if (configuration == null)
         {
             _advancedModelEndpoint = "http://localhost:5000/api/chat";
-            _advancedModelName = "gpt-4";
             _useAdvancedModel = true;
         }
         else
         {
             _advancedModelEndpoint = configuration["AI:AdvancedModelEndpoint"] ?? "http://localhost:5000/api/chat";
-            _advancedModelName = configuration["AI:AdvancedModelName"] ?? "gpt-4";
             try
             {
                 _useAdvancedModel = configuration.GetValue<bool?>("AI:UseAdvancedModel") ?? true;

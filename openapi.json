@@ -17,7 +17,7 @@
     "/health": {
       "get": {
         "summary": "Health check endpoint",
-        "description": "Checks the health status of all dependent services including PostgreSQL, Redis, MinIO, Ollama AI, and the Vosk transcription service. Returns a comprehensive health report with individual service statuses.",
+        "description": "Checks the health status of all dependent services including PostgreSQL and Redis. Returns a comprehensive health report with individual service statuses.",
         "tags": ["System"],
         "operationId": "getHealth",
         "responses": {
