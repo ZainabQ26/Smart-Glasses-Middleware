@@ -8,8 +8,14 @@ if (-not $region) { $region = 'us-east-1' }
 Write-Output "Running destructive cleanup for prefix '$prefix' in region $region"
 
 function Try-Run($cmd) {
+    Write-Output "About to run: $cmd"
+    $confirm = Read-Host "Run this command? (y/N)"
+    if ($confirm -ne 'y' -and $confirm -ne 'Y') {
+        Write-Warning "Skipping command by user choice: $cmd"
+        return
+    }
     try {
-        iex $cmd
+        Start-Process -FilePath "powershell" -ArgumentList ('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $cmd) -NoNewWindow -Wait
     } catch {
         Write-Warning "Command failed: $cmd -- continuing: $_"
     }

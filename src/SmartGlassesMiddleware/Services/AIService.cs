@@ -38,10 +38,11 @@ public class AIService : IAIService
     private readonly ILogger<AIService> _logger;
     private readonly string _advancedModelEndpoint;
     private readonly bool _useAdvancedModel;
+    private readonly bool _allowBedrockProcessing;
     private readonly List<string> _knownTasks;
     private readonly ITaskDispatcher _dispatcher;
 
-    public AIService(Kernel kernel, HttpClient httpClient, IConfiguration configuration, ILogger<AIService> logger, ITaskDispatcher dispatcher)
+        public AIService(Kernel kernel, HttpClient httpClient, IConfiguration configuration, ILogger<AIService> logger, ITaskDispatcher dispatcher)
     {
         _kernel = kernel;
         _httpClient = httpClient;
@@ -49,18 +50,28 @@ public class AIService : IAIService
         if (configuration == null)
         {
             _advancedModelEndpoint = "http://localhost:5000/api/chat";
-            _useAdvancedModel = true;
+            _useAdvancedModel = false;
+            _allowBedrockProcessing = false;
         }
         else
         {
             _advancedModelEndpoint = configuration["AI:AdvancedModelEndpoint"] ?? "http://localhost:5000/api/chat";
             try
             {
-                _useAdvancedModel = configuration.GetValue<bool?>("AI:UseAdvancedModel") ?? true;
+                _useAdvancedModel = configuration.GetValue<bool?>("AI:UseAdvancedModel") ?? false;
             }
             catch
             {
-                _useAdvancedModel = true;
+                _useAdvancedModel = false;
+            }
+
+            try
+            {
+                _allowBedrockProcessing = configuration.GetValue<bool?>("AI:AllowBedrockProcessing") ?? false;
+            }
+            catch
+            {
+                _allowBedrockProcessing = false;
             }
         }
         _dispatcher = dispatcher;
@@ -151,10 +162,45 @@ public class AIService : IAIService
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Handler for task {Task} failed, falling back to model processing", detectedTask);
+                _logger.LogError(ex, "Handler for task {Task} failed", detectedTask);
             }
 
-            // Process with AI model if no task handler is available
+            // If the task wasn't handled locally:
+            // - Prefer the advanced model if configured
+            // - Otherwise, only fall back to the Bedrock/local model if expressly allowed
+            if (_useAdvancedModel)
+            {
+                _logger.LogInformation("Delegating unhandled task to advanced model handler (detectedTask={Task})", detectedTask);
+                try
+                {
+                    var (handledAdv, advancedResponse) = await _dispatcher.TryHandleAsync("advanced", input);
+                    if (handledAdv && !string.IsNullOrWhiteSpace(advancedResponse))
+                    {
+                        if (IsAdvancedUnavailableResponse(advancedResponse))
+                        {
+                            return ("advanced", BuildAdvancedUnavailableResponse(), false);
+                        }
+
+                        return ("advanced", advancedResponse, true);
+                    }
+
+                    _logger.LogWarning("Advanced model handler did not handle request for task {Task}; returning unavailable response (no fallback)", detectedTask);
+                    return ("advanced", BuildAdvancedUnavailableResponse(), false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Advanced model call failed for unhandled task {Task}; returning unavailable response (no fallback)", detectedTask);
+                    return ("advanced", BuildAdvancedUnavailableResponse(), false);
+                }
+            }
+
+            if (!_allowBedrockProcessing)
+            {
+                _logger.LogInformation("Local Bedrock processing disabled; cannot process task {Task}", detectedTask);
+                return (detectedTask, "Local model processing is disabled for this deployment. Please enable an advanced model to handle this request.", false);
+            }
+
+            // Process with local Bedrock model if allowed
             try
             {
                 var chatService = _kernel.GetRequiredService<IChatCompletionService>();
