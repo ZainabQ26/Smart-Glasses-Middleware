@@ -8,8 +8,7 @@ Backend middleware and frontend for a smart glasses application. Provides a mult
 |-------|-----------|
 | API | ASP.NET Core (.NET 10), C# |
 | Frontend | React 18 + Vite, served from S3 via CloudFront |
-| AI (prod) | AWS Bedrock (Nova / Titan Embed) |
-| AI (local dev) | Any OpenAI-compatible chat/embedding endpoint (`AI:ChatEndpoint`) |
+| AI | AWS Bedrock (Nova / Titan Embed) — always |
 | Advanced model | External REST API (`AI:AdvancedModelEndpoint`) — request/response |
 | Audio transcription | Whisper Lambda (containerised, invoked via SQS) |
 | Document processing | Lambda (Python), iText7, Tesseract OCR, pgvector RAG |
@@ -103,21 +102,18 @@ docker build -f src/SmartGlassesMiddleware/Dockerfile -t smart-glasses-api:local
 |-----|---------|-------------|
 | `ConnectionStrings:DefaultConnection` | `Host=localhost;...` | PostgreSQL |
 | `ConnectionStrings:Redis` | `localhost:6379` | Redis (optional) |
-| `MinIO:Endpoint` | `localhost:9000` | MinIO endpoint |
-| `AI:ChatEndpoint` | `http://localhost:11434` | OpenAI-compatible chat API base URL |
-| `AI:ChatModel` | `llama3:latest` | Chat model name |
-| `AI:EmbeddingEndpoint` | `http://localhost:11434` | OpenAI-compatible embedding API base URL |
-| `AI:EmbeddingModel` | `nomic-embed-text` | Embedding model name |
-| `AI:AdvancedModelEndpoint` | `` | External REST API for advanced requests |
+| `MinIO:Endpoint` | `localhost:9000` | MinIO endpoint (local storage) |
+| `AI:AdvancedModelEndpoint` | `` | External REST API for unknown tasks |
 | `AI:UseAdvancedModel` | `false` | Enable advanced model routing |
-| `AI:UseBedrockAI` | `false` | Switch to AWS Bedrock |
+| `AWS:Bedrock:ModelId` | `us.amazon.nova-2-lite-v1:0` | Bedrock chat model |
+| `AWS:Bedrock:EmbeddingModelId` | `amazon.titan-embed-text-v2:0` | Bedrock embedding model |
 | `MigrateOnStartup` | `true` (dev) / `false` (AWS) | Run EF migrations on boot |
 
 ### AWS (`appsettings.AWS.json`)
 
 Secrets (DB connection string, S3 bucket names, Redis URL) are injected at runtime from AWS Secrets Manager via ECS task secret references — no plaintext credentials in the image.
 
-`AI:UseBedrockAI=true` switches the LLM and embedding client to Bedrock (Nova / Titan Embed V2). The ECS task role grants the necessary `bedrock:InvokeModel` permissions.
+AI classification and embeddings always use Bedrock (Nova / Titan Embed V2). The ECS task role grants the necessary `bedrock:InvokeModel` permissions. Unknown tasks are forwarded to the advanced model REST API (`AI:AdvancedModelEndpoint`).
 
 ## Advanced Model
 

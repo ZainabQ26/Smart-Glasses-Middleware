@@ -132,7 +132,7 @@ var awsRegionEndpoint = Amazon.RegionEndpoint.GetBySystemName(awsRegion);
 builder.Services.AddSingleton<Amazon.S3.IAmazonS3>(_ => new Amazon.S3.AmazonS3Client(awsRegionEndpoint));
 builder.Services.AddSingleton<Amazon.Lambda.IAmazonLambda>(_ => new Amazon.Lambda.AmazonLambdaClient(awsRegionEndpoint));
 
-// In AWS (AI:UseBedrockAI=true) use native S3 for media storage.
+// Use native AWS S3 for media storage when AI:UseBedrockAI=true (AWS deployment).
 // In local dev register the MinIO client (docker-compose provides the MinIO server).
 var useAwsStorage = builder.Configuration.GetValue<bool?>("AI:UseBedrockAI") ?? false;
 
@@ -151,51 +151,21 @@ if (!useAwsStorage)
     });
 }
 
-// Configure AI model service with Semantic Kernel
-// When AI:UseBedrockAI=true (set in appsettings.AWS.json) the Bedrock Converse API is used.
-// Otherwise uses an OpenAI-compatible chat endpoint (configured via AI:ChatEndpoint).
-var useBedrockAI = builder.Configuration.GetValue<bool?>("AI:UseBedrockAI") ?? false;
+// AI always uses AWS Bedrock. Register the Bedrock runtime client
+// (uses default AWS credential chain — ECS task role on AWS).
+builder.Services.AddSingleton<Amazon.BedrockRuntime.IAmazonBedrockRuntime>(_ =>
+    new Amazon.BedrockRuntime.AmazonBedrockRuntimeClient(awsRegionEndpoint));
 
-if (useBedrockAI)
-{
-    // Register the Bedrock runtime client (uses default AWS credential chain — ECS task role on AWS)
-    builder.Services.AddSingleton<Amazon.BedrockRuntime.IAmazonBedrockRuntime>(_ =>
-        new Amazon.BedrockRuntime.AmazonBedrockRuntimeClient(awsRegionEndpoint));
-}
-
+// Build the Semantic Kernel with the Bedrock chat completion service.
+// RagService uses the kernel for local response generation.
 builder.Services.AddSingleton<Kernel>(sp =>
 {
     var kernelBuilder = Kernel.CreateBuilder();
-
-    if (useBedrockAI)
-    {
-        // Wire up the Bedrock chat completion service into the SK kernel
-        var bedrockRuntime = sp.GetRequiredService<Amazon.BedrockRuntime.IAmazonBedrockRuntime>();
-        var bedrockLogger = sp.GetRequiredService<ILoggerFactory>().CreateLogger<SmartGlassesMiddleware.Services.BedrockChatCompletionService>();
-        var bedrockChatService = new SmartGlassesMiddleware.Services.BedrockChatCompletionService(
-            bedrockRuntime, builder.Configuration, bedrockLogger);
-        kernelBuilder.Services.AddSingleton<Microsoft.SemanticKernel.ChatCompletion.IChatCompletionService>(bedrockChatService);
-    }
-    else
-    {
-        var chatEndpoint = builder.Configuration["AI:ChatEndpoint"] ?? "http://localhost:11434";
-        var chatModel = builder.Configuration["AI:ChatModel"] ?? "llama3:latest";
-
-        // Configure with timeout and attach a logging handler to capture outgoing requests
-        var chatHandler = new SmartGlassesMiddleware.Services.HttpLoggingHandler(
-            _preLoggerFactory.CreateLogger("ChatHttp")) { InnerHandler = new HttpClientHandler() };
-        var httpClient = new HttpClient(chatHandler)
-        {
-            Timeout = TimeSpan.FromSeconds(builder.Configuration.GetValue<int?>("AI:ChatTimeoutSeconds") ?? 120)
-        };
-
-        kernelBuilder.AddOpenAIChatCompletion(
-            modelId: chatModel,
-            apiKey: "not-needed",
-            endpoint: new Uri($"{chatEndpoint.TrimEnd('/')}/v1"),
-            httpClient: httpClient);
-    }
-
+    var bedrockRuntime = sp.GetRequiredService<Amazon.BedrockRuntime.IAmazonBedrockRuntime>();
+    var bedrockLogger = sp.GetRequiredService<ILoggerFactory>().CreateLogger<SmartGlassesMiddleware.Services.BedrockChatCompletionService>();
+    var bedrockChatService = new SmartGlassesMiddleware.Services.BedrockChatCompletionService(
+        bedrockRuntime, builder.Configuration, bedrockLogger);
+    kernelBuilder.Services.AddSingleton<Microsoft.SemanticKernel.ChatCompletion.IChatCompletionService>(bedrockChatService);
     return kernelBuilder.Build();
 });
 
@@ -229,21 +199,8 @@ else
 builder.Services.AddSingleton<IMetricsService, MetricsService>();
 builder.Services.AddSingleton<IRequestMonitoringService, RequestMonitoringService>();
 builder.Services.AddScoped<IRagService, RagService>();
-// Register embedding client — Bedrock (Titan Embed V2) or generic OpenAI-compatible endpoint
-if (useBedrockAI)
-{
-    builder.Services.AddScoped<IEmbeddingClient, SmartGlassesMiddleware.Services.BedrockEmbeddingClient>();
-}
-else
-{
-    builder.Services.AddHttpClient<IEmbeddingClient, EmbeddingClient>((sp, http) =>
-    {
-        var cfg = sp.GetRequiredService<IConfiguration>();
-        var baseUrl = cfg["AI:EmbeddingEndpoint"] ?? "http://localhost:11434";
-        http.BaseAddress = new Uri(baseUrl);
-        http.Timeout = TimeSpan.FromSeconds(cfg.GetValue<int?>("AI:EmbeddingTimeoutSeconds") ?? 120);
-    });
-}
+// Always use Bedrock (Titan Embed V2) for embeddings
+builder.Services.AddScoped<IEmbeddingClient, SmartGlassesMiddleware.Services.BedrockEmbeddingClient>();
 // Document processing and RAG services
 builder.Services.AddScoped<IDocumentProcessingService, DocumentProcessingService>();
 builder.Services.AddScoped<IRAGService, RAGService>();
@@ -565,13 +522,6 @@ try
     if (string.IsNullOrWhiteSpace(minioAccessKey) || string.IsNullOrWhiteSpace(minioSecretKey))
     {
         logger.LogWarning("MinIO credentials not properly configured. Using default credentials.");
-    }
-
-    // Validate AI configuration
-    var chatEndpoint = config["AI:ChatEndpoint"];
-    if (string.IsNullOrWhiteSpace(chatEndpoint) && !useBedrockAI)
-    {
-        logger.LogWarning("Chat endpoint not configured (AI:ChatEndpoint). AI classification features may not work correctly.");
     }
 
     // Validate advanced model endpoint
