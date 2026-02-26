@@ -67,7 +67,7 @@ public static class ServiceRegistrationExtensions
                 services.AddSingleton(kernel);
             }
 
-            services.AddHttpClient<IAIService, OllamaAIService>((sp, client) =>
+            services.AddHttpClient<IAIService, AIService>((sp, client) =>
             {
                 var timeoutSeconds = configuration.GetValue<int?>("ServiceTimeouts:AIServiceTimeoutSeconds") ?? 60;
                 client.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
@@ -94,11 +94,11 @@ public static class ServiceRegistrationExtensions
         else
         {
             // Use alternative embedding service
-            services.AddHttpClient<IOllamaEmbeddingClient, OllamaEmbeddingClient>((sp, http) =>
+            services.AddHttpClient<IEmbeddingClient, EmbeddingClient>((sp, http) =>
             {
-                var baseUrl = configuration["AI:OllamaEndpoint"] ?? "http://ollama:11434";
+                var baseUrl = configuration["AI:EmbeddingEndpoint"] ?? "http://localhost:11434";
                 http.BaseAddress = new Uri(baseUrl);
-                http.Timeout = TimeSpan.FromSeconds(configuration.GetValue<int?>("AI:OllamaEmbeddingTimeoutSeconds") ?? 120);
+                http.Timeout = TimeSpan.FromSeconds(configuration.GetValue<int?>("AI:EmbeddingTimeoutSeconds") ?? 120);
             });
         }
 

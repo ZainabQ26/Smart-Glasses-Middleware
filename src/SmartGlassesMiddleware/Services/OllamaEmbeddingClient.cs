@@ -4,17 +4,17 @@ using Microsoft.Extensions.Logging;
 
 namespace SmartGlassesMiddleware.Services;
 
-public interface IOllamaEmbeddingClient
+public interface IEmbeddingClient
 {
     Task<float[]> GenerateEmbeddingAsync(string model, string input, CancellationToken ct = default);
 }
 
-public class OllamaEmbeddingClient : IOllamaEmbeddingClient
+public class EmbeddingClient : IEmbeddingClient
 {
     private readonly HttpClient _http;
-    private readonly ILogger<OllamaEmbeddingClient> _logger;
+    private readonly ILogger<EmbeddingClient> _logger;
 
-    public OllamaEmbeddingClient(HttpClient http, ILogger<OllamaEmbeddingClient> logger)
+    public EmbeddingClient(HttpClient http, ILogger<EmbeddingClient> logger)
     {
         _http = http;
         _logger = logger;
@@ -30,7 +30,7 @@ public class OllamaEmbeddingClient : IOllamaEmbeddingClient
             var content = await resp.Content.ReadAsStringAsync(ct);
             if (!resp.IsSuccessStatusCode)
             {
-                _logger.LogWarning("Ollama embedding request failed: {Status} {Body}", resp.StatusCode, content);
+                _logger.LogWarning("Embedding request failed: {Status} {Body}", resp.StatusCode, content);
                 resp.EnsureSuccessStatusCode();
             }
 
@@ -56,7 +56,7 @@ public class OllamaEmbeddingClient : IOllamaEmbeddingClient
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get embedding from Ollama");
+            _logger.LogError(ex, "Failed to get embedding from endpoint");
             throw;
         }
     }

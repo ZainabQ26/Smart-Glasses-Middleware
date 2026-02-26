@@ -275,8 +275,11 @@ public class DocumentsController : ControllerBase
         try
         {
             _logger.LogInformation("Starting monitoring request...");
+            // Use the client-provided RequestId for progress tracking via SignalR, otherwise generate one
+            var clientRequestId = !string.IsNullOrWhiteSpace(request.RequestId) ? request.RequestId : null;
             requestId = await _monitoringService.StartRequest("DocumentQuery", 
-                $"Query: {request.Query.Substring(0, Math.Min(50, request.Query.Length))}...");
+                $"Query: {request.Query.Substring(0, Math.Min(50, request.Query.Length))}...",
+                clientRequestId);
             _logger.LogInformation("Monitoring request started with ID: {RequestId}", requestId);
 
             _logger.LogInformation("Updating request status to 'Searching documents'...");
@@ -870,6 +873,8 @@ public class QueryRequest
     public List<Guid>? GroupIds { get; set; }
     public List<Guid>? DocumentIds { get; set; }
     public Guid? ConversationId { get; set; }
+    /// <summary>Optional client-provided request ID used for progress tracking via SignalR.</summary>
+    public string? RequestId { get; set; }
 }
 
 public class MoveDocumentRequest

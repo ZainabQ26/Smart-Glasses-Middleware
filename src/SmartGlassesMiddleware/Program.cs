@@ -153,7 +153,7 @@ if (!useAwsStorage)
 
 // Configure AI model service with Semantic Kernel
 // When AI:UseBedrockAI=true (set in appsettings.AWS.json) the Bedrock Converse API is used.
-// Otherwise falls back to Ollama via OpenAI-compatible endpoint (local dev default).
+// Otherwise uses an OpenAI-compatible chat endpoint (configured via AI:ChatEndpoint).
 var useBedrockAI = builder.Configuration.GetValue<bool?>("AI:UseBedrockAI") ?? false;
 
 if (useBedrockAI)
@@ -178,21 +178,21 @@ builder.Services.AddSingleton<Kernel>(sp =>
     }
     else
     {
-        var ollamaEndpoint = builder.Configuration["AI:OllamaEndpoint"] ?? "http://localhost:11434";
-        var ollamaModel = builder.Configuration["AI:OllamaModel"] ?? "llama2";
+        var chatEndpoint = builder.Configuration["AI:ChatEndpoint"] ?? "http://localhost:11434";
+        var chatModel = builder.Configuration["AI:ChatModel"] ?? "llama3:latest";
 
         // Configure with timeout and attach a logging handler to capture outgoing requests
         var chatHandler = new SmartGlassesMiddleware.Services.HttpLoggingHandler(
-            _preLoggerFactory.CreateLogger("OllamaHttp")) { InnerHandler = new HttpClientHandler() };
+            _preLoggerFactory.CreateLogger("ChatHttp")) { InnerHandler = new HttpClientHandler() };
         var httpClient = new HttpClient(chatHandler)
         {
-            Timeout = TimeSpan.FromSeconds(builder.Configuration.GetValue<int?>("AI:OllamaTimeoutSeconds") ?? 120)
+            Timeout = TimeSpan.FromSeconds(builder.Configuration.GetValue<int?>("AI:ChatTimeoutSeconds") ?? 120)
         };
 
         kernelBuilder.AddOpenAIChatCompletion(
-            modelId: ollamaModel,
+            modelId: chatModel,
             apiKey: "not-needed",
-            endpoint: new Uri($"{ollamaEndpoint.TrimEnd('/')}/v1"),
+            endpoint: new Uri($"{chatEndpoint.TrimEnd('/')}/v1"),
             httpClient: httpClient);
     }
 
@@ -200,7 +200,7 @@ builder.Services.AddSingleton<Kernel>(sp =>
 });
 
 // Add HttpClient for advanced model calls with timeout configuration
-builder.Services.AddHttpClient<IAIService, OllamaAIService>((sp, client) =>
+builder.Services.AddHttpClient<IAIService, AIService>((sp, client) =>
 {
     var config = sp.GetRequiredService<IConfiguration>();
     var timeoutSeconds = config.GetValue<int?>("ServiceTimeouts:AIServiceTimeoutSeconds") ?? 60;
@@ -229,19 +229,19 @@ else
 builder.Services.AddSingleton<IMetricsService, MetricsService>();
 builder.Services.AddSingleton<IRequestMonitoringService, RequestMonitoringService>();
 builder.Services.AddScoped<IRagService, RagService>();
-// Register embedding client — Bedrock (Titan Embed V2) or Ollama depending on config
+// Register embedding client — Bedrock (Titan Embed V2) or generic OpenAI-compatible endpoint
 if (useBedrockAI)
 {
-    builder.Services.AddScoped<IOllamaEmbeddingClient, SmartGlassesMiddleware.Services.BedrockEmbeddingClient>();
+    builder.Services.AddScoped<IEmbeddingClient, SmartGlassesMiddleware.Services.BedrockEmbeddingClient>();
 }
 else
 {
-    builder.Services.AddHttpClient<IOllamaEmbeddingClient, OllamaEmbeddingClient>((sp, http) =>
+    builder.Services.AddHttpClient<IEmbeddingClient, EmbeddingClient>((sp, http) =>
     {
         var cfg = sp.GetRequiredService<IConfiguration>();
-        var baseUrl = cfg["AI:OllamaEndpoint"] ?? "http://ollama:11434";
+        var baseUrl = cfg["AI:EmbeddingEndpoint"] ?? "http://localhost:11434";
         http.BaseAddress = new Uri(baseUrl);
-        http.Timeout = TimeSpan.FromSeconds(cfg.GetValue<int?>("AI:OllamaEmbeddingTimeoutSeconds") ?? 120);
+        http.Timeout = TimeSpan.FromSeconds(cfg.GetValue<int?>("AI:EmbeddingTimeoutSeconds") ?? 120);
     });
 }
 // Document processing and RAG services
@@ -568,17 +568,17 @@ try
     }
 
     // Validate AI configuration
-    var ollamaEndpoint = config["AI:OllamaEndpoint"];
-    if (string.IsNullOrWhiteSpace(ollamaEndpoint))
+    var chatEndpoint = config["AI:ChatEndpoint"];
+    if (string.IsNullOrWhiteSpace(chatEndpoint) && !useBedrockAI)
     {
-        logger.LogWarning("Ollama endpoint not configured. AI features may not work correctly.");
+        logger.LogWarning("Chat endpoint not configured (AI:ChatEndpoint). AI classification features may not work correctly.");
     }
 
-    // Validate transcription endpoint
-    var transcriptionEndpoint = config["Transcription:Endpoint"];
-    if (string.IsNullOrWhiteSpace(transcriptionEndpoint))
+    // Validate advanced model endpoint
+    var advancedEndpoint = config["AI:AdvancedModelEndpoint"];
+    if (string.IsNullOrWhiteSpace(advancedEndpoint))
     {
-        logger.LogWarning("Transcription endpoint not configured. Audio transcription may not work correctly.");
+        logger.LogWarning("Advanced model endpoint not configured (AI:AdvancedModelEndpoint). Advanced tasks will be unavailable.");
     }
 
     logger.LogInformation("Configuration validation completed.");
@@ -1216,32 +1216,6 @@ app.MapGet("/debug/resolve-components", async (IServiceProvider sp, ILoggerFacto
     catch (Exception ex)
     {
         logger.LogError(ex, "Unexpected error in /debug/resolve-components");
-        return Results.StatusCode(500);
-    }
-});
-
-// Attempt to construct OllamaAIService manually (bypass IHttpClientFactory)
-app.MapGet("/debug/new-ollama", async (IServiceProvider sp, ILoggerFactory lf) =>
-{
-    var logger = lf.CreateLogger("DebugNewOllama");
-    logger.LogInformation("/debug/new-ollama entered");
-
-    try
-    {
-        var kernel = sp.GetRequiredService<Kernel>();
-        var cfg = sp.GetRequiredService<IConfiguration>();
-        var dispatcher = sp.GetRequiredService<ITaskDispatcher>();
-        var log = sp.GetRequiredService<ILogger<OllamaAIService>>();
-
-        // Construct with a fresh HttpClient to avoid IHttpClientFactory
-        var http = new HttpClient() { Timeout = TimeSpan.FromSeconds(30) };
-        var instance = new SmartGlassesMiddleware.Services.OllamaAIService(kernel, http, cfg, log, dispatcher);
-        logger.LogInformation("Manual OllamaAIService constructed successfully");
-        return Results.Ok(new { constructed = true });
-    }
-    catch (Exception ex)
-    {
-        logger.LogError(ex, "Manual OllamaAIService construction failed");
         return Results.StatusCode(500);
     }
 });

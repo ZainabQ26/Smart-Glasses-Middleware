@@ -146,6 +146,20 @@ public class BedrockAIService : IAIService
         return await InvokeClaudeAsync(prompt, maxTokens: 1000, cancellationToken: cancellationToken);
     }
 
+    public async Task<bool> WillUseAdvancedModelAsync(string input, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return false;
+        try
+        {
+            var detected = await ClassifyOnlyAsync(input, cancellationToken);
+            return string.Equals(detected, "unknown", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private async Task<string> InvokeClaudeAsync(
         string prompt, 
         int maxTokens = 1000, 
