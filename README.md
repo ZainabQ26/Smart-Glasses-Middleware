@@ -8,7 +8,8 @@ Backend middleware and frontend for a smart glasses application. Provides a mult
 |-------|-----------|
 | API | ASP.NET Core (.NET 10), C# |
 | Frontend | React 18 + Vite, served from S3 via CloudFront |
-| AI | AWS Bedrock (Nova / Titan Embed) or Ollama (local dev) |
+| AI | AWS Bedrock (Nova / Titan Embed) — always |
+| Advanced model | External REST API (`AI:AdvancedModelEndpoint`) — request/response |
 | Audio transcription | Whisper Lambda (containerised, invoked via SQS) |
 | Document processing | Lambda (Python), iText7, Tesseract OCR, pgvector RAG |
 | Database | PostgreSQL 16 + pgvector (RDS db.t3.micro) |
@@ -30,6 +31,7 @@ Browser
                     ├─► ElastiCache Redis (optional)
                     ├─► S3 (media + documents)
                     ├─► Bedrock (LLM + embeddings)
+                    ├─► Advanced model REST API (external, optional)
                     └─► SQS → Whisper Lambda (transcription)
 ```
 
@@ -100,17 +102,34 @@ docker build -f src/SmartGlassesMiddleware/Dockerfile -t smart-glasses-api:local
 |-----|---------|-------------|
 | `ConnectionStrings:DefaultConnection` | `Host=localhost;...` | PostgreSQL |
 | `ConnectionStrings:Redis` | `localhost:6379` | Redis (optional) |
-| `MinIO:Endpoint` | `localhost:9000` | MinIO endpoint |
-| `AI:OllamaEndpoint` | `http://localhost:11434` | Ollama API |
-| `AI:OllamaModel` | `llama3:latest` | Chat model |
-| `AI:UseBedrockAI` | `false` | Switch to Bedrock |
+| `MinIO:Endpoint` | `localhost:9000` | MinIO endpoint (local storage) |
+| `AI:AdvancedModelEndpoint` | `` | External REST API for unknown tasks |
+| `AI:UseAdvancedModel` | `false` | Enable advanced model routing |
+| `AWS:Bedrock:ModelId` | `us.amazon.nova-2-lite-v1:0` | Bedrock chat model |
+| `AWS:Bedrock:EmbeddingModelId` | `amazon.titan-embed-text-v2:0` | Bedrock embedding model |
 | `MigrateOnStartup` | `true` (dev) / `false` (AWS) | Run EF migrations on boot |
 
 ### AWS (`appsettings.AWS.json`)
 
 Secrets (DB connection string, S3 bucket names, Redis URL) are injected at runtime from AWS Secrets Manager via ECS task secret references — no plaintext credentials in the image.
 
-`AI:UseBedrockAI=true` switches the LLM and embedding client to Bedrock (Nova / Titan Embed V2). The ECS task role grants the necessary `bedrock:InvokeModel` permissions.
+AI classification and embeddings always use Bedrock (Nova / Titan Embed V2). The ECS task role grants the necessary `bedrock:InvokeModel` permissions. Unknown tasks are forwarded to the advanced model REST API (`AI:AdvancedModelEndpoint`).
+
+## Advanced Model
+
+When `AI:UseAdvancedModel=true`, requests that don't match a local task handler are forwarded to the external REST API configured at `AI:AdvancedModelEndpoint`.
+
+The request is a simple JSON POST:
+```json
+{ "message": "user input" }
+```
+
+The response is expected to contain a `response` field:
+```json
+{ "response": "AI response text" }
+```
+
+If the response cannot be parsed, the raw body is returned.
 
 ## Database Migrations
 
@@ -147,7 +166,7 @@ The middleware dispatches AI-classified requests to typed task handlers. Handler
 | `DocumentQueryTaskHandler` | `document-query` | Semantic RAG query over uploaded documents |
 | `OCRTaskHandler` | `ocr` | Runs OCR on an image or scanned PDF page |
 | `OCRRetryTaskHandler` | `ocr-retry` | Retries a failed OCR job |
-| `AdvancedTaskHandler` | `advanced` | Forwards to a configurable external model endpoint |
+| `AdvancedTaskHandler` | `advanced` | Forwards to the configured external REST API endpoint |
 | `TemplateTaskHandler` | `template` | Starter template for new handlers |
 
 ### Adding a custom handler
@@ -162,15 +181,14 @@ Run the application and visit `/swagger` for the full interactive spec.
 
 | Group | Endpoints |
 |-------|-----------|
-| AI interaction | `POST /api/ai/interact` — text/task dispatch |
-| Audio | `POST /api/audio/transcribe` |
+| AI interaction | `POST /api/ask` — text/task dispatch |
 | Documents | `POST /api/documents/upload`, `POST /api/documents/query`, `GET/DELETE /api/documents/{id}` |
 | Media | `POST /api/media/upload`, `GET /api/media/{id}` |
 | Conversations | `GET/POST/DELETE /api/conversations` |
 | History | `GET /api/history` |
 | Tasks | `GET /api/tasks/{id}` — background task status |
 | Admin | `GET/POST/PUT/DELETE /api/admin/files`, `/api/admin/prompts`, `/api/admin/groups` |
-| Monitoring | `GET /api/monitoring/metrics` |
+| Monitoring | `GET /api/monitoring/requests` |
 | Health | `GET /health` — Postgres + Redis liveness |
 
 ## CI/CD Pipeline
