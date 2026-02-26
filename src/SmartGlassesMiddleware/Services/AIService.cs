@@ -12,6 +12,8 @@ public interface IAIService
     Task<(string task, string response, bool usedAdvancedModel)> ProcessRequestAsync(string input, CancellationToken cancellationToken = default);
     /// <summary>Classify only — returns the task name or "unknown". No response generated.</summary>
     Task<string> ClassifyOnlyAsync(string input, CancellationToken cancellationToken = default);
+    /// <summary>Quick check whether the advanced model will be used for this input.</summary>
+    Task<bool> WillUseAdvancedModelAsync(string input, CancellationToken cancellationToken = default);
 }
 
 public class OllamaAIService : IAIService
@@ -122,8 +124,7 @@ public class OllamaAIService : IAIService
                                 return ("advanced", BuildAdvancedUnavailableResponse(), false);
                             }
 
-                            const string advancedSymbol = " ⚡";
-                            return ("advanced", advancedResponse + advancedSymbol, true);
+                            return ("advanced", advancedResponse, true);
                         }
 
                         // If we reached here, the advanced handler didn't handle the request.
@@ -240,6 +241,21 @@ Task:";
             return NormalizeDetectedTask(raw);
         }
         catch { return "unknown"; }
+    }
+
+    public async Task<bool> WillUseAdvancedModelAsync(string input, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return false;
+        try
+        {
+            var detected = await ClassifyOnlyAsync(input, cancellationToken);
+            // If classification yields unknown and advanced model is enabled, we will delegate
+            return string.Equals(detected, "unknown", StringComparison.OrdinalIgnoreCase) && _useAdvancedModel;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private void EnsureKnownTasksLoaded()
