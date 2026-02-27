@@ -12,7 +12,7 @@ The application automatically:
 1. Compiles `.cs` files in this folder at startup
 2. Loads `.dll` plugin files from this folder
 3. Registers all `ITaskHandler` implementations with dependency injection
-4. Uses the configured AI model (Ollama locally, or AWS Bedrock in production) to classify requests and route to appropriate handlers
+4. Uses the configured AI model (OpenAI-compatible endpoint locally, or AWS Bedrock in production) to classify requests and route to appropriate handlers
 
 ## Available Task Handlers
 
@@ -133,8 +133,7 @@ public class WeatherTaskHandler : ITaskHandler
 {
   "AI": {
     "UseAdvancedModel": true,
-    "AdvancedModelEndpoint": "https://api.openai.com/v1/chat/completions",
-    "AdvancedModelName": "gpt-4"
+    "AdvancedModelEndpoint": "https://your-advanced-api/endpoint"
   }
 }
 ```
@@ -197,7 +196,7 @@ public class MyTaskHandler : ITaskHandler
 3. **Log extensively** - Help debugging with good logging
 4. **Handle errors gracefully** - Always catch exceptions and return user-friendly messages
 5. **Document usage** - Add comments explaining input format
-6. **Test locally** - Iterate quickly using a local Ollama instance
+6. **Test locally** - Iterate quickly using a local OpenAI-compatible endpoint
 
 ## Examples of Good vs Bad Task Names
 
