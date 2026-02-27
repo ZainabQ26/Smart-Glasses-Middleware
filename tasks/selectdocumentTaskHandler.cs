@@ -15,14 +15,14 @@ public class SelectDocumentTaskHandler : ITaskHandler
 
     public async Task<string> HandleAsync(string input)
     {
-        var lastDoc = await _context.DocumentMetadatas
-            .OrderByDescending(d => d.UploadedAt)
+        var lastFile = await _context.ManagedFiles
+            .OrderByDescending(f => f.UploadedAt)
             .FirstOrDefaultAsync();
 
-        if (lastDoc == null)
+        if (lastFile == null)
             return "No documents found. Please upload a file first.";
 
         // Return a special action token the frontend intercepts to open the file preview
-        return $"__ACTION:SELECT_DOCUMENT:{lastDoc.Id}:{lastDoc.OriginalFileName}";
+        return $"__ACTION:SELECT_DOCUMENT:{lastFile.Id}:{lastFile.FileName}";
     }
 }
