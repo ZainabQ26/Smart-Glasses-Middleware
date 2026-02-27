@@ -5,15 +5,18 @@ using Amazon.BedrockRuntime.Model;
 
 namespace SmartGlassesMiddleware.Services;
 
+public interface IEmbeddingClient
+{
+    Task<float[]> GenerateEmbeddingAsync(string input, CancellationToken ct = default);
+}
+
 /// <summary>
 /// Embedding client backed by Amazon Bedrock (Titan Text Embeddings V2).
-/// Implements IOllamaEmbeddingClient so it can be used as a drop-in replacement
-/// without changing the RAGService or any consumers.
 ///
 /// Titan Embed V2 supports output dimensions: 256, 512, or 1024 (default 1024).
 /// The pgvector column must match — see ApplicationDbContext vector(1024).
 /// </summary>
-public class BedrockEmbeddingClient : IOllamaEmbeddingClient
+public class BedrockEmbeddingClient : IEmbeddingClient
 {
     private readonly IAmazonBedrockRuntime _bedrockRuntime;
     private readonly string _modelId;
@@ -32,10 +35,9 @@ public class BedrockEmbeddingClient : IOllamaEmbeddingClient
     }
 
     /// <summary>
-    /// Generates an embedding for the given input text.
-    /// The <paramref name="model"/> parameter is ignored — the embedding model is taken from configuration.
+    /// Generates an embedding for the given input text using the configured Bedrock model.
     /// </summary>
-    public async Task<float[]> GenerateEmbeddingAsync(string model, string input, CancellationToken ct = default)
+    public async Task<float[]> GenerateEmbeddingAsync(string input, CancellationToken ct = default)
     {
         var requestBody = JsonSerializer.Serialize(new
         {

@@ -20,6 +20,25 @@ public class ProcessController : ControllerBase
     /// Send a voice transcript to the AI service and return the response.
     /// </summary>
     [HttpPost]
+    [Route("preview")]
+    public async Task<IActionResult> Preview([FromBody] ProcessRequest request, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request?.Input))
+            return BadRequest(new { error = "Input is required" });
+
+        try
+        {
+            var willUse = await _aiService.WillUseAdvancedModelAsync(request.Input, cancellationToken);
+            return Ok(new { willUseAdvanced = willUse });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Preview failed");
+            return StatusCode(500, new { error = "Preview failed" });
+        }
+    }
+
+    [HttpPost]
     public async Task<IActionResult> Process([FromBody] ProcessRequest request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request?.Input))
@@ -28,8 +47,8 @@ public class ProcessController : ControllerBase
         try
         {
             // usedAdvancedModel is not relevant for the UI — discard it
-            var (task, response, _) = await _aiService.ProcessRequestAsync(request.Input, cancellationToken);
-            return Ok(new { task, response });
+            var (task, response, usedAdvanced) = await _aiService.ProcessRequestAsync(request.Input, cancellationToken);
+            return Ok(new { task, response, usedAdvancedModel = usedAdvanced });
         }
         catch (OperationCanceledException)
         {

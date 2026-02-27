@@ -1,4 +1,3 @@
-using System.Net.Http.Headers;
 using System.Text.Json;
 
 namespace SmartGlassesMiddleware.Services;
@@ -21,7 +20,6 @@ public class AdvancedTaskHandler : ITaskHandler
     public async Task<string> HandleAsync(string input)
     {
         var endpoint = _configuration["AI:AdvancedModelEndpoint"];
-        var model = _configuration["AI:AdvancedModelName"] ?? string.Empty;
 
         if (string.IsNullOrWhiteSpace(endpoint))
         {
@@ -32,7 +30,7 @@ public class AdvancedTaskHandler : ITaskHandler
         try
         {
             var client = _httpFactory.CreateClient();
-            var requestBody = new { message = input, model = model };
+            var requestBody = new { message = input };
             var content = new StringContent(JsonSerializer.Serialize(requestBody), System.Text.Encoding.UTF8, "application/json");
 
             var response = await client.PostAsync(endpoint, content);
