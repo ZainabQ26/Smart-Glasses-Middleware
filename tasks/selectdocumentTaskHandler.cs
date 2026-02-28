@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using SmartGlassesMiddleware.Data;
 using SmartGlassesMiddleware.Services;
+using SmartGlassesMiddleware.Models;
+using System.Linq;
 
 public class SelectDocumentTaskHandler : ITaskHandler
 {

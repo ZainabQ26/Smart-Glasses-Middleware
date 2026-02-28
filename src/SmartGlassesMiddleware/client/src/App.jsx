@@ -374,7 +374,7 @@ export default function App() {
                 <button
                   style={styles.actionBtnSecondary}
                   onClick={() => {
-                    window.open(`/admin.html`, "_blank");
+                    window.open(`/admin.html?preview=${pendingAction.id}`, "_blank");
                     setPendingAction(null);
                   }}
                 >
