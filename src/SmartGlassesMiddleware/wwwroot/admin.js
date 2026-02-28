@@ -4778,6 +4778,27 @@ async function init() {
         
         setupInfiniteScroll();
         console.log('[INIT] Infinite scroll setup complete');
+
+        // Auto-preview a file if ?preview=<id> is in the URL (e.g. navigated from the glasses app)
+        try {
+            const _previewId = new URLSearchParams(window.location.search).get('preview');
+            if (_previewId) {
+                // Switch to Files tab first
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+                const filesTab = document.querySelector('[data-tab="files"]');
+                const filesContent = document.getElementById('files');
+                if (filesTab) filesTab.classList.add('active');
+                if (filesContent) filesContent.classList.add('active');
+                // Find file in loaded state or fall back to fetching metadata
+                const _matchedFile = state.files.data.find(f => (f.id || f.Id) === _previewId);
+                const _fname = (_matchedFile && (_matchedFile.fileName || _matchedFile.FileName)) || 'Document';
+                setTimeout(() => previewFile(_previewId, _fname), 300);
+            }
+        } catch (e) {
+            console.warn('[INIT] Auto-preview failed:', e);
+        }
+
         console.log('[INIT] State:', JSON.stringify({
             filesCount: state.files.data.length,
             promptsCount: state.prompts.data.length,
