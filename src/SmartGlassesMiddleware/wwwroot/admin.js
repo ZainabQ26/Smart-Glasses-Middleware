@@ -954,50 +954,17 @@ async function previewFile(id, fileName) {
             return;
         }
 
-        // PDF — render with PDF.js (canvas-based, no plugin dependency)
+        // PDF — open directly in a new browser tab using the API URL
+        // (Chrome's native PDF viewer works perfectly for direct navigation but not for embeds/iframes)
         if (contentType.includes('pdf') || header === '%PDF') {
-            previewContent.innerHTML = '<p style="color:#888; padding:10px;">Rendering PDF...</p>';
-            try {
-                // Lazy-load PDF.js from CDN
-                if (!window.pdfjsLib) {
-                    await new Promise((resolve, reject) => {
-                        const script = document.createElement('script');
-                        script.src = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js';
-                        script.onload = resolve;
-                        script.onerror = reject;
-                        document.head.appendChild(script);
-                    });
-                    window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
-                }
-                const pdf = await window.pdfjsLib.getDocument({ data: buffer }).promise;
-                const totalPages = pdf.numPages;
-                const container = document.createElement('div');
-                container.style.cssText = 'overflow:auto; max-height:520px; background:#525659; padding:10px; border-radius:4px;';
-                const pagesToRender = Math.min(totalPages, 5);
-                for (let pageNum = 1; pageNum <= pagesToRender; pageNum++) {
-                    const page = await pdf.getPage(pageNum);
-                    const viewport = page.getViewport({ scale: 1.5 });
-                    const canvas = document.createElement('canvas');
-                    canvas.width = viewport.width;
-                    canvas.height = viewport.height;
-                    canvas.style.cssText = 'display:block; margin:0 auto 8px; max-width:100%; box-shadow:0 2px 8px rgba(0,0,0,0.5);';
-                    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
-                    container.appendChild(canvas);
-                }
-                if (totalPages > pagesToRender) {
-                    const note = document.createElement('p');
-                    note.style.cssText = 'color:#ccc; text-align:center; font-size:12px; margin:6px 0 0;';
-                    note.textContent = `Showing ${pagesToRender} of ${totalPages} pages — use Download to view all.`;
-                    container.appendChild(note);
-                }
-                previewContent.innerHTML = '';
-                previewContent.appendChild(container);
-            } catch (pdfErr) {
-                console.warn('[preview] PDF.js render failed:', pdfErr);
-                const blobUrl = URL.createObjectURL(new Blob([buffer], { type: 'application/pdf' }));
-                previewContent.dataset.blobUrl = blobUrl;
-                previewContent.innerHTML = `<div style="padding:20px; text-align:center; color:#ccc;"><p style="margin:0 0 10px;">Could not render PDF inline.</p><a href="${blobUrl}" target="_blank" style="color:#3498db; font-size:14px;">Open PDF in new tab ↗</a></div>`;
-            }
+            const directUrl = `${API_BASE}/files/${id}/preview`;
+            window.open(directUrl, '_blank');
+            previewContent.innerHTML = `<div style="padding:24px; text-align:center;">
+                <div style="font-size:48px; margin-bottom:12px;">📄</div>
+                <p style="font-weight:600; margin:0 0 6px;">${escapeHtml(fileName)}</p>
+                <p style="color:#888; font-size:13px; margin:0 0 16px;">PDF opened in a new tab.</p>
+                <button onclick="window.open('${directUrl}', '_blank')" style="padding:8px 18px; background:#3498db; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:13px;">Open again ↗</button>
+            </div>`;
             return;
         }
 
