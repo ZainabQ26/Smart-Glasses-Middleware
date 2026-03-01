@@ -955,10 +955,9 @@ async function previewFile(id, fileName) {
         }
 
         // PDF (detect by content-type or header)
+        // Use iframe pointing directly at the API URL — more reliable than embed+blob across browsers
         if (contentType.includes('pdf') || header === '%PDF') {
-            const blobUrl = URL.createObjectURL(new Blob([buffer], { type: 'application/pdf' }));
-            previewContent.dataset.blobUrl = blobUrl;
-            previewContent.innerHTML = `<embed src="${blobUrl}" type="application/pdf" width="100%" height="400px" style="border-radius: 4px;">`;
+            previewContent.innerHTML = `<iframe src="${previewUrl}" width="100%" height="500px" style="border-radius: 4px; border: none;"></iframe>`;
             return;
         }
 
@@ -4791,8 +4790,9 @@ async function init() {
                 if (filesTab) filesTab.classList.add('active');
                 if (filesContent) filesContent.classList.add('active');
                 // Find file in loaded state or fall back to fetching metadata
+                const _previewName = new URLSearchParams(window.location.search).get('name');
                 const _matchedFile = state.files.data.find(f => (f.id || f.Id) === _previewId);
-                const _fname = (_matchedFile && (_matchedFile.fileName || _matchedFile.FileName)) || 'Document';
+                const _fname = (_matchedFile && (_matchedFile.fileName || _matchedFile.FileName)) || _previewName || 'Document';
                 setTimeout(() => previewFile(_previewId, _fname), 300);
             }
         } catch (e) {

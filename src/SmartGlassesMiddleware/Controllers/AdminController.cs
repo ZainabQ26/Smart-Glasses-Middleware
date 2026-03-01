@@ -433,7 +433,8 @@ public class AdminController : ControllerBase
                 };
             }
 
-            // Return file inline (for preview in browser)
+            // Return file inline (for preview in browser — include filename so PDF viewer shows document name)
+            Response.Headers["Content-Disposition"] = $"inline; filename=\"{fileName}\"";
             return File(stream, contentType);
         }
         catch (Exception ex)
