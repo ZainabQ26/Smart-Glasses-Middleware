@@ -17,15 +17,27 @@ public class SelectDocumentTaskHandler : ITaskHandler
 
     public async Task<string> HandleAsync(string input)
     {
-        // Try ManagedFiles first (direct uploads via admin panel)
-        var lastFile = await _context.ManagedFiles
+        // User-uploaded files always have a Label (required by the upload form).
+        // Auto-created ManagedFile entries (from DocumentProcessingService background jobs)
+        // have an empty Label — exclude those to avoid stale background-processed files
+        // from overriding the actual last user upload.
+        var lastUserFile = await _context.ManagedFiles
+            .Where(f => f.Label != null && f.Label != string.Empty)
             .OrderByDescending(f => f.UploadedAt)
             .FirstOrDefaultAsync();
 
-        if (lastFile != null)
-            return $"__ACTION:SELECT_DOCUMENT:{lastFile.Id}:{lastFile.FileName}";
+        if (lastUserFile != null)
+            return $"__ACTION:SELECT_DOCUMENT:{lastUserFile.Id}:{lastUserFile.FileName}";
 
-        // Fall back to DocumentMetadatas (processed/converted documents)
+        // Fall back: any ManagedFile regardless of label
+        var lastAnyFile = await _context.ManagedFiles
+            .OrderByDescending(f => f.UploadedAt)
+            .FirstOrDefaultAsync();
+
+        if (lastAnyFile != null)
+            return $"__ACTION:SELECT_DOCUMENT:{lastAnyFile.Id}:{lastAnyFile.FileName}";
+
+        // Final fall back: DocumentMetadatas (deep-processed docs)
         var lastDoc = await _context.DocumentMetadatas
             .OrderByDescending(d => d.UploadedAt)
             .FirstOrDefaultAsync();
@@ -33,8 +45,9 @@ public class SelectDocumentTaskHandler : ITaskHandler
         if (lastDoc == null)
             return "No documents found. Please upload a file first.";
 
-        // Use ManagedFileId if available so the preview endpoint works correctly
-        var previewId = lastDoc.ManagedFileId.HasValue ? lastDoc.ManagedFileId.Value.ToString() : lastDoc.Id.ToString();
+        var previewId = lastDoc.ManagedFileId.HasValue
+            ? lastDoc.ManagedFileId.Value.ToString()
+            : lastDoc.Id.ToString();
         return $"__ACTION:SELECT_DOCUMENT:{previewId}:{lastDoc.OriginalFileName}";
     }
 }
