@@ -433,9 +433,11 @@ public class AdminController : ControllerBase
                 };
             }
 
-            // Return file inline (for preview in browser — include filename so PDF viewer shows document name)
-            Response.Headers["Content-Disposition"] = $"inline; filename=\"{fileName}\"";
-            return File(stream, contentType);
+            // Read into byte array so Chrome PDF viewer gets a proper Content-Length
+            // and range-processing is supported (required by Chrome's built-in PDF viewer).
+            var bytes = new byte[stream.Length];
+            await stream.ReadExactlyAsync(bytes);
+            return File(bytes, contentType, enableRangeProcessing: true);
         }
         catch (Exception ex)
         {
