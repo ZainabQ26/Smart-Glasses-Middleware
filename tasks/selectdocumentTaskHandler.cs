@@ -17,37 +17,32 @@ public class SelectDocumentTaskHandler : ITaskHandler
 
     public async Task<string> HandleAsync(string input)
     {
-        // User-uploaded files always have a Label (required by the upload form).
-        // Auto-created ManagedFile entries (from DocumentProcessingService background jobs)
-        // have an empty Label — exclude those to avoid stale background-processed files
-        // from overriding the actual last user upload.
-        var lastUserFile = await _context.ManagedFiles
-            .Where(f => f.Label != null && f.Label != string.Empty)
-            .OrderByDescending(f => f.UploadedAt)
-            .FirstOrDefaultAsync();
-
-        if (lastUserFile != null)
-            return $"__ACTION:SELECT_DOCUMENT:{lastUserFile.Id}:{lastUserFile.FileName}";
-
-        // Fall back: any ManagedFile regardless of label
-        var lastAnyFile = await _context.ManagedFiles
-            .OrderByDescending(f => f.UploadedAt)
-            .FirstOrDefaultAsync();
-
-        if (lastAnyFile != null)
-            return $"__ACTION:SELECT_DOCUMENT:{lastAnyFile.Id}:{lastAnyFile.FileName}";
-
-        // Final fall back: DocumentMetadatas (deep-processed docs)
+        // DocumentMetadatas holds all user-uploaded processed documents.
+        // Use OriginalFileName to show the user-friendly name.
+        // The preview endpoint now accepts both ManagedFile IDs and DocumentMetadata IDs.
         var lastDoc = await _context.DocumentMetadatas
             .OrderByDescending(d => d.UploadedAt)
             .FirstOrDefaultAsync();
 
-        if (lastDoc == null)
-            return "No documents found. Please upload a file first.";
+        if (lastDoc != null)
+        {
+            // Prefer ManagedFileId so the preview endpoint hits ManagedFiles first,
+            // but fall back to the DocumentMetadata ID (preview endpoint now handles both).
+            var previewId = lastDoc.ManagedFileId.HasValue
+                ? lastDoc.ManagedFileId.Value.ToString()
+                : lastDoc.Id.ToString();
+            return $"__ACTION:SELECT_DOCUMENT:{previewId}:{lastDoc.OriginalFileName}";
+        }
 
-        var previewId = lastDoc.ManagedFileId.HasValue
-            ? lastDoc.ManagedFileId.Value.ToString()
-            : lastDoc.Id.ToString();
-        return $"__ACTION:SELECT_DOCUMENT:{previewId}:{lastDoc.OriginalFileName}";
+        // Final fallback: labelled ManagedFiles (direct uploads without deep processing)
+        var lastFile = await _context.ManagedFiles
+            .Where(f => f.Label != null && f.Label != string.Empty)
+            .OrderByDescending(f => f.UploadedAt)
+            .FirstOrDefaultAsync();
+
+        if (lastFile != null)
+            return $"__ACTION:SELECT_DOCUMENT:{lastFile.Id}:{lastFile.FileName}";
+
+        return "No documents found. Please upload a file first.";
     }
 }
