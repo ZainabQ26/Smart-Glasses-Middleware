@@ -379,28 +379,42 @@ public class AdminController : ControllerBase
     }
 
     /// <summary>
-    /// Preview a managed file (inline display)
+    /// Preview a managed file (inline display). Falls back to DocumentMetadatas if not found in ManagedFiles.
     /// </summary>
     [HttpGet("files/{id}/preview")]
     public async Task<ActionResult> PreviewFile(Guid id)
     {
+        // Try ManagedFiles first
         var file = await _context.ManagedFiles.FindAsync(id);
-        if (file == null)
+        string storageKey;
+        string fileName;
+        string contentType;
+
+        if (file != null)
         {
-            return NotFound();
+            storageKey = file.StorageKey;
+            fileName = file.FileName;
+            contentType = string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType;
+        }
+        else
+        {
+            // Fall back to DocumentMetadatas (processed documents)
+            var doc = await _context.DocumentMetadatas.FindAsync(id);
+            if (doc == null)
+                return NotFound();
+            storageKey = doc.StorageKey;
+            fileName = doc.FileName;
+            contentType = string.IsNullOrWhiteSpace(doc.ContentType) ? "application/octet-stream" : doc.ContentType;
         }
 
         try
         {
-            var stream = await _mediaStorageService.DownloadMediaAsync(file.StorageKey);
+            var stream = await _mediaStorageService.DownloadMediaAsync(storageKey);
             stream.Position = 0;
-            var contentType = string.IsNullOrWhiteSpace(file.ContentType)
-                ? "application/octet-stream"
-                : file.ContentType;
 
             if (contentType == "application/octet-stream")
             {
-                var ext = Path.GetExtension(file.FileName ?? string.Empty)?.ToLowerInvariant() ?? string.Empty;
+                var ext = Path.GetExtension(fileName ?? string.Empty)?.ToLowerInvariant() ?? string.Empty;
                 contentType = ext switch
                 {
                     ".pdf" => "application/pdf",
