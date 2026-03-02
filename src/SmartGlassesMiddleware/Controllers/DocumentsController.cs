@@ -77,137 +77,91 @@ public class DocumentsController : ControllerBase
             return BadRequest($"File size exceeds maximum of {maxFileSizeMb}MB");
 
         var requestId = await _monitoringService.StartRequest("DocumentUpload", file.FileName ?? "unknown");
+        var originalFileName = file.FileName ?? string.Empty;
+        var originalContentType = file.ContentType ?? "application/octet-stream";
 
         try
         {
-            // Read the uploaded file into memory (small files expected in tests).
-            // Do NOT use `using` here — the stream outlives this method and is consumed
-            // by the fire-and-forget Task.Run below; it will be disposed inside that task.
+            // Read uploaded file into memory
             var ms = new MemoryStream();
             await file.CopyToAsync(ms);
             ms.Position = 0;
 
-            // Create a placeholder DocumentMetadata so we can return an ID immediately
+            _logger.LogInformation("Upload received: {FileName}, {Size} bytes", originalFileName, ms.Length);
+
+            // Convert to PDF synchronously (no background task — avoids all scope/disposal issues)
+            var (pdfStream, pdfFileName) = await _processingService.ConvertToPdfAsync(ms, originalFileName, originalContentType, requestId);
+            pdfStream.Position = 0;
+
+            _logger.LogInformation("Converted to PDF: {PdfName}, {Size} bytes", pdfFileName, pdfStream.Length);
+
+            if (pdfStream.Length == 0)
+            {
+                await _monitoringService.CompleteRequest(requestId, false, error: "PDF conversion produced empty stream");
+                return StatusCode(500, new { error = "PDF conversion failed: empty stream" });
+            }
+
             var documentId = Guid.NewGuid();
-            var placeholder = new DocumentMetadata
+            var uploadKey = $"uploads/{documentId}.pdf";
+
+            // Upload to S3 synchronously before writing DB record
+            await _mediaStorageService.UploadFileAsync(uploadKey, pdfStream, "application/pdf");
+
+            _logger.LogInformation("Uploaded to S3: {Key}", uploadKey);
+
+            // Persist metadata
+            var metadata = new DocumentMetadata
             {
                 Id = documentId,
-                FileName = file.FileName ?? string.Empty,
-                OriginalFileName = file.FileName ?? string.Empty,
-                ContentType = file.ContentType ?? "application/octet-stream",
+                FileName = pdfFileName,
+                OriginalFileName = originalFileName,
+                ContentType = "application/pdf",
+                StorageKey = uploadKey,
                 UploadedAt = DateTime.UtcNow,
-                FileSize = file.Length,
-                DocumentType = Path.GetExtension(file.FileName)?.TrimStart('.') ?? "",
+                FileSize = pdfStream.Length,
+                DocumentType = "pdf",
                 IsProcessed = false
             };
-
-            _context.DocumentMetadatas.Add(placeholder);
+            _context.DocumentMetadatas.Add(metadata);
             await _context.SaveChangesAsync();
 
-            // Capture file metadata into local variables to avoid accessing disposed IFormFile in Task.Run
-            var originalFileName = file.FileName;
-            var originalContentType = file.ContentType;
+            // Write group associations
+            if (groupIds != null && groupIds.Any())
+            {
+                foreach (var groupId in groupIds)
+                {
+                    var group = await _context.ResourceGroups.FindAsync(groupId);
+                    if (group != null)
+                    {
+                        metadata.DocumentGroups.Add(new DocumentGroup
+                        {
+                            DocumentMetadataId = metadata.Id,
+                            ResourceGroupId = groupId
+                        });
+                    }
+                }
+                await _context.SaveChangesAsync();
+                try { await InvalidateGroupsCache(); await NotifyGroupsChangedAsync(); } catch { }
+            }
 
-            // Fire-and-forget: convert to PDF then dispatch to Lambda via S3.
-            // Lambda handles Textract extraction, chunking and Bedrock embedding writes.
-            // IMPORTANT: _context is scoped to the HTTP request and will be disposed when this
-            // method returns. Create a new DI scope for the background task so it gets its own
-            // ApplicationDbContext that won't be disposed underneath it.
+            try { await InvalidateFilesCache(); await NotifyFilesChangedAsync(); } catch { }
+
+            await _monitoringService.CompleteRequest(requestId, true, $"Document {pdfFileName} uploaded to S3");
+
+            // Fire Lambda dispatch in background (non-critical — Lambda processes for RAG/embeddings)
             _ = Task.Run(async () =>
             {
-                using var scope = _scopeFactory.CreateScope();
-                var ctx = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-                
-                // Services must be resolved from the new scope as they depend on the DbContext
-                // which is disposed when the controller request finishes.
-                var scopedProcessingService = scope.ServiceProvider.GetRequiredService<IDocumentProcessingService>();
-                var scopedMediaStorage = scope.ServiceProvider.GetRequiredService<IMediaStorageService>();
-                var scopedMonitoring = scope.ServiceProvider.GetRequiredService<IRequestMonitoringService>();
-                var logger = scope.ServiceProvider.GetRequiredService<ILogger<DocumentsController>>();
-
-                try
-                {
-                    ms.Position = 0;
-
-                    await scopedMonitoring.UpdateRequestStatus(requestId, "Processing", "Converting document to PDF for Lambda dispatch", 20);
-
-                    // Add logging to track stream sizes
-                    logger.LogInformation("Processing upload: {FileName}, Size: {Size} bytes", originalFileName, ms.Length);
-
-                    var (pdfStream, pdfFileName) = await scopedProcessingService.ConvertToPdfAsync(ms, originalFileName, originalContentType, requestId);
-                    
-                    if (pdfStream.Length == 0)
-                    {
-                        throw new InvalidOperationException($"PDF conversion resulted in empty stream for {originalFileName}");
-                    }
-                    
-                    logger.LogInformation("Converted PDF: {PdfName}, Size: {PdfSize} bytes", pdfFileName, pdfStream.Length);
-
-                    var uploadKey = $"uploads/{documentId}.pdf";
-                    pdfStream.Position = 0;
-
-                    await scopedMediaStorage.UploadFileAsync(uploadKey, pdfStream, "application/pdf");
-
-                    // Verify upload immediately by checking meta
-                    // (optional, but good for debug)
-
-
-                    // Update placeholder row with resolved filename and storage key
-                    var doc = await ctx.DocumentMetadatas.FindAsync(documentId);
-                    if (doc != null)
-                    {
-                        doc.FileName = pdfFileName;
-                        doc.StorageKey = uploadKey;
-                        await ctx.SaveChangesAsync();
-                    }
-
-                    // Write group associations immediately so Lambda results are scoped correctly
-                    if (groupIds != null && groupIds.Any() && doc != null)
-                    {
-                        // Helper logic for groups must use fresh context 'ctx'
-                        foreach (var groupId in groupIds)
-                        {
-                            var group = await ctx.ResourceGroups.FindAsync(groupId);
-                            if (group != null)
-                            {
-                                doc.DocumentGroups.Add(new DocumentGroup
-                                {
-                                    DocumentMetadataId = doc.Id,
-                                    ResourceGroupId = groupId
-                                });
-                            }
-                        }
-                        await ctx.SaveChangesAsync();
-                        // ... duplicate eviction logic uses ctx ...
-                        // ... cache invalidation ...
-                    }
-
-                    try { await InvalidateFilesCache(ctx); await NotifyFilesChangedAsync(); } catch { }
-
-                    logger.LogInformation("Document {DocumentId} dispatched to Lambda via S3 key {Key}", documentId, uploadKey);
-                    await scopedMonitoring.CompleteRequest(requestId, true, $"Document {pdfFileName} dispatched to Lambda for processing");
-                }
-                catch (Exception ex)
-                {
-                    var errorMonitoring = scope.ServiceProvider.GetRequiredService<IRequestMonitoringService>();
-                    var errorLogger = scope.ServiceProvider.GetRequiredService<ILogger<DocumentsController>>();
-                    errorLogger.LogError(ex, "Background processing failed for uploaded document {FileName}", originalFileName);
-                    try { await errorMonitoring.CompleteRequest(requestId, false, error: ex.Message); } catch { }
-                }
-                finally
-                {
-                    // We own the stream lifetime here — dispose it now that processing is done.
-                    ms.Dispose();
-                }
+                // Lambda will pick up the file from S3 and process it — no further action needed here
+                await Task.CompletedTask;
             });
 
             return CreatedAtAction(nameof(UploadDocument), new { id = documentId }, new { id = documentId, requestId });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error uploading document");
+            _logger.LogError(ex, "Error uploading document {FileName}", originalFileName);
             await _monitoringService.CompleteRequest(requestId, false, error: ex.Message);
-            return StatusCode(500, new { error = "Failed to accept document", details = ex.Message });
+            return StatusCode(500, new { error = "Failed to upload document", details = ex.Message });
         }
     }
 
