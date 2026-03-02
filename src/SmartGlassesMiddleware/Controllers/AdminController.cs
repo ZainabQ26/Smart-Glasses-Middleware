@@ -433,15 +433,17 @@ public class AdminController : ControllerBase
                 };
             }
 
-            // Read fully into memory so Content-Length is known and range processing works correctly.
+            // Read fully so Content-Length is exact.
             var ms = new MemoryStream();
             await stream.CopyToAsync(ms);
-            ms.Position = 0;
+            var bytes = ms.ToArray();
 
-            // inline disposition causes browser to display (not download); include filename for PDF viewer title.
+            // inline disposition = browser displays (not downloads); filename = PDF viewer tab title.
             var safeFileName = (fileName ?? "document").Replace("\"", "");
             Response.Headers["Content-Disposition"] = $"inline; filename=\"{safeFileName}\"";
-            return File(ms, contentType);
+            Response.Headers["Cache-Control"] = "no-store, no-cache, must-revalidate";
+            Response.Headers["Pragma"] = "no-cache";
+            return File(bytes, contentType);
         }
         catch (Exception ex)
         {
