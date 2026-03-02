@@ -433,11 +433,15 @@ public class AdminController : ControllerBase
                 };
             }
 
-            // Read into byte array so Chrome PDF viewer gets a proper Content-Length
-            // and range-processing is supported (required by Chrome's built-in PDF viewer).
-            var bytes = new byte[stream.Length];
-            await stream.ReadExactlyAsync(bytes);
-            return File(bytes, contentType, enableRangeProcessing: true);
+            // Read fully into memory so Content-Length is known and range processing works correctly.
+            var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            ms.Position = 0;
+
+            // inline disposition causes browser to display (not download); include filename for PDF viewer title.
+            var safeFileName = (fileName ?? "document").Replace("\"", "");
+            Response.Headers["Content-Disposition"] = $"inline; filename=\"{safeFileName}\"";
+            return File(ms, contentType);
         }
         catch (Exception ex)
         {
