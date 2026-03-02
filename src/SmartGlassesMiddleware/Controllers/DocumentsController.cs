@@ -104,6 +104,10 @@ public class DocumentsController : ControllerBase
             _context.DocumentMetadatas.Add(placeholder);
             await _context.SaveChangesAsync();
 
+            // Capture file metadata into local variables to avoid accessing disposed IFormFile in Task.Run
+            var originalFileName = file.FileName;
+            var originalContentType = file.ContentType;
+
             // Fire-and-forget: convert to PDF then dispatch to Lambda via S3.
             // Lambda handles Textract extraction, chunking and Bedrock embedding writes.
             // IMPORTANT: _context is scoped to the HTTP request and will be disposed when this
@@ -121,9 +125,14 @@ public class DocumentsController : ControllerBase
 
                     // Add logging to track stream sizes
                     scope.ServiceProvider.GetRequiredService<ILogger<DocumentsController>>()
-                        .LogInformation("Processing upload: {FileName}, Size: {Size} bytes", file.FileName, ms.Length);
+                        .LogInformation("Processing upload: {FileName}, Size: {Size} bytes", originalFileName, ms.Length);
 
-                    var (pdfStream, pdfFileName) = await _processingService.ConvertToPdfAsync(ms, file.FileName, file.ContentType, requestId);
+                    var (pdfStream, pdfFileName) = await _processingService.ConvertToPdfAsync(ms, originalFileName, originalContentType, requestId);
+                    
+                    if (pdfStream.Length == 0)
+                    {
+                        throw new InvalidOperationException($"PDF conversion resulted in empty stream for {originalFileName}");
+                    }
                     
                     scope.ServiceProvider.GetRequiredService<ILogger<DocumentsController>>()
                         .LogInformation("Converted PDF: {PdfName}, Size: {PdfSize} bytes", pdfFileName, pdfStream.Length);
@@ -217,7 +226,7 @@ public class DocumentsController : ControllerBase
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Background processing failed for uploaded document {FileName}", file.FileName);
+                    _logger.LogError(ex, "Background processing failed for uploaded document {FileName}", originalFileName);
                     try { await _monitoringService.CompleteRequest(requestId, false, error: ex.Message); } catch { }
                 }
                 finally
