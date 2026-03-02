@@ -663,6 +663,7 @@ public class DocumentProcessingService : IDocumentProcessingService
         {
             pdfStream.Position = 0;
             using var pdfReader = new PdfReader(pdfStream);
+            pdfReader.SetCloseStream(false);
             using var pdfDocument = new PdfDocument(pdfReader);
             
             if (pdfDocument.GetNumberOfPages() > 0)
