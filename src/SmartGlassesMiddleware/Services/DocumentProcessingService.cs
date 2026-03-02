@@ -276,59 +276,22 @@ public class DocumentProcessingService : IDocumentProcessingService
     {
         if (requestId != null && _monitoringService != null)
         {
-            await _monitoringService.UpdateRequestStatus(requestId, "Processing", "Ensuring PDF is text-based", 20);
+            await _monitoringService.UpdateRequestStatus(requestId, "Processing", "Forwarding PDF to Lambda", 20);
         }
 
-        try
-        {
-            // SetUnethicalReading bypasses owner-password encryption (copy/print restrictions).
-            // NOTE: this is called on the PdfReader instance, not ReaderProperties.
-            pdfStream.Position = 0;
-            using var pdfReader = new PdfReader(pdfStream);
-            pdfReader.SetUnethicalReading(true);
-            pdfReader.SetCloseStream(false);
-            using var pdfDocument = new PdfDocument(pdfReader);
-
-            var outputStream = new MemoryStream();
-            using var writer = CreatePdfWriter(outputStream);
-            writer.SetCloseStream(false);
-            using var outPdf = new PdfDocument(writer);
-
-            // Copy all pages — also strips owner-password restriction from the output
-            pdfDocument.CopyPagesTo(1, pdfDocument.GetNumberOfPages(), outPdf);
-            
-            // Explicitly close the output document (flushes buffers to stream)
-            outPdf.Close(); 
-            // writer.Close() is called automatically by outPdf.Close()
-
-            outputStream.Position = 0;
-            return outputStream;
-        }
-        catch (Exception ex)
-        {
-            // If iText7 still can't open the PDF (e.g. user-password protected or corrupt),
-            // fall back to forwarding the original bytes unchanged.  Lambda/Textract can
-            // sometimes handle PDFs that iText7 cannot grok.
-            _logger.LogWarning(ex, "iText7 could not open PDF ({ExType}: {Msg}) — forwarding original bytes to Lambda unchanged", ex.GetType().Name, ex.Message);
-
-            // Ensure we can read from the stream even if iText messed with it
-            if (pdfStream.CanSeek)
-            {
-                pdfStream.Position = 0;
-                var fallback = new MemoryStream();
-                await pdfStream.CopyToAsync(fallback);
-                fallback.Position = 0;
-                return fallback;
-            }
-            else
-            {
-                 // If the stream was closed, we can't recover easily unless we had a backup.
-                 // Since we now pass a copy in ConvertToTextPdfAsync, this branch should be safer,
-                 // but we can log if it happens.
-                 _logger.LogError("Input stream was closed during failure recovery!");
-                 throw;
-            }
-        }
+        // BYPASS iText7 re-encoding entirely.
+        // iText7 8.x disposes the output MemoryStream when the PdfDocument/PdfWriter using
+        // blocks exit — even with SetCloseStream(false) — resulting in a zero-byte S3 object.
+        // Lambda's PyMuPDF handles any well-formed or lightly-encrypted PDF natively, so
+        // re-encoding through iText7 here provides no benefit and only causes data loss.
+        // Forward the original bytes to S3 unchanged.
+        pdfStream.Position = 0;
+        var forwarded = new MemoryStream();
+        await pdfStream.CopyToAsync(forwarded);
+        forwarded.Position = 0;
+        
+        _logger.LogInformation("PDF forwarded to S3 unchanged ({Bytes} bytes)", forwarded.Length);
+        return forwarded;
     }
 
     private async Task<MemoryStream> ConvertDocxToPdfAsync(Stream docxStream, string pdfFileName, string? requestId)
