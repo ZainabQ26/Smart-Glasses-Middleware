@@ -957,13 +957,13 @@ async function previewFile(id, fileName) {
         // PDF — open directly in a new browser tab using the API URL
         // (Chrome's native PDF viewer works perfectly for direct navigation but not for embeds/iframes)
         if (contentType.includes('pdf') || header === '%PDF') {
-            const directUrl = `${API_BASE}/files/${id}/preview`;
-            window.open(directUrl, '_blank');
+            // Use the same cachebuster URL already fetched — avoids any stale cached bad response
+            window.open(previewUrl, '_blank');
             previewContent.innerHTML = `<div style="padding:24px; text-align:center;">
                 <div style="font-size:48px; margin-bottom:12px;">📄</div>
                 <p style="font-weight:600; margin:0 0 6px;">${escapeHtml(fileName)}</p>
                 <p style="color:#888; font-size:13px; margin:0 0 16px;">PDF opened in a new tab.</p>
-                <button onclick="window.open('${directUrl}', '_blank')" style="padding:8px 18px; background:#3498db; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:13px;">Open again ↗</button>
+                <button onclick="window.open('${previewUrl}', '_blank')" style="padding:8px 18px; background:#3498db; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:13px;">Open again ↗</button>
             </div>`;
             return;
         }
