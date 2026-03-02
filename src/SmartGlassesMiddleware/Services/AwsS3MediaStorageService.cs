@@ -36,30 +36,41 @@ public class AwsS3MediaStorageService : IMediaStorageService
             // Ensure we read from the beginning of the stream
             if (fileStream.CanSeek) fileStream.Position = 0;
 
+            // Guard against uploading empty content
+            long streamLength = fileStream.CanSeek ? fileStream.Length : -1;
+            if (streamLength == 0)
+                throw new InvalidOperationException($"Refusing to upload 0-byte stream to S3 key {key}");
+
+            _logger.LogInformation("Uploading to S3: {Bucket}/{Key} ({Bytes} bytes)", _bucketName, key, streamLength);
+
+            // Copy to a MemoryStream so the AWS SDK knows the exact length and won't use
+            // chunked transfer encoding which can result in a 0-byte object.
+            MemoryStream ms;
+            if (fileStream is MemoryStream existing)
+            {
+                ms = existing;
+            }
+            else
+            {
+                ms = new MemoryStream();
+                await fileStream.CopyToAsync(ms);
+                ms.Position = 0;
+            }
+
+            if (ms.Length == 0)
+                throw new InvalidOperationException($"Stream was empty after copy for S3 key {key}");
+
             var request = new PutObjectRequest
             {
                 BucketName = _bucketName,
                 Key = key,
-                InputStream = fileStream,
+                InputStream = ms,
                 ContentType = contentType,
                 AutoCloseStream = false
             };
 
-            // Explicitly set ContentLength so the SDK does not silently upload 0 bytes
-            // when it cannot determine the stream length via chunked encoding.
-            if (fileStream.CanSeek)
-            {
-                request.ContentLength = fileStream.Length - fileStream.Position;
-                _logger.LogInformation("Uploading to S3: {Bucket}/{Key} ({Bytes} bytes)", _bucketName, key, request.ContentLength);
-            }
-
-            if (request.ContentLength == 0)
-            {
-                throw new InvalidOperationException($"Refusing to upload 0-byte stream to S3 key {key}");
-            }
-
             await _s3Client.PutObjectAsync(request);
-            _logger.LogInformation("Uploaded file to S3: {Bucket}/{Key}", _bucketName, key);
+            _logger.LogInformation("Uploaded file to S3: {Bucket}/{Key} ({Bytes} bytes)", _bucketName, key, ms.Length);
             return key;
         }
         catch (Exception ex)
