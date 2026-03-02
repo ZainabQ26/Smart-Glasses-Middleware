@@ -123,6 +123,20 @@ public class DocumentsController : ControllerBase
                 IsProcessed = false
             };
             _context.DocumentMetadatas.Add(metadata);
+
+            // Also create a ManagedFile so the upload appears in the admin files panel
+            var managedFile = new ManagedFile
+            {
+                Id = documentId,
+                FileName = pdfFileName,
+                Label = originalFileName,
+                ContentType = "application/pdf",
+                StorageKey = uploadKey,
+                UploadedAt = DateTime.UtcNow,
+                FileSize = pdfStream.Length
+            };
+            _context.ManagedFiles.Add(managedFile);
+
             await _context.SaveChangesAsync();
 
             // Write group associations
