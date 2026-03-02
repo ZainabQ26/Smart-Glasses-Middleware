@@ -453,28 +453,40 @@ public class AdminController : ControllerBase
     }
 
     /// <summary>
-    /// Download a managed file (force download)
+    /// Download a managed file (force download). Falls back to DocumentMetadatas if not found in ManagedFiles.
     /// </summary>
     [HttpGet("files/{id}/download")]
     public async Task<ActionResult> DownloadFile(Guid id)
     {
+        string storageKey;
+        string fileName;
+        string contentType;
+
         var file = await _context.ManagedFiles.FindAsync(id);
-        if (file == null)
+        if (file != null)
         {
-            return NotFound();
+            storageKey = file.StorageKey;
+            fileName = file.FileName;
+            contentType = string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType;
+        }
+        else
+        {
+            var doc = await _context.DocumentMetadatas.FindAsync(id);
+            if (doc == null)
+                return NotFound();
+            storageKey = doc.StorageKey;
+            fileName = doc.OriginalFileName ?? doc.FileName;
+            contentType = string.IsNullOrWhiteSpace(doc.ContentType) ? "application/octet-stream" : doc.ContentType;
         }
 
         try
         {
-            var stream = await _mediaStorageService.DownloadMediaAsync(file.StorageKey);
+            var stream = await _mediaStorageService.DownloadMediaAsync(storageKey);
             stream.Position = 0;
-            var contentType = string.IsNullOrWhiteSpace(file.ContentType)
-                ? "application/octet-stream"
-                : file.ContentType;
 
             if (contentType == "application/octet-stream")
             {
-                var ext = Path.GetExtension(file.FileName ?? string.Empty)?.ToLowerInvariant() ?? string.Empty;
+                var ext = Path.GetExtension(fileName ?? string.Empty)?.ToLowerInvariant() ?? string.Empty;
                 contentType = ext switch
                 {
                     ".pdf" => "application/pdf",
@@ -494,13 +506,39 @@ public class AdminController : ControllerBase
             }
 
             // Force download with filename
-            return File(stream, contentType, file.FileName);
+            return File(stream, contentType, fileName);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error downloading file {FileId}", id);
             return StatusCode(500);
         }
+    }
+
+    /// <summary>
+    /// Debug: returns size, first 16 bytes (hex), stored content-type and storage key for a file.
+    /// </summary>
+    [HttpGet("files/{id}/info")]
+    public async Task<IActionResult> FileInfo(Guid id)
+    {
+        string storageKey; string fileName; string storedContentType;
+        var file = await _context.ManagedFiles.FindAsync(id);
+        if (file != null) { storageKey = file.StorageKey; fileName = file.FileName; storedContentType = file.ContentType; }
+        else
+        {
+            var doc = await _context.DocumentMetadatas.FindAsync(id);
+            if (doc == null) return NotFound(new { error = "Not found in ManagedFiles or DocumentMetadatas", id });
+            storageKey = doc.StorageKey; fileName = doc.FileName; storedContentType = doc.ContentType;
+        }
+        try
+        {
+            var stream = await _mediaStorageService.DownloadMediaAsync(storageKey);
+            stream.Position = 0;
+            var header = new byte[Math.Min(16, stream.Length)];
+            await stream.ReadExactlyAsync(header);
+            return Ok(new { id, storageKey, fileName, storedContentType, totalBytes = stream.Length, firstBytesHex = Convert.ToHexString(header), firstBytesAscii = System.Text.Encoding.ASCII.GetString(header).Replace("\0","·") });
+        }
+        catch (Exception ex) { return StatusCode(500, new { error = ex.Message }); }
     }
 
     #endregion
