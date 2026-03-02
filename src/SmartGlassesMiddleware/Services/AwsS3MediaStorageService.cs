@@ -24,6 +24,7 @@ public class AwsS3MediaStorageService : IMediaStorageService
 
     public async Task<string> UploadMediaAsync(Stream fileStream, string fileName, string contentType)
     {
+        if (fileStream.CanSeek) fileStream.Position = 0;
         var key = $"{Guid.NewGuid()}/{fileName}";
         return await UploadFileAsync(key, fileStream, contentType);
     }
@@ -32,6 +33,9 @@ public class AwsS3MediaStorageService : IMediaStorageService
     {
         try
         {
+            // Ensure we read from the beginning of the stream
+            if (fileStream.CanSeek) fileStream.Position = 0;
+
             var request = new PutObjectRequest
             {
                 BucketName = _bucketName,
@@ -40,6 +44,19 @@ public class AwsS3MediaStorageService : IMediaStorageService
                 ContentType = contentType,
                 AutoCloseStream = false
             };
+
+            // Explicitly set ContentLength so the SDK does not silently upload 0 bytes
+            // when it cannot determine the stream length via chunked encoding.
+            if (fileStream.CanSeek)
+            {
+                request.ContentLength = fileStream.Length - fileStream.Position;
+                _logger.LogInformation("Uploading to S3: {Bucket}/{Key} ({Bytes} bytes)", _bucketName, key, request.ContentLength);
+            }
+
+            if (request.ContentLength == 0)
+            {
+                throw new InvalidOperationException($"Refusing to upload 0-byte stream to S3 key {key}");
+            }
 
             await _s3Client.PutObjectAsync(request);
             _logger.LogInformation("Uploaded file to S3: {Bucket}/{Key}", _bucketName, key);
