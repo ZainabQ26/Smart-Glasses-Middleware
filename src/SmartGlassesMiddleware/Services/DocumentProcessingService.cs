@@ -214,7 +214,16 @@ public class DocumentProcessingService : IDocumentProcessingService
         {
             case "pdf":
                 // PDF is already in PDF format, but we need to ensure it's text-based (searchable)
-                convertedStream = await EnsureTextBasedPdfAsync(inputStream, requestId);
+                // Use a dedicated copy for the check to protect input stream from unexpected closure
+                inputStream.Position = 0;
+                var safeInput = new MemoryStream();
+                await inputStream.CopyToAsync(safeInput);
+                safeInput.Position = 0;
+
+                convertedStream = await EnsureTextBasedPdfAsync(safeInput, requestId);
+                
+                // If the check returned the same stream (fallback), ensure we use a fresh copy if needed
+                // but usually EnsureTextBasedPdfAsync returns a new MemoryStream.
                 break;
 
             case "docx":
@@ -241,9 +250,21 @@ public class DocumentProcessingService : IDocumentProcessingService
                 throw new NotSupportedException($"Document type {documentType} is not supported");
         }
 
-        // Generate a meaningful filename
-        convertedStream.Position = 0;
-        var slug = await GenerateSlugFromPdfAsync(convertedStream, baseFileName);
+        // Generate a meaningful filename safely without closing the stream
+        string slug = baseFileName;
+        try
+        {
+            convertedStream.Position = 0;
+            using var tempSlugStream = new MemoryStream();
+            await convertedStream.CopyToAsync(tempSlugStream);
+            tempSlugStream.Position = 0;
+            slug = await GenerateSlugFromPdfAsync(tempSlugStream, baseFileName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to generate slug for {FileName}", fileName);
+        }
+        
         var finalFileName = $"{slug}.pdf";
 
         // Reset stream position for downstream consumers
@@ -275,7 +296,10 @@ public class DocumentProcessingService : IDocumentProcessingService
 
             // Copy all pages — also strips owner-password restriction from the output
             pdfDocument.CopyPagesTo(1, pdfDocument.GetNumberOfPages(), outPdf);
-            outPdf.Close();
+            
+            // Explicitly close the output document (flushes buffers to stream)
+            outPdf.Close(); 
+            // writer.Close() is called automatically by outPdf.Close()
 
             outputStream.Position = 0;
             return outputStream;
@@ -287,11 +311,23 @@ public class DocumentProcessingService : IDocumentProcessingService
             // sometimes handle PDFs that iText7 cannot grok.
             _logger.LogWarning(ex, "iText7 could not open PDF ({ExType}: {Msg}) — forwarding original bytes to Lambda unchanged", ex.GetType().Name, ex.Message);
 
-            pdfStream.Position = 0;
-            var fallback = new MemoryStream();
-            await pdfStream.CopyToAsync(fallback);
-            fallback.Position = 0;
-            return fallback;
+            // Ensure we can read from the stream even if iText messed with it
+            if (pdfStream.CanSeek)
+            {
+                pdfStream.Position = 0;
+                var fallback = new MemoryStream();
+                await pdfStream.CopyToAsync(fallback);
+                fallback.Position = 0;
+                return fallback;
+            }
+            else
+            {
+                 // If the stream was closed, we can't recover easily unless we had a backup.
+                 // Since we now pass a copy in ConvertToTextPdfAsync, this branch should be safer,
+                 // but we can log if it happens.
+                 _logger.LogError("Input stream was closed during failure recovery!");
+                 throw;
+            }
         }
     }
 
