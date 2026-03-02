@@ -964,6 +964,7 @@ async function previewFile(id, fileName) {
                 <p style="font-weight:600; margin:0 0 6px;">${escapeHtml(fileName)}</p>
                 <p style="color:#888; font-size:13px; margin:0 0 16px;">PDF opened in a new tab.</p>
                 <button onclick="window.open('${previewUrl}', '_blank')" style="padding:8px 18px; background:#3498db; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:13px;">Open again ↗</button>
+                <br><br><a href="${API_BASE}/files/${id}/info" target="_blank" style="font-size:11px; color:#aaa;">Check file info (debug)</a>
             </div>`;
             return;
         }
