@@ -581,6 +581,11 @@ public class DocumentsController : ControllerBase
             return NotFound();
         }
 
+        if (string.IsNullOrEmpty(document.StorageKey))
+        {
+            return NotFound("Document file not available (processing may be incomplete).");
+        }
+
         var stream = await _mediaStorageService.DownloadFileAsync(document.StorageKey);
         stream.Position = 0;
         var contentType = string.IsNullOrWhiteSpace(document.ContentType)
