@@ -119,11 +119,23 @@ public class DocumentsController : ControllerBase
 
                     await _monitoringService.UpdateRequestStatus(requestId, "Processing", "Converting document to PDF for Lambda dispatch", 20);
 
+                    // Add logging to track stream sizes
+                    scope.ServiceProvider.GetRequiredService<ILogger<DocumentsController>>()
+                        .LogInformation("Processing upload: {FileName}, Size: {Size} bytes", file.FileName, ms.Length);
+
                     var (pdfStream, pdfFileName) = await _processingService.ConvertToPdfAsync(ms, file.FileName, file.ContentType, requestId);
+                    
+                    scope.ServiceProvider.GetRequiredService<ILogger<DocumentsController>>()
+                        .LogInformation("Converted PDF: {PdfName}, Size: {PdfSize} bytes", pdfFileName, pdfStream.Length);
+
                     var uploadKey = $"uploads/{documentId}.pdf";
                     pdfStream.Position = 0;
 
                     await _mediaStorageService.UploadFileAsync(uploadKey, pdfStream, "application/pdf");
+
+                    // Verify upload immediately by checking meta
+                    // (optional, but good for debug)
+
 
                     // Update placeholder row with resolved filename and storage key
                     var doc = await ctx.DocumentMetadatas.FindAsync(documentId);
