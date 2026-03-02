@@ -373,7 +373,7 @@ export default function App() {
                 <p style={styles.actionCardDoc}>{pendingAction.name}</p>
                 <button
                   style={styles.actionBtnSecondary}
-                  onClick={() => {
+                  on Click={() => {
                     window.open(`/admin.html?preview=${pendingAction.id}&name=${encodeURIComponent(pendingAction.name)}`, "_blank");
                     setPendingAction(null);
                   }}
