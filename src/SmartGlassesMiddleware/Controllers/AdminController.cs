@@ -410,8 +410,8 @@ public class AdminController : ControllerBase
         try
         {
             var stream = await _mediaStorageService.DownloadMediaAsync(storageKey);
-            stream.Position = 0;
-
+            stream.Position = 0; // Essential for some stream implementations
+            
             if (contentType == "application/octet-stream")
             {
                 var ext = Path.GetExtension(fileName ?? string.Empty)?.ToLowerInvariant() ?? string.Empty;
@@ -433,17 +433,18 @@ public class AdminController : ControllerBase
                 };
             }
 
-            // Read fully so Content-Length is exact.
-            var ms = new MemoryStream();
-            await stream.CopyToAsync(ms);
-            var bytes = ms.ToArray();
-
+            // Return the stream directly to support range requests (PDF viewing often requires this)
             // inline disposition = browser displays (not downloads); filename = PDF viewer tab title.
             var safeFileName = (fileName ?? "document").Replace("\"", "");
             Response.Headers["Content-Disposition"] = $"inline; filename=\"{safeFileName}\"";
-            Response.Headers["Cache-Control"] = "no-store, no-cache, must-revalidate";
-            Response.Headers["Pragma"] = "no-cache";
-            return File(bytes, contentType);
+            
+            // Allow range processing if the stream supports seeking
+            if (stream.CanSeek)
+            {
+                return File(stream, contentType, enableRangeProcessing: true);
+            }
+            
+            return File(stream, contentType);
         }
         catch (Exception ex)
         {
@@ -505,7 +506,12 @@ public class AdminController : ControllerBase
                 };
             }
 
-            // Force download with filename
+            // Force download with filename support for range processing if stream allows
+            if (stream.CanSeek)
+            {
+                return File(stream, contentType, fileName, enableRangeProcessing: true);
+            }
+            
             return File(stream, contentType, fileName);
         }
         catch (Exception ex)
