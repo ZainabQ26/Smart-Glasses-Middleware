@@ -10,9 +10,8 @@ import WhisperWorker from "./whisperWorker?worker";
 //
 // Flow:
 //   [always] SpeechRecognition listening for "activate"
-//   "activate" heard → vad.start(), status=listening
-//   Silero VAD.onSpeechEnd fires → 16 kHz Float32Array sent to Whisper Worker
-//   Whisper Worker returns transcript → vad.pause(), SR restarts, status=idle
+//   "activate" heard → SpeechRecognition captures command (primary path)
+//   If Web Speech confidence is low → fallback to Whisper worker result
 //
 export default function App() {
   const [status, setStatus]       = useState("idle"); // idle | listening | processing | sending
@@ -20,6 +19,7 @@ export default function App() {
   const [transcript, setTranscript] = useState(null);
   const [aiResponse, setAiResponse] = useState(null);
   const [usedAdvancedModel, setUsedAdvancedModel] = useState(false);
+  const [speechMode, setSpeechMode] = useState("auto"); // auto | webspeech-only | whisper-only
   const [pendingAction, setPendingAction] = useState(null); // { type: "OPEN_FILE_PICKER" } | { type: "SELECT_DOCUMENT", id, name } | null
   const [logOpen, setLogOpen]     = useState(false);
 
@@ -30,6 +30,34 @@ export default function App() {
   const workerRef           = useRef(null);
   const sendToAIRef         = useRef(null);
   const fileInputRef        = useRef(null);
+  const whisperFallbackNeededRef = useRef(false);
+  const webSpeechHandledRef      = useRef(false);
+  const lowConfidenceTranscriptRef = useRef(null);
+
+  const WEB_SPEECH_CONFIDENCE_THRESHOLD = 0.72;
+  const isWebSpeechOnly = speechMode === "webspeech-only";
+  const isWhisperOnly = speechMode === "whisper-only";
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadClientSettings = async () => {
+      try {
+        const res = await fetch("/api/process/client-settings");
+        if (!res.ok) return;
+        const data = await res.json();
+        const mode = (data?.speechTranscriptionMode || "").toLowerCase();
+        const normalized = mode === "webspeech-only" || mode === "whisper-only" ? mode : "auto";
+        if (!cancelled) {
+          setSpeechMode(normalized);
+          addLog(`⚙️ Speech mode: ${normalized}`, "info");
+        }
+      } catch (_) {
+      }
+    };
+
+    loadClientSettings();
+    return () => { cancelled = true; };
+  }, [addLog]);
 
   const addLog = useCallback((text, type = "info") => {
     setLogs(prev =>
@@ -54,13 +82,13 @@ export default function App() {
     onSpeechEnd: (audio) => {
       // `audio` is a 16 kHz mono Float32Array — exactly what Whisper expects.
       if (!activatedRef.current) return;
+      if (isWebSpeechOnly) return;
       if (listeningTimeoutRef.current) {
         clearTimeout(listeningTimeoutRef.current);
         listeningTimeoutRef.current = null;
       }
       vadRef.current?.pause();
-      setStatus("processing");
-      addLog("⏳ Transcribing with Whisper (browser)…", "info");
+      addLog("⏳ Whisper fallback transcript preparing…", "info");
       // Transfer the buffer zero-copy; worker owns it from here.
       workerRef.current?.postMessage({ type: "transcribe", audio }, [audio.buffer]);
     },
@@ -90,10 +118,13 @@ export default function App() {
   const resumeListening = useCallback(() => {
     if (listeningTimeoutRef.current) { clearTimeout(listeningTimeoutRef.current); listeningTimeoutRef.current = null; }
     activatedRef.current = false;
+    whisperFallbackNeededRef.current = false;
+    webSpeechHandledRef.current = false;
+    lowConfidenceTranscriptRef.current = null;
     setStatus("idle");
     try { vadRef.current?.pause(); } catch (_) {}
     setTimeout(() => { try { recognitionRef.current?.start(); } catch (_) {} }, RESUME_DELAY_MS);
-  }, []);
+  }, [RESUME_DELAY_MS]);
 
   const resumeListeningRef = useRef(resumeListening);
   useEffect(() => { resumeListeningRef.current = resumeListening; }, [resumeListening]);
@@ -179,9 +210,16 @@ export default function App() {
         .join("")
         .toLowerCase();
 
+      const lastResult = event.results[event.results.length - 1];
+      const lastAlt = lastResult?.[0];
+      const latestText = (lastAlt?.transcript || "").trim().toLowerCase();
+      const confidence = typeof lastAlt?.confidence === "number" ? lastAlt.confidence : null;
+
       if (transcript.includes("activate") && !activatedRef.current) {
         activatedRef.current = true;
-        rec.stop();
+        webSpeechHandledRef.current = false;
+        whisperFallbackNeededRef.current = false;
+        lowConfidenceTranscriptRef.current = null;
         setStatus("listening");
         addLog("🎤 Activated — speak your command", "info");
 
@@ -190,8 +228,49 @@ export default function App() {
           if (activatedRef.current) { addLog("⏱️ No speech detected — resetting.", "warn"); resumeListeningRef.current(); }
         }, 30_000);
 
-        try { vadRef.current.start(); } catch (_) {}
+        if (!isWebSpeechOnly) {
+          try { vadRef.current.start(); } catch (_) {}
+        }
+        return;
       }
+
+      if (!activatedRef.current) return;
+      if (webSpeechHandledRef.current) return;
+      if (!lastResult?.isFinal) return;
+      if (!latestText) return;
+
+      if (listeningTimeoutRef.current) {
+        clearTimeout(listeningTimeoutRef.current);
+        listeningTimeoutRef.current = null;
+      }
+
+      if (isWhisperOnly) {
+        whisperFallbackNeededRef.current = true;
+        lowConfidenceTranscriptRef.current = latestText;
+        setStatus("processing");
+        addLog("⚙️ Whisper-only mode: using Whisper transcript.", "info");
+        return;
+      }
+
+      if (confidence != null && confidence < WEB_SPEECH_CONFIDENCE_THRESHOLD && !isWebSpeechOnly) {
+        whisperFallbackNeededRef.current = true;
+        lowConfidenceTranscriptRef.current = latestText;
+        setStatus("processing");
+        addLog(`⚠️ Web Speech confidence ${confidence.toFixed(2)} is low — using Whisper fallback.`, "warn");
+        return;
+      }
+
+      whisperFallbackNeededRef.current = false;
+      lowConfidenceTranscriptRef.current = null;
+      webSpeechHandledRef.current = true;
+      addLog(confidence != null
+        ? `🗣️ Web Speech (${confidence.toFixed(2)}): "${latestText}"`
+        : `🗣️ Web Speech: "${latestText}"`, "voice");
+      setTranscript(latestText);
+      setAiResponse(null);
+      setPendingAction(null);
+      setStatus("sending");
+      sendToAIRef.current?.(latestText);
     };
 
     rec.onerror = (e) => {
@@ -206,7 +285,7 @@ export default function App() {
     rec.start();
     recognitionRef.current = rec;
     return () => { try { rec.abort(); } catch (_) {} };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isWebSpeechOnly, isWhisperOnly]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Whisper Web Worker ────────────────────────────────────────────────────
   useEffect(() => {
@@ -221,17 +300,56 @@ export default function App() {
         const cleaned = (text || "").trim();
         const meaningful = cleaned.length >= 2 && /[A-Za-z0-9]/.test(cleaned);
         if (meaningful) {
-          addLog(`🗣️ "${cleaned}"`, "voice");
+          if (isWebSpeechOnly) return;
+          const shouldUseWhisper = whisperFallbackNeededRef.current || !webSpeechHandledRef.current;
+          if (!shouldUseWhisper) return;
+
+          webSpeechHandledRef.current = true;
+          whisperFallbackNeededRef.current = false;
+          lowConfidenceTranscriptRef.current = null;
+          addLog(`🗣️ Whisper: "${cleaned}"`, "voice");
           setTranscript(cleaned);
           setAiResponse(null);
           setPendingAction(null);
           setStatus("sending");
           sendToAIRef.current?.(cleaned);
         } else {
+          if (whisperFallbackNeededRef.current && lowConfidenceTranscriptRef.current && !webSpeechHandledRef.current) {
+            const fallbackText = lowConfidenceTranscriptRef.current;
+            webSpeechHandledRef.current = true;
+            whisperFallbackNeededRef.current = false;
+            lowConfidenceTranscriptRef.current = null;
+            addLog("⚠️ Whisper returned no speech — using low-confidence Web Speech transcript.", "warn");
+            addLog(`🗣️ Web Speech fallback: "${fallbackText}"`, "voice");
+            setTranscript(fallbackText);
+            setAiResponse(null);
+            setPendingAction(null);
+            setStatus("sending");
+            sendToAIRef.current?.(fallbackText);
+            return;
+          }
           addLog("(No speech detected)", "warn");
           resumeListeningRef.current();
         }
       } else if (type === "error") {
+        if (isWebSpeechOnly) {
+          addLog("❌ Whisper error (ignored in webspeech-only mode)", "warn");
+          return;
+        }
+        if (whisperFallbackNeededRef.current && lowConfidenceTranscriptRef.current && !webSpeechHandledRef.current) {
+          const fallbackText = lowConfidenceTranscriptRef.current;
+          webSpeechHandledRef.current = true;
+          whisperFallbackNeededRef.current = false;
+          lowConfidenceTranscriptRef.current = null;
+          addLog("⚠️ Whisper error — using low-confidence Web Speech transcript.", "warn");
+          addLog(`🗣️ Web Speech fallback: "${fallbackText}"`, "voice");
+          setTranscript(fallbackText);
+          setAiResponse(null);
+          setPendingAction(null);
+          setStatus("sending");
+          sendToAIRef.current?.(fallbackText);
+          return;
+        }
         addLog(`❌ Whisper: ${message}`, "error");
         resumeListeningRef.current();
       }
@@ -240,12 +358,26 @@ export default function App() {
     worker.onerror = (err) => {
       // err is an ErrorEvent; .message is sometimes empty so fall back to other fields
       const msg = err.message || (err.filename ? `${err.filename}:${err.lineno}` : err.type) || "unknown error";
+      if (whisperFallbackNeededRef.current && lowConfidenceTranscriptRef.current && !webSpeechHandledRef.current) {
+        const fallbackText = lowConfidenceTranscriptRef.current;
+        webSpeechHandledRef.current = true;
+        whisperFallbackNeededRef.current = false;
+        lowConfidenceTranscriptRef.current = null;
+        addLog("⚠️ Whisper worker crashed — using low-confidence Web Speech transcript.", "warn");
+        addLog(`🗣️ Web Speech fallback: "${fallbackText}"`, "voice");
+        setTranscript(fallbackText);
+        setAiResponse(null);
+        setPendingAction(null);
+        setStatus("sending");
+        sendToAIRef.current?.(fallbackText);
+        return;
+      }
       addLog(`❌ Whisper worker crashed: ${msg}`, "error");
       resumeListeningRef.current();
     };
 
     return () => worker.terminate();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isWebSpeechOnly]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     return () => {
@@ -268,7 +400,9 @@ export default function App() {
       listeningTimeoutRef.current = setTimeout(() => {
         if (activatedRef.current) { addLog("⏱️ No speech detected — resetting.", "warn"); resumeListening(); }
       }, 30_000);
-      try { vadRef.current.start(); } catch (_) {}
+      if (!isWebSpeechOnly) {
+        try { vadRef.current.start(); } catch (_) {}
+      }
     } else if (status === "listening") {
       if (listeningTimeoutRef.current) { clearTimeout(listeningTimeoutRef.current); listeningTimeoutRef.current = null; }
       activatedRef.current = false;
