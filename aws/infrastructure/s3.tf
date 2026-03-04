@@ -16,7 +16,7 @@ resource "aws_s3_bucket_versioning" "media" {
   bucket = aws_s3_bucket.media.id
 
   versioning_configuration {
-    status = "Enabled"
+    status = local.enable_s3_versioning_effective ? "Enabled" : "Suspended"
   }
 }
 
@@ -103,7 +103,7 @@ resource "aws_s3_bucket_versioning" "documents" {
   bucket = aws_s3_bucket.documents.id
 
   versioning_configuration {
-    status = "Enabled"
+    status = local.enable_s3_versioning_effective ? "Enabled" : "Suspended"
   }
 }
 
@@ -190,7 +190,7 @@ resource "aws_s3_bucket_versioning" "frontend" {
   bucket = aws_s3_bucket.frontend.id
 
   versioning_configuration {
-    status = "Enabled"
+    status = local.enable_s3_versioning_effective ? "Enabled" : "Suspended"
   }
 }
 
