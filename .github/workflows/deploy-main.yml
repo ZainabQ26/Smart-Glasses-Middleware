@@ -10,7 +10,7 @@ on:
       environment:
         description: 'Environment to deploy to'
         required: true
-        default: 'prod'
+        default: 'dev'
         type: choice
         options:
           - dev
@@ -146,6 +146,16 @@ jobs:
           aws-region: ${{ secrets.AWS_REGION }}
           # Required so aws sts get-caller-identity returns the account ID unmasked
           mask-aws-account-id: false
+
+      - name: Guardrail for prod deploy input
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'prod' }}
+        run: |
+          echo "Prod deploy selected via workflow_dispatch."
+          if [[ "${GITHUB_REF_TYPE}" != "tag" || "${GITHUB_REF_NAME}" != v* ]]; then
+            echo "❌ Blocked: prod deploy requires a version tag (v*)."
+            echo "Create/push a v* tag and use that flow for prod deployments."
+            exit 1
+          fi
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v2
@@ -646,6 +656,7 @@ jobs:
             -var "aws_region=${AWS_REGION}" \
             -var "cost_optimized_non_prod=true" \
             -var "enable_customer_managed_kms=false" \
+            -var "enable_s3_versioning=false" \
             -var "dev_public_network_mode=true" \
             -var "enable_vpc_interface_endpoints=false" \
             -var "enable_redis=false" \

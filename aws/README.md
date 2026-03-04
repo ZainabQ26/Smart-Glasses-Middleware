@@ -56,6 +56,7 @@ The Terraform in `aws/infrastructure` now defaults to lower idle cost for non-pr
 - Redis/ElastiCache is disabled by default in non-prod
 - ECS Container Insights is disabled by default in non-prod
 - Interface VPC endpoints default to disabled in non-prod when cost optimization is enabled
+- S3 bucket versioning defaults to suspended in non-prod when cost optimization is enabled
 - RDS Performance Insights and Enhanced Monitoring default to disabled
 - NAT gateways default to disabled
 
@@ -70,6 +71,7 @@ terraform apply \
 	-var="environment=dev" \
 	-var="cost_optimized_non_prod=false" \
 	-var="dev_public_network_mode=false" \
+	-var="enable_s3_versioning=true" \
 	-var="ecs_api_desired_count=1" \
 	-var="ecs_api_min_capacity=1" \
 	-var="enable_redis=true" \
