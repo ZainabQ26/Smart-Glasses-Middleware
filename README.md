@@ -109,6 +109,20 @@ docker build -f src/SmartGlassesMiddleware/Dockerfile -t smart-glasses-api:local
 | `AWS:Bedrock:EmbeddingModelId` | `amazon.titan-embed-text-v2:0` | Bedrock embedding model |
 | `MigrateOnStartup` | `true` (dev) / `false` (AWS) | Run EF migrations on boot |
 
+### Speech Transcription Mode
+
+The client-side transcription behavior is configurable via the `AI:SpeechTranscriptionMode` setting. Add this under the `AI` section in your `appsettings.*.json` files or provide it as an environment variable (`AI__SpeechTranscriptionMode`). Valid values:
+
+- `auto`: Use the browser Web Speech API as the primary fast-path; if the Web Speech final result has low confidence, the client falls back to the local Whisper worker for higher-accuracy transcription (default).
+- `webspeech-only`: Use only the browser Web Speech API. The Whisper worker is ignored.
+- `whisper-only`: Ignore Web Speech results and always use the Whisper worker for final transcripts.
+
+The server exposes a convenience endpoint that the SPA calls on load to read this value:
+
+- `GET /api/process/client-settings` — returns `{ "speechTranscriptionMode": "auto|webspeech-only|whisper-only" }`.
+
+Client note: the confidence threshold used to decide when to fall back to Whisper is defined in the SPA (`src/SmartGlassesMiddleware/client/src/App.jsx`) as `WEB_SPEECH_CONFIDENCE_THRESHOLD`. Change that constant in the client if you want a different threshold.
+
 ### AWS (`appsettings.AWS.json`)
 
 Secrets (DB connection string, S3 bucket names, Redis URL) are injected at runtime from AWS Secrets Manager via ECS task secret references — no plaintext credentials in the image.

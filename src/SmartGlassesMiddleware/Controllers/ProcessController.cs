@@ -9,11 +9,13 @@ public class ProcessController : ControllerBase
 {
     private readonly IAIService _aiService;
     private readonly ILogger<ProcessController> _logger;
+    private readonly IConfiguration _configuration;
 
-    public ProcessController(IAIService aiService, ILogger<ProcessController> logger)
+    public ProcessController(IAIService aiService, ILogger<ProcessController> logger, IConfiguration configuration)
     {
         _aiService = aiService;
         _logger = logger;
+        _configuration = configuration;
     }
 
     /// <summary>
@@ -36,6 +38,21 @@ public class ProcessController : ControllerBase
             _logger.LogError(ex, "Preview failed");
             return StatusCode(500, new { error = "Preview failed" });
         }
+    }
+
+    [HttpGet]
+    [Route("client-settings")]
+    public IActionResult GetClientSettings()
+    {
+        var configuredMode = _configuration["AI:SpeechTranscriptionMode"]?.Trim().ToLowerInvariant();
+        var mode = configuredMode switch
+        {
+            "webspeech-only" => "webspeech-only",
+            "whisper-only" => "whisper-only",
+            _ => "auto"
+        };
+
+        return Ok(new { speechTranscriptionMode = mode });
     }
 
     [HttpPost]
