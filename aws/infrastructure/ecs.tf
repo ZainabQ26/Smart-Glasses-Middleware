@@ -32,7 +32,7 @@ resource "aws_ecs_cluster_capacity_providers" "main" {
 # CloudWatch Log Group for ECS
 resource "aws_cloudwatch_log_group" "ecs_api" {
   name              = "/ecs/${var.project_name}-${var.environment}/api"
-  retention_in_days = var.environment == "prod" ? 30 : 7
+  retention_in_days = var.environment == "prod" ? 30 : 1
 
   tags = {
     Name = "${var.project_name}-${var.environment}-ecs-api-logs"
@@ -72,21 +72,29 @@ resource "aws_iam_role_policy" "ecs_task_execution_secrets" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
+    Statement = concat([
       {
         Effect = "Allow"
         Action = [
-          "secretsmanager:GetSecretValue",
-          "kms:Decrypt"
+          "secretsmanager:GetSecretValue"
         ]
         Resource = concat([
           aws_secretsmanager_secret.app_secrets.arn,
-          aws_secretsmanager_secret.db_credentials.arn,
-          aws_kms_key.s3.arn
-        ], local.enable_redis_effective ? [aws_secretsmanager_secret.redis_credentials[0].arn] : [])
+          aws_secretsmanager_secret.db_credentials.arn
+        ], local.enable_customer_managed_kms_effective ? [aws_kms_key.s3[0].arn] : [], local.enable_redis_effective ? [aws_secretsmanager_secret.redis_credentials[0].arn] : [])
         
       }
-    ]
+    ], local.enable_customer_managed_kms_effective ? [
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt"
+        ]
+        Resource = [
+          aws_kms_key.s3[0].arn
+        ]
+      }
+    ] : [])
   })
 }
 
@@ -117,7 +125,7 @@ resource "aws_iam_role_policy" "ecs_task" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
+    Statement = concat([
       {
         Effect = "Allow"
         Action = [
@@ -182,7 +190,8 @@ resource "aws_iam_role_policy" "ecs_task" {
           aws_secretsmanager_secret.app_secrets.arn,
           aws_secretsmanager_secret.db_credentials.arn
         ], local.enable_redis_effective ? [aws_secretsmanager_secret.redis_credentials[0].arn] : [])
-      },
+      }
+    ], local.enable_customer_managed_kms_effective ? [
       {
         # KMS permissions required for S3 SSE-KMS (PutObject needs GenerateDataKey, GetObject needs Decrypt)
         Effect = "Allow"
@@ -191,9 +200,9 @@ resource "aws_iam_role_policy" "ecs_task" {
           "kms:Decrypt",
           "kms:DescribeKey"
         ]
-        Resource = aws_kms_key.s3.arn
+        Resource = aws_kms_key.s3[0].arn
       }
-    ]
+    ] : [])
   })
 }
 
@@ -221,6 +230,10 @@ resource "aws_ecs_task_definition" "api" {
 }
 
 locals {
+  use_public_network_for_ecs = var.dev_public_network_mode && var.environment != "prod"
+  ecs_service_subnet_ids     = local.use_public_network_for_ecs ? aws_subnet.public[*].id : aws_subnet.private_app[*].id
+  ecs_assign_public_ip       = local.use_public_network_for_ecs
+
   api_image_to_use = var.api_image != "" ? var.api_image : "${aws_ecr_repository.api.repository_url}:latest"
 
   api_container_definitions = jsonencode([
@@ -308,9 +321,9 @@ resource "aws_ecs_service" "api" {
   force_new_deployment = true  # Force new deployment on every terraform apply
 
   network_configuration {
-    subnets          = aws_subnet.private_app[*].id
+    subnets          = local.ecs_service_subnet_ids
     security_groups  = [aws_security_group.ecs_tasks.id]
-    assign_public_ip = false
+    assign_public_ip = local.ecs_assign_public_ip
   }
 
   load_balancer {

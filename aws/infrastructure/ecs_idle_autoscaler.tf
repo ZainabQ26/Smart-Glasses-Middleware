@@ -11,6 +11,7 @@ import os
 import boto3
 
 ecs = boto3.client("ecs")
+rds = boto3.client("rds")
 
 
 def _to_int(value, default):
@@ -24,10 +25,25 @@ def handler(event, context):
     cluster = os.environ["ECS_CLUSTER_NAME"]
     service = os.environ["ECS_SERVICE_NAME"]
     default_desired = _to_int(os.environ.get("DEFAULT_DESIRED_COUNT", "1"), 1)
+  db_instance_id = os.environ.get("RDS_INSTANCE_ID", "").strip()
 
     desired = default_desired
     if isinstance(event, dict) and "desired_count" in event:
         desired = _to_int(event.get("desired_count"), default_desired)
+
+  db_status = None
+  db_start_requested = False
+  if desired > 0 and db_instance_id:
+    try:
+      db_instances = rds.describe_db_instances(DBInstanceIdentifier=db_instance_id).get("DBInstances", [])
+      if db_instances:
+        db_status = db_instances[0].get("DBInstanceStatus")
+        if db_status == "stopped":
+          rds.start_db_instance(DBInstanceIdentifier=db_instance_id)
+          db_start_requested = True
+    except Exception:
+      # Keep ECS wake path resilient even if RDS describe/start fails.
+      pass
 
     current = ecs.describe_services(cluster=cluster, services=[service]).get("services", [])
     current_desired = current[0].get("desiredCount") if current else None
@@ -38,6 +54,9 @@ def handler(event, context):
             "cluster": cluster,
             "service": service,
             "desired_count": desired,
+        "db_instance_id": db_instance_id or None,
+        "db_status": db_status,
+        "db_start_requested": db_start_requested,
             "message": "No scaling action required"
         }
 
@@ -48,7 +67,10 @@ def handler(event, context):
         "cluster": cluster,
         "service": service,
         "previous_desired_count": current_desired,
-        "desired_count": desired
+        "desired_count": desired,
+        "db_instance_id": db_instance_id or None,
+        "db_status": db_status,
+        "db_start_requested": db_start_requested
     }
 PY
   }
@@ -106,6 +128,16 @@ resource "aws_iam_role_policy" "ecs_idle_scaler_lambda" {
         Resource = [
           aws_ecs_cluster.main.arn
         ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "rds:DescribeDBInstances",
+          "rds:StartDBInstance"
+        ]
+        Resource = [
+          aws_db_instance.main.arn
+        ]
       }
     ]
   })
@@ -114,7 +146,7 @@ resource "aws_iam_role_policy" "ecs_idle_scaler_lambda" {
 resource "aws_cloudwatch_log_group" "ecs_idle_scaler_lambda" {
   count             = local.enable_ecs_idle_autoscaler_effective ? 1 : 0
   name              = "/aws/lambda/${var.project_name}-${var.environment}-ecs-idle-scaler"
-  retention_in_days = var.environment == "prod" ? 30 : 7
+  retention_in_days = var.environment == "prod" ? 30 : 1
 
   tags = {
     Name = "${var.project_name}-${var.environment}-ecs-idle-scaler-logs"
@@ -136,6 +168,7 @@ resource "aws_lambda_function" "ecs_idle_scaler" {
       ECS_CLUSTER_NAME      = aws_ecs_cluster.main.name
       ECS_SERVICE_NAME      = aws_ecs_service.api.name
       DEFAULT_DESIRED_COUNT = tostring(var.ecs_warm_desired_count)
+      RDS_INSTANCE_ID       = aws_db_instance.main.id
     }
   }
 

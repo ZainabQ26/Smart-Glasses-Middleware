@@ -16,6 +16,19 @@ variable "cost_optimized_non_prod" {
   default     = true
 }
 
+variable "enable_customer_managed_kms" {
+  description = "Enable customer-managed KMS keys for S3/RDS/ECR encryption. Set null to use environment-aware defaults."
+  type        = bool
+  default     = null
+  nullable    = true
+}
+
+variable "dev_public_network_mode" {
+  description = "When true for non-prod, run ECS API tasks in public subnets with public IPs (cheaper than private+interface endpoints, but lower network isolation)."
+  type        = bool
+  default     = false
+}
+
 variable "environment" {
   description = "Environment name (dev, staging, prod)"
   type        = string

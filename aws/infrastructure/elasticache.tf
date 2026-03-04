@@ -165,7 +165,7 @@ resource "aws_secretsmanager_secret_version" "redis_credentials" {
 # CloudWatch Log Groups for ElastiCache
 resource "aws_cloudwatch_log_group" "elasticache_slow_log" {
   name              = "/aws/elasticache/${var.project_name}-${var.environment}/slow-log"
-  retention_in_days = var.environment == "prod" ? 30 : 7
+  retention_in_days = var.environment == "prod" ? 30 : 1
 
   tags = {
     Name = "${var.project_name}-${var.environment}-elasticache-slow-log"
@@ -178,7 +178,7 @@ resource "aws_cloudwatch_log_group" "elasticache_slow_log" {
 
 resource "aws_cloudwatch_log_group" "elasticache_engine_log" {
   name              = "/aws/elasticache/${var.project_name}-${var.environment}/engine-log"
-  retention_in_days = var.environment == "prod" ? 30 : 7
+  retention_in_days = var.environment == "prod" ? 30 : 1
 
   tags = {
     Name = "${var.project_name}-${var.environment}-elasticache-engine-log"

@@ -25,10 +25,10 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "media" {
 
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm     = "aws:kms"
-      kms_master_key_id = aws_kms_key.s3.arn
+      sse_algorithm     = local.enable_customer_managed_kms_effective ? "aws:kms" : "AES256"
+      kms_master_key_id = local.enable_customer_managed_kms_effective ? aws_kms_key.s3[0].arn : null
     }
-    bucket_key_enabled = true
+    bucket_key_enabled = local.enable_customer_managed_kms_effective
   }
 }
 
@@ -112,10 +112,10 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "documents" {
 
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm     = "aws:kms"
-      kms_master_key_id = aws_kms_key.s3.arn
+      sse_algorithm     = local.enable_customer_managed_kms_effective ? "aws:kms" : "AES256"
+      kms_master_key_id = local.enable_customer_managed_kms_effective ? aws_kms_key.s3[0].arn : null
     }
-    bucket_key_enabled = true
+    bucket_key_enabled = local.enable_customer_managed_kms_effective
   }
 }
 
@@ -247,6 +247,7 @@ resource "aws_s3_bucket_policy" "frontend" {
 
 # KMS Key for S3 encryption
 resource "aws_kms_key" "s3" {
+  count = local.enable_customer_managed_kms_effective ? 1 : 0
   description             = "KMS key for S3 encryption"
   deletion_window_in_days = var.environment == "prod" ? 30 : 7
   enable_key_rotation     = true
@@ -261,6 +262,7 @@ resource "aws_kms_key" "s3" {
 }
 
 resource "aws_kms_alias" "s3" {
+  count         = local.enable_customer_managed_kms_effective ? 1 : 0
   name          = "alias/${var.project_name}-${var.environment}-s3"
-  target_key_id = aws_kms_key.s3.key_id
+  target_key_id = aws_kms_key.s3[0].key_id
 }

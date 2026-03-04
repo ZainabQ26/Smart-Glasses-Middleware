@@ -1,0 +1,165 @@
+name: Dev Park / Wake
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Action to run for dev environment"
+        required: true
+        default: "park"
+        type: choice
+        options:
+          - park
+          - wake
+          - status
+  schedule:
+    # Nightly auto-park (UTC)
+    - cron: "15 5 * * *"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  dev-park-wake:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      ENV_NAME: dev
+      PROJECT_PREFIX: smart-glasses-dev
+      DEFAULT_WAKE_MAX_CAPACITY: "1"
+      DEFAULT_WAKE_DESIRED_COUNT: "1"
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_TERRAFORM_ROLE }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          mask-aws-account-id: false
+
+      - name: Resolve action
+        id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "action=park" >> "$GITHUB_OUTPUT"
+          else
+            echo "action=${{ github.event.inputs.action }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run park/wake/status
+        run: |
+          set -euo pipefail
+
+          ACTION="${{ steps.resolve.outputs.action }}"
+          CLUSTER_NAME="${PROJECT_PREFIX}-cluster"
+          SERVICE_NAME="${PROJECT_PREFIX}-api-service"
+          ECS_RESOURCE_ID="service/${CLUSTER_NAME}/${SERVICE_NAME}"
+          DB_INSTANCE_ID="${PROJECT_PREFIX}-postgres"
+
+          echo "Action: ${ACTION}"
+          echo "Region: ${AWS_REGION}"
+          echo "Cluster: ${CLUSTER_NAME}"
+          echo "Service: ${SERVICE_NAME}"
+          echo "DB: ${DB_INSTANCE_ID}"
+
+          safe_describe_db() {
+            aws rds describe-db-instances \
+              --db-instance-identifier "$DB_INSTANCE_ID" \
+              --region "$AWS_REGION" \
+              --query 'DBInstances[0].DBInstanceStatus' \
+              --output text 2>/dev/null || echo "not-found"
+          }
+
+          safe_describe_ecs() {
+            aws ecs describe-services \
+              --cluster "$CLUSTER_NAME" \
+              --services "$SERVICE_NAME" \
+              --region "$AWS_REGION" \
+              --query 'services[0].{desired:desiredCount,running:runningCount,pending:pendingCount,status:status}' \
+              --output json 2>/dev/null || echo '{}'
+          }
+
+          if [ "$ACTION" = "park" ]; then
+            echo "Parking dev environment..."
+
+            # Freeze ECS autoscaling at 0 and stop running tasks.
+            aws application-autoscaling register-scalable-target \
+              --service-namespace ecs \
+              --resource-id "$ECS_RESOURCE_ID" \
+              --scalable-dimension ecs:service:DesiredCount \
+              --min-capacity 0 \
+              --max-capacity 0 \
+              --region "$AWS_REGION" || true
+
+            aws ecs update-service \
+              --cluster "$CLUSTER_NAME" \
+              --service "$SERVICE_NAME" \
+              --desired-count 0 \
+              --region "$AWS_REGION" || true
+
+            DB_STATUS="$(safe_describe_db)"
+            if [ "$DB_STATUS" = "available" ]; then
+              aws rds stop-db-instance \
+                --db-instance-identifier "$DB_INSTANCE_ID" \
+                --region "$AWS_REGION" || true
+              echo "Requested RDS stop."
+            else
+              echo "RDS stop skipped (current status: $DB_STATUS)."
+            fi
+
+            echo "Park request complete."
+
+          elif [ "$ACTION" = "wake" ]; then
+            echo "Waking dev environment..."
+
+            DB_STATUS="$(safe_describe_db)"
+            if [ "$DB_STATUS" = "stopped" ]; then
+              aws rds start-db-instance \
+                --db-instance-identifier "$DB_INSTANCE_ID" \
+                --region "$AWS_REGION" || true
+              echo "Requested RDS start."
+            else
+              echo "RDS start skipped (current status: $DB_STATUS)."
+            fi
+
+            # Re-enable ECS autoscaling envelope and warm one task.
+            aws application-autoscaling register-scalable-target \
+              --service-namespace ecs \
+              --resource-id "$ECS_RESOURCE_ID" \
+              --scalable-dimension ecs:service:DesiredCount \
+              --min-capacity 0 \
+              --max-capacity "$DEFAULT_WAKE_MAX_CAPACITY" \
+              --region "$AWS_REGION" || true
+
+            aws ecs update-service \
+              --cluster "$CLUSTER_NAME" \
+              --service "$SERVICE_NAME" \
+              --desired-count "$DEFAULT_WAKE_DESIRED_COUNT" \
+              --region "$AWS_REGION" || true
+
+            echo "Wake request complete."
+
+          elif [ "$ACTION" = "status" ]; then
+            echo "Status-only mode."
+
+          else
+            echo "Unsupported action: $ACTION"
+            exit 1
+          fi
+
+          echo "--- Current ECS status ---"
+          safe_describe_ecs
+
+          echo "--- Current RDS status ---"
+          safe_describe_db
+
+      - name: Job summary
+        run: |
+          ACTION="${{ steps.resolve.outputs.action }}"
+          {
+            echo "## Dev Park/Wake"
+            echo "- Action: ${ACTION}"
+            echo "- Environment: dev"
+            echo "- ECS service: smart-glasses-dev-api-service"
+            echo "- RDS instance: smart-glasses-dev-postgres"
+          } >> "$GITHUB_STEP_SUMMARY"
