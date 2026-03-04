@@ -94,7 +94,7 @@ resource "aws_db_instance" "main" {
   max_allocated_storage = 100
   storage_type          = "gp2"
   storage_encrypted     = true
-  kms_key_id            = aws_kms_key.rds.arn
+  kms_key_id            = local.enable_customer_managed_kms_effective ? aws_kms_key.rds[0].arn : null
 
   db_name  = var.db_name
   username = var.db_username
@@ -107,7 +107,7 @@ resource "aws_db_instance" "main" {
   # Single-AZ (free tier); set to true for production HA
   multi_az = false
 
-  backup_retention_period      = var.environment == "prod" ? 30 : 1
+  backup_retention_period      = var.environment == "prod" ? 30 : 0
   backup_window      = "03:00-04:00"
   maintenance_window = "mon:04:00-mon:05:00"
 
@@ -138,6 +138,7 @@ resource "aws_db_instance" "main" {
 
 # KMS Key for RDS encryption
 resource "aws_kms_key" "rds" {
+  count = local.enable_customer_managed_kms_effective ? 1 : 0
   description             = "KMS key for RDS encryption"
   deletion_window_in_days = var.environment == "prod" ? 30 : 7
   enable_key_rotation     = true
@@ -152,8 +153,9 @@ resource "aws_kms_key" "rds" {
 }
 
 resource "aws_kms_alias" "rds" {
+  count         = local.enable_customer_managed_kms_effective ? 1 : 0
   name          = "alias/${var.project_name}-${var.environment}-rds"
-  target_key_id = aws_kms_key.rds.key_id
+  target_key_id = aws_kms_key.rds[0].key_id
 }
 
 # IAM Role for RDS Enhanced Monitoring

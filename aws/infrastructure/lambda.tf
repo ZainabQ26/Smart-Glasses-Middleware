@@ -74,7 +74,7 @@ resource "aws_iam_role_policy" "lambda_document_processor" {
 # CloudWatch Log Group for Lambda
 resource "aws_cloudwatch_log_group" "lambda_document_processor" {
   name              = "/aws/lambda/${var.project_name}-${var.environment}-document-processor"
-  retention_in_days = var.environment == "prod" ? 30 : 7
+  retention_in_days = var.environment == "prod" ? 30 : 1
 
   tags = {
     Name = "${var.project_name}-${var.environment}-lambda-doc-processor-logs"
@@ -93,7 +93,7 @@ resource "aws_lambda_function" "document_processor" {
   handler       = "index.handler"
   runtime       = "python3.12"
   timeout       = 300 # 5 minutes
-  memory_size   = 2048
+  memory_size   = 1024
   # Guard with fileexists() so `terraform validate` passes before the artifact is built.
   # In CI, the zip is created in the build job and placed here before terraform apply.
   source_code_hash = fileexists("${path.module}/../lambda-document-processor/deployment.zip") ? filebase64sha256("${path.module}/../lambda-document-processor/deployment.zip") : null

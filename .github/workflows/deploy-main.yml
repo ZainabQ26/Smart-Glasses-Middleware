@@ -2,7 +2,9 @@ name: Deploy to AWS
 
 on:
   push:
-    branches: [ "main" ]
+    tags:
+      - "deploy-*"
+      - "v*"
   workflow_dispatch:
     inputs:
       environment:
@@ -642,6 +644,16 @@ jobs:
           terraform apply -auto-approve -lock=false \
             -var "environment=dev" \
             -var "aws_region=${AWS_REGION}" \
+            -var "cost_optimized_non_prod=true" \
+            -var "enable_customer_managed_kms=false" \
+            -var "dev_public_network_mode=true" \
+            -var "enable_vpc_interface_endpoints=false" \
+            -var "enable_redis=false" \
+            -var "enable_container_insights=false" \
+            -var "ecs_api_cpu=512" \
+            -var "ecs_api_memory=1024" \
+            -var "ecs_api_max_capacity=1" \
+            -var "ecs_idle_timeout_minutes=5" \
             -var "domain_name=" \
             -var "certificate_arn=${CERTIFICATE_ARN}"
 

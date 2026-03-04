@@ -41,7 +41,7 @@ The ECS service scales to 0 tasks when idle (default: 15 minutes of no traffic) 
 
 1. Browser loads the React SPA from S3 (always available)
 2. `WakeupGate` component polls `/health` — on first non-200, immediately `POST /wake`
-3. `/wake` (CloudFront → Lambda Function URL) sets `desiredCount=1` in **< 1 second**
+3. `/wake` (CloudFront → Lambda Function URL) sets `desiredCount=1` in **< 1 second** and requests `StartDBInstance` if the dev DB is stopped
 4. ECS task starts; ALB health checks pass in ~20 s; app is serving in **~35–45 s total**
 5. The CloudWatch alarm (ALB + CloudFront 5xx metrics) provides a parallel wake signal
 

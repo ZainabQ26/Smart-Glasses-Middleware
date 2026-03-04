@@ -8,8 +8,8 @@ resource "aws_ecr_repository" "api" {
   }
 
   encryption_configuration {
-    encryption_type = "KMS"
-    kms_key         = aws_kms_key.ecr.arn
+    encryption_type = local.enable_customer_managed_kms_effective ? "KMS" : "AES256"
+    kms_key         = local.enable_customer_managed_kms_effective ? aws_kms_key.ecr[0].arn : null
   }
 
   tags = {
@@ -55,6 +55,7 @@ resource "aws_ecr_lifecycle_policy" "api" {
 
 # KMS Key for ECR encryption
 resource "aws_kms_key" "ecr" {
+  count = local.enable_customer_managed_kms_effective ? 1 : 0
   description             = "KMS key for ECR encryption"
   deletion_window_in_days = var.environment == "prod" ? 30 : 7
   enable_key_rotation     = true
@@ -65,6 +66,7 @@ resource "aws_kms_key" "ecr" {
 }
 
 resource "aws_kms_alias" "ecr" {
+  count         = local.enable_customer_managed_kms_effective ? 1 : 0
   name          = "alias/${var.project_name}-${var.environment}-ecr"
-  target_key_id = aws_kms_key.ecr.key_id
+  target_key_id = aws_kms_key.ecr[0].key_id
 }
