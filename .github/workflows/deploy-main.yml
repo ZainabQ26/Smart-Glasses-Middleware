@@ -77,6 +77,11 @@ jobs:
         id: ecr-login
         uses: aws-actions/amazon-ecr-login@v1
 
+      - name: Ensure ECR repository exists
+        run: |
+          aws ecr describe-repositories --repository-names "smart-glasses-dev-api" --region "${{ secrets.AWS_REGION }}" >/dev/null 2>&1 || \
+          aws ecr create-repository --repository-name "smart-glasses-dev-api" --image-scanning-configuration scanOnPush=true --region "${{ secrets.AWS_REGION }}"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -94,7 +99,7 @@ jobs:
           context: .
           file: ./src/SmartGlassesMiddleware/Dockerfile
           push: true
-          tags: ${{ steps.ecr-login.outputs.registry }}/smart-glasses-api:${{ github.sha }}
+          tags: ${{ steps.ecr-login.outputs.registry }}/smart-glasses-dev-api:${{ github.sha }}
           platforms: linux/amd64
           cache-from: type=local,src=/tmp/.buildx-cache-api
           cache-to: type=local,dest=/tmp/.buildx-cache-api-new,mode=max
@@ -239,7 +244,7 @@ jobs:
           REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
           SHA="${{ github.sha }}"
           cat > aws/infrastructure/tf_image_vars.auto.tfvars <<EOF
-          api_image = "${REGISTRY}/smart-glasses-api:${SHA}"
+          api_image = "${REGISTRY}/smart-glasses-dev-api:${SHA}"
           lambda_document_image = ""
           deployment_id = "${{ github.run_id }}"
           EOF
