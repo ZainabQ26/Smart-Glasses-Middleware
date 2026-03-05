@@ -281,8 +281,9 @@ jobs:
         working-directory: aws/infrastructure
         run: |
           # Create S3 backend bucket (us-east-1 must NOT use --create-bucket-configuration)
-          BUCKET_NAME="smart-glasses-terraform-state-dev"
-          DDB_NAME="smart-glasses-terraform-locks-dev"
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          BUCKET_NAME="smart-glasses-terraform-state-${ACCOUNT_ID}-dev"
+          DDB_NAME="smart-glasses-terraform-locks-${ACCOUNT_ID}-dev"
           aws s3api head-bucket --bucket "$BUCKET_NAME" --region "$AWS_REGION" >/dev/null 2>&1 || (
             if [ "$AWS_REGION" = "us-east-1" ]; then
               aws s3api create-bucket --bucket "$BUCKET_NAME" --region "$AWS_REGION" || true
@@ -658,11 +659,16 @@ jobs:
             -var "enable_customer_managed_kms=false" \
             -var "enable_s3_versioning=false" \
             -var "dev_public_network_mode=true" \
+            -var "enable_nat_gateway=false" \
             -var "enable_vpc_interface_endpoints=false" \
             -var "enable_redis=false" \
             -var "enable_container_insights=false" \
+            -var "enable_rds_performance_insights=false" \
+            -var "rds_monitoring_interval=0" \
             -var "ecs_api_cpu=512" \
             -var "ecs_api_memory=1024" \
+            -var "ecs_api_desired_count=0" \
+            -var "ecs_api_min_capacity=0" \
             -var "ecs_api_max_capacity=1" \
             -var "ecs_idle_timeout_minutes=5" \
             -var "domain_name=" \
