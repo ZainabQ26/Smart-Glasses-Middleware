@@ -773,6 +773,15 @@ jobs:
 
           echo "Secret seeding complete."
 
+      - name: Ensure ECS API log group exists
+        run: |
+          # Guard against prior manual cleanup/state drift that can remove the
+          # log group and cause ECS ResourceInitializationError at startup.
+          LOG_GROUP="/ecs/smart-glasses-dev/api"
+          aws logs create-log-group --log-group-name "$LOG_GROUP" --region "$AWS_REGION" >/dev/null 2>&1 || true
+          aws logs put-retention-policy --log-group-name "$LOG_GROUP" --retention-in-days 7 --region "$AWS_REGION" >/dev/null 2>&1 || true
+          echo "Ensured log group: $LOG_GROUP"
+
       - name: Save Terraform outputs
         working-directory: aws/infrastructure
         run: |
