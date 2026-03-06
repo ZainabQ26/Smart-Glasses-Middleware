@@ -21,6 +21,11 @@ on:
         required: false
         default: true
         type: boolean
+      force_recreate_dev:
+        description: 'DANGER: delete existing dev resources before apply'
+        required: false
+        default: false
+        type: boolean
 
 # Ensure only one deployment runs at a time per branch.
 # A newer push cancels any in-progress run so Terraform state is never
@@ -177,6 +182,7 @@ jobs:
           terraform_version: 1.5.7
 
       - name: Destroy existing dev resources (best-effort, non-fatal)
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'dev' && github.event.inputs.force_recreate_dev == 'true' }}
         run: |
           set -e
           REGION=${AWS_REGION}
