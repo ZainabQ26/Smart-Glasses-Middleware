@@ -1009,8 +1009,9 @@ jobs:
             sleep 30
           done
           if [ "$STABLE" = "false" ]; then
-            echo "Warning: ECS service did not reach stable state within 15 minutes."
-            echo "Terraform apply succeeded – infra is deployed. Check ECS console for container issues."
+            echo "ECS service did not reach stable state within 15 minutes."
+            echo "Failing deployment because desired task count is non-zero but service never stabilized."
+            exit 1
           fi
 
       - name: Fetch ECS container logs from CloudWatch
@@ -1040,10 +1041,23 @@ jobs:
 
       - name: Smoke-test health endpoint
         run: |
+          CLUSTER=$(jq -r '.ecs_cluster_name.value // empty' ./tf/tf_outputs.json 2>/dev/null || true)
+          CLUSTER=${CLUSTER:-smart-glasses-dev-cluster}
+          SERVICE="smart-glasses-dev-api-service"
+          DESIRED=$(aws ecs describe-services \
+            --cluster "$CLUSTER" --services "$SERVICE" --region "$AWS_REGION" \
+            --query 'services[0].desiredCount' --output text 2>/dev/null || echo "0")
+
+          # In scale-to-zero mode there may be no healthy endpoint until wake-up.
+          if [ "$DESIRED" = "0" ]; then
+            echo "ECS desired count is 0; skipping strict health smoke test."
+            exit 0
+          fi
+
           ALB=$(jq -r '.api_alb_dns.value // empty' ./tf/tf_outputs.json 2>/dev/null || true)
           if [ -z "$ALB" ]; then
-            echo "ALB DNS not available in outputs – skipping smoke test"
-            exit 0
+            echo "ALB DNS not available in outputs while desired count is $DESIRED."
+            exit 1
           fi
           echo "Health check: http://${ALB}/health"
           for i in $(seq 1 5); do
@@ -1052,5 +1066,5 @@ jobs:
             [ "$STATUS" = "200" ] && exit 0
             sleep 15
           done
-          echo "Warning: health check did not return 200 after retries (service may still be warming up)"
-          exit 0
+          echo "Health check did not return 200 after retries while desired count is $DESIRED."
+          exit 1
