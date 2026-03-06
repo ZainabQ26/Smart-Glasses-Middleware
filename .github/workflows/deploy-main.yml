@@ -16,6 +16,11 @@ on:
           - dev
           - staging
           - prod
+      skip_migrations:
+        description: 'Skip EF Core migrations (recommended for fresh dev setup)'
+        required: false
+        default: true
+        type: boolean
 
 # Ensure only one deployment runs at a time per branch.
 # A newer push cancels any in-progress run so Terraform state is never
@@ -838,6 +843,7 @@ jobs:
   run-migrations:
     name: Run EF Core database migrations
     needs: terraform-apply
+    if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'dev' && github.event.inputs.skip_migrations == 'true') }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -930,6 +936,7 @@ jobs:
   verify-deployment:
     name: Wait for ECS service stability
     needs: [terraform-apply, deploy-frontend, run-migrations]
+    if: ${{ always() && needs.terraform-apply.result == 'success' && needs.deploy-frontend.result == 'success' && (needs.run-migrations.result == 'success' || needs.run-migrations.result == 'skipped') }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write
