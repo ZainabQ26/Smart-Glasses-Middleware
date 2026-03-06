@@ -25,25 +25,33 @@ def handler(event, context):
     cluster = os.environ["ECS_CLUSTER_NAME"]
     service = os.environ["ECS_SERVICE_NAME"]
     default_desired = _to_int(os.environ.get("DEFAULT_DESIRED_COUNT", "1"), 1)
-  db_instance_id = os.environ.get("RDS_INSTANCE_ID", "").strip()
+    db_instance_id = os.environ.get("RDS_INSTANCE_ID", "").strip()
+    allow_db_stop = os.environ.get("ALLOW_DB_STOP", "true").lower() == "true"
 
     desired = default_desired
     if isinstance(event, dict) and "desired_count" in event:
         desired = _to_int(event.get("desired_count"), default_desired)
 
-  db_status = None
-  db_start_requested = False
-  if desired > 0 and db_instance_id:
-    try:
-      db_instances = rds.describe_db_instances(DBInstanceIdentifier=db_instance_id).get("DBInstances", [])
-      if db_instances:
-        db_status = db_instances[0].get("DBInstanceStatus")
-        if db_status == "stopped":
-          rds.start_db_instance(DBInstanceIdentifier=db_instance_id)
-          db_start_requested = True
-    except Exception:
-      # Keep ECS wake path resilient even if RDS describe/start fails.
-      pass
+    db_status = None
+    db_start_requested = False
+    db_stop_requested = False
+
+    if db_instance_id:
+        try:
+            db_instances = rds.describe_db_instances(DBInstanceIdentifier=db_instance_id).get("DBInstances", [])
+            if db_instances:
+                db_status = db_instances[0].get("DBInstanceStatus")
+
+                if desired > 0 and db_status == "stopped":
+                    rds.start_db_instance(DBInstanceIdentifier=db_instance_id)
+                    db_start_requested = True
+
+                if desired == 0 and allow_db_stop and db_status == "available":
+                    rds.stop_db_instance(DBInstanceIdentifier=db_instance_id)
+                    db_stop_requested = True
+        except Exception:
+            # Keep ECS wake/sleep path resilient even if RDS calls fail.
+            pass
 
     current = ecs.describe_services(cluster=cluster, services=[service]).get("services", [])
     current_desired = current[0].get("desiredCount") if current else None
@@ -54,9 +62,10 @@ def handler(event, context):
             "cluster": cluster,
             "service": service,
             "desired_count": desired,
-        "db_instance_id": db_instance_id or None,
-        "db_status": db_status,
-        "db_start_requested": db_start_requested,
+            "db_instance_id": db_instance_id or None,
+            "db_status": db_status,
+            "db_start_requested": db_start_requested,
+            "db_stop_requested": db_stop_requested,
             "message": "No scaling action required"
         }
 
@@ -70,7 +79,8 @@ def handler(event, context):
         "desired_count": desired,
         "db_instance_id": db_instance_id or None,
         "db_status": db_status,
-        "db_start_requested": db_start_requested
+        "db_start_requested": db_start_requested,
+        "db_stop_requested": db_stop_requested
     }
 PY
   }
@@ -133,7 +143,8 @@ resource "aws_iam_role_policy" "ecs_idle_scaler_lambda" {
         Effect = "Allow"
         Action = [
           "rds:DescribeDBInstances",
-          "rds:StartDBInstance"
+          "rds:StartDBInstance",
+          "rds:StopDBInstance"
         ]
         Resource = [
           aws_db_instance.main.arn
@@ -169,6 +180,7 @@ resource "aws_lambda_function" "ecs_idle_scaler" {
       ECS_SERVICE_NAME      = aws_ecs_service.api.name
       DEFAULT_DESIRED_COUNT = tostring(var.ecs_warm_desired_count)
       RDS_INSTANCE_ID       = aws_db_instance.main.id
+      ALLOW_DB_STOP         = var.environment == "prod" ? "false" : "true"
     }
   }
 
