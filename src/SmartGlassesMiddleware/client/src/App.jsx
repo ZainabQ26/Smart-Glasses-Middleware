@@ -38,6 +38,12 @@ export default function App() {
   const isWebSpeechOnly = speechMode === "webspeech-only";
   const isWhisperOnly = speechMode === "whisper-only";
 
+  const addLog = useCallback((text, type = "info") => {
+    setLogs(prev =>
+      [{ id: Date.now() + Math.random(), text, type, ts: new Date().toLocaleTimeString() }, ...prev].slice(0, 50)
+    );
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     const loadClientSettings = async () => {
@@ -58,12 +64,6 @@ export default function App() {
     loadClientSettings();
     return () => { cancelled = true; };
   }, [addLog]);
-
-  const addLog = useCallback((text, type = "info") => {
-    setLogs(prev =>
-      [{ id: Date.now() + Math.random(), text, type, ts: new Date().toLocaleTimeString() }, ...prev].slice(0, 50)
-    );
-  }, []);
 
   // ── Silero VAD (whisper.cpp model) ────────────────────────────────────────
   // startOnLoad:false → mic is only acquired after the wake word.
