@@ -870,14 +870,16 @@ jobs:
           TASK_DEF=$(echo "$SERVICE_JSON" | jq -r '.taskDefinition')
           SUBNETS=$(echo "$SERVICE_JSON" | jq -r '[.networkConfiguration.awsvpcConfiguration.subnets[]] | join(",")')
           SGS=$(echo "$SERVICE_JSON"    | jq -r '[.networkConfiguration.awsvpcConfiguration.securityGroups[]] | join(",")')
+          ASSIGN_PUBLIC_IP=$(echo "$SERVICE_JSON" | jq -r '.networkConfiguration.awsvpcConfiguration.assignPublicIp // "DISABLED"')
 
           echo "Using task definition: $TASK_DEF"
+          echo "Migration task network: assignPublicIp=$ASSIGN_PUBLIC_IP"
 
           TASK_ARN=$(aws ecs run-task \
             --cluster "$CLUSTER" \
             --task-definition "$TASK_DEF" \
             --launch-type FARGATE \
-            --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SGS],assignPublicIp=DISABLED}" \
+            --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SGS],assignPublicIp=$ASSIGN_PUBLIC_IP}" \
             --overrides '{"containerOverrides":[{"name":"api","environment":[{"name":"MIGRATE_ONLY","value":"true"},{"name":"MIGRATE_ON_STARTUP","value":"false"}]}]}' \
             --count 1 \
             --query 'tasks[0].taskArn' \
@@ -895,7 +897,21 @@ jobs:
             --query 'tasks[0].containers[0].exitCode' \
             --output text)
 
+          STOP_REASON=$(aws ecs describe-tasks \
+            --cluster "$CLUSTER" --tasks "$TASK_ARN" \
+            --region "$AWS_REGION" \
+            --query 'tasks[0].stoppedReason' \
+            --output text)
+
+          CONTAINER_REASON=$(aws ecs describe-tasks \
+            --cluster "$CLUSTER" --tasks "$TASK_ARN" \
+            --region "$AWS_REGION" \
+            --query 'tasks[0].containers[0].reason' \
+            --output text)
+
           echo "Migration task exit code: $EXIT_CODE"
+          echo "Migration task stopped reason: ${STOP_REASON:-n/a}"
+          echo "Migration task container reason: ${CONTAINER_REASON:-n/a}"
           if [ "$EXIT_CODE" != "0" ]; then
             echo "Migration task failed — fetching logs..."
             LOG_GROUP="/ecs/smart-glasses-dev/api"
