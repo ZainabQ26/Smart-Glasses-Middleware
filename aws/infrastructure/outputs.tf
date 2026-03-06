@@ -65,7 +65,7 @@ output "cloudfront_distribution_id" {
 
 output "secrets_manager_arn" {
   description = "Secrets Manager secret ARN"
-  value       = aws_secretsmanager_secret.app_secrets.arn
+  value       = aws_secretsmanager_secret.db_credentials.arn
 }
 
 output "ecs_wake_url" {

@@ -79,7 +79,6 @@ resource "aws_iam_role_policy" "ecs_task_execution_secrets" {
           "secretsmanager:GetSecretValue"
         ]
         Resource = concat([
-          aws_secretsmanager_secret.app_secrets.arn,
           aws_secretsmanager_secret.db_credentials.arn
         ], local.enable_customer_managed_kms_effective ? [aws_kms_key.s3[0].arn] : [], local.enable_redis_effective ? [aws_secretsmanager_secret.redis_credentials[0].arn] : [])
         
@@ -187,7 +186,6 @@ resource "aws_iam_role_policy" "ecs_task" {
           "secretsmanager:GetSecretValue"
         ]
         Resource = concat([
-          aws_secretsmanager_secret.app_secrets.arn,
           aws_secretsmanager_secret.db_credentials.arn
         ], local.enable_redis_effective ? [aws_secretsmanager_secret.redis_credentials[0].arn] : [])
       }
@@ -257,6 +255,14 @@ locals {
           value = var.aws_region
         },
         {
+          name  = "AWS__S3__MediaBucket"
+          value = aws_s3_bucket.media.id
+        },
+        {
+          name  = "AWS__S3__DocumentsBucket"
+          value = aws_s3_bucket.documents.id
+        },
+        {
           name  = "DEPLOYMENT_ID"
           value = var.deployment_id
         },
@@ -274,14 +280,6 @@ locals {
           {
             name      = "ConnectionStrings__DefaultConnection"
             valueFrom = "${aws_secretsmanager_secret.db_credentials.arn}:connection_string::"
-          },
-          {
-            name      = "AWS__S3__MediaBucket"
-            valueFrom = "${aws_secretsmanager_secret.app_secrets.arn}:s3_media_bucket::"
-          },
-          {
-            name      = "AWS__S3__DocumentsBucket"
-            valueFrom = "${aws_secretsmanager_secret.app_secrets.arn}:s3_documents_bucket::"
           }
         ],
         local.enable_redis_effective ? [{

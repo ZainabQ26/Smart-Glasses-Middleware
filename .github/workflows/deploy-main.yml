@@ -386,8 +386,20 @@ jobs:
               --query 'ARN' --output text --region "$REGION" 2>/dev/null || true)
             safe_import "$TF_RES" "$ARN"
           }
-          import_secret aws_secretsmanager_secret.app_secrets       "${PREFIX}-app-secrets"
           import_secret aws_secretsmanager_secret.db_credentials    "${PREFIX}-db-credentials"
+          # app_secrets is now prod-only. Ensure stale dev state is removed.
+          if [ "$ENV" = "dev" ]; then
+            terraform state rm "aws_secretsmanager_secret.app_secrets" 2>/dev/null || true
+            terraform state rm "aws_secretsmanager_secret.app_secrets[0]" 2>/dev/null || true
+            terraform state rm "aws_secretsmanager_secret_version.app_secrets" 2>/dev/null || true
+            terraform state rm "aws_secretsmanager_secret_version.app_secrets[0]" 2>/dev/null || true
+            EXISTING_STATE=$(printf '%s\n' "$EXISTING_STATE" | grep -vxF "aws_secretsmanager_secret.app_secrets" || true)
+            EXISTING_STATE=$(printf '%s\n' "$EXISTING_STATE" | grep -vxF "aws_secretsmanager_secret.app_secrets[0]" || true)
+            EXISTING_STATE=$(printf '%s\n' "$EXISTING_STATE" | grep -vxF "aws_secretsmanager_secret_version.app_secrets" || true)
+            EXISTING_STATE=$(printf '%s\n' "$EXISTING_STATE" | grep -vxF "aws_secretsmanager_secret_version.app_secrets[0]" || true)
+          else
+            import_secret "aws_secretsmanager_secret.app_secrets[0]" "${PREFIX}-app-secrets"
+          fi
           # redis_credentials count=0 for dev (cost_optimized_non_prod=true disables redis).
           # Importing it would leave a count=0 resource in state, causing a
           # prevent_destroy-blocked destroy on apply. Remove from state instead.
@@ -658,6 +670,13 @@ jobs:
         working-directory: aws/infrastructure
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          DB_INSTANCE_ID="smart-glasses-dev-postgres"
+          DB_STATUS=$(aws rds describe-db-instances --db-instance-identifier "$DB_INSTANCE_ID" --region "$AWS_REGION" --query 'DBInstances[0].DBInstanceStatus' --output text 2>/dev/null || echo "not-found")
+          if [ "$DB_STATUS" = "stopped" ]; then
+            echo "RDS is stopped; starting before terraform apply..."
+            aws rds start-db-instance --db-instance-identifier "$DB_INSTANCE_ID" --region "$AWS_REGION"
+            aws rds wait db-instance-available --db-instance-identifier "$DB_INSTANCE_ID" --region "$AWS_REGION"
+          fi
           terraform apply -auto-approve -lock=false \
             -var "environment=dev" \
             -var "aws_region=${AWS_REGION}" \
@@ -714,15 +733,6 @@ jobs:
           # will at least boot so health checks can return a non-503.
           seed_secret_if_empty "${PREFIX}-db-credentials" \
             '{"username":"placeholder","password":"placeholder","engine":"postgres","host":"localhost","port":5432,"dbname":"placeholder","connection_string":"Host=localhost;Port=5432;Database=placeholder;Username=placeholder;Password=placeholder"}'
-
-          # Redis credentials placeholder
-          seed_secret_if_empty "${PREFIX}-redis-credentials" \
-            '{"connection_string":"localhost:6379,password=placeholder,ssl=false,abortConnect=false"}'
-
-          # App secrets placeholder (app_secrets version IS created by Terraform,
-          # but seed it in case it somehow has no value)
-          seed_secret_if_empty "${PREFIX}-app-secrets" \
-            '{"s3_media_bucket":"placeholder","s3_documents_bucket":"placeholder","bedrock_model_id":"anthropic.claude-3-sonnet-20240229-v1:0","embedding_model_id":"amazon.titan-embed-text-v2:0","transcribe_language":"en-US","cors_allowed_origins":"*"}'
 
           echo "Secret seeding complete."
 
