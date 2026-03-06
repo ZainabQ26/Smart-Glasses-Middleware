@@ -843,7 +843,9 @@ jobs:
   run-migrations:
     name: Run EF Core database migrations
     needs: terraform-apply
-    if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'dev' && github.event.inputs.skip_migrations == 'true') }}
+    # Fresh dev setups usually have no schema to migrate; only run when
+    # explicitly requested from workflow_dispatch with skip_migrations=false.
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.skip_migrations == 'false' }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write
