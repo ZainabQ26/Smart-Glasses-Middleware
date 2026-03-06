@@ -1,5 +1,47 @@
 # Smart Glasses Middleware
 
+## Deploy Via GitHub Actions (Tag + Manual Run)
+
+The deploy workflow is `deploy-main.yml`.
+
+1. Tag-based deploy (push a tag to trigger Actions):
+
+```bash
+# From repo root, on the commit you want to deploy
+git pull
+git tag deploy-$(date +%Y%m%d-%H%M)
+git push origin --tags
+```
+
+The workflow triggers on tags matching:
+
+- `deploy-*`
+- `v*`
+
+2. Manual deploy (`workflow_dispatch`) with required inputs:
+
+```bash
+# Dev deploy, recommended defaults
+gh workflow run deploy-main.yml \
+      --ref main \
+      -f environment=dev \
+      -f skip_migrations=true \
+      -f force_recreate_dev=false
+```
+
+Input guidance:
+
+- `environment`: `dev|staging|prod`
+- `skip_migrations`: set `true` for fresh dev setups
+- `force_recreate_dev`: keep `false` unless you intentionally want destructive cleanup of dev resources
+
+3. Watch deploy progress:
+
+```bash
+gh run list --workflow deploy-main.yml --limit 5
+gh run watch <run-id> --exit-status
+```
+
 Backend middleware and frontend for a smart glasses application. Provides a multi-modal API for AI interaction, document processing, audio transcription, and task management, deployed to AWS ECS Fargate with automatic scale-to-zero when idle.
 
 ## Stack
