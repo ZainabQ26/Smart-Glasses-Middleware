@@ -48,6 +48,12 @@ variable "project_name" {
   default     = "smart-glasses"
 }
 
+variable "s3_bucket_suffix" {
+  description = "Optional suffix appended to S3 bucket names for global uniqueness (for example, AWS account ID)."
+  type        = string
+  default     = ""
+}
+
 variable "vpc_cidr" {
   description = "CIDR block for VPC"
   type        = string

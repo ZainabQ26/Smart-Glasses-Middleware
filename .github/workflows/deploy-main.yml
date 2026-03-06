@@ -657,9 +657,11 @@ jobs:
       - name: Terraform apply
         working-directory: aws/infrastructure
         run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           terraform apply -auto-approve -lock=false \
             -var "environment=dev" \
             -var "aws_region=${AWS_REGION}" \
+            -var "s3_bucket_suffix=${ACCOUNT_ID}" \
             -var "cost_optimized_non_prod=true" \
             -var "enable_customer_managed_kms=false" \
             -var "enable_s3_versioning=false" \

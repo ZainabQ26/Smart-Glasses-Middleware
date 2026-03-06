@@ -1,6 +1,6 @@
 # S3 Bucket for Media Storage
 resource "aws_s3_bucket" "media" {
-  bucket = "${var.project_name}-${var.environment}-media"
+  bucket = var.s3_bucket_suffix != "" ? "${var.project_name}-${var.environment}-media-${var.s3_bucket_suffix}" : "${var.project_name}-${var.environment}-media"
 
   tags = {
     Name        = "${var.project_name}-${var.environment}-media"
@@ -87,7 +87,7 @@ resource "aws_s3_bucket_public_access_block" "media" {
 
 # S3 Bucket for Document Storage
 resource "aws_s3_bucket" "documents" {
-  bucket = "${var.project_name}-${var.environment}-documents"
+  bucket = var.s3_bucket_suffix != "" ? "${var.project_name}-${var.environment}-documents-${var.s3_bucket_suffix}" : "${var.project_name}-${var.environment}-documents"
 
   tags = {
     Name        = "${var.project_name}-${var.environment}-documents"
@@ -162,7 +162,7 @@ resource "aws_s3_bucket_public_access_block" "documents" {
 
 # S3 Bucket for Frontend Website
 resource "aws_s3_bucket" "frontend" {
-  bucket = "${var.project_name}-${var.environment}-frontend"
+  bucket = var.s3_bucket_suffix != "" ? "${var.project_name}-${var.environment}-frontend-${var.s3_bucket_suffix}" : "${var.project_name}-${var.environment}-frontend"
 
   tags = {
     Name        = "${var.project_name}-${var.environment}-frontend"
