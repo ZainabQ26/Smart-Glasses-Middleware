@@ -428,16 +428,16 @@ jobs:
             terraform state rm "aws_elasticache_cluster.redis_single[0]"        2>/dev/null || true
             terraform state rm "aws_elasticache_replication_group.redis[0]"     2>/dev/null || true
             terraform state rm aws_elasticache_replication_group.redis           2>/dev/null || true
-            terraform state rm aws_elasticache_subnet_group.main                 2>/dev/null || true
-            terraform state rm aws_elasticache_parameter_group.redis             2>/dev/null || true
+            terraform state rm "aws_elasticache_subnet_group.main[0]"            2>/dev/null || true
+            terraform state rm "aws_elasticache_parameter_group.redis[0]"        2>/dev/null || true
             # Invalidate in-memory cache for all rm'd resources so safe_import
             # correctly re-imports them instead of skipping them.
             for _rmres in \
               "aws_elasticache_cluster.redis_single[0]" \
               "aws_elasticache_replication_group.redis[0]" \
               "aws_elasticache_replication_group.redis" \
-              "aws_elasticache_subnet_group.main" \
-              "aws_elasticache_parameter_group.redis"; do
+              "aws_elasticache_subnet_group.main[0]" \
+              "aws_elasticache_parameter_group.redis[0]"; do
               EXISTING_STATE=$(printf '%s\n' "$EXISTING_STATE" | grep -vxF "$_rmres" || true)
             done
           fi
@@ -447,8 +447,8 @@ jobs:
             terraform state rm "aws_elasticache_replication_group.redis[0]" 2>/dev/null || true
             EXISTING_STATE=$(printf '%s\n' "$EXISTING_STATE" | grep -vxF "aws_elasticache_replication_group.redis[0]" || true)
           fi
-          safe_import aws_elasticache_parameter_group.redis   "${PREFIX}-redis-params"
-          safe_import aws_elasticache_subnet_group.main       "${PREFIX}-elasticache-subnet-group"
+          safe_import "aws_elasticache_parameter_group.redis[0]"   "${PREFIX}-redis-params"
+          safe_import "aws_elasticache_subnet_group.main[0]"       "${PREFIX}-elasticache-subnet-group"
           # Only import the replication group for non-dev envs (count>0 only outside dev)
           [ "$ENV" != "dev" ] && safe_import "aws_elasticache_replication_group.redis[0]" "${PREFIX}-redis"
           safe_import "aws_elasticache_cluster.redis_single[0]" "${PREFIX}-redis-single"
