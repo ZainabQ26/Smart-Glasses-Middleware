@@ -1,5 +1,6 @@
 # Application Secrets
 resource "aws_secretsmanager_secret" "app_secrets" {
+  count       = var.environment == "prod" ? 1 : 0
   name        = "${var.project_name}-${var.environment}-app-secrets"
   description = "Application secrets for Smart Glasses Middleware"
 
@@ -13,7 +14,8 @@ resource "aws_secretsmanager_secret" "app_secrets" {
 }
 
 resource "aws_secretsmanager_secret_version" "app_secrets" {
-  secret_id = aws_secretsmanager_secret.app_secrets.id
+  count     = var.environment == "prod" ? 1 : 0
+  secret_id = aws_secretsmanager_secret.app_secrets[0].id
   secret_string = jsonencode({
     s3_media_bucket      = aws_s3_bucket.media.id
     s3_documents_bucket  = aws_s3_bucket.documents.id

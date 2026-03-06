@@ -28,6 +28,7 @@ resource "aws_ecr_lifecycle_policy" "api" {
         description  = "Keep last 5 tagged images"
         selection = {
           tagStatus     = "tagged"
+          tagPatternList = ["*"]
           countType     = "imageCountMoreThan"
           countNumber   = 5
         }
