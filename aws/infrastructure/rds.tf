@@ -27,12 +27,12 @@ resource "aws_db_parameter_group" "main" {
 
   parameter {
     name  = "log_statement"
-    value = "all"
+    value = var.environment == "prod" ? "ddl" : "none"
   }
 
   parameter {
     name  = "log_min_duration_statement"
-    value = "1000"
+    value = var.environment == "prod" ? "1000" : "5000"
   }
 
   tags = {
@@ -122,7 +122,7 @@ resource "aws_db_instance" "main" {
   skip_final_snapshot = var.environment != "prod"
   final_snapshot_identifier = var.environment == "prod" ? "${var.project_name}-${var.environment}-final-snapshot" : null
 
-  enabled_cloudwatch_logs_exports = ["postgresql", "upgrade"]
+  enabled_cloudwatch_logs_exports = var.environment == "prod" ? ["postgresql", "upgrade"] : []
 
   tags = {
     Name = "${var.project_name}-${var.environment}-postgres"

@@ -13,8 +13,8 @@ on:
           - wake
           - status
   schedule:
-    # Nightly auto-park (UTC)
-    - cron: "15 5 * * *"
+    # Frequent auto-park (UTC) to keep dev costs near-zero even after accidental wake.
+    - cron: "15 */6 * * *"
 
 permissions:
   id-token: write

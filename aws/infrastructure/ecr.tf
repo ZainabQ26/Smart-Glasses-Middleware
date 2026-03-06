@@ -25,12 +25,11 @@ resource "aws_ecr_lifecycle_policy" "api" {
     rules = [
       {
         rulePriority = 1
-        description  = "Keep last 10 images"
+        description  = "Keep last 5 tagged images"
         selection = {
           tagStatus     = "tagged"
-          tagPrefixList = ["v"]
           countType     = "imageCountMoreThan"
-          countNumber   = 10
+          countNumber   = 5
         }
         action = {
           type = "expire"
@@ -38,12 +37,12 @@ resource "aws_ecr_lifecycle_policy" "api" {
       },
       {
         rulePriority = 2
-        description  = "Remove untagged images after 7 days"
+        description  = "Remove untagged images after 1 day"
         selection = {
           tagStatus   = "untagged"
           countType   = "sinceImagePushed"
           countUnit   = "days"
-          countNumber = 7
+          countNumber = 1
         }
         action = {
           type = "expire"
