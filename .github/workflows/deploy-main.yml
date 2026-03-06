@@ -795,7 +795,9 @@ jobs:
 
       - name: Sync to S3
         run: |
-          BUCKET=$(jq -r '.frontend_bucket_name.value // "smart-glasses-dev-frontend"' ./tf/tf_outputs.json 2>/dev/null || echo "smart-glasses-dev-frontend")
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          DEFAULT_BUCKET="smart-glasses-dev-frontend-${ACCOUNT_ID}"
+          BUCKET=$(jq -r --arg def "$DEFAULT_BUCKET" '.frontend_bucket_name.value // $def' ./tf/tf_outputs.json 2>/dev/null || echo "$DEFAULT_BUCKET")
           WWWROOT="src/SmartGlassesMiddleware/wwwroot"
           echo "Deploying frontend to s3://$BUCKET"
 
@@ -818,7 +820,11 @@ jobs:
 
       - name: Invalidate CloudFront cache
         run: |
-          CF_ID=$(jq -r '.cloudfront_distribution_id.value // "E12GGOP46L2E8U"' ./tf/tf_outputs.json 2>/dev/null || echo "E12GGOP46L2E8U")
+          CF_ID=$(jq -r '.cloudfront_distribution_id.value // empty' ./tf/tf_outputs.json 2>/dev/null || true)
+          if [ -z "$CF_ID" ]; then
+            echo "No CloudFront distribution id found in Terraform outputs; skipping invalidation."
+            exit 0
+          fi
           echo "Invalidating CloudFront distribution $CF_ID"
           RESULT=$(aws cloudfront create-invalidation \
             --distribution-id "$CF_ID" \
