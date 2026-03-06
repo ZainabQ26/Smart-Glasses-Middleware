@@ -1,5 +1,7 @@
 # ElastiCache Subnet Group
 resource "aws_elasticache_subnet_group" "main" {
+  count = local.enable_redis_effective ? 1 : 0
+
   name       = "${var.project_name}-${var.environment}-elasticache-subnet-group"
   subnet_ids = aws_subnet.private_app[*].id
 
@@ -16,6 +18,8 @@ resource "aws_elasticache_subnet_group" "main" {
 
 # ElastiCache Parameter Group for Redis 7
 resource "aws_elasticache_parameter_group" "redis" {
+  count = local.enable_redis_effective ? 1 : 0
+
   name   = "${var.project_name}-${var.environment}-redis-params"
   family = "redis7"
 
@@ -44,9 +48,9 @@ resource "aws_elasticache_replication_group" "redis" {
   engine_version             = "7.1"
   node_type                  = var.elasticache_node_type
   num_cache_clusters         = 2 # Primary + 1 replica
-  parameter_group_name       = aws_elasticache_parameter_group.redis.name
+  parameter_group_name       = aws_elasticache_parameter_group.redis[0].name
   port                       = 6379
-  subnet_group_name          = aws_elasticache_subnet_group.main.name
+  subnet_group_name          = aws_elasticache_subnet_group.main[0].name
   security_group_ids         = [aws_security_group.elasticache.id]
 
   # Automatic failover for high availability
@@ -64,18 +68,18 @@ resource "aws_elasticache_replication_group" "redis" {
   auth_token                 = random_password.redis_auth_token[0].result
 
   # Notifications
-  notification_topic_arn = aws_sns_topic.elasticache_notifications.arn
+  notification_topic_arn = aws_sns_topic.elasticache_notifications[0].arn
 
   # Log delivery
   log_delivery_configuration {
-    destination      = aws_cloudwatch_log_group.elasticache_slow_log.name
+    destination      = aws_cloudwatch_log_group.elasticache_slow_log[0].name
     destination_type = "cloudwatch-logs"
     log_format       = "json"
     log_type         = "slow-log"
   }
 
   log_delivery_configuration {
-    destination      = aws_cloudwatch_log_group.elasticache_engine_log.name
+    destination      = aws_cloudwatch_log_group.elasticache_engine_log[0].name
     destination_type = "cloudwatch-logs"
     log_format       = "json"
     log_type         = "engine-log"
@@ -104,9 +108,9 @@ resource "aws_elasticache_cluster" "redis_single" {
   engine_version       = "7.1"
   node_type            = var.elasticache_node_type
   num_cache_nodes      = 1
-  parameter_group_name = aws_elasticache_parameter_group.redis.name
+  parameter_group_name = aws_elasticache_parameter_group.redis[0].name
   port                 = 6379
-  subnet_group_name    = aws_elasticache_subnet_group.main.name
+  subnet_group_name    = aws_elasticache_subnet_group.main[0].name
   security_group_ids   = [aws_security_group.elasticache.id]
 
   snapshot_retention_limit = 1
@@ -164,6 +168,8 @@ resource "aws_secretsmanager_secret_version" "redis_credentials" {
 
 # CloudWatch Log Groups for ElastiCache
 resource "aws_cloudwatch_log_group" "elasticache_slow_log" {
+  count = local.enable_redis_effective ? 1 : 0
+
   name              = "/aws/elasticache/${var.project_name}-${var.environment}/slow-log"
   retention_in_days = var.environment == "prod" ? 30 : 1
 
@@ -177,6 +183,8 @@ resource "aws_cloudwatch_log_group" "elasticache_slow_log" {
 }
 
 resource "aws_cloudwatch_log_group" "elasticache_engine_log" {
+  count = local.enable_redis_effective ? 1 : 0
+
   name              = "/aws/elasticache/${var.project_name}-${var.environment}/engine-log"
   retention_in_days = var.environment == "prod" ? 30 : 1
 
@@ -191,6 +199,8 @@ resource "aws_cloudwatch_log_group" "elasticache_engine_log" {
 
 # SNS Topic for ElastiCache notifications
 resource "aws_sns_topic" "elasticache_notifications" {
+  count = local.enable_redis_effective ? 1 : 0
+
   name = "${var.project_name}-${var.environment}-elasticache-notifications"
 
   tags = {
