@@ -46,6 +46,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Delete invalid old Actions caches
         env:
@@ -97,13 +99,8 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Cache Docker layers (API)
-        uses: actions/cache@v4
-        with:
-          path: /tmp/.buildx-cache-api
-          key: ${{ runner.os }}-buildx-api-${{ hashFiles('src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj', 'src/SmartGlassesMiddleware/client/package-lock.json', 'src/SmartGlassesMiddleware/Dockerfile') }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-api-
+      # buildx will use the GitHub Actions cache (gha) to avoid storing large
+      # layer caches on the runner disk. This reduces ephemeral storage usage.
 
       - name: Build & push API image
         uses: docker/build-push-action@v5
@@ -115,13 +112,10 @@ jobs:
             ${{ steps.ecr-login.outputs.registry }}/smart-glasses-dev-api:${{ github.sha }}
             ${{ steps.ecr-login.outputs.registry }}/smart-glasses-dev-api:latest
           platforms: linux/amd64
-          cache-from: type=local,src=/tmp/.buildx-cache-api
-          cache-to: type=local,dest=/tmp/.buildx-cache-api-new,mode=max
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-      - name: Rotate build cache
-        run: |
-          rm -rf /tmp/.buildx-cache-api
-          mv /tmp/.buildx-cache-api-new /tmp/.buildx-cache-api 2>/dev/null || true
+      # No local cache rotation required when using gha cache.
 
   # Packages the Document Processor Lambda zip. Runs in PARALLEL with build-api — no shared deps.
   # Whisper Lambda removed: audio transcription now handled entirely browser-side via Whisper worker.
@@ -129,6 +123,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -146,6 +142,7 @@ jobs:
         with:
           name: lambda-document-zip
           path: aws/lambda-document-processor/deployment.zip
+          retention-days: 1
 
   terraform-apply:
     needs: [build-api, build-lambda]
@@ -157,6 +154,8 @@ jobs:
       AWS_REGION: ${{ secrets.AWS_REGION }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -305,6 +304,32 @@ jobs:
             ls -la || true;
             exit 1
           fi
+
+      - name: Delete lambda-document-zip artifact (cleanup)
+        if: ${{ success() }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          echo "Looking up artifact ids for lambda-document-zip..."
+          PAGE=1
+          while :; do
+            RESP=$(curl -s -H "Authorization: token $GH_TOKEN" "https://api.github.com/repos/${REPO}/actions/artifacts?per_page=100&page=${PAGE}") || true
+            COUNT=$(echo "$RESP" | jq '.artifacts | length')
+            if [ "$COUNT" -eq 0 ]; then
+              break
+            fi
+            IDS=$(echo "$RESP" | jq -r '.artifacts[] | select(.name=="lambda-document-zip") | .id') || true
+            if [ -n "${IDS:-}" ]; then
+              for id in $IDS; do
+                echo "Deleting artifact id=$id"
+                curl -s -X DELETE -H "Authorization: token $GH_TOKEN" "https://api.github.com/repos/${REPO}/actions/artifacts/${id}" || true
+              done
+            fi
+            PAGE=$((PAGE+1))
+          done
+          echo "lambda-document-zip cleanup complete."
 
       - name: Patch IAM role with application-autoscaling permission
         run: |
@@ -798,6 +823,7 @@ jobs:
         with:
           name: tf-outputs
           path: aws/infrastructure/tf_outputs.json
+          retention-days: 1
 
   deploy-frontend:
     name: Build & deploy frontend to S3
@@ -838,6 +864,32 @@ jobs:
       - name: Build frontend
         working-directory: src/SmartGlassesMiddleware/client
         run: npm run build
+
+      - name: Delete tf-outputs artifact (cleanup)
+        if: ${{ success() }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          echo "Looking up artifact ids for tf-outputs..."
+          PAGE=1
+          while :; do
+            RESP=$(curl -s -H "Authorization: token $GH_TOKEN" "https://api.github.com/repos/${REPO}/actions/artifacts?per_page=100&page=${PAGE}") || true
+            COUNT=$(echo "$RESP" | jq '.artifacts | length')
+            if [ "$COUNT" -eq 0 ]; then
+              break
+            fi
+            IDS=$(echo "$RESP" | jq -r '.artifacts[] | select(.name=="tf-outputs") | .id') || true
+            if [ -n "${IDS:-}" ]; then
+              for id in $IDS; do
+                echo "Deleting artifact id=$id"
+                curl -s -X DELETE -H "Authorization: token $GH_TOKEN" "https://api.github.com/repos/${REPO}/actions/artifacts/${id}" || true
+              done
+            fi
+            PAGE=$((PAGE+1))
+          done
+          echo "tf-outputs cleanup complete."
 
       - name: Sync to S3
         run: |
