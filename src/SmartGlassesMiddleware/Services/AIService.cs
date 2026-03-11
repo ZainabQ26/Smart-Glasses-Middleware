@@ -247,7 +247,7 @@ Please provide a helpful and concise response:";
         ["document-highlight"] = "user wants to highlight text or a section in a document",
         ["ocr"]                = "user wants to scan text, read text from an image, or perform OCR",
         ["ocr-retry"]          = "user wants to retry or redo an OCR scan",
-        ["open-file"]          = "user wants to open, browse, pick, upload, or choose a file from their device",
+        ["open-file"]          = "user wants to open a file, see recent files, view the last uploaded documents, or browse previously uploaded files",
         ["select-document"]    = "user wants to select, view, preview, or load a previously uploaded document",
         ["advanced"]           = "user wants advanced features, settings, or RAG document processing",
         ["template"]           = "user wants to use or fill in a template",
