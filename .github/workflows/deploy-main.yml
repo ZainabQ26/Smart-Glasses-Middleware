@@ -813,7 +813,7 @@ jobs:
           # Capture output; fall back to empty JSON object if Terraform errors
           # (e.g. no outputs defined or partial state) so the artifact is always
           # valid JSON that downstream jq calls can parse.
-          terraform output -json > tf_outputs.json 2>/dev/null \
+          terraform output -json -no-color > tf_outputs.json 2>/dev/null \
             || echo '{}' > tf_outputs.json
           # Verify it is valid JSON before uploading
           jq empty tf_outputs.json || echo '{}' > tf_outputs.json
@@ -1146,6 +1146,18 @@ jobs:
           fi
 
           ALB=$(jq -r '.api_alb_dns.value // empty' ./tf/tf_outputs.json 2>/dev/null || true)
+          # tf_outputs.json can be '{}' when terraform output emits non-JSON.
+          # Fall back to querying AWS directly so smoke tests remain reliable.
+          if [ -z "$ALB" ]; then
+            ALB=$(aws elbv2 describe-load-balancers \
+              --names "smart-glasses-dev-api-alb" \
+              --region "$AWS_REGION" \
+              --query 'LoadBalancers[0].DNSName' \
+              --output text 2>/dev/null || true)
+            if [ "$ALB" = "None" ] || [ "$ALB" = "null" ]; then
+              ALB=""
+            fi
+          fi
           if [ -z "$ALB" ]; then
             echo "ALB DNS not available in outputs while desired count is $DESIRED."
             exit 1
