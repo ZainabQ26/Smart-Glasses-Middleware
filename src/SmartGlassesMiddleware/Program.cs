@@ -208,6 +208,10 @@ builder.Services.AddScoped<IDocumentHighlightService, DocumentHighlightService>(
 builder.Services.AddScoped<IConversationService, ConversationService>();
 // Global mapping service for ResourceGroup -> Conversation
 builder.Services.AddScoped<IGroupConversationMappingService, GroupConversationMappingService>();
+
+// Register the updated OpenFileTaskHandler explicitly
+builder.Services.AddScoped<OpenFileTaskHandler>();
+
 // Audio transcription service removed: transcription now handled entirely in-browser via Whisper worker
 
 // Auto-register ITaskHandler implementations from this assembly and optional plugin DLLs in the 'tasks' folder.
