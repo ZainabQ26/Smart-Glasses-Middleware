@@ -913,6 +913,30 @@ async function deleteFile(id) {
 // Store current preview file info
 let currentPreviewFile = { id: null, fileName: null };
 
+function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function waitForPreviewReady(id, timeoutMs = 15000, intervalMs = 1000) {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+        try {
+            const cacheBuster = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
+            const infoUrl = `${API_BASE}/files/${id}/info?v=${cacheBuster}`;
+            const res = await fetch(infoUrl);
+            if (res.ok) {
+                return true;
+            }
+        } catch (error) {
+            // Keep polling until timeout.
+        }
+
+        await delay(intervalMs);
+    }
+
+    return false;
+}
+
 async function previewFile(id, fileName) {
     const previewContainer = document.getElementById('file-preview');
     const previewContent = document.getElementById('preview-content');
@@ -957,15 +981,26 @@ async function previewFile(id, fileName) {
         // PDF — open directly in a new browser tab using the API URL
         // (Chrome's native PDF viewer works perfectly for direct navigation but not for embeds/iframes)
         if (contentType.includes('pdf') || header === '%PDF') {
-            // Use the same cachebuster URL already fetched — avoids any stale cached bad response
-            window.open(previewUrl, '_blank');
-            previewContent.innerHTML = `<div style="padding:24px; text-align:center;">
-                <div style="font-size:48px; margin-bottom:12px;">📄</div>
-                <p style="font-weight:600; margin:0 0 6px;">${escapeHtml(fileName)}</p>
-                <p style="color:#888; font-size:13px; margin:0 0 16px;">PDF opened in a new tab.</p>
-                <button onclick="window.open('${previewUrl}', '_blank')" style="padding:8px 18px; background:#3498db; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:13px;">Open again ↗</button>
-                <br><br><a href="${API_BASE}/files/${id}/info" target="_blank" style="font-size:11px; color:#aaa;">Check file info (debug)</a>
-            </div>`;
+            // Use the same cachebuster URL already fetched — avoids stale cached responses.
+            // If popup is blocked (common for non-user-triggered voice actions), fall back inline.
+            const popup = window.open(previewUrl, '_blank');
+            if (popup && !popup.closed) {
+                previewContent.innerHTML = `<div style="padding:24px; text-align:center;">
+                    <div style="font-size:48px; margin-bottom:12px;">📄</div>
+                    <p style="font-weight:600; margin:0 0 6px;">${escapeHtml(fileName)}</p>
+                    <p style="color:#888; font-size:13px; margin:0 0 16px;">PDF opened in a new tab.</p>
+                    <button onclick="window.open('${previewUrl}', '_blank')" style="padding:8px 18px; background:#3498db; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:13px;">Open again ↗</button>
+                    <br><br><a href="${API_BASE}/files/${id}/info" target="_blank" style="font-size:11px; color:#aaa;">Check file info (debug)</a>
+                </div>`;
+            } else {
+                previewContent.innerHTML = `<div style="padding:12px; text-align:center;">
+                    <p style="margin:0 0 10px; color:#666; font-size:13px;">Popup blocked. Showing inline preview.</p>
+                    <iframe src="${previewUrl}" title="${escapeHtml(fileName)}" style="width:100%; height:500px; border:1px solid #ddd; border-radius:6px;"></iframe>
+                    <div style="margin-top:10px;">
+                        <a href="${previewUrl}" target="_blank" rel="noopener" style="font-size:12px; color:#3498db;">Open in new tab ↗</a>
+                    </div>
+                </div>`;
+            }
             return;
         }
 
@@ -4068,6 +4103,13 @@ async function init() {
                     // Switch to the Files tab
                     const filesTab = document.querySelector('[data-tab="files"]') || document.getElementById('files-tab');
                     if (filesTab) filesTab.click();
+
+                    const previewReady = await waitForPreviewReady(fileId, 15000, 1000);
+                    if (!previewReady) {
+                        responseContent.innerHTML = '<div style="padding: 15px; white-space: pre-wrap;">timed out</div>';
+                        return;
+                    }
+
                     // Wait briefly for tab to render then open preview
                     setTimeout(() => previewFile(fileId, fileName), 200);
                     return;
