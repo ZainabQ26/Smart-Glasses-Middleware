@@ -813,7 +813,7 @@ jobs:
           # Capture output; fall back to empty JSON object if Terraform errors
           # (e.g. no outputs defined or partial state) so the artifact is always
           # valid JSON that downstream jq calls can parse.
-          terraform output -json -no-color > tf_outputs.json 2>/dev/null \
+          terraform output -json > tf_outputs.json 2>/dev/null \
             || echo '{}' > tf_outputs.json
           # Verify it is valid JSON before uploading
           jq empty tf_outputs.json || echo '{}' > tf_outputs.json
@@ -1053,7 +1053,13 @@ jobs:
         run: |
           CLUSTER=$(jq -r '.ecs_cluster_name.value // empty' ./tf/tf_outputs.json 2>/dev/null || true)
           CLUSTER=${CLUSTER:-smart-glasses-dev-cluster}
-          SERVICE="smart-glasses-dev-api-service"
+          SERVICE=$(aws ecs list-services \
+            --cluster "$CLUSTER" --region "$AWS_REGION" \
+            --query 'serviceArns[?ends_with(@, `-api-service`)] | [0]' \
+            --output text 2>/dev/null | awk -F/ '{print $NF}')
+          if [ -z "$SERVICE" ] || [ "$SERVICE" = "None" ] || [ "$SERVICE" = "null" ]; then
+            SERVICE="smart-glasses-dev-api-service"
+          fi
           echo "Waiting for ECS service $SERVICE in cluster $CLUSTER (up to 15 min)..."
           # Use a longer poll loop instead of the default 10-min waiter
           STABLE=false
@@ -1108,7 +1114,17 @@ jobs:
       - name: Fetch ECS container logs from CloudWatch
         if: always()
         run: |
-          LOG_GROUP="/ecs/smart-glasses-dev/api"
+          CLUSTER=$(jq -r '.ecs_cluster_name.value // empty' ./tf/tf_outputs.json 2>/dev/null || true)
+          CLUSTER=${CLUSTER:-smart-glasses-dev-cluster}
+          SERVICE=$(aws ecs list-services \
+            --cluster "$CLUSTER" --region "$AWS_REGION" \
+            --query 'serviceArns[?ends_with(@, `-api-service`)] | [0]' \
+            --output text 2>/dev/null | awk -F/ '{print $NF}')
+          if [ -z "$SERVICE" ] || [ "$SERVICE" = "None" ] || [ "$SERVICE" = "null" ]; then
+            SERVICE="smart-glasses-dev-api-service"
+          fi
+          PREFIX="${SERVICE%-api-service}"
+          LOG_GROUP="/ecs/${PREFIX}/api"
           echo "=== Last container logs from $LOG_GROUP ==="
           # Get the most recent log stream
           STREAM=$(aws logs describe-log-streams \
@@ -1134,7 +1150,14 @@ jobs:
         run: |
           CLUSTER=$(jq -r '.ecs_cluster_name.value // empty' ./tf/tf_outputs.json 2>/dev/null || true)
           CLUSTER=${CLUSTER:-smart-glasses-dev-cluster}
-          SERVICE="smart-glasses-dev-api-service"
+          SERVICE=$(aws ecs list-services \
+            --cluster "$CLUSTER" --region "$AWS_REGION" \
+            --query 'serviceArns[?ends_with(@, `-api-service`)] | [0]' \
+            --output text 2>/dev/null | awk -F/ '{print $NF}')
+          if [ -z "$SERVICE" ] || [ "$SERVICE" = "None" ] || [ "$SERVICE" = "null" ]; then
+            SERVICE="smart-glasses-dev-api-service"
+          fi
+          PREFIX="${SERVICE%-api-service}"
           DESIRED=$(aws ecs describe-services \
             --cluster "$CLUSTER" --services "$SERVICE" --region "$AWS_REGION" \
             --query 'services[0].desiredCount' --output text 2>/dev/null || echo "0")
@@ -1149,14 +1172,36 @@ jobs:
           # tf_outputs.json can be '{}' when terraform output emits non-JSON.
           # Fall back to querying AWS directly so smoke tests remain reliable.
           if [ -z "$ALB" ]; then
-            ALB=$(aws elbv2 describe-load-balancers \
-              --names "smart-glasses-dev-api-alb" \
-              --region "$AWS_REGION" \
-              --query 'LoadBalancers[0].DNSName' \
+            TG_ARN=$(aws ecs describe-services \
+              --cluster "$CLUSTER" --services "$SERVICE" --region "$AWS_REGION" \
+              --query 'services[0].loadBalancers[0].targetGroupArn' \
               --output text 2>/dev/null || true)
-            if [ "$ALB" = "None" ] || [ "$ALB" = "null" ]; then
-              ALB=""
+            if [ -n "$TG_ARN" ] && [ "$TG_ARN" != "None" ] && [ "$TG_ARN" != "null" ]; then
+              LB_ARN=$(aws elbv2 describe-target-groups \
+                --target-group-arns "$TG_ARN" \
+                --region "$AWS_REGION" \
+                --query 'TargetGroups[0].LoadBalancerArns[0]' \
+                --output text 2>/dev/null || true)
+              if [ -n "$LB_ARN" ] && [ "$LB_ARN" != "None" ] && [ "$LB_ARN" != "null" ]; then
+                ALB=$(aws elbv2 describe-load-balancers \
+                  --load-balancer-arns "$LB_ARN" \
+                  --region "$AWS_REGION" \
+                  --query 'LoadBalancers[0].DNSName' \
+                  --output text 2>/dev/null || true)
+              fi
             fi
+
+            # Last resort: infer ALB name from ECS service prefix.
+            if [ -z "$ALB" ] || [ "$ALB" = "None" ] || [ "$ALB" = "null" ]; then
+              ALB=$(aws elbv2 describe-load-balancers \
+                --names "${PREFIX}-api-alb" \
+                --region "$AWS_REGION" \
+                --query 'LoadBalancers[0].DNSName' \
+                --output text 2>/dev/null || true)
+            fi
+          fi
+          if [ "$ALB" = "None" ] || [ "$ALB" = "null" ]; then
+            ALB=""
           fi
           if [ -z "$ALB" ]; then
             echo "ALB DNS not available in outputs while desired count is $DESIRED."
