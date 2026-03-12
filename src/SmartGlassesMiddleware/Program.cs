@@ -856,6 +856,21 @@ static IAsyncPolicy<HttpResponseMessage> GetCircuitBreakerPolicy()
 // Cache-Control: no-store ensures CloudFront never caches this response.
 app.MapGet("/health", async (IServiceProvider services, HttpContext context) =>
 {
+    // ECS/ALB process liveness check — always 200 when the app process is running.
+    // This prevents the ALB from cycling containers during RDS cold-start (which can
+    // take 4-8 minutes). The WakeupGate and CI smoke test use this endpoint so they
+    // unblock as soon as ECS is up (~60 s), not when the DB is ready.
+    // Use /ready for the DB/Redis readiness check.
+    context.Response.Headers.CacheControl = "no-store, no-cache, must-revalidate";
+    context.Response.Headers.Pragma = "no-cache";
+    return Results.Ok(new { status = "Healthy", timestamp = DateTime.UtcNow });
+});
+
+// DB + Redis readiness endpoint — 503 until Postgres is reachable.
+// The admin page's waitForAPI() polls this before loading data so it waits out
+// the full RDS cold-start without showing 500 errors to the user.
+app.MapGet("/ready", async (IServiceProvider services, HttpContext context) =>
+{
     context.Response.Headers.CacheControl = "no-store, no-cache, must-revalidate";
     context.Response.Headers.Pragma = "no-cache";
 
@@ -868,7 +883,7 @@ app.MapGet("/health", async (IServiceProvider services, HttpContext context) =>
     var ready = true;
 
     // Postgres is required for API traffic.
-    // Use a short timeout so /health never hangs on a stuck connection.
+    // Use a short timeout so /ready never hangs on a stuck connection.
     var dbOk = false;
     string? dbError = null;
     try
@@ -887,7 +902,7 @@ app.MapGet("/health", async (IServiceProvider services, HttpContext context) =>
     checks["postgres"] = new { healthy = dbOk, error = dbError };
     ready &= dbOk;
     if (!dbOk)
-        logger.LogWarning("Postgres health check failed: {DbError}", dbError);
+        logger.LogWarning("Postgres readiness check failed: {DbError}", dbError);
 
     // Redis is useful but non-blocking for readiness.
     if (redis != null)
@@ -905,7 +920,7 @@ app.MapGet("/health", async (IServiceProvider services, HttpContext context) =>
         }
         checks["redis"] = new { healthy = redisOk, error = redisError };
         if (!redisOk)
-            logger.LogWarning("Redis health check failed: {RedisError}", redisError);
+            logger.LogWarning("Redis readiness check failed: {RedisError}", redisError);
 
         // Check Redis Pub/Sub bridge
         var bridgeOk = false;
@@ -940,7 +955,7 @@ app.MapGet("/health", async (IServiceProvider services, HttpContext context) =>
 
     var result = new
     {
-        status = ready ? "Healthy" : "Starting",
+        status = ready ? "Ready" : "Starting",
         checks = checks,
         timestamp = DateTime.UtcNow
     };
