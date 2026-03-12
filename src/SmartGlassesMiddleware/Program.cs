@@ -868,11 +868,17 @@ app.MapGet("/health", async (IServiceProvider services, HttpContext context) =>
     var ready = true;
 
     // Postgres is required for API traffic.
+    // Use a short timeout so /health never hangs on a stuck connection.
     var dbOk = false;
     string? dbError = null;
     try
     {
-        dbOk = await db.Database.CanConnectAsync();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        dbOk = await db.Database.CanConnectAsync(cts.Token);
+    }
+    catch (OperationCanceledException)
+    {
+        dbError = "Timeout: database check took too long";
     }
     catch (Exception ex)
     {
