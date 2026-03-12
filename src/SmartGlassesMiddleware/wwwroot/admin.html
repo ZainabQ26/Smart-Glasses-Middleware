@@ -1646,14 +1646,26 @@
                 const section = document.getElementById('prompt-file-section');
                 const preview = document.getElementById('prompt-preview-panel');
                 const files = document.getElementById('prompt-files-panel');
-                const isHidden = window.getComputedStyle(section || document.createElement('div')).display === 'none';
+                const showBtn = document.getElementById('prompt-show-file-btn');
+                const computed = window.getComputedStyle(section || document.createElement('div'));
+                const isHidden = computed.display === 'none' || computed.visibility === 'hidden' || computed.opacity === '0';
                 if (isHidden) {
-                    if (section) section.style.display = 'block';
-                    if (preview) preview.style.display = 'block';
-                    if (files) files.style.display = 'flex';
+                    if (section) {
+                        section.style.setProperty('display', 'block', 'important');
+                        section.style.setProperty('visibility', 'visible', 'important');
+                        section.style.setProperty('opacity', '1', 'important');
+                    }
+                    if (preview) preview.style.setProperty('display', 'block', 'important');
+                    if (files) files.style.setProperty('display', 'flex', 'important');
+                    if (showBtn) showBtn.textContent = '✕ Close';
                     try { if (section && typeof section._markShown === 'function') section._markShown(); } catch(e){}
                 } else {
-                    if (section) section.style.display = 'none';
+                    if (section) {
+                        section.style.setProperty('display', 'none', 'important');
+                        section.style.setProperty('visibility', 'hidden', 'important');
+                        section.style.setProperty('opacity', '0', 'important');
+                    }
+                    if (showBtn) showBtn.textContent = 'Attach file';
                 }
             } catch (e) {
                 // noop
@@ -1664,9 +1676,15 @@
                 const section = document.getElementById('prompt-file-section');
                 const preview = document.getElementById('prompt-preview-panel');
                 const files = document.getElementById('prompt-files-panel');
-                if (section) section.style.display = 'block';
-                if (preview) preview.style.display = 'none';
-                if (files) files.style.display = 'flex';
+                const showBtn = document.getElementById('prompt-show-file-btn');
+                if (section) {
+                    section.style.setProperty('display', 'block', 'important');
+                    section.style.setProperty('visibility', 'visible', 'important');
+                    section.style.setProperty('opacity', '1', 'important');
+                }
+                if (preview) preview.style.setProperty('display', 'none', 'important');
+                if (files) files.style.setProperty('display', 'flex', 'important');
+                if (showBtn) showBtn.textContent = '✕ Close';
                 try { if (section && typeof section._markShown === 'function') section._markShown(); } catch(e){}
             } catch (e) { /* noop */ }
         };

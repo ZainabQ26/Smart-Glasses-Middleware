@@ -36,6 +36,46 @@ export default function App() {
   const WEB_SPEECH_CONFIDENCE_THRESHOLD = 0.72;
   const isWebSpeechOnly = speechMode === "webspeech-only";
   const isWhisperOnly = speechMode === "whisper-only";
+  const API_TIMEOUT_MS = 20_000;
+  const PREVIEW_TIMEOUT_MS = 6_000;
+  const DOCUMENTS_TIMEOUT_MS = 10_000;
+
+  const normalizeCommandText = useCallback((value) => {
+    const raw = (value ?? "").trim();
+    if (!raw) return "";
+    const withoutWakeWord = raw.replace(/^activate[\s,:-]*/i, "").trim();
+    return withoutWakeWord || raw;
+  }, []);
+
+  const fetchJsonWithTimeout = useCallback(async (url, options = {}, timeoutMs = API_TIMEOUT_MS) => {
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetch(url, { ...options, signal: controller.signal });
+      let payload = null;
+
+      try {
+        payload = await response.json();
+      } catch (_) {
+        payload = null;
+      }
+
+      if (!response.ok) {
+        const serverError = payload?.error || payload?.details;
+        throw new Error(serverError || `HTTP ${response.status}`);
+      }
+
+      return payload;
+    } catch (err) {
+      if (err?.name === "AbortError") {
+        throw new Error("Request timed out");
+      }
+      throw err;
+    } finally {
+      window.clearTimeout(timeoutId);
+    }
+  }, [API_TIMEOUT_MS]);
 
   const addLog = useCallback((text, type = "info") => {
     setLogs(prev =>
@@ -152,10 +192,11 @@ export default function App() {
 
   const fetchRecentDocuments = useCallback(async () => {
     try {
-      const response = await fetch("/api/documents?page=1&pageSize=5");
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-      const payload = await response.json();
+      const payload = await fetchJsonWithTimeout(
+        "/api/documents?page=1&pageSize=5",
+        {},
+        DOCUMENTS_TIMEOUT_MS,
+      );
       const rawDocuments = Array.isArray(payload?.documents)
         ? payload.documents
         : Array.isArray(payload?.Documents)
@@ -185,39 +226,48 @@ export default function App() {
       setPendingAction(null);
       setAiResponse("I couldn't load the recent files list.");
     }
-  }, [addLog]);
+  }, [addLog, fetchJsonWithTimeout]);
 
   // ── Send transcript to AI ─────────────────────────────────────────────────
   const sendToAI = useCallback(async (text) => {
     try {
+      const commandText = normalizeCommandText(text);
+      if (!commandText) {
+        addLog("⚠️ Command was empty after wake-word cleanup.", "warn");
+        setPendingAction(null);
+        setAiResponse("I didn't catch that command. Please try again.");
+        return;
+      }
+
       // Preview whether the backend will delegate this request to the advanced model
       // Clear previous state first to avoid stale badge persisting on preview error
       setUsedAdvancedModel(false);
       try {
-        const previewRes = await fetch('/api/process/preview', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input: text })
-        });
-        if (previewRes.ok) {
-          const previewJson = await previewRes.json();
-          const willUse = !!previewJson?.willUseAdvanced;
-          setUsedAdvancedModel(willUse);
-        } else {
-          setUsedAdvancedModel(false);
-        }
+        const previewJson = await fetchJsonWithTimeout('/api/process/preview', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input: commandText })
+        }, PREVIEW_TIMEOUT_MS);
+        const willUse = !!previewJson?.willUseAdvanced;
+        setUsedAdvancedModel(willUse);
       } catch (previewErr) {
-        // On preview failure, clear badge to avoid misleading UI
+        addLog(`⚠️ Preview check failed: ${previewErr?.message || 'Unknown error'}`, "warn");
         setUsedAdvancedModel(false);
       }
-      addLog("🤖 Sending to AI…", "info");
-      const res = await fetch("/api/process", {
+      addLog(`🤖 Sending to AI: \"${commandText}\"`, "info");
+      const data = await fetchJsonWithTimeout("/api/process", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ input: text }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
+        body: JSON.stringify({ input: commandText }),
+      }, API_TIMEOUT_MS);
       const answer = (data.response || "").trim();
       const usedAdvanced = data?.usedAdvancedModel ?? data?.UsedAdvancedModel ?? data?.usedAdvanced ?? false;
+
+      if (!answer) {
+        addLog("⚠️ AI returned an empty response.", "warn");
+        setPendingAction(null);
+        setAiResponse("I didn't get a response for that command. Please try again.");
+        setUsedAdvancedModel(usedAdvanced);
+        return;
+      }
 
       // ── Action token interception ────────────────────────────────────────
       if (answer === "__ACTION:OPEN_FILE_PICKER__" || answer === "__ACTION:SHOW_RECENT_FILES__") {
@@ -238,13 +288,17 @@ export default function App() {
         setUsedAdvancedModel(usedAdvanced);
       }
     } catch (err) {
-      addLog(`❌ AI error: ${err.message}`, "error");
-      setAiResponse(null);
+      const errorMessage = err?.message || "Unknown error";
+      addLog(`❌ AI error: ${errorMessage}`, "error");
+      setUsedAdvancedModel(false);
       setPendingAction(null);
+      setAiResponse(/timed out/i.test(errorMessage)
+        ? "The request timed out. Please try again."
+        : "I couldn't process that command right now. Please try again.");
     } finally {
       resumeListeningRef.current();
     }
-  }, [addLog, fetchRecentDocuments]);
+  }, [addLog, fetchRecentDocuments, fetchJsonWithTimeout, normalizeCommandText]);
 
   sendToAIRef.current = sendToAI;
   useEffect(() => { sendToAIRef.current = sendToAI; }, [sendToAI]);
@@ -328,9 +382,7 @@ export default function App() {
       setAiResponse(null);
       setPendingAction(null);
       setStatus("sending");
-      // Strip the "activate" wake word before sending so the backend sees the pure command.
-      const commandText = latestText.replace(/^activate\s+/i, "").trim() || latestText;
-      sendToAIRef.current?.(commandText);
+      sendToAIRef.current?.(latestText);
     };
 
     rec.onerror = (e) => {
