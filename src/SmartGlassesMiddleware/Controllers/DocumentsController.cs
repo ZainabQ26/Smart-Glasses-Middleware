@@ -65,7 +65,7 @@ public class DocumentsController : ControllerBase
     /// Upload a new document for processing and indexing
     /// </summary>
     [HttpPost("upload")]
-    [ProducesResponseType(typeof(CreatedAtActionResult), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status202Accepted)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> UploadDocument(IFormFile? file, [FromQuery] List<Guid>? groupIds = null)
     {
@@ -82,43 +82,36 @@ public class DocumentsController : ControllerBase
 
         try
         {
-            // Read uploaded file into memory
-            var ms = new MemoryStream();
-            await file.CopyToAsync(ms);
-            ms.Position = 0;
-
-            _logger.LogInformation("Upload received: {FileName}, {Size} bytes", originalFileName, ms.Length);
-
-            // Convert to PDF synchronously (no background task — avoids all scope/disposal issues)
-            var (pdfStream, pdfFileName) = await _processingService.ConvertToPdfAsync(ms, originalFileName, originalContentType, requestId);
-            pdfStream.Position = 0;
-
-            _logger.LogInformation("Converted to PDF: {PdfName}, {Size} bytes", pdfFileName, pdfStream.Length);
-
-            if (pdfStream.Length == 0)
+            var documentId = Guid.NewGuid();
+            var placeholderBaseName = Path.GetFileNameWithoutExtension(originalFileName);
+            if (string.IsNullOrWhiteSpace(placeholderBaseName))
             {
-                await _monitoringService.CompleteRequest(requestId, false, error: "PDF conversion produced empty stream");
-                return StatusCode(500, new { error = "PDF conversion failed: empty stream" });
+                placeholderBaseName = "document";
+            }
+            var placeholderPdfName = $"{placeholderBaseName}.pdf";
+
+            // Read uploaded bytes once and process in a background task.
+            // This keeps the request short and avoids CloudFront 504 timeouts.
+            byte[] uploadedBytes;
+            using (var ms = new MemoryStream())
+            {
+                await file.CopyToAsync(ms);
+                uploadedBytes = ms.ToArray();
             }
 
-            var documentId = Guid.NewGuid();
-            var uploadKey = $"uploads/{documentId}.pdf";
+            _logger.LogInformation("Upload received and queued: {FileName}, {Size} bytes", originalFileName, uploadedBytes.LongLength);
 
-            // Upload to S3 synchronously before writing DB record
-            await _mediaStorageService.UploadFileAsync(uploadKey, pdfStream, "application/pdf");
-
-            _logger.LogInformation("Uploaded to S3: {Key}", uploadKey);
-
-            // Persist metadata
+            // Create placeholder records immediately so the upload returns successfully.
+            // StorageKey/FileSize are populated when background conversion+upload completes.
             var metadata = new DocumentMetadata
             {
                 Id = documentId,
-                FileName = pdfFileName,
+                FileName = placeholderPdfName,
                 OriginalFileName = originalFileName,
                 ContentType = "application/pdf",
-                StorageKey = uploadKey,
+                StorageKey = string.Empty,
                 UploadedAt = DateTime.UtcNow,
-                FileSize = pdfStream.Length,
+                FileSize = 0,
                 DocumentType = "pdf",
                 IsProcessed = false
             };
@@ -128,14 +121,15 @@ public class DocumentsController : ControllerBase
             var managedFile = new ManagedFile
             {
                 Id = documentId,
-                FileName = pdfFileName,
+                FileName = placeholderPdfName,
                 Label = originalFileName,
                 ContentType = "application/pdf",
-                StorageKey = uploadKey,
+                StorageKey = string.Empty,
                 UploadedAt = DateTime.UtcNow,
-                FileSize = pdfStream.Length
+                FileSize = 0
             };
             _context.ManagedFiles.Add(managedFile);
+            metadata.ManagedFileId = managedFile.Id;
 
             await _context.SaveChangesAsync();
 
@@ -160,22 +154,120 @@ public class DocumentsController : ControllerBase
 
             try { await InvalidateFilesCache(); await NotifyFilesChangedAsync(); } catch { }
 
-            await _monitoringService.CompleteRequest(requestId, true, $"Document {pdfFileName} uploaded to S3");
+            await _monitoringService.UpdateRequestStatus(requestId, "Queued", "Upload accepted. Converting and storing document in the background...");
 
-            // Fire Lambda dispatch in background (non-critical — Lambda processes for RAG/embeddings)
-            _ = Task.Run(async () =>
-            {
-                // Lambda will pick up the file from S3 and process it — no further action needed here
-                await Task.CompletedTask;
-            });
+            _ = Task.Run(() => ProcessQueuedDocumentUploadAsync(documentId, uploadedBytes, originalFileName, originalContentType, requestId));
 
-            return CreatedAtAction(nameof(UploadDocument), new { id = documentId }, new { id = documentId, requestId });
+            return Accepted(new { id = documentId, requestId, status = "processing" });
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error uploading document {FileName}", originalFileName);
             await _monitoringService.CompleteRequest(requestId, false, error: ex.Message);
             return StatusCode(500, new { error = "Failed to upload document", details = ex.Message });
+        }
+    }
+
+    private async Task ProcessQueuedDocumentUploadAsync(
+        Guid documentId,
+        byte[] uploadedBytes,
+        string originalFileName,
+        string originalContentType,
+        string requestId)
+    {
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var processingService = scope.ServiceProvider.GetRequiredService<IDocumentProcessingService>();
+            var mediaStorageService = scope.ServiceProvider.GetRequiredService<IMediaStorageService>();
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var monitoringService = scope.ServiceProvider.GetService<IRequestMonitoringService>();
+
+            if (monitoringService != null)
+            {
+                await monitoringService.UpdateRequestStatus(requestId, "Processing", "Converting uploaded document to PDF...");
+            }
+
+            using var input = new MemoryStream(uploadedBytes);
+            var (pdfStream, pdfFileName) = await processingService.ConvertToPdfAsync(input, originalFileName, originalContentType, requestId);
+            pdfStream.Position = 0;
+
+            if (pdfStream.Length == 0)
+            {
+                throw new InvalidOperationException("PDF conversion produced empty stream");
+            }
+
+            var uploadKey = $"uploads/{documentId}.pdf";
+            await mediaStorageService.UploadFileAsync(uploadKey, pdfStream, "application/pdf");
+
+            var metadata = await db.DocumentMetadatas.FirstOrDefaultAsync(d => d.Id == documentId);
+            var managedFile = await db.ManagedFiles.FirstOrDefaultAsync(f => f.Id == documentId);
+
+            if (metadata != null)
+            {
+                metadata.FileName = pdfFileName;
+                metadata.OriginalFileName = originalFileName;
+                metadata.ContentType = "application/pdf";
+                metadata.StorageKey = uploadKey;
+                metadata.FileSize = pdfStream.Length;
+                metadata.DocumentType = "pdf";
+                metadata.IsProcessed = false;
+                metadata.ProcessingError = null;
+                metadata.ManagedFileId = documentId;
+            }
+
+            if (managedFile != null)
+            {
+                managedFile.FileName = pdfFileName;
+                managedFile.Label = originalFileName;
+                managedFile.ContentType = "application/pdf";
+                managedFile.StorageKey = uploadKey;
+                managedFile.FileSize = pdfStream.Length;
+            }
+
+            await db.SaveChangesAsync();
+
+            try
+            {
+                await InvalidateFilesCache(db);
+                await NotifyFilesChangedAsync();
+            }
+            catch (Exception notifyEx)
+            {
+                _logger.LogWarning(notifyEx, "Failed to notify file list refresh after queued upload {DocumentId}", documentId);
+            }
+
+            if (monitoringService != null)
+            {
+                await monitoringService.CompleteRequest(requestId, true, $"Document {pdfFileName} uploaded to S3");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Queued upload failed for document {DocumentId}", documentId);
+
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+                var monitoringService = scope.ServiceProvider.GetService<IRequestMonitoringService>();
+
+                var metadata = await db.DocumentMetadatas.FirstOrDefaultAsync(d => d.Id == documentId);
+                if (metadata != null)
+                {
+                    metadata.ProcessingError = ex.Message;
+                    await db.SaveChangesAsync();
+                }
+
+                if (monitoringService != null)
+                {
+                    await monitoringService.CompleteRequest(requestId, false, error: ex.Message);
+                }
+            }
+            catch (Exception finalizeEx)
+            {
+                _logger.LogWarning(finalizeEx, "Failed to finalize queued upload failure state for {DocumentId}", documentId);
+            }
         }
     }
 
@@ -456,6 +548,7 @@ public class DocumentsController : ControllerBase
     public async Task<IActionResult> ListDocuments([FromQuery] int page = 1, [FromQuery] int pageSize = 20)
     {
         var documents = await _context.DocumentMetadatas
+            .Where(d => !string.IsNullOrWhiteSpace(d.StorageKey) && d.FileSize > 0)
             .OrderByDescending(d => d.UploadedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
@@ -475,7 +568,9 @@ public class DocumentsController : ControllerBase
             })
             .ToListAsync();
 
-        var totalCount = await _context.DocumentMetadatas.CountAsync();
+        var totalCount = await _context.DocumentMetadatas
+            .Where(d => !string.IsNullOrWhiteSpace(d.StorageKey) && d.FileSize > 0)
+            .CountAsync();
 
         return Ok(new
         {
