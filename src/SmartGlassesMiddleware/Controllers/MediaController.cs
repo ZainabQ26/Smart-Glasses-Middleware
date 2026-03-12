@@ -476,7 +476,26 @@ public class MediaController : ControllerBase
                 }
             }
 
-            await _backgroundQueue.EnqueueAsync(entry);
+            try
+            {
+                await _backgroundQueue.EnqueueAsync(entry);
+            }
+            catch (InvalidOperationException ex)
+            {
+                // Queue is full — return 503 Service Unavailable
+                _logger.LogWarning(ex, "Background task queue is full");
+                var queueFullDetails = new ProblemDetails
+                {
+                    Type = "https://tools.ietf.org/html/rfc7231#section-6.6.3",
+                    Title = "Service Temporarily Unavailable",
+                    Detail = "The server is currently processing too many requests. Please try again in a moment.",
+                    Status = StatusCodes.Status503ServiceUnavailable,
+                    Instance = HttpContext.Request.Path
+                };
+                queueFullDetails.Extensions["requestId"] = HttpContext.TraceIdentifier;
+                queueFullDetails.Extensions["timestamp"] = DateTime.UtcNow.ToString("o");
+                return StatusCode(503, queueFullDetails);
+            }
 
             var location = $"/api/tasks/{entry.Id}";
             // Return requestId for consistency with E2E expectations
