@@ -213,52 +213,10 @@ public class AdminController : ControllerBase
             return BadRequest(pdAudio);
         }
 
-        string? requestId = null;
+        var requestId = Guid.NewGuid().ToString("N");
         try
         {
-            requestId = await _monitoringService.StartRequest("FileUpload", 
-                $"Uploading: {request.File.FileName ?? string.Empty} (Label: {request.Label})");
-            await _monitoringService.UpdateRequestStatus(requestId, "Checking for duplicates...");
-
-            // Compute content hash for deduplication (fast, compute once before reading file)
-            using var hashStream = request.File.OpenReadStream();
-            var contentHash = _mediaStorageService.ComputeContentHash(hashStream);
-
-            // Check if file with same hash already exists
-            var existingFile = await _context.ManagedFiles
-                .FirstOrDefaultAsync(f => f.ContentHash == contentHash);
-
-            if (existingFile != null)
-            {
-                _logger.LogInformation("File with hash {Hash} already exists as {FileId}, updating timestamp and returning existing file", contentHash, existingFile.Id);
-
-                // Refresh the uploaded timestamp so repeated uploads surface in the admin listing
-                existingFile.UploadedAt = DateTime.UtcNow;
-                // Optionally update the label to reflect the most recent upload label
-                existingFile.Label = request.Label ?? existingFile.Label;
-                _context.ManagedFiles.Update(existingFile);
-                await _context.SaveChangesAsync();
-
-                // Invalidate caches and notify listeners so UI and API listings reflect the update immediately
-                try { await InvalidateFilesCache(); } catch { /* best-effort */ }
-                try { await NotifyFilesChangedAsync(); } catch { /* best-effort */ }
-
-                await _monitoringService.CompleteRequest(requestId, true, "File already exists (deduplicated, refreshed)");
-                return Ok(new
-                {
-                    existingFile.Id,
-                    existingFile.FileName,
-                    existingFile.Label,
-                    existingFile.ContentType,
-                    existingFile.StorageKey,
-                    existingFile.UploadedAt,
-                    existingFile.FileSize,
-                    existingFile.ContentHash,
-                    deduplicated = true
-                });
-            }
-
-            // Read uploaded bytes into memory immediately (fast, small buffer)
+            // Keep the request path minimal to avoid gateway timeouts.
             byte[] uploadedBytes;
             using (var ms = new MemoryStream())
             {
@@ -279,7 +237,7 @@ public class AdminController : ControllerBase
                 Label = string.IsNullOrWhiteSpace(request.Label) ? (request.File.FileName ?? "Untitled") : request.Label,
                 ContentType = contentType,
                 StorageKey = string.Empty,  // Will be populated when background upload completes
-                ContentHash = contentHash,
+                ContentHash = null,
                 UploadedAt = DateTime.UtcNow,
                 FileSize = 0  // Will be populated when background upload completes
             };
@@ -291,11 +249,9 @@ public class AdminController : ControllerBase
             try { await InvalidateFilesCache(); } catch { /* best-effort */ }
             try { await NotifyFilesChangedAsync(); } catch { /* best-effort */ }
 
-            await _monitoringService.UpdateRequestStatus(requestId, "Queued", "File accepted. Uploading to storage and processing for RAG in the background...");
-
             // Queue S3 upload and RAG processing to background task (keep request fast)
             _ = Task.Run(() => ProcessQueuedFileUploadAsync(fileId, uploadedBytes, request.File.FileName ?? string.Empty, 
-                contentType, request.Label ?? string.Empty, contentHash, requestId));
+                contentType, requestId));
 
             return Accepted(new { id = fileId, requestId, status = "processing" });
         }
@@ -318,8 +274,6 @@ public class AdminController : ControllerBase
         byte[] uploadedBytes,
         string fileName,
         string contentType,
-        string label,
-        string contentHash,
         string requestId)
     {
         try
@@ -329,6 +283,18 @@ public class AdminController : ControllerBase
             var ragService = scope.ServiceProvider.GetRequiredService<IRagService>();
             var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
             var monitoringService = scope.ServiceProvider.GetService<IRequestMonitoringService>();
+
+            if (monitoringService != null)
+            {
+                try
+                {
+                    await monitoringService.StartRequest("FileUpload", $"Uploading: {fileName}", requestId);
+                }
+                catch (Exception monitorStartEx)
+                {
+                    _logger.LogWarning(monitorStartEx, "Failed to initialize monitoring for queued file upload {FileId}", fileId);
+                }
+            }
 
             if (monitoringService != null)
             {
@@ -343,9 +309,21 @@ public class AdminController : ControllerBase
             var managedFile = await db.ManagedFiles.FirstOrDefaultAsync(f => f.Id == fileId);
             if (managedFile != null)
             {
+                string? contentHash = null;
+                try
+                {
+                    using var hashStream = new MemoryStream(uploadedBytes, writable: false);
+                    contentHash = mediaStorageService.ComputeContentHash(hashStream);
+                }
+                catch (Exception hashEx)
+                {
+                    _logger.LogWarning(hashEx, "Failed to compute content hash for queued file upload {FileId}", fileId);
+                }
+
                 managedFile.FileName = fileName;
                 managedFile.ContentType = contentType;
                 managedFile.StorageKey = storageKey;
+                managedFile.ContentHash = contentHash;
                 managedFile.FileSize = uploadedBytes.LongLength;
                 db.ManagedFiles.Update(managedFile);
                 await db.SaveChangesAsync();
