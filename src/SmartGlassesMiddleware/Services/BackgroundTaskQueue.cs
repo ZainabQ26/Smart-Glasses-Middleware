@@ -18,6 +18,7 @@ public class BackgroundTaskQueue : IBackgroundTaskQueue
     private const string TaskKeyPrefix = "background:task:";
     private const string PubSubChannel = "background:task:completed";
     private readonly int _retentionSeconds;
+    private readonly int _maxQueueSize;
 
     public BackgroundTaskQueue(IConnectionMultiplexer redis, ILogger<BackgroundTaskQueue> logger, IHubContext<TaskHub> hub, IConfiguration config, IRequestMonitoringService? monitoringService = null)
     {
@@ -27,15 +28,23 @@ public class BackgroundTaskQueue : IBackgroundTaskQueue
         _hub = hub;
         _monitoringService = monitoringService;
         _retentionSeconds = config.GetValue<int?>("BackgroundTasks:RetentionSeconds") ?? 60;
+        _maxQueueSize = config.GetValue<int?>("BackgroundTasks:MaxQueueSize") ?? 500;
     }
 
     public async Task EnqueueAsync(BackgroundTaskEntry entry)
     {
+        // Check queue size BEFORE adding to prevent unbounded growth
+        var queueLen = await _db.ListLengthAsync(QueueKey);
+        if (queueLen >= _maxQueueSize)
+        {
+            _logger.LogWarning("Background task queue full ({QueueLen}/{MaxSize}), rejecting task {TaskId}", queueLen, _maxQueueSize, entry.Id);
+            throw new InvalidOperationException($"Background task queue is full (size: {queueLen}). Please try again later.");
+        }
+
         var key = TaskKeyPrefix + entry.Id.ToString();
         var json = JsonSerializer.Serialize(entry, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
         await _db.StringSetAsync(key, json);
         await _db.ListRightPushAsync(QueueKey, entry.Id.ToString());
-        var queueLen = await _db.ListLengthAsync(QueueKey);
         // Monitoring is handled by the caller (MediaController), so we don't create a duplicate entry here
     }
 
