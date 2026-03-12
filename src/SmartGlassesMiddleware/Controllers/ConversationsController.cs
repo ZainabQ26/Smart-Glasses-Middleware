@@ -123,14 +123,38 @@ public class ConversationsController : ControllerBase
     }
 
     /// <summary>
-    /// Get all active conversations
+    /// Get active conversations with pagination
     /// </summary>
     [HttpGet]
-    [ProducesResponseType(typeof(List<Conversation>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> GetConversations([FromQuery] Guid? groupId = null)
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetConversations(
+        [FromQuery] Guid? groupId = null,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20)
     {
-        var conversations = await _conversationService.GetActiveConversationsAsync(groupId);
-        return Ok(conversations);
+        try
+        {
+            var (items, totalCount) = await _conversationService.GetActiveConversationsAsync(groupId, page, pageSize);
+            var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
+            return Ok(new
+            {
+                data = items,
+                pagination = new
+                {
+                    currentPage = page,
+                    pageSize,
+                    totalCount,
+                    totalPages,
+                    hasNext = page < totalPages,
+                    hasPrevious = page > 1
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving conversations");
+            return StatusCode(500, new { error = "Failed to retrieve conversations", details = ex.Message });
+        }
     }
 
     /// <summary>

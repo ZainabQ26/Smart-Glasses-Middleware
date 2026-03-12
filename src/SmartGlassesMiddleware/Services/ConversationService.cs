@@ -10,7 +10,7 @@ public interface IConversationService
 {
     Task<Conversation> CreateConversationAsync(string? title = null, Guid? groupId = null);
     Task<Conversation?> GetConversationAsync(Guid conversationId);
-    Task<List<Conversation>> GetActiveConversationsAsync(Guid? groupId = null);
+    Task<(List<Conversation> Items, int TotalCount)> GetActiveConversationsAsync(Guid? groupId = null, int page = 1, int pageSize = 20);
     Task<ChatMessage> AddMessageAsync(Guid conversationId, string role, string content, string? model = null, List<Guid>? documentIds = null);
     Task<List<ChatMessage>> GetRecentMessagesAsync(Guid conversationId, int count = 10);
     Task<Conversation> DetectOrCreateConversationAsync(string userMessage, Guid? groupId = null);
@@ -104,8 +104,11 @@ public class ConversationService : IConversationService
         return conversation;
     }
 
-    public async Task<List<Conversation>> GetActiveConversationsAsync(Guid? groupId = null)
+    public async Task<(List<Conversation> Items, int TotalCount)> GetActiveConversationsAsync(Guid? groupId = null, int page = 1, int pageSize = 20)
     {
+        if (pageSize < 1 || pageSize > MaxPageSize) pageSize = DefaultPageSize;
+        if (page < 1) page = 1;
+
         var query = _context.Conversations
             .Where(c => c.IsActive);
 
@@ -114,12 +117,16 @@ public class ConversationService : IConversationService
             query = query.Where(c => c.ResourceGroupId == groupId.Value);
         }
 
+        var totalCount = await query.CountAsync();
+
         var conversations = await query
             .OrderByDescending(c => c.UpdatedAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
             .ToListAsync();
 
         if (conversations.Count == 0)
-            return conversations;
+            return (conversations, totalCount);
 
         // Load messages for all returned conversations in a single query
         var convoIds = conversations.Select(c => c.Id).ToList();
@@ -136,7 +143,7 @@ public class ConversationService : IConversationService
             c.Messages = list ?? new List<ChatMessage>();
         }
 
-        return conversations;
+        return (conversations, totalCount);
     }
 
     public async Task<ChatMessage> AddMessageAsync(Guid conversationId, string role, string content, string? model = null, List<Guid>? documentIds = null)

@@ -3377,12 +3377,13 @@ function setupInfiniteScroll() {
     });
 }
 
-// Wait for API to be ready
-async function waitForAPI(maxRetries = 10, delayMs = 500) {
+// Wait for API to be ready (up to 3 minutes to survive ECS cold-start)
+async function waitForAPI(maxRetries = 60, delayMs = 3000) {
     for (let i = 0; i < maxRetries; i++) {
         try {
-            console.log(`[API Health] Checking API health (attempt ${i + 1}/${maxRetries})...`);
-            const response = await fetch(`${API_BASE}/files?page=1&pageSize=1`);
+            const elapsed = Math.round((i * delayMs) / 1000);
+            console.log(`[API Health] Checking API health (attempt ${i + 1}/${maxRetries}, ${elapsed}s elapsed)...`);
+            const response = await fetch('/health');
             if (response.ok) {
                 console.log('[API Health] API is ready!');
                 return true;
@@ -3391,12 +3392,15 @@ async function waitForAPI(maxRetries = 10, delayMs = 500) {
         } catch (error) {
             console.warn(`[API Health] API not ready yet:`, error.message);
         }
-        
+
         if (i < maxRetries - 1) {
+            const elapsed = Math.round(((i + 1) * delayMs) / 1000);
+            const remaining = Math.round(((maxRetries - i - 1) * delayMs) / 1000);
+            showMessage(`Server is starting up... (${elapsed}s elapsed, up to ${remaining}s more)`, 'info');
             await new Promise(resolve => setTimeout(resolve, delayMs));
         }
     }
-    
+
     console.error('[API Health] API failed to become ready after', maxRetries, 'attempts');
     return false;
 }
@@ -3422,8 +3426,7 @@ async function init() {
     // Wait for API to be ready
     const apiReady = await waitForAPI();
     if (!apiReady) {
-        showMessage('API is not responding. Please refresh the page.', 'error');
-        alert('ERROR: The backend API is not responding. Please wait a moment and refresh the page.');
+        showMessage('ERROR: The backend API is not responding. Please refresh the page.', 'error');
         return;
     }
     
