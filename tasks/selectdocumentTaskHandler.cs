@@ -21,6 +21,7 @@ public class SelectDocumentTaskHandler : ITaskHandler
         // Use OriginalFileName to show the user-friendly name.
         // The preview endpoint now accepts both ManagedFile IDs and DocumentMetadata IDs.
         var lastDoc = await _context.DocumentMetadatas
+            .Where(d => !string.IsNullOrWhiteSpace(d.StorageKey) && d.FileSize > 0)
             .OrderByDescending(d => d.UploadedAt)
             .FirstOrDefaultAsync();
 

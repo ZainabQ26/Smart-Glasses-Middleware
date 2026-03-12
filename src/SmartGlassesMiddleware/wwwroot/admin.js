@@ -3811,6 +3811,10 @@ async function init() {
                                 if (progressBar) {
                                     progressBar.style.width = '100%';
                                 }
+                                if (xhr.status === 504) {
+                                    reject(new Error('Server timed out while processing this file. Please retry in a moment.'));
+                                    return;
+                                }
                                 if (xhr.status >= 200 && xhr.status < 300) {
                                     try {
                                         const fileData = JSON.parse(xhr.responseText);
@@ -3819,7 +3823,8 @@ async function init() {
                                         reject(new Error('Invalid JSON response'));
                                     }
                                 } else {
-                                    reject(new Error(`Upload failed: ${xhr.responseText}`));
+                                    const responsePreview = (xhr.responseText || '').slice(0, 240);
+                                    reject(new Error(`Upload failed (${xhr.status}): ${responsePreview}`));
                                 }
                             });
                             xhr.addEventListener('error', () => reject(new Error('Network error')));
@@ -3844,6 +3849,8 @@ async function init() {
                         
                         const fileData = await uploadPromise;
                         const documentId = fileData.id || fileData.Id;
+                        const uploadStatus = (fileData.status || fileData.Status || '').toLowerCase();
+                        const isQueued = xhr.status === 202 || uploadStatus === 'processing';
                         
                         // Add uploaded file to list with server ID
                         promptSelectedFiles.push({
@@ -3857,7 +3864,12 @@ async function init() {
                         const newEntry = promptSelectedFiles[promptSelectedFiles.length - 1];
                         scheduleFileNameRefresh(newEntry, documentId, file.name);
                         updatePromptFilesList();
-                        showMessage(`File "${file.name}" uploaded successfully`, 'success');
+                        showMessage(
+                            isQueued
+                                ? `File "${file.name}" accepted and is processing. It will appear in recent files once ready.`
+                                : `File "${file.name}" uploaded successfully`,
+                            isQueued ? 'info' : 'success'
+                        );
                         
                         // Clear preview
                         promptPreviewFile = null;
