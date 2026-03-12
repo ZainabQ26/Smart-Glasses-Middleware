@@ -3793,6 +3793,7 @@ async function init() {
                         // Regular file upload (documents, images, etc.)
                         const formData = new FormData();
                         formData.append('file', file);
+                        formData.append('label', file.name || 'Attachment');
                         
                         const xhr = new XMLHttpRequest();
                         xhr.timeout = 240000;
@@ -3832,37 +3833,26 @@ async function init() {
                             xhr.addEventListener('timeout', () => reject(new Error('Upload timed out while waiting for the server')));
                         });
                         
-                        // Upload to Documents API so RAG can use the attachment
-                        let uploadGroupId = activePromptGroupId || null;
-                        if (!uploadGroupId && activeConversationId) {
-                            try {
-                                const conv = await (await fetch(`/api/conversations/${activeConversationId}`)).json().catch(() => null);
-                                uploadGroupId = conv?.resourceGroupId || conv?.ResourceGroupId || null;
-                            } catch (err) {
-                                console.warn('[UPLOAD] Failed to resolve conversation group for file:', err);
-                            }
-                        }
-                        // Pass groupIds as a query parameter (controller uses [FromQuery], not [FromForm])
-                        const uploadUrl = uploadGroupId ? `/api/documents/upload?groupIds=${encodeURIComponent(uploadGroupId)}` : '/api/documents/upload';
+                        // Upload through admin files endpoint to avoid long document-conversion request timeouts.
+                        const uploadUrl = '/api/admin/files';
                         xhr.open('POST', uploadUrl);
                         xhr.send(formData);
                         
                         const fileData = await uploadPromise;
-                        const documentId = fileData.id || fileData.Id;
+                        const managedFileId = fileData.id || fileData.Id;
                         const uploadStatus = (fileData.status || fileData.Status || '').toLowerCase();
                         const isQueued = xhr.status === 202 || uploadStatus === 'processing';
                         
-                        // Add uploaded file to list with server ID
+                        // Add uploaded file to list with managed-file ID.
                         promptSelectedFiles.push({
                             file: file, 
                             name: file.name, 
                             selected: false,
-                            documentId: documentId
+                            id: managedFileId,
+                            managedFileId: managedFileId,
+                            isManagedFile: true
                         });
                         window.promptSelectedFiles = promptSelectedFiles;
-                        // Refresh name once server slug is assigned asynchronously
-                        const newEntry = promptSelectedFiles[promptSelectedFiles.length - 1];
-                        scheduleFileNameRefresh(newEntry, documentId, file.name);
                         updatePromptFilesList();
                         showMessage(
                             isQueued
@@ -4012,6 +4002,9 @@ async function init() {
                     : promptSelectedFiles;
                 const documentIds = [];
                 for (const f of selectedFiles) {
+                    if (f.isManagedFile) {
+                        continue;
+                    }
                     let id = f.documentId || f.id;
                     if (!id && f.name) {
                         id = await resolveDocumentIdByName(f.name);
@@ -4038,23 +4031,19 @@ async function init() {
                             try {
                                 const fd = new FormData();
                                 fd.append('file', f.file);
+                                fd.append('label', f.name || f.file?.name || 'Attachment');
 
-                                // Upload to Documents API so RAG can index and use the attachment
-                                let uploadGroupId = activePromptGroupId || null;
-                                if (!uploadGroupId && activeConversationId) {
-                                    const conv = await (await fetch(`/api/conversations/${activeConversationId}`)).json().catch(() => null);
-                                    uploadGroupId = conv?.resourceGroupId || conv?.ResourceGroupId || null;
-                                }
-                                // Pass groupIds as a query parameter (controller uses [FromQuery], not [FromForm])
-                                const uploadUrlFallback = uploadGroupId ? `/api/documents/upload?groupIds=${encodeURIComponent(uploadGroupId)}` : '/api/documents/upload';
+                                // Use admin files endpoint to keep prompt uploads responsive.
+                                const uploadUrlFallback = '/api/admin/files';
                                 const upRes = await fetch(uploadUrlFallback, { method: 'POST', body: fd });
                                 if (upRes.ok) {
                                     const fdJson = await upRes.json().catch(() => null);
                                     const newId = fdJson?.id || fdJson?.Id;
                                     if (newId) {
-                                        f.documentId = newId;
-                                        scheduleFileNameRefresh(f, newId, f.name);
-                                        console.log('[SEND PROMPT] Uploaded attached file', f.name, '=>', newId);
+                                        f.id = newId;
+                                        f.managedFileId = newId;
+                                        f.isManagedFile = true;
+                                        console.log('[SEND PROMPT] Uploaded attached file to managed files', f.name, '=>', newId);
                                     }
                                 } else {
                                     console.warn('[SEND PROMPT] Failed to upload attached file:', f.name);
@@ -4074,7 +4063,7 @@ async function init() {
                     ? promptSelectedFiles.filter(f => f.selected)
                     : promptSelectedFiles;
                 const documentIdsAfterUpload = selectedFilesAfterUpload
-                    .map(f => f.documentId || f.id)
+                    .map(f => f.isManagedFile ? null : (f.documentId || f.id))
                     .filter(Boolean);
                 if (documentIdsAfterUpload.length > 0) {
                     payload.DocumentIds = documentIdsAfterUpload;

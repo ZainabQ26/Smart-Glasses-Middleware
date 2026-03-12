@@ -192,26 +192,59 @@ export default function App() {
 
   const fetchRecentDocuments = useCallback(async () => {
     try {
-      const payload = await fetchJsonWithTimeout(
-        "/api/documents?page=1&pageSize=5",
-        {},
-        DOCUMENTS_TIMEOUT_MS,
-      );
-      const rawDocuments = Array.isArray(payload?.documents)
-        ? payload.documents
-        : Array.isArray(payload?.Documents)
-          ? payload.Documents
-          : [];
+      let recentFiles = [];
 
-      const recentFiles = rawDocuments
-        .map((document) => ({
-          id: document.id ?? document.Id ?? null,
-          previewId: document.managedFileId ?? document.ManagedFileId ?? document.id ?? document.Id ?? null,
-          name: document.originalFileName ?? document.OriginalFileName ?? document.fileName ?? document.FileName ?? "Document",
-          uploadedAt: document.uploadedAt ?? document.UploadedAt ?? null,
-        }))
-        .filter((document) => document.id && document.name)
-        .slice(0, 5);
+      try {
+        const payload = await fetchJsonWithTimeout(
+          "/api/documents?page=1&pageSize=5",
+          {},
+          DOCUMENTS_TIMEOUT_MS,
+        );
+        const rawDocuments = Array.isArray(payload?.documents)
+          ? payload.documents
+          : Array.isArray(payload?.Documents)
+            ? payload.Documents
+            : [];
+
+        recentFiles = rawDocuments
+          .map((document) => ({
+            id: document.id ?? document.Id ?? null,
+            previewId: document.managedFileId ?? document.ManagedFileId ?? document.id ?? document.Id ?? null,
+            name: document.originalFileName ?? document.OriginalFileName ?? document.fileName ?? document.FileName ?? "Document",
+            uploadedAt: document.uploadedAt ?? document.UploadedAt ?? null,
+          }))
+          .filter((document) => document.id && document.name)
+          .slice(0, 5);
+      } catch (docsErr) {
+        addLog(`⚠️ Documents list unavailable: ${docsErr?.message || "unknown error"}`, "warn");
+      }
+
+      if (recentFiles.length === 0) {
+        const adminPayload = await fetchJsonWithTimeout(
+          "/api/admin/files?page=1&pageSize=5",
+          {},
+          DOCUMENTS_TIMEOUT_MS,
+        );
+        const rawFiles = Array.isArray(adminPayload?.data)
+          ? adminPayload.data
+          : Array.isArray(adminPayload?.Data)
+            ? adminPayload.Data
+            : [];
+
+        recentFiles = rawFiles
+          .map((file) => ({
+            id: file.id ?? file.Id ?? null,
+            previewId: file.id ?? file.Id ?? null,
+            name: file.label ?? file.Label ?? file.fileName ?? file.FileName ?? "Document",
+            uploadedAt: file.uploadedAt ?? file.UploadedAt ?? null,
+          }))
+          .filter((file) => file.id && file.name)
+          .slice(0, 5);
+
+        if (recentFiles.length > 0) {
+          addLog("ℹ️ Using admin files list for recent-file actions.", "info");
+        }
+      }
 
       if (recentFiles.length === 0) {
         setPendingAction(null);
