@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
 
 const POLL_INTERVAL_MS   = 4_000;   // how often to probe /health while sleeping
-const WAKE_TIMEOUT_MS    = 180_000; // give up after 3 min and show error
+const WAKE_TIMEOUT_MS    = 300_000; // allow up to 5 min when ECS + RDS are cold
+const WAKE_RETRY_MS      = 15_000;  // retry /wake if initial request is dropped
 
 /**
  * WakeupGate — polls /health before mounting the main App.
@@ -27,7 +28,7 @@ export default function WakeupGate({ children }) {
   const timerRef     = useRef(null);
   const dotsRef      = useRef(null);
   const cancelledRef = useRef(false);
-  const wakePostedRef = useRef(false); // fire-and-forget POST /wake once per gate mount
+  const lastWakeAttemptRef = useRef(0);
 
   useEffect(() => {
     cancelledRef.current = false;
@@ -43,6 +44,14 @@ export default function WakeupGate({ children }) {
     }, 1000);
 
     let timeout;
+
+    function triggerWake() {
+      const now = Date.now();
+      if (now - lastWakeAttemptRef.current < WAKE_RETRY_MS) return;
+      lastWakeAttemptRef.current = now;
+      // Fire-and-forget — /wake routes to Lambda and scales ECS immediately.
+      fetch("/wake", { method: "POST" }).catch(() => {});
+    }
 
     async function poll() {
       if (cancelledRef.current) return;
@@ -64,21 +73,14 @@ export default function WakeupGate({ children }) {
             setPhase("ready");
             return; // done — stop polling
           }
-          // 503 / 5xx  →  server starting up or no tasks yet
-          if (!wakePostedRef.current) {
-            wakePostedRef.current = true;
-            // Directly invoke the ECS idle-scaler Lambda via the /wake CF behavior.
-            // Fire-and-forget — we keep polling /health independently.
-            fetch("/wake", { method: "POST" }).catch(() => {});
-          }
+          // 503 / 5xx -> service is cold or still booting.
+          // Retry wake periodically in case the first wake request is lost.
+          triggerWake();
           setPhase("waking");
         }
       } catch {
         if (!cancelledRef.current) {
-          if (!wakePostedRef.current) {
-            wakePostedRef.current = true;
-            fetch("/wake", { method: "POST" }).catch(() => {});
-          }
+          triggerWake();
           setPhase("waking");
         }
       }
@@ -132,7 +134,7 @@ export default function WakeupGate({ children }) {
             <p style={s.sub}>
               {phase === "checking"
                 ? "Checking server status…"
-                : "The server is starting up — this takes about 60–90 seconds on first access."}
+                : "The server is starting up — this usually takes 60–180 seconds when sleeping."}
             </p>
             {phase === "waking" && elapsed > 0 && (
               <p style={s.timer}>{elapsed}s</p>
