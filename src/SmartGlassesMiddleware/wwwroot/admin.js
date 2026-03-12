@@ -4115,6 +4115,32 @@ async function init() {
                     return;
                 }
 
+                // Intercept PDF page navigation actions
+                if (answer.trim() === '__ACTION:NEXT_PDF_PAGE__') {
+                    responseContent.innerHTML = '<div style="padding: 15px; white-space: pre-wrap;">Next page</div>';
+                    // Send message to PDF viewer iframe/embed to go to next page
+                    if (window.pdfViewer && window.pdfViewer.pdfDocument) {
+                        const currentPage = window.pdfViewer.currentPageNumber || 1;
+                        const totalPages = window.pdfViewer.pagesCount || 1;
+                        if (currentPage < totalPages) {
+                            window.pdfViewer.currentPageNumber = currentPage + 1;
+                        }
+                    }
+                    return;
+                }
+
+                if (answer.trim() === '__ACTION:PREVIOUS_PDF_PAGE__') {
+                    responseContent.innerHTML = '<div style="padding: 15px; white-space: pre-wrap;">Previous page</div>';
+                    // Send message to PDF viewer iframe/embed to go to previous page
+                    if (window.pdfViewer && window.pdfViewer.pdfDocument) {
+                        const currentPage = window.pdfViewer.currentPageNumber || 1;
+                        if (currentPage > 1) {
+                            window.pdfViewer.currentPageNumber = currentPage - 1;
+                        }
+                    }
+                    return;
+                }
+
                 const sources = result.referencedSources || result.ReferencedSources || result.sources || result.Sources || [];
 
                 // Get current attached files

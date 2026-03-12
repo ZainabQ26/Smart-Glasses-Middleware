@@ -249,6 +249,8 @@ Please provide a helpful and concise response:";
         ["ocr-retry"]          = "user wants to retry or redo an OCR scan",
         ["open-file"]          = "user wants to open a file, see recent files, view the last uploaded documents, or browse previously uploaded files",
         ["select-document"]    = "user wants to select, view, preview, or load a previously uploaded document",
+        ["next-page"]          = "user wants to go to the next page in a document or PDF",
+        ["previous-page"]      = "user wants to go to the previous page in a document or PDF",
         ["advanced"]           = "user wants advanced features, settings, or RAG document processing",
         ["template"]           = "user wants to use or fill in a template",
     };
