@@ -3497,6 +3497,8 @@ async function init() {
         const promptUploadProgress = document.getElementById('prompt-upload-progress');
         const promptUploadBtn = document.getElementById('prompt-upload-btn');
         const promptFileInputElement = document.getElementById('prompt-file-input');
+        const promptShowFileBtn = document.getElementById('prompt-show-file-btn');
+        let promptUploadInFlight = false;
 
         const setPromptUploadLoading = (isLoading) => {
             if (promptUploadProgress) {
@@ -3509,6 +3511,15 @@ async function init() {
             }
             if (promptFileInputElement) {
                 promptFileInputElement.disabled = isLoading;
+            }
+            if (promptShowFileBtn) {
+                promptShowFileBtn.disabled = isLoading;
+                promptShowFileBtn.style.opacity = isLoading ? '0.7' : '1';
+                promptShowFileBtn.style.cursor = isLoading ? 'not-allowed' : 'pointer';
+            }
+            if (promptFilesIcon) {
+                promptFilesIcon.style.pointerEvents = isLoading ? 'none' : 'auto';
+                promptFilesIcon.style.opacity = isLoading ? '0.5' : '1';
             }
         };
         
@@ -3524,6 +3535,10 @@ async function init() {
         
         // Show file section when clicking "add file+" button
         document.getElementById('prompt-show-file-btn')?.addEventListener('click', () => {
+            if (promptUploadInFlight) {
+                showMessage('Please wait for the current upload to finish.', 'info');
+                return;
+            }
             if (ADMIN_DEBUG) console.log('prompt-show-file-btn clicked');
             // Prefer a global shim if present (ensures reliability across browsers/load timing)
             if (typeof window.togglePromptFileSection === 'function') {
@@ -3589,6 +3604,10 @@ async function init() {
         
         // Show only Files panel when clicking paperclip in Prompts
         promptFilesIcon?.addEventListener('click', () => {
+            if (promptUploadInFlight) {
+                showMessage('Please wait for the current upload to finish.', 'info');
+                return;
+            }
             if (ADMIN_DEBUG) console.log('promptFilesIcon clicked (paperclip)');
             // Prefer global shim when available
             if (typeof window.showPromptFilesPanel === 'function') {
@@ -3635,6 +3654,12 @@ async function init() {
             promptFileInput.addEventListener('change', async (e) => {
                 const file = e.target.files[0];
                 if (file) {
+                    if (promptUploadInFlight) {
+                        showMessage('A file upload is already in progress. Please wait.', 'info');
+                        promptFileInput.value = '';
+                        return;
+                    }
+
                     promptPreviewFile = file;
                     if (promptPreviewFilename) {
                         promptPreviewFilename.textContent = file.name;
@@ -3700,12 +3725,11 @@ async function init() {
                         promptFileInput.value = '';
                         return;
                     }
+
+                    promptUploadInFlight = true;
+                    setPromptUploadLoading(true);
                     
                     try {
-                        // Show progress bar
-                        if (promptUploadProgress) {
-                            promptUploadProgress.style.display = 'block';
-                        }
                         const progressBar = document.getElementById('prompt-upload-progress-bar');
                         if (progressBar) {
                             progressBar.style.width = '0%';
@@ -3736,6 +3760,9 @@ async function init() {
                         // Handle upload completion
                         const uploadPromise = new Promise((resolve, reject) => {
                             xhr.addEventListener('load', () => {
+                                if (progressBar) {
+                                    progressBar.style.width = '100%';
+                                }
                                 if (xhr.status >= 200 && xhr.status < 300) {
                                     try {
                                         const fileData = JSON.parse(xhr.responseText);
@@ -3792,19 +3819,15 @@ async function init() {
                         
                         // Reload files list to show the new file (documents are listed via /api/documents)
                         if (typeof loadFiles === 'function') {
-                            loadFiles(true);
+                            await loadFiles(true);
                         }
                     } catch (error) {
                         console.error('Error uploading file:', error);
                         showMessage(`Failed to upload file: ${error.message}`, 'error');
                         if (promptFileInput) promptFileInput.value = '';
                     } finally {
-                        // Hide progress bar after a short delay
-                        setTimeout(() => {
-                            if (promptUploadProgress) {
-                                promptUploadProgress.style.display = 'none';
-                            }
-                        }, 1000);
+                        promptUploadInFlight = false;
+                        setPromptUploadLoading(false);
                     }
                 }
             });
