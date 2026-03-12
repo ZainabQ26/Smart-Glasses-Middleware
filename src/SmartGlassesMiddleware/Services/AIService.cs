@@ -4,6 +4,7 @@ using Microsoft.SemanticKernel.Connectors.OpenAI;
 using System.Text.Json;
 using System.Linq;
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 
 namespace SmartGlassesMiddleware.Services;
 
@@ -100,6 +101,14 @@ public class AIService : IAIService
             {
                 var sw = Stopwatch.StartNew();
                 detectedTask = await ClassifyOnlyAsync(input, cancellationToken);
+                var forcedTask = TryRuleBasedTask(input);
+                if (!string.IsNullOrWhiteSpace(forcedTask)
+                    && _knownTasks.Contains(forcedTask)
+                    && !string.Equals(detectedTask, forcedTask, StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogInformation("Overriding detected task {Detected} -> {Forced} using rule-based routing for input: {Input}", detectedTask, forcedTask, input);
+                    detectedTask = forcedTask;
+                }
                 sw.Stop();
                 _logger.LogInformation("Detected task: {Task} for input: {Input} (taskDetectionMs={Ms})", detectedTask, input, sw.ElapsedMilliseconds);
             }
@@ -260,6 +269,12 @@ Please provide a helpful and concise response:";
         if (string.IsNullOrWhiteSpace(input)) return "unknown";
         EnsureKnownTasksLoaded();
 
+        var forcedTask = TryRuleBasedTask(input);
+        if (!string.IsNullOrWhiteSpace(forcedTask) && _knownTasks.Contains(forcedTask))
+        {
+            return forcedTask;
+        }
+
         var taskLines = _knownTasks
             .Select(t => TaskDescriptions.TryGetValue(t, out var desc)
                 ? $"- {t}: {desc}"
@@ -286,6 +301,55 @@ Task:";
             return NormalizeDetectedTask(raw);
         }
         catch { return "unknown"; }
+    }
+
+    private static bool ContainsAnyPhrase(string normalizedInput, params string[] phrases)
+    {
+        return phrases.Any(p => normalizedInput.Contains(p, StringComparison.Ordinal));
+    }
+
+    private string? TryRuleBasedTask(string input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return null;
+
+        var normalized = Regex.Replace(input.ToLowerInvariant(), @"[^a-z0-9\s-]", " ");
+        normalized = Regex.Replace(normalized, @"\s+", " ").Trim();
+
+        if (ContainsAnyPhrase(normalized,
+            "select document",
+            "select file",
+            "choose document",
+            "choose file",
+            "pick document",
+            "pick file",
+            "load document",
+            "preview document",
+            "view document"))
+        {
+            return "select-document";
+        }
+
+        if (ContainsAnyPhrase(normalized,
+            "open file",
+            "show recent files",
+            "recent files",
+            "last uploaded",
+            "uploaded documents"))
+        {
+            return "open-file";
+        }
+
+        if (ContainsAnyPhrase(normalized, "next page", "page down"))
+        {
+            return "next-page";
+        }
+
+        if (ContainsAnyPhrase(normalized, "previous page", "prev page", "back page", "page up"))
+        {
+            return "previous-page";
+        }
+
+        return null;
     }
 
     public async Task<bool> WillUseAdvancedModelAsync(string input, CancellationToken cancellationToken = default)
