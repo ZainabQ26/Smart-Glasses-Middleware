@@ -328,7 +328,9 @@ export default function App() {
       setAiResponse(null);
       setPendingAction(null);
       setStatus("sending");
-      sendToAIRef.current?.(latestText);
+      // Strip the "activate" wake word before sending so the backend sees the pure command.
+      const commandText = latestText.replace(/^activate\s+/i, "").trim() || latestText;
+      sendToAIRef.current?.(commandText);
     };
 
     rec.onerror = (e) => {

@@ -331,6 +331,9 @@ Task:";
 
         if (ContainsAnyPhrase(normalized,
             "open file",
+            "open document",
+            "open doc",
+            "show recent",
             "show recent files",
             "recent files",
             "last uploaded",
