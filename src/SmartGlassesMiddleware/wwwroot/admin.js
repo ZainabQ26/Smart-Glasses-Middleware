@@ -3529,7 +3529,13 @@ async function init() {
             promptFileSection.style.setProperty('visibility', 'hidden', 'important');
         }
         const _initAttachBtn = document.getElementById('prompt-show-file-btn');
-        if (_initAttachBtn) _initAttachBtn.textContent = 'Attach file';
+        if (_initAttachBtn) {
+            _initAttachBtn.textContent = 'Attach file';
+            // Remove inline onclick to prevent double-toggle (onclick + addEventListener both firing)
+            _initAttachBtn.removeAttribute('onclick');
+        }
+        // Same fix for the paperclip icon
+        if (promptFilesIcon) promptFilesIcon.removeAttribute('onclick');
 
         updatePromptFilesList();
         
