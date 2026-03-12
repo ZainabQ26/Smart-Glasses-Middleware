@@ -3723,6 +3723,7 @@ async function init() {
                         formData.append('file', file);
                         
                         const xhr = new XMLHttpRequest();
+                        xhr.timeout = 240000;
                         
                         // Track upload progress
                         xhr.upload.addEventListener('progress', (e) => {
@@ -3748,6 +3749,7 @@ async function init() {
                             });
                             xhr.addEventListener('error', () => reject(new Error('Network error')));
                             xhr.addEventListener('abort', () => reject(new Error('Upload cancelled')));
+                            xhr.addEventListener('timeout', () => reject(new Error('Upload timed out while waiting for the server')));
                         });
                         
                         // Upload to Documents API so RAG can use the attachment
