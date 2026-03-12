@@ -3,7 +3,6 @@ name: Deploy to AWS
 on:
   push:
     tags:
-      - "deploy-*"
       - "v*"
   workflow_dispatch:
     inputs:
