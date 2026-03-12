@@ -3383,7 +3383,7 @@ async function waitForAPI(maxRetries = 60, delayMs = 3000) {
         try {
             const elapsed = Math.round((i * delayMs) / 1000);
             console.log(`[API Health] Checking API health (attempt ${i + 1}/${maxRetries}, ${elapsed}s elapsed)...`);
-            const response = await fetch('/health');
+            const response = await fetch('/ready');
             if (response.ok) {
                 console.log('[API Health] API is ready!');
                 return true;
