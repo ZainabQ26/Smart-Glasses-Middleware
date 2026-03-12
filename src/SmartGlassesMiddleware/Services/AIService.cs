@@ -256,8 +256,8 @@ Please provide a helpful and concise response:";
         ["document-highlight"] = "user wants to highlight text or a section in a document",
         ["ocr"]                = "user wants to scan text, read text from an image, or perform OCR",
         ["ocr-retry"]          = "user wants to retry or redo an OCR scan",
-        ["open-file"]          = "user wants to open a file, see recent files, view the last uploaded documents, or browse previously uploaded files",
-        ["select-document"]    = "user wants to select, view, preview, or load a previously uploaded document",
+        ["open-file"]          = "user wants to browse or choose from a list of recently uploaded files (shows 5 recent files to pick from). Use when the user wants to see options, pick a file, or browse recent uploads.",
+        ["select-document"]    = "user wants to immediately open/preview the most recently uploaded document without browsing. Use when the user says 'select document', 'open last file', 'open latest document', 'select and open', or wants the last/most-recent document directly.",
         ["next-page"]          = "user wants to go to the next page in a document or PDF",
         ["previous-page"]      = "user wants to go to the previous page in a document or PDF",
         ["advanced"]           = "user wants advanced features, settings, or RAG document processing",
@@ -315,20 +315,40 @@ Task:";
         var normalized = Regex.Replace(input.ToLowerInvariant(), @"[^a-z0-9\s-]", " ");
         normalized = Regex.Replace(normalized, @"\s+", " ").Trim();
 
+        // "select document" family → auto-open the most recently uploaded file (no browsing)
         if (ContainsAnyPhrase(normalized,
             "select document",
             "select file",
+            "select and open",
             "choose document",
             "choose file",
             "pick document",
             "pick file",
             "load document",
+            "load file",
             "preview document",
-            "view document"))
+            "preview the document",
+            "preview last",
+            "view document",
+            "open last",
+            "open the last",
+            "open latest",
+            "open the latest",
+            "show last document",
+            "show the last document",
+            "show latest document",
+            "view last",
+            "latest document",
+            "latest file",
+            "most recent document",
+            "most recent file",
+            "last document",
+            "recently uploaded document"))
         {
             return "select-document";
         }
 
+        // "open file" family → show a browseable list of 5 recent files to pick from
         if (ContainsAnyPhrase(normalized,
             "open file",
             "open document",
@@ -336,8 +356,34 @@ Task:";
             "show recent",
             "show recent files",
             "recent files",
+            "recent documents",
             "last uploaded",
-            "uploaded documents"))
+            "uploaded documents",
+            "show files",
+            "show documents",
+            "list files",
+            "list documents",
+            "browse files",
+            "browse documents",
+            "browse recent",
+            "my files",
+            "my documents",
+            "see files",
+            "see documents",
+            "view files",
+            "view recent",
+            "file list",
+            "document list",
+            "all files",
+            "all documents",
+            "show me files",
+            "show me documents",
+            "show me my files",
+            "show me my documents",
+            "pick a file",
+            "pick a document",
+            "choose a file",
+            "choose a document"))
         {
             return "open-file";
         }
