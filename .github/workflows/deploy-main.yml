@@ -581,9 +581,16 @@ jobs:
             echo "Authoritative VPC (from ALB): $VPC_ID"
           else
             VPC_ID=$(aws ec2 describe-vpcs \
+              --filters "Name=tag:Name,Values=${PREFIX}-vpc" \
+              --query 'Vpcs[0].VpcId' --output text --region "$REGION" 2>/dev/null || true)
+            if [ -n "$VPC_ID" ] && [ "$VPC_ID" != "None" ] && [ "$VPC_ID" != "null" ]; then
+              echo "ALB not found; Name-tag VPC lookup: $VPC_ID"
+            else
+              VPC_ID=$(aws ec2 describe-vpcs \
               --filters "Name=tag:Project,Values=SmartGlassesMiddleware" "Name=tag:Environment,Values=${ENV}" \
               --query 'Vpcs[0].VpcId' --output text --region "$REGION" 2>/dev/null || true)
-            echo "ALB not found; tag-based VPC lookup: $VPC_ID"
+              echo "ALB not found; legacy tag-based VPC lookup: $VPC_ID"
+            fi
           fi
 
           if [ -n "$VPC_ID" ] && [ "$VPC_ID" != "None" ]; then
@@ -594,28 +601,46 @@ jobs:
               --query 'InternetGateways[0].InternetGatewayId' --output text --region "$REGION" 2>/dev/null || true)
             tf_import aws_internet_gateway.main "$IGW_ID"
 
-            readarray -t PUB_SUBNETS < <(aws ec2 describe-subnets \
-              --filters "Name=vpc-id,Values=$VPC_ID" "Name=tag:Type,Values=public" \
-              --query 'sort_by(Subnets,&AvailabilityZone)[].SubnetId' \
-              --output text --region "$REGION" 2>/dev/null | tr '\t' '\n' | grep -v '^$' || true)
-            for i in "${!PUB_SUBNETS[@]}"; do
-              tf_import "aws_subnet.public[$i]" "${PUB_SUBNETS[$i]}"
-            done
+            find_subnet_id() {
+              local NAME_TAG="$1" TYPE_TAG="$2" CIDR_BLOCK="$3"
+              local SUBNET_ID
+              SUBNET_ID=$(aws ec2 describe-subnets \
+                --filters "Name=vpc-id,Values=$VPC_ID" "Name=tag:Name,Values=$NAME_TAG" \
+                --query 'Subnets[0].SubnetId' --output text --region "$REGION" 2>/dev/null || true)
+              if [ -z "$SUBNET_ID" ] || [ "$SUBNET_ID" = "None" ] || [ "$SUBNET_ID" = "null" ]; then
+                SUBNET_ID=$(aws ec2 describe-subnets \
+                  --filters "Name=vpc-id,Values=$VPC_ID" "Name=tag:Type,Values=$TYPE_TAG" "Name=cidr-block,Values=$CIDR_BLOCK" \
+                  --query 'Subnets[0].SubnetId' --output text --region "$REGION" 2>/dev/null || true)
+              fi
+              if [ -z "$SUBNET_ID" ] || [ "$SUBNET_ID" = "None" ] || [ "$SUBNET_ID" = "null" ]; then
+                SUBNET_ID=$(aws ec2 describe-subnets \
+                  --filters "Name=vpc-id,Values=$VPC_ID" "Name=cidr-block,Values=$CIDR_BLOCK" \
+                  --query 'Subnets[0].SubnetId' --output text --region "$REGION" 2>/dev/null || true)
+              fi
+              echo "$SUBNET_ID"
+            }
 
-            readarray -t PRIV_APP < <(aws ec2 describe-subnets \
-              --filters "Name=vpc-id,Values=$VPC_ID" "Name=tag:Type,Values=private-app" \
-              --query 'sort_by(Subnets,&AvailabilityZone)[].SubnetId' \
-              --output text --region "$REGION" 2>/dev/null | tr '\t' '\n' | grep -v '^$' || true)
-            for i in "${!PRIV_APP[@]}"; do
-              tf_import "aws_subnet.private_app[$i]" "${PRIV_APP[$i]}"
-            done
+            PUB_SUBNETS=()
+            PRIV_APP=()
+            PRIV_DB=()
+            for i in 0 1; do
+              PUB_ID=$(find_subnet_id "${PREFIX}-public-$((i + 1))" "public" "10.0.${i}.0/24")
+              if [ -n "$PUB_ID" ] && [ "$PUB_ID" != "None" ] && [ "$PUB_ID" != "null" ]; then
+                PUB_SUBNETS[$i]="$PUB_ID"
+                tf_import "aws_subnet.public[$i]" "$PUB_ID"
+              fi
 
-            readarray -t PRIV_DB < <(aws ec2 describe-subnets \
-              --filters "Name=vpc-id,Values=$VPC_ID" "Name=tag:Type,Values=private-db" \
-              --query 'sort_by(Subnets,&AvailabilityZone)[].SubnetId' \
-              --output text --region "$REGION" 2>/dev/null | tr '\t' '\n' | grep -v '^$' || true)
-            for i in "${!PRIV_DB[@]}"; do
-              tf_import "aws_subnet.private_db[$i]" "${PRIV_DB[$i]}"
+              PRIV_APP_ID=$(find_subnet_id "${PREFIX}-private-app-$((i + 1))" "private-app" "10.0.$((i + 10)).0/24")
+              if [ -n "$PRIV_APP_ID" ] && [ "$PRIV_APP_ID" != "None" ] && [ "$PRIV_APP_ID" != "null" ]; then
+                PRIV_APP[$i]="$PRIV_APP_ID"
+                tf_import "aws_subnet.private_app[$i]" "$PRIV_APP_ID"
+              fi
+
+              PRIV_DB_ID=$(find_subnet_id "${PREFIX}-private-db-$((i + 1))" "private-db" "10.0.$((i + 20)).0/24")
+              if [ -n "$PRIV_DB_ID" ] && [ "$PRIV_DB_ID" != "None" ] && [ "$PRIV_DB_ID" != "null" ]; then
+                PRIV_DB[$i]="$PRIV_DB_ID"
+                tf_import "aws_subnet.private_db[$i]" "$PRIV_DB_ID"
+              fi
             done
 
             for i in 0 1; do
