@@ -23,6 +23,7 @@ public class AdminController : ControllerBase
     private readonly ILogger<AdminController> _logger;
     private readonly IRequestMonitoringService _monitoringService;
     private readonly IHubContext<ResourceHub>? _resourceHub;
+    private readonly IServiceScopeFactory _scopeFactory;
     private const int DefaultPageSize = 20;
     private const int MaxPageSize = 100;
 
@@ -34,6 +35,7 @@ public class AdminController : ControllerBase
         IRAGService documentRagService,
         ILogger<AdminController> logger,
         IRequestMonitoringService monitoringService,
+        IServiceScopeFactory scopeFactory,
         IHubContext<ResourceHub>? resourceHub = null)
     {
         _context = context;
@@ -44,6 +46,7 @@ public class AdminController : ControllerBase
         _logger = logger;
         _monitoringService = monitoringService;
         _resourceHub = resourceHub;
+        _scopeFactory = scopeFactory;
     }
 
     /// <summary>
@@ -160,9 +163,11 @@ public class AdminController : ControllerBase
     }
 
     /// <summary>
-    /// Upload a new file with label
+    /// Upload a new file with label - queues S3 upload and RAG processing to background to avoid request timeouts
     /// </summary>
     [HttpPost("files")]
+    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult> UploadFile([FromForm] FileUploadRequest request)
     {
         if (request.File == null || request.File.Length == 0)
@@ -209,13 +214,13 @@ public class AdminController : ControllerBase
         }
 
         string? requestId = null;
-            try
-            {
-                requestId = await _monitoringService.StartRequest("FileUpload", 
-                    $"Uploading: {request.File.FileName ?? string.Empty} (Label: {request.Label})");
-            await _monitoringService.UpdateRequestStatus(requestId, "Uploading file...");
+        try
+        {
+            requestId = await _monitoringService.StartRequest("FileUpload", 
+                $"Uploading: {request.File.FileName ?? string.Empty} (Label: {request.Label})");
+            await _monitoringService.UpdateRequestStatus(requestId, "Checking for duplicates...");
 
-            // Compute content hash for deduplication
+            // Compute content hash for deduplication (fast, compute once before reading file)
             using var hashStream = request.File.OpenReadStream();
             var contentHash = _mediaStorageService.ComputeContentHash(hashStream);
 
@@ -253,64 +258,46 @@ public class AdminController : ControllerBase
                 });
             }
 
-            await _monitoringService.UpdateRequestStatus(requestId, "Storing file...");
-            // Upload to storage
-            using var stream = request.File.OpenReadStream();
-            var contentType = request.File.ContentType ?? "application/octet-stream";
-            var storageKey = await _mediaStorageService.UploadMediaAsync(stream, request.File.FileName ?? string.Empty, contentType);
-
-            // Save to database
-                var managedFile = new ManagedFile
+            // Read uploaded bytes into memory immediately (fast, small buffer)
+            byte[] uploadedBytes;
+            using (var ms = new MemoryStream())
             {
-                Id = Guid.NewGuid(),
-                    FileName = request.File.FileName ?? string.Empty,
+                await request.File.CopyToAsync(ms);
+                uploadedBytes = ms.ToArray();
+            }
+
+            _logger.LogInformation("File upload received and queued: {FileName}, {Size} bytes, Label: {Label}", 
+                request.File.FileName, uploadedBytes.LongLength, request.Label);
+
+            // Create placeholder ManagedFile immediately (empty StorageKey = not-yet-uploaded)
+            var fileId = Guid.NewGuid();
+            var contentType = request.File.ContentType ?? "application/octet-stream";
+            var managedFile = new ManagedFile
+            {
+                Id = fileId,
+                FileName = request.File.FileName ?? string.Empty,
                 Label = string.IsNullOrWhiteSpace(request.Label) ? (request.File.FileName ?? "Untitled") : request.Label,
                 ContentType = contentType,
-                StorageKey = storageKey,
+                StorageKey = string.Empty,  // Will be populated when background upload completes
                 ContentHash = contentHash,
                 UploadedAt = DateTime.UtcNow,
-                FileSize = request.File.Length
+                FileSize = 0  // Will be populated when background upload completes
             };
 
             _context.ManagedFiles.Add(managedFile);
             await _context.SaveChangesAsync();
 
-            await _monitoringService.UpdateRequestStatus(requestId, "Processing for RAG...");
-            // Process file for RAG indexing
-            try
-            {
-                await _ragService.ProcessFileForRagAsync(
-                    managedFile.Id,
-                    managedFile.FileName,
-                    managedFile.ContentType,
-                    managedFile.StorageKey);
-                _logger.LogInformation("File {FileId} processed for RAG", managedFile.Id);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to process file {FileId} for RAG, but file was uploaded successfully", managedFile.Id);
-            }
+            // Invalidate cache so placeholder appears immediately
+            try { await InvalidateFilesCache(); } catch { /* best-effort */ }
+            try { await NotifyFilesChangedAsync(); } catch { /* best-effort */ }
 
-            // Invalidate cache
-            await InvalidateFilesCache();
+            await _monitoringService.UpdateRequestStatus(requestId, "Queued", "File accepted. Uploading to storage and processing for RAG in the background...");
 
-            await _monitoringService.CompleteRequest(requestId, true, 
-                $"File uploaded successfully: {managedFile.FileName}");
+            // Queue S3 upload and RAG processing to background task (keep request fast)
+            _ = Task.Run(() => ProcessQueuedFileUploadAsync(fileId, uploadedBytes, request.File.FileName ?? string.Empty, 
+                contentType, request.Label ?? string.Empty, contentHash, requestId));
 
-            await NotifyFilesChangedAsync();
-
-            return CreatedAtAction(nameof(GetFiles), new { id = managedFile.Id }, new
-            {
-                managedFile.Id,
-                managedFile.FileName,
-                managedFile.Label,
-                managedFile.ContentType,
-                managedFile.StorageKey,
-                managedFile.UploadedAt,
-                managedFile.FileSize,
-                managedFile.ContentHash,
-                deduplicated = false
-            });
+            return Accepted(new { id = fileId, requestId, status = "processing" });
         }
         catch (Exception ex)
         {
@@ -323,6 +310,98 @@ public class AdminController : ControllerBase
                 Detail = "An error occurred while uploading the file",
                 Status = StatusCodes.Status500InternalServerError
             });
+        }
+    }
+
+    private async Task ProcessQueuedFileUploadAsync(
+        Guid fileId,
+        byte[] uploadedBytes,
+        string fileName,
+        string contentType,
+        string label,
+        string contentHash,
+        string requestId)
+    {
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var mediaStorageService = scope.ServiceProvider.GetRequiredService<IMediaStorageService>();
+            var ragService = scope.ServiceProvider.GetRequiredService<IRagService>();
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var monitoringService = scope.ServiceProvider.GetService<IRequestMonitoringService>();
+
+            if (monitoringService != null)
+            {
+                await monitoringService.UpdateRequestStatus(requestId, "Uploading", "Uploading file to storage...");
+            }
+
+            // Upload to storage
+            using var stream = new MemoryStream(uploadedBytes);
+            var storageKey = await mediaStorageService.UploadMediaAsync(stream, fileName, contentType);
+
+            // Update ManagedFile with actual storage details
+            var managedFile = await db.ManagedFiles.FirstOrDefaultAsync(f => f.Id == fileId);
+            if (managedFile != null)
+            {
+                managedFile.FileName = fileName;
+                managedFile.ContentType = contentType;
+                managedFile.StorageKey = storageKey;
+                managedFile.FileSize = uploadedBytes.LongLength;
+                db.ManagedFiles.Update(managedFile);
+                await db.SaveChangesAsync();
+            }
+
+            if (monitoringService != null)
+            {
+                await monitoringService.UpdateRequestStatus(requestId, "Processing", "Processing file for RAG indexing...");
+            }
+
+            // Process file for RAG indexing
+            try
+            {
+                await ragService.ProcessFileForRagAsync(fileId, fileName, contentType, storageKey);
+                _logger.LogInformation("File {FileId} processed for RAG", fileId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to process file {FileId} for RAG, but file was uploaded successfully", fileId);
+            }
+
+            // Invalidate cache and notify listeners so UI reflects the completed upload
+            try { await InvalidateFilesCache(); } catch { /* best-effort */ }
+            try { await NotifyFilesChangedAsync(); } catch { /* best-effort */ }
+
+            if (monitoringService != null)
+            {
+                await monitoringService.CompleteRequest(requestId, true, $"File {fileName} uploaded and processed successfully");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Queued file upload failed for {FileId}", fileId);
+
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+                var mf = await db.ManagedFiles.FirstOrDefaultAsync(f => f.Id == fileId);
+                if (mf != null)
+                {
+                    mf.StorageKey = $"FAILED: {ex.Message}";
+                    db.ManagedFiles.Update(mf);
+                    await db.SaveChangesAsync();
+                }
+
+                var monitoringService = scope.ServiceProvider.GetService<IRequestMonitoringService>();
+                if (monitoringService != null)
+                {
+                    await monitoringService.CompleteRequest(requestId, false, error: ex.Message);
+                }
+            }
+            catch { /* best-effort cleanup */ }
+
+            try { await InvalidateFilesCache(); } catch { }
+            try { await NotifyFilesChangedAsync(); } catch { }
         }
     }
 
