@@ -3549,11 +3549,37 @@ async function init() {
             // Prefer a global shim if present (ensures reliability across browsers/load timing)
             if (typeof window.togglePromptFileSection === 'function') {
                 if (ADMIN_DEBUG) console.log('calling window.togglePromptFileSection()');
-                try { window.togglePromptFileSection(); return; } catch (e) { /* fallback below */ }
+                try {
+                    const before = window.getComputedStyle(promptFileSection);
+                    const wasHidden = before
+                        ? (before.display === 'none' || before.visibility === 'hidden' || before.opacity === '0')
+                        : (promptFileSection.style.display === 'none' || !promptFileSection.style.display);
+
+                    window.togglePromptFileSection();
+
+                    const after = window.getComputedStyle(promptFileSection);
+                    const isHiddenAfter = after
+                        ? (after.display === 'none' || after.visibility === 'hidden' || after.opacity === '0')
+                        : (promptFileSection.style.display === 'none' || !promptFileSection.style.display);
+
+                    if (wasHidden && !isHiddenAfter) {
+                        const _showBtn = document.getElementById('prompt-show-file-btn');
+                        if (_showBtn) _showBtn.textContent = '✕ Close';
+                        return;
+                    }
+
+                    if (!wasHidden && isHiddenAfter) {
+                        const _closeBtn = document.getElementById('prompt-show-file-btn');
+                        if (_closeBtn) _closeBtn.textContent = 'Attach file';
+                        return;
+                    }
+                } catch (e) { /* fallback below */ }
             }
             // Fallback: toggle using computed style for robustness
             const computed = window.getComputedStyle(promptFileSection);
-            const isCurrentlyHidden = computed ? computed.display === 'none' : (promptFileSection.style.display === 'none' || !promptFileSection.style.display);
+            const isCurrentlyHidden = computed
+                ? (computed.display === 'none' || computed.visibility === 'hidden' || computed.opacity === '0')
+                : (promptFileSection.style.display === 'none' || !promptFileSection.style.display);
             
             if (isCurrentlyHidden) {
                 promptFileSection.style.setProperty('display', 'block', 'important');
@@ -3618,7 +3644,23 @@ async function init() {
             // Prefer global shim when available
             if (typeof window.showPromptFilesPanel === 'function') {
                 if (ADMIN_DEBUG) console.log('calling window.showPromptFilesPanel()');
-                try { window.showPromptFilesPanel(); return; } catch (e) { /* fallback below */ }
+                try {
+                    window.showPromptFilesPanel();
+                    const filesPanelEl = document.getElementById('prompt-files-panel');
+                    const sectionState = window.getComputedStyle(promptFileSection);
+                    const filesState = filesPanelEl ? window.getComputedStyle(filesPanelEl) : null;
+                    const shimSucceeded = sectionState.display !== 'none'
+                        && sectionState.visibility !== 'hidden'
+                        && sectionState.opacity !== '0'
+                        && (!filesState || filesState.display !== 'none');
+
+                    if (shimSucceeded) {
+                        updatePromptFilesList();
+                        const _paperclipShowBtn = document.getElementById('prompt-show-file-btn');
+                        if (_paperclipShowBtn) _paperclipShowBtn.textContent = '✕ Close';
+                        return;
+                    }
+                } catch (e) { /* fallback below */ }
             }
             const filesPanel = document.getElementById('prompt-files-panel');
             // Hide preview panel, show only files panel
