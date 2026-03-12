@@ -463,12 +463,14 @@ public class DocumentsController : ControllerBase
             {
                 d.Id,
                 d.FileName,
+                OriginalFileName = string.IsNullOrWhiteSpace(d.OriginalFileName) ? d.FileName : d.OriginalFileName,
                 d.DocumentType,
                 d.TotalPages,
                 d.FileSize,
                 d.UploadedAt,
                 d.IsProcessed,
                 d.ProcessedAt,
+                d.ManagedFileId,
                 ChunkCount = d.Chunks.Count
             })
             .ToListAsync();

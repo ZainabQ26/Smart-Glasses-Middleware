@@ -20,7 +20,7 @@ export default function App() {
   const [aiResponse, setAiResponse] = useState(null);
   const [usedAdvancedModel, setUsedAdvancedModel] = useState(false);
   const [speechMode, setSpeechMode] = useState("auto"); // auto | webspeech-only | whisper-only
-  const [pendingAction, setPendingAction] = useState(null); // { type: "OPEN_FILE_PICKER" } | { type: "SELECT_DOCUMENT", id, name } | null
+  const [pendingAction, setPendingAction] = useState(null); // { type: "SHOW_RECENT_FILES", files } | { type: "SELECT_DOCUMENT", id, name } | null
   const [logOpen, setLogOpen]     = useState(false);
 
   const activatedRef        = useRef(false);
@@ -29,7 +29,6 @@ export default function App() {
   const listeningTimeoutRef = useRef(null);
   const workerRef           = useRef(null);
   const sendToAIRef         = useRef(null);
-  const fileInputRef        = useRef(null);
   const whisperFallbackNeededRef = useRef(false);
   const webSpeechHandledRef      = useRef(false);
   const lowConfidenceTranscriptRef = useRef(null);
@@ -129,65 +128,62 @@ export default function App() {
   const resumeListeningRef = useRef(resumeListening);
   useEffect(() => { resumeListeningRef.current = resumeListening; }, [resumeListening]);
 
-  const uploadSelectedFile = useCallback(async (file) => {
-    if (!file) return;
+  const openDocumentPreview = useCallback((document) => {
+    if (!document) return;
 
-    const extension = file.name.includes(".")
-      ? file.name.split(".").pop().toLowerCase()
-      : "";
+    const previewId = document.previewId ?? document.managedFileId ?? document.id;
+    const name = document.name ?? document.originalFileName ?? document.fileName ?? "Document";
 
-    if (["wav", "mp3", "m4a", "ogg", "webm"].includes(extension)) {
-      addLog("❌ Audio files are not supported for document upload.", "error");
+    if (!previewId) {
+      addLog("❌ Could not open the selected document.", "error");
       setPendingAction(null);
-      setAiResponse("Audio files are not supported for document upload.");
+      setAiResponse("Could not open that document.");
       return;
     }
 
+    const targetUrl = `/admin.html?preview=${previewId}&name=${encodeURIComponent(name)}`;
+    setPendingAction(null);
+
+    const previewWindow = window.open(targetUrl, "_blank");
+    if (!previewWindow) {
+      window.location.assign(targetUrl);
+    }
+  }, [addLog]);
+
+  const fetchRecentDocuments = useCallback(async () => {
     try {
-      setStatus("sending");
+      const response = await fetch("/api/documents?page=1&pageSize=5");
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      const payload = await response.json();
+      const rawDocuments = Array.isArray(payload?.documents)
+        ? payload.documents
+        : Array.isArray(payload?.Documents)
+          ? payload.Documents
+          : [];
+
+      const recentFiles = rawDocuments
+        .map((document) => ({
+          id: document.id ?? document.Id ?? null,
+          previewId: document.managedFileId ?? document.ManagedFileId ?? document.id ?? document.Id ?? null,
+          name: document.originalFileName ?? document.OriginalFileName ?? document.fileName ?? document.FileName ?? "Document",
+          uploadedAt: document.uploadedAt ?? document.UploadedAt ?? null,
+        }))
+        .filter((document) => document.id && document.name)
+        .slice(0, 5);
+
+      if (recentFiles.length === 0) {
+        setPendingAction(null);
+        setAiResponse("No uploaded files were found. Please upload a file first.");
+        return;
+      }
+
       setAiResponse(null);
-      setPendingAction(null);
-      addLog(`⬆️ Uploading "${file.name}"…`, "info");
-
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const response = await fetch("/api/documents/upload", {
-        method: "POST",
-        body: formData,
-      });
-
-      const responseText = await response.text();
-      let payload = null;
-      if (responseText) {
-        try {
-          payload = JSON.parse(responseText);
-        } catch (_) {
-          payload = null;
-        }
-      }
-
-      if (!response.ok) {
-        throw new Error(
-          payload?.details || payload?.error || responseText || `HTTP ${response.status}`
-        );
-      }
-
-      const documentId = payload?.id ?? payload?.Id ?? null;
-      addLog(`✅ Uploaded "${file.name}"`, "doc");
-
-      if (documentId) {
-        setPendingAction({ type: "SELECT_DOCUMENT", id: documentId, name: file.name });
-      } else {
-        setAiResponse(`Uploaded "${file.name}" successfully.`);
-      }
+      setPendingAction({ type: "SHOW_RECENT_FILES", files: recentFiles });
     } catch (err) {
-      addLog(`❌ Upload failed: ${err.message}`, "error");
+      addLog(`❌ Recent files error: ${err.message}`, "error");
       setPendingAction(null);
-      setAiResponse(`Upload failed: ${err.message}`);
-    } finally {
-      setStatus("idle");
-      if (fileInputRef.current) fileInputRef.current.value = "";
+      setAiResponse("I couldn't load the recent files list.");
     }
   }, [addLog]);
 
@@ -225,13 +221,13 @@ export default function App() {
 
       // ── Action token interception ────────────────────────────────────────
       if (answer === "__ACTION:OPEN_FILE_PICKER__" || answer === "__ACTION:SHOW_RECENT_FILES__") {
-        addLog("📂 Command: open file picker", "voice");
+        addLog("📂 Command: show recent uploaded files", "voice");
         setAiResponse(null);
-        setPendingAction({ type: "OPEN_FILE_PICKER" });
+        await fetchRecentDocuments();
       } else if (answer.startsWith("__ACTION:SELECT_DOCUMENT:")) {
         const parts = answer.split(":");
         const docId   = parts[2];
-        const docName = parts.slice(3).join(":");
+        const docName = parts.slice(3).join(":") || "Document";
         addLog(`📄 Command: select document "${docName}"`, "voice");
         setAiResponse(null);
         setPendingAction({ type: "SELECT_DOCUMENT", id: docId, name: docName });
@@ -248,7 +244,7 @@ export default function App() {
     } finally {
       resumeListeningRef.current();
     }
-  }, [addLog]);
+  }, [addLog, fetchRecentDocuments]);
 
   sendToAIRef.current = sendToAI;
   useEffect(() => { sendToAIRef.current = sendToAI; }, [sendToAI]);
@@ -501,19 +497,6 @@ export default function App() {
 
   return (
     <div style={styles.page}>
-      {/* Hidden file input — triggered by tap after "open file" command */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        style={{ display: "none" }}
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (!file) return;
-          addLog(`📎 File selected: ${file.name}`, "info");
-          void uploadSelectedFile(file);
-        }}
-      />
-
       <div style={styles.indicator}>
         <span style={dotStyle} />
         <span style={styles.indicatorText}>{btnLabel}</span>
@@ -551,16 +534,28 @@ export default function App() {
                 )}
               </div>
             )}
-            {pendingAction?.type === "OPEN_FILE_PICKER" && (
+            {pendingAction?.type === "SHOW_RECENT_FILES" && (
               <div style={styles.actionCard}>
-                <p style={styles.actionCardTitle}>📂 Open File</p>
-                <p style={styles.actionCardHint}>Tap the button below to open the file picker</p>
-                <button
-                  style={styles.actionBtn}
-                  onClick={() => { fileInputRef.current?.click(); }}
-                >
-                  Browse Files
-                </button>
+                <p style={styles.actionCardTitle}>📂 Recent Uploaded Files</p>
+                <p style={styles.actionCardHint}>Pick one of the last 5 uploaded files to open.</p>
+                <div style={styles.actionList}>
+                  {pendingAction.files.map((file, index) => (
+                    <button
+                      key={file.previewId ?? file.id ?? `${file.name}-${index}`}
+                      type="button"
+                      style={styles.actionListBtn}
+                      onClick={() => openDocumentPreview(file)}
+                    >
+                      <span style={styles.actionListIndex}>{index + 1}</span>
+                      <span style={styles.actionListBody}>
+                        <span style={styles.actionListName}>{file.name}</span>
+                        {file.uploadedAt && (
+                          <span style={styles.actionListMeta}>{formatActionTime(file.uploadedAt)}</span>
+                        )}
+                      </span>
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
             {pendingAction?.type === "SELECT_DOCUMENT" && (
@@ -569,12 +564,9 @@ export default function App() {
                 <p style={styles.actionCardDoc}>{pendingAction.name}</p>
                 <button
                   style={styles.actionBtnSecondary}
-                  onClick={() => {
-                    window.open(`/admin.html?preview=${pendingAction.id}&name=${encodeURIComponent(pendingAction.name)}`, "_blank");
-                    setPendingAction(null);
-                  }}
+                  onClick={() => openDocumentPreview({ previewId: pendingAction.id, name: pendingAction.name })}
                 >
-                  View in Admin Panel →
+                  Preview Document →
                 </button>
               </div>
             )}
@@ -608,6 +600,15 @@ export default function App() {
       )}
     </div>
   );
+}
+
+function formatActionTime(value) {
+  if (!value) return "";
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "";
+
+  return parsed.toLocaleString();
 }
 
 function logBg(type) {
@@ -737,6 +738,56 @@ const styles = {
     color: "#e0e0e0",
     fontWeight: 600,
     wordBreak: "break-all",
+  },
+  actionList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+    marginTop: 4,
+  },
+  actionListBtn: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    width: "100%",
+    padding: "10px 12px",
+    background: "#14212f",
+    color: "#fff",
+    border: "1px solid #2a4a6a",
+    borderRadius: 10,
+    fontSize: "0.9rem",
+    cursor: "pointer",
+    textAlign: "left",
+  },
+  actionListIndex: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 28,
+    height: 28,
+    borderRadius: "50%",
+    background: "#2a7ae2",
+    color: "#fff",
+    fontWeight: 700,
+    fontSize: "0.85rem",
+    flexShrink: 0,
+  },
+  actionListBody: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 2,
+    minWidth: 0,
+  },
+  actionListName: {
+    color: "#e0e0e0",
+    fontWeight: 600,
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  },
+  actionListMeta: {
+    color: "#8aa4be",
+    fontSize: "0.75rem",
   },
   actionBtn: {
     marginTop: 4,

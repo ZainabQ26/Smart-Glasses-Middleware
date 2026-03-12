@@ -31,7 +31,10 @@ public class SelectDocumentTaskHandler : ITaskHandler
             var previewId = lastDoc.ManagedFileId.HasValue
                 ? lastDoc.ManagedFileId.Value.ToString()
                 : lastDoc.Id.ToString();
-            return $"__ACTION:SELECT_DOCUMENT:{previewId}:{lastDoc.OriginalFileName}";
+            var displayName = string.IsNullOrWhiteSpace(lastDoc.OriginalFileName)
+                ? lastDoc.FileName
+                : lastDoc.OriginalFileName;
+            return $"__ACTION:SELECT_DOCUMENT:{previewId}:{displayName}";
         }
 
         // Final fallback: labelled ManagedFiles (direct uploads without deep processing)
