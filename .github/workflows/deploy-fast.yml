@@ -349,15 +349,19 @@ jobs:
             exit 1
           fi
 
+          # Wait up to 5 minutes (20 x 15s) for DB to finish cold-starting.
+          # 503 = container is up but Postgres not ready yet — keep waiting.
+          # 502 = no healthy target in ALB yet — keep waiting.
           echo "Health check: http://${ALB_DNS}/health"
-          for i in $(seq 1 6); do
+          for i in $(seq 1 20); do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://${ALB_DNS}/health" || true)
-            echo "Attempt $i: HTTP $STATUS"
+            echo "Attempt $i/20: HTTP $STATUS"
             if [ "$STATUS" = "200" ]; then
+              echo "Health check passed."
               exit 0
             fi
             sleep 15
           done
 
-          echo "Health endpoint did not return 200 after retries."
+          echo "Health endpoint did not return 200 after 5 minutes."
           exit 1
