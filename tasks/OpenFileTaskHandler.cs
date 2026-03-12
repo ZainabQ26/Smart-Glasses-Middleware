@@ -6,6 +6,6 @@ public class OpenFileTaskHandler : ITaskHandler
 
     public Task<string> HandleAsync(string input)
     {
-        return Task.FromResult("__ACTION:SHOW_RECENT_FILES__");
+        return Task.FromResult("__ACTION:OPEN_FILE_PICKER__");
     }
 }
