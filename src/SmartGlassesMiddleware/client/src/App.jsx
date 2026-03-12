@@ -129,6 +129,68 @@ export default function App() {
   const resumeListeningRef = useRef(resumeListening);
   useEffect(() => { resumeListeningRef.current = resumeListening; }, [resumeListening]);
 
+  const uploadSelectedFile = useCallback(async (file) => {
+    if (!file) return;
+
+    const extension = file.name.includes(".")
+      ? file.name.split(".").pop().toLowerCase()
+      : "";
+
+    if (["wav", "mp3", "m4a", "ogg", "webm"].includes(extension)) {
+      addLog("❌ Audio files are not supported for document upload.", "error");
+      setPendingAction(null);
+      setAiResponse("Audio files are not supported for document upload.");
+      return;
+    }
+
+    try {
+      setStatus("sending");
+      setAiResponse(null);
+      setPendingAction(null);
+      addLog(`⬆️ Uploading "${file.name}"…`, "info");
+
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch("/api/documents/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      const responseText = await response.text();
+      let payload = null;
+      if (responseText) {
+        try {
+          payload = JSON.parse(responseText);
+        } catch (_) {
+          payload = null;
+        }
+      }
+
+      if (!response.ok) {
+        throw new Error(
+          payload?.details || payload?.error || responseText || `HTTP ${response.status}`
+        );
+      }
+
+      const documentId = payload?.id ?? payload?.Id ?? null;
+      addLog(`✅ Uploaded "${file.name}"`, "doc");
+
+      if (documentId) {
+        setPendingAction({ type: "SELECT_DOCUMENT", id: documentId, name: file.name });
+      } else {
+        setAiResponse(`Uploaded "${file.name}" successfully.`);
+      }
+    } catch (err) {
+      addLog(`❌ Upload failed: ${err.message}`, "error");
+      setPendingAction(null);
+      setAiResponse(`Upload failed: ${err.message}`);
+    } finally {
+      setStatus("idle");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }, [addLog]);
+
   // ── Send transcript to AI ─────────────────────────────────────────────────
   const sendToAI = useCallback(async (text) => {
     try {
@@ -162,7 +224,7 @@ export default function App() {
       const usedAdvanced = data?.usedAdvancedModel ?? data?.UsedAdvancedModel ?? data?.usedAdvanced ?? false;
 
       // ── Action token interception ────────────────────────────────────────
-      if (answer === "__ACTION:OPEN_FILE_PICKER__") {
+      if (answer === "__ACTION:OPEN_FILE_PICKER__" || answer === "__ACTION:SHOW_RECENT_FILES__") {
         addLog("📂 Command: open file picker", "voice");
         setAiResponse(null);
         setPendingAction({ type: "OPEN_FILE_PICKER" });
@@ -446,9 +508,9 @@ export default function App() {
         style={{ display: "none" }}
         onChange={(e) => {
           const file = e.target.files?.[0];
-          if (file) addLog(`📎 File selected: ${file.name}`, "info");
-          setPendingAction(null);
-          e.target.value = "";
+          if (!file) return;
+          addLog(`📎 File selected: ${file.name}`, "info");
+          void uploadSelectedFile(file);
         }}
       />
 
@@ -507,7 +569,7 @@ export default function App() {
                 <p style={styles.actionCardDoc}>{pendingAction.name}</p>
                 <button
                   style={styles.actionBtnSecondary}
-                  on Click={() => {
+                  onClick={() => {
                     window.open(`/admin.html?preview=${pendingAction.id}&name=${encodeURIComponent(pendingAction.name)}`, "_blank");
                     setPendingAction(null);
                   }}
