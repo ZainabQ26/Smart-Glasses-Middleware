@@ -1,0 +1,363 @@
+name: Fast Deploy (No Terraform)
+
+on:
+  push:
+    tags:
+      - "deploy-*"
+  workflow_dispatch:
+
+# Keep fast deploys serial per ref so two deploy tags cannot race each other.
+concurrency:
+  group: fast-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-api:
+    name: Build & push API image
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_TERRAFORM_ROLE }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          mask-aws-account-id: false
+
+      - name: Login to ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Ensure ECR repository exists
+        run: |
+          aws ecr describe-repositories --repository-names "smart-glasses-dev-api" --region "$AWS_REGION" >/dev/null 2>&1 || \
+          aws ecr create-repository --repository-name "smart-glasses-dev-api" --image-scanning-configuration scanOnPush=true --region "$AWS_REGION"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build & push API image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./src/SmartGlassesMiddleware/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.ecr-login.outputs.registry }}/smart-glasses-dev-api:${{ github.sha }}
+            ${{ steps.ecr-login.outputs.registry }}/smart-glasses-dev-api:latest
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy-api:
+    name: Roll out API on ECS
+    needs: build-api
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+    outputs:
+      cluster: ${{ steps.rollout.outputs.cluster }}
+      service: ${{ steps.rollout.outputs.service }}
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_TERRAFORM_ROLE }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          mask-aws-account-id: false
+
+      - name: Register new task definition revision and update service
+        id: rollout
+        run: |
+          set -euo pipefail
+
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          IMAGE="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/smart-glasses-dev-api:${GITHUB_SHA}"
+
+          CLUSTER="smart-glasses-dev-cluster"
+          SERVICE="smart-glasses-dev-api-service"
+
+          CLUSTER_STATUS=$(aws ecs describe-clusters --clusters "$CLUSTER" --region "$AWS_REGION" --query 'clusters[0].status' --output text 2>/dev/null || true)
+          if [ -z "$CLUSTER_STATUS" ] || [ "$CLUSTER_STATUS" = "None" ] || [ "$CLUSTER_STATUS" = "null" ]; then
+            CLUSTER=$(aws ecs list-clusters --region "$AWS_REGION" --query 'clusterArns[?contains(@, `smart-glasses-dev`)] | [0]' --output text 2>/dev/null | awk -F/ '{print $NF}')
+          fi
+          if [ -z "$CLUSTER" ] || [ "$CLUSTER" = "None" ] || [ "$CLUSTER" = "null" ]; then
+            echo "Unable to resolve ECS cluster for dev deploy."
+            exit 1
+          fi
+
+          SERVICE_STATUS=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" --region "$AWS_REGION" --query 'services[0].status' --output text 2>/dev/null || true)
+          if [ -z "$SERVICE_STATUS" ] || [ "$SERVICE_STATUS" = "None" ] || [ "$SERVICE_STATUS" = "null" ]; then
+            SERVICE=$(aws ecs list-services \
+              --cluster "$CLUSTER" --region "$AWS_REGION" \
+              --query 'serviceArns[?ends_with(@, `-api-service`)] | [0]' \
+              --output text 2>/dev/null | awk -F/ '{print $NF}')
+          fi
+          if [ -z "$SERVICE" ] || [ "$SERVICE" = "None" ] || [ "$SERVICE" = "null" ]; then
+            echo "Unable to resolve ECS API service in cluster $CLUSTER."
+            exit 1
+          fi
+
+          TASK_DEF_ARN=$(aws ecs describe-services \
+            --cluster "$CLUSTER" --services "$SERVICE" --region "$AWS_REGION" \
+            --query 'services[0].taskDefinition' --output text)
+          if [ -z "$TASK_DEF_ARN" ] || [ "$TASK_DEF_ARN" = "None" ] || [ "$TASK_DEF_ARN" = "null" ]; then
+            echo "Unable to resolve current task definition for $SERVICE."
+            exit 1
+          fi
+
+          aws ecs describe-task-definition \
+            --task-definition "$TASK_DEF_ARN" \
+            --region "$AWS_REGION" \
+            --query 'taskDefinition' \
+            --output json > taskdef-current.json
+
+          jq --arg IMAGE "$IMAGE" '
+            .containerDefinitions |= map(if .name == "api" then .image = $IMAGE else . end)
+            | del(
+                .taskDefinitionArn,
+                .revision,
+                .status,
+                .requiresAttributes,
+                .compatibilities,
+                .registeredAt,
+                .registeredBy,
+                .deregisteredAt
+              )
+          ' taskdef-current.json > taskdef-next.json
+
+          NEW_TASK_DEF_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://taskdef-next.json \
+            --region "$AWS_REGION" \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+
+          aws ecs update-service \
+            --cluster "$CLUSTER" \
+            --service "$SERVICE" \
+            --task-definition "$NEW_TASK_DEF_ARN" \
+            --force-new-deployment \
+            --region "$AWS_REGION" >/dev/null
+
+          echo "cluster=$CLUSTER" >> "$GITHUB_OUTPUT"
+          echo "service=$SERVICE" >> "$GITHUB_OUTPUT"
+          echo "Updated $SERVICE in $CLUSTER to $NEW_TASK_DEF_ARN"
+
+  deploy-frontend:
+    name: Build & deploy frontend to S3
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: src/SmartGlassesMiddleware/client/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: src/SmartGlassesMiddleware/client
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: src/SmartGlassesMiddleware/client
+        run: npm run build
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_TERRAFORM_ROLE }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          mask-aws-account-id: false
+
+      - name: Sync frontend to S3
+        run: |
+          set -euo pipefail
+
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          BUCKET="smart-glasses-dev-frontend-${ACCOUNT_ID}"
+          WWWROOT="src/SmartGlassesMiddleware/wwwroot"
+
+          aws s3api head-bucket --bucket "$BUCKET" >/dev/null 2>&1 || {
+            echo "Frontend bucket not found: $BUCKET"
+            exit 1
+          }
+
+          echo "Deploying frontend to s3://$BUCKET"
+
+          aws s3 cp "$WWWROOT/index.html" "s3://$BUCKET/index.html" \
+            --cache-control "no-cache,no-store,must-revalidate" \
+            --content-type "text/html"
+
+          aws s3 sync "$WWWROOT/assets/" "s3://$BUCKET/assets/" \
+            --cache-control "public,max-age=31536000,immutable" \
+            --delete
+
+          aws s3 sync "$WWWROOT/" "s3://$BUCKET/" \
+            --exclude "index.html" \
+            --exclude "assets/*" \
+            --cache-control "public,max-age=31536000,immutable" \
+            --delete
+
+      - name: Invalidate CloudFront cache
+        run: |
+          set -euo pipefail
+
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          BUCKET="smart-glasses-dev-frontend-${ACCOUNT_ID}"
+
+          CF_ID=$(aws cloudfront list-distributions --output json 2>/dev/null | jq -r --arg BUCKET "$BUCKET" '
+            .DistributionList.Items[]?
+            | select(any(.Origins.Items[]?; .DomainName | contains($BUCKET)))
+            | .Id
+          ' | head -1)
+
+          if [ -z "$CF_ID" ] || [ "$CF_ID" = "null" ] || [ "$CF_ID" = "None" ]; then
+            echo "No CloudFront distribution found for bucket $BUCKET; skipping invalidation."
+            exit 0
+          fi
+
+          aws cloudfront create-invalidation \
+            --distribution-id "$CF_ID" \
+            --paths "/index.html" "/*.html" >/dev/null
+
+          echo "Invalidated CloudFront distribution $CF_ID"
+
+  verify-deployment:
+    name: Verify API stability and health
+    needs: [deploy-api, deploy-frontend]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_TERRAFORM_ROLE }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          mask-aws-account-id: false
+
+      - name: Wait for ECS service to stabilize
+        run: |
+          set -euo pipefail
+
+          CLUSTER="${{ needs.deploy-api.outputs.cluster }}"
+          SERVICE="${{ needs.deploy-api.outputs.service }}"
+          CLUSTER=${CLUSTER:-smart-glasses-dev-cluster}
+          SERVICE=${SERVICE:-smart-glasses-dev-api-service}
+
+          DESIRED=$(aws ecs describe-services \
+            --cluster "$CLUSTER" --services "$SERVICE" --region "$AWS_REGION" \
+            --query 'services[0].desiredCount' --output text 2>/dev/null || echo "0")
+
+          if [ "$DESIRED" = "0" ]; then
+            echo "Service desired count is 0 (scale-to-zero). Skipping strict stability wait."
+            exit 0
+          fi
+
+          STABLE=false
+          for attempt in $(seq 1 30); do
+            ECS_JSON=$(aws ecs describe-services \
+              --cluster "$CLUSTER" --services "$SERVICE" --region "$AWS_REGION" \
+              --query 'services[0].{running:runningCount,desired:desiredCount,pending:pendingCount}' \
+              --output json 2>/dev/null || echo '{}')
+
+            RUNNING=$(echo "$ECS_JSON" | jq -r '.running // 0')
+            EXPECTED=$(echo "$ECS_JSON" | jq -r '.desired // 1')
+            PENDING=$(echo "$ECS_JSON" | jq -r '.pending // 99')
+
+            echo "Attempt $attempt/30: running=$RUNNING desired=$EXPECTED pending=$PENDING"
+            if [ "$RUNNING" = "$EXPECTED" ] && [ "$PENDING" = "0" ]; then
+              STABLE=true
+              break
+            fi
+
+            if [ $((attempt % 5)) -eq 0 ]; then
+              echo "--- Recent ECS service events ---"
+              aws ecs describe-services \
+                --cluster "$CLUSTER" --services "$SERVICE" --region "$AWS_REGION" \
+                --query 'services[0].events[0:5].[createdAt,message]' \
+                --output text 2>/dev/null || true
+            fi
+
+            sleep 30
+          done
+
+          if [ "$STABLE" = "false" ]; then
+            echo "ECS service did not stabilize in time."
+            exit 1
+          fi
+
+      - name: Smoke-test health endpoint
+        run: |
+          set -euo pipefail
+
+          CLUSTER="${{ needs.deploy-api.outputs.cluster }}"
+          SERVICE="${{ needs.deploy-api.outputs.service }}"
+          CLUSTER=${CLUSTER:-smart-glasses-dev-cluster}
+          SERVICE=${SERVICE:-smart-glasses-dev-api-service}
+
+          DESIRED=$(aws ecs describe-services \
+            --cluster "$CLUSTER" --services "$SERVICE" --region "$AWS_REGION" \
+            --query 'services[0].desiredCount' --output text 2>/dev/null || echo "0")
+
+          if [ "$DESIRED" = "0" ]; then
+            echo "Service desired count is 0 (scale-to-zero). Skipping strict /health check."
+            exit 0
+          fi
+
+          TG_ARN=$(aws ecs describe-services \
+            --cluster "$CLUSTER" --services "$SERVICE" --region "$AWS_REGION" \
+            --query 'services[0].loadBalancers[0].targetGroupArn' \
+            --output text 2>/dev/null || true)
+
+          if [ -z "$TG_ARN" ] || [ "$TG_ARN" = "None" ] || [ "$TG_ARN" = "null" ]; then
+            echo "Could not resolve target group ARN for service $SERVICE"
+            exit 1
+          fi
+
+          LB_ARN=$(aws elbv2 describe-target-groups \
+            --target-group-arns "$TG_ARN" --region "$AWS_REGION" \
+            --query 'TargetGroups[0].LoadBalancerArns[0]' --output text 2>/dev/null || true)
+
+          ALB_DNS=$(aws elbv2 describe-load-balancers \
+            --load-balancer-arns "$LB_ARN" --region "$AWS_REGION" \
+            --query 'LoadBalancers[0].DNSName' --output text 2>/dev/null || true)
+
+          if [ -z "$ALB_DNS" ] || [ "$ALB_DNS" = "None" ] || [ "$ALB_DNS" = "null" ]; then
+            echo "Could not resolve ALB DNS for service $SERVICE"
+            exit 1
+          fi
+
+          echo "Health check: http://${ALB_DNS}/health"
+          for i in $(seq 1 6); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://${ALB_DNS}/health" || true)
+            echo "Attempt $i: HTTP $STATUS"
+            if [ "$STATUS" = "200" ]; then
+              exit 0
+            fi
+            sleep 15
+          done
+
+          echo "Health endpoint did not return 200 after retries."
+          exit 1
