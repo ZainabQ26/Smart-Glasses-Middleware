@@ -843,23 +843,26 @@ static IAsyncPolicy<HttpResponseMessage> GetCircuitBreakerPolicy()
         .CircuitBreakerAsync(5, TimeSpan.FromSeconds(30));
 }
 
-// Health endpoint to allow Docker healthchecks to verify service dependencies
-// Cache-Control: no-store ensures CloudFront never caches this response — if it did,
-// a cached 200 could be served while ECS is sleeping, preventing the wake alarm from firing.
+// Health endpoint for WakeupGate to detect when ECS is up (after Lambda scale-up).
+// The app is considered "ready" as soon as ECS/app are running — DB issues are logged but don't fail the check.
+// This allows WakeupGate to unblock and show app UI while Postgres/RDS finish cold-starting in the background.
+// Cache-Control: no-store ensures CloudFront never caches this response.
 app.MapGet("/health", async (IServiceProvider services, HttpContext context) =>
 {
     context.Response.Headers.CacheControl = "no-store, no-cache, must-revalidate";
     context.Response.Headers.Pragma = "no-cache";
+    
+    // Always return 200 — app process is running.
+    // Dependency checks are logged but don't block WakeupGate unblocking.
     using var scope = services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-    // Redis is optional — not registered when enable_redis=false (dev/cost-optimised)
     var redis = scope.ServiceProvider.GetService<IConnectionMultiplexer>();
     var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
 
     var checks = new Dictionary<string, object>();
-    var allHealthy = true;
 
-    // Check Postgres
+    // Check Postgres (cold RDS may not be ready yet, but app can still start)
     var dbOk = false;
     string? dbError = null;
     try
@@ -871,9 +874,10 @@ app.MapGet("/health", async (IServiceProvider services, HttpContext context) =>
         dbError = ex.Message;
     }
     checks["postgres"] = new { healthy = dbOk, error = dbError };
-    allHealthy &= dbOk;
+    if (!dbOk)
+        logger.LogWarning("Postgres health check failed: {DbError}", dbError);
 
-    // Check Redis (skipped when not configured — intentionally disabled in cost-optimised environments)
+    // Check Redis (skipped when not configured)
     if (redis != null)
     {
         var redisOk = false;
@@ -888,9 +892,10 @@ app.MapGet("/health", async (IServiceProvider services, HttpContext context) =>
             redisError = ex.Message;
         }
         checks["redis"] = new { healthy = redisOk, error = redisError };
-        allHealthy &= redisOk;
+        if (!redisOk)
+            logger.LogWarning("Redis health check failed: {RedisError}", redisError);
 
-        // Check Redis Pub/Sub bridge (only relevant when Redis is configured)
+        // Check Redis Pub/Sub bridge
         var bridgeOk = false;
         string? bridgeError = null;
         try
@@ -912,7 +917,8 @@ app.MapGet("/health", async (IServiceProvider services, HttpContext context) =>
             bridgeError = ex.Message;
         }
         checks["redis-pubsub-bridge"] = new { healthy = bridgeOk, error = bridgeError };
-        allHealthy &= bridgeOk;
+        if (!bridgeOk)
+            logger.LogWarning("Redis Pub/Sub bridge check failed: {BridgeError}", bridgeError);
     }
     else
     {
@@ -922,17 +928,13 @@ app.MapGet("/health", async (IServiceProvider services, HttpContext context) =>
 
     var result = new
     {
-        status = allHealthy ? "Healthy" : "Unhealthy",
+        status = "Healthy", // Always healthy — ECS is up
         checks = checks,
         timestamp = DateTime.UtcNow
     };
 
-    if (allHealthy)
-    {
-        return Results.Ok(result);
-    }
-
-    return Results.Json(result, statusCode: 503);
+    // Always return 200 so WakeupGate unblocks even if DB/cache are still booting
+    return Results.Ok(result);
 });
 
 // Metrics endpoint to view application statistics
