@@ -106,7 +106,14 @@ builder.Services.AddHttpLogging(options =>
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
     ?? "Host=localhost;Database=smartglasses;Username=postgres;Password=postgres";
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseNpgsql(connectionString, o => o.UseVector()));
+    options.UseNpgsql(connectionString, o =>
+    {
+        o.UseVector();
+        o.EnableRetryOnFailure(
+            maxRetryCount: 10,
+            maxRetryDelay: TimeSpan.FromSeconds(10),
+            errorCodesToAdd: null);
+    }));
 
 // Configure Redis (only when a connection string is provided)
 var redisConnection = builder.Configuration.GetConnectionString("Redis");
@@ -843,26 +850,24 @@ static IAsyncPolicy<HttpResponseMessage> GetCircuitBreakerPolicy()
         .CircuitBreakerAsync(5, TimeSpan.FromSeconds(30));
 }
 
-// Health endpoint for WakeupGate to detect when ECS is up (after Lambda scale-up).
-// The app is considered "ready" as soon as ECS/app are running — DB issues are logged but don't fail the check.
-// This allows WakeupGate to unblock and show app UI while Postgres/RDS finish cold-starting in the background.
+// Health endpoint used by WakeupGate, ALB health checks, and deployment smoke tests.
+// Postgres readiness is required before the app is considered ready for traffic.
+// Redis status is reported for diagnostics but does not block startup.
 // Cache-Control: no-store ensures CloudFront never caches this response.
 app.MapGet("/health", async (IServiceProvider services, HttpContext context) =>
 {
     context.Response.Headers.CacheControl = "no-store, no-cache, must-revalidate";
     context.Response.Headers.Pragma = "no-cache";
-    
-    // Always return 200 — app process is running.
-    // Dependency checks are logged but don't block WakeupGate unblocking.
+
     using var scope = services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
     var redis = scope.ServiceProvider.GetService<IConnectionMultiplexer>();
-    var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
     var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
 
     var checks = new Dictionary<string, object>();
+    var ready = true;
 
-    // Check Postgres (cold RDS may not be ready yet, but app can still start)
+    // Postgres is required for API traffic.
     var dbOk = false;
     string? dbError = null;
     try
@@ -874,10 +879,11 @@ app.MapGet("/health", async (IServiceProvider services, HttpContext context) =>
         dbError = ex.Message;
     }
     checks["postgres"] = new { healthy = dbOk, error = dbError };
+    ready &= dbOk;
     if (!dbOk)
         logger.LogWarning("Postgres health check failed: {DbError}", dbError);
 
-    // Check Redis (skipped when not configured)
+    // Redis is useful but non-blocking for readiness.
     if (redis != null)
     {
         var redisOk = false;
@@ -928,13 +934,14 @@ app.MapGet("/health", async (IServiceProvider services, HttpContext context) =>
 
     var result = new
     {
-        status = "Healthy", // Always healthy — ECS is up
+        status = ready ? "Healthy" : "Starting",
         checks = checks,
         timestamp = DateTime.UtcNow
     };
 
-    // Always return 200 so WakeupGate unblocks even if DB/cache are still booting
-    return Results.Ok(result);
+    return ready
+        ? Results.Ok(result)
+        : Results.Json(result, statusCode: 503);
 });
 
 // Metrics endpoint to view application statistics

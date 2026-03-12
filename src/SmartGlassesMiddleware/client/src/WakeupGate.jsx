@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 
 const POLL_INTERVAL_MS   = 4_000;   // how often to probe /health while sleeping
-const WAKE_TIMEOUT_MS    = 300_000; // allow up to 5 min when ECS + RDS are cold
+const WAKE_TIMEOUT_MS    = 600_000; // allow up to 10 min when ECS + RDS are cold
 const WAKE_RETRY_MS      = 15_000;  // retry /wake if initial request is dropped
 
 /**
@@ -134,7 +134,7 @@ export default function WakeupGate({ children }) {
             <p style={s.sub}>
               {phase === "checking"
                 ? "Checking server status…"
-                : "The server is starting up — this usually takes 60–180 seconds when sleeping."}
+                : "The server and database are starting up — this can take several minutes when sleeping."}
             </p>
             {phase === "waking" && elapsed > 0 && (
               <p style={s.timer}>{elapsed}s</p>
