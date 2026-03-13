@@ -228,6 +228,33 @@ public class AdminController : ControllerBase
         var label = string.IsNullOrWhiteSpace(request.Label) ? request.FileName : request.Label;
         var contentType = string.IsNullOrWhiteSpace(request.ContentType) ? "application/octet-stream" : request.ContentType;
 
+        var managedFile = await _context.ManagedFiles.FirstOrDefaultAsync(f => f.Id == fileId || f.StorageKey == request.Key);
+        if (managedFile == null)
+        {
+            managedFile = new ManagedFile
+            {
+                Id = fileId,
+                FileName = request.FileName,
+                Label = label,
+                ContentType = contentType,
+                StorageKey = request.Key,
+                UploadedAt = DateTime.UtcNow,
+                FileSize = request.FileSize
+            };
+            _context.ManagedFiles.Add(managedFile);
+        }
+        else
+        {
+            managedFile.Id = fileId;
+            managedFile.FileName = request.FileName;
+            managedFile.Label = label;
+            managedFile.ContentType = contentType;
+            managedFile.StorageKey = request.Key;
+            managedFile.FileSize = request.FileSize;
+            _context.ManagedFiles.Update(managedFile);
+        }
+        await _context.SaveChangesAsync();
+
         HttpContext.Response.OnCompleted(() =>
         {
             _ = Task.Run(() => ProcessPresignedUploadAsync(fileId, request.Key, request.FileName, contentType, label, request.FileSize, requestId));
@@ -238,8 +265,8 @@ public class AdminController : ControllerBase
         {
             id = fileId,
             requestId,
-            status = "processing",
-            registration = "deferred"
+            status = "registered",
+            registration = "saved"
         });
     }
 
@@ -259,7 +286,6 @@ public class AdminController : ControllerBase
             var ragService = scope.ServiceProvider.GetRequiredService<IRagService>();
             var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
-            // File is already in S3 — just update the DB record
             var managedFile = await db.ManagedFiles.FirstOrDefaultAsync(f => f.Id == fileId);
             if (managedFile == null)
             {
@@ -274,14 +300,8 @@ public class AdminController : ControllerBase
                     FileSize = fileSize
                 };
                 db.ManagedFiles.Add(managedFile);
+                await db.SaveChangesAsync();
             }
-            else
-            {
-                managedFile.StorageKey = s3Key;
-                managedFile.FileSize = fileSize;
-                db.ManagedFiles.Update(managedFile);
-            }
-            await db.SaveChangesAsync();
 
             try { await InvalidateFilesCache(); } catch { /* best-effort */ }
             try { await NotifyFilesChangedAsync(); } catch { /* best-effort */ }
@@ -875,7 +895,7 @@ public class AdminController : ControllerBase
         catch (OperationCanceledException) when (!HttpContext.RequestAborted.IsCancellationRequested)
         {
             _logger.LogWarning("Timed out retrieving file status for {FileId}", id);
-            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+            return Ok(new
             {
                 id,
                 isReady = false,
