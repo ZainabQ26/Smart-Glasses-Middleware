@@ -1138,6 +1138,57 @@ function getRetryDelayMs(baseIntervalMs, consecutiveFailures, maxDelayMs = 20000
     return backoff + jitter;
 }
 
+function createClientGuid() {
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+        return window.crypto.randomUUID();
+    }
+
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, char => {
+        const random = Math.floor(Math.random() * 16);
+        const value = char === 'x' ? random : ((random & 0x3) | 0x8);
+        return value.toString(16);
+    });
+}
+
+async function registerPresignedUpload(payload, maxAttempts = 4) {
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+            const response = await fetchWithTimeout(`${API_BASE}/files/complete`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            }, 15000);
+
+            if (response.ok) {
+                return await response.json();
+            }
+
+            if (isTransientGatewayStatus(response.status) && attempt < maxAttempts) {
+                await delay(getRetryDelayMs(1500, attempt));
+                continue;
+            }
+
+            throw new Error(`Failed to register upload (${response.status})`);
+        } catch (error) {
+            lastError = error;
+            const isRetryableError = error?.name === 'AbortError'
+                || /network/i.test(String(error?.message || ''))
+                || /502|503|504/.test(String(error?.message || ''));
+
+            if (isRetryableError && attempt < maxAttempts) {
+                await delay(getRetryDelayMs(1500, attempt));
+                continue;
+            }
+
+            break;
+        }
+    }
+
+    throw lastError || new Error('Failed to register upload');
+}
+
 function notifyUploadPollingOutage() {
     const now = Date.now();
     if ((now - lastUploadPollingOutageNoticeAt) < 30000) {
@@ -4657,21 +4708,21 @@ async function init() {
                             if (progressBar) progressBar.style.width = '100%';
 
                             // Step 3: tell the API the upload is done
-                            const completeResp = await fetch(`${API_BASE}/files/complete`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                    key: presignedUrlData.key,
-                                    fileName: file.name,
-                                    contentType: file.type || 'application/octet-stream',
-                                    label: file.name,
-                                    fileSize: file.size
-                                })
+                            const clientFileId = createClientGuid();
+                            pendingFile.id = clientFileId;
+                            pendingFile.managedFileId = clientFileId;
+                            pendingFile.isManagedFile = true;
+                            pendingFile.statusText = 'Finalizing upload...';
+                            syncPromptSelectedFilesState();
+
+                            fileData = await registerPresignedUpload({
+                                fileId: clientFileId,
+                                key: presignedUrlData.key,
+                                fileName: file.name,
+                                contentType: file.type || 'application/octet-stream',
+                                label: file.name,
+                                fileSize: file.size
                             });
-                            if (!completeResp.ok) {
-                                throw new Error(`Failed to register upload (${completeResp.status})`);
-                            }
-                            fileData = await completeResp.json();
 
                         } else {
                             // ── Legacy proxied upload (fallback for LocalStack / MinIO) ──
