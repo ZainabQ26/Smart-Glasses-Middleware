@@ -25,6 +25,8 @@ public class AdminController : ControllerBase
     private readonly IHubContext<ResourceHub>? _resourceHub;
     private readonly IServiceScopeFactory _scopeFactory;
     private static readonly TimeSpan InitEndpointTimeout = TimeSpan.FromSeconds(8);
+    private static readonly SemaphoreSlim UploadProcessingSemaphore = new(2, 2);
+    private const long MaxAdminUploadBytes = 100L * 1024 * 1024; // 100 MB
     private const int DefaultPageSize = 20;
     private const int MaxPageSize = 100;
 
@@ -205,6 +207,16 @@ public class AdminController : ControllerBase
             });
         }
 
+        if (request.File.Length > MaxAdminUploadBytes)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title = "Bad Request",
+                Detail = $"File size exceeds maximum of {MaxAdminUploadBytes / (1024 * 1024)}MB",
+                Status = StatusCodes.Status400BadRequest
+            });
+        }
+
         if (string.IsNullOrWhiteSpace(request.Label))
         {
             return BadRequest(new ProblemDetails
@@ -296,145 +308,153 @@ public class AdminController : ControllerBase
         string label,
         string requestId)
     {
+        await UploadProcessingSemaphore.WaitAsync();
         try
         {
-            using var scope = _scopeFactory.CreateScope();
-            var mediaStorageService = scope.ServiceProvider.GetRequiredService<IMediaStorageService>();
-            var ragService = scope.ServiceProvider.GetRequiredService<IRagService>();
-            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-            var monitoringService = scope.ServiceProvider.GetService<IRequestMonitoringService>();
-
-            if (monitoringService != null)
-            {
-                try
-                {
-                    await monitoringService.StartRequest("FileUpload", $"Uploading: {fileName}", requestId);
-                }
-                catch (Exception monitorStartEx)
-                {
-                    _logger.LogWarning(monitorStartEx, "Failed to initialize monitoring for queued file upload {FileId}", fileId);
-                }
-            }
-
-            if (monitoringService != null)
-            {
-                await monitoringService.UpdateRequestStatus(requestId, "Uploading", "Uploading file to storage...");
-            }
-
-            // Upload to storage
-            using var stream = new MemoryStream(uploadedBytes);
-            var storageKey = await mediaStorageService.UploadMediaAsync(stream, fileName, contentType);
-
-            // Update existing record if present, otherwise create it here.
-            var managedFile = await db.ManagedFiles.FirstOrDefaultAsync(f => f.Id == fileId);
-            string? contentHash = null;
-            try
-            {
-                using var hashStream = new MemoryStream(uploadedBytes, writable: false);
-                contentHash = mediaStorageService.ComputeContentHash(hashStream);
-            }
-            catch (Exception hashEx)
-            {
-                _logger.LogWarning(hashEx, "Failed to compute content hash for queued file upload {FileId}", fileId);
-            }
-
-            if (managedFile == null)
-            {
-                managedFile = new ManagedFile
-                {
-                    Id = fileId,
-                    FileName = fileName,
-                    Label = label,
-                    ContentType = contentType,
-                    StorageKey = storageKey,
-                    ContentHash = contentHash,
-                    UploadedAt = DateTime.UtcNow,
-                    FileSize = uploadedBytes.LongLength
-                };
-                db.ManagedFiles.Add(managedFile);
-            }
-            else
-            {
-                managedFile.FileName = fileName;
-                managedFile.Label = label;
-                managedFile.ContentType = contentType;
-                managedFile.StorageKey = storageKey;
-                managedFile.ContentHash = contentHash;
-                managedFile.FileSize = uploadedBytes.LongLength;
-                db.ManagedFiles.Update(managedFile);
-            }
-
-            await db.SaveChangesAsync();
-
-            // Make the uploaded file visible in the recent files list as soon as it is stored.
-            try { await InvalidateFilesCache(); } catch { /* best-effort */ }
-            try { await NotifyFilesChangedAsync(); } catch { /* best-effort */ }
-
-            if (monitoringService != null)
-            {
-                await monitoringService.UpdateRequestStatus(requestId, "Processing", "Processing file for RAG indexing...");
-            }
-
-            // Process file for RAG indexing
-            try
-            {
-                await ragService.ProcessFileForRagAsync(fileId, fileName, contentType, storageKey);
-                _logger.LogInformation("File {FileId} processed for RAG", fileId);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to process file {FileId} for RAG, but file was uploaded successfully", fileId);
-            }
-
-            // Invalidate cache and notify listeners so UI reflects the completed upload
-            try { await InvalidateFilesCache(); } catch { /* best-effort */ }
-            try { await NotifyFilesChangedAsync(); } catch { /* best-effort */ }
-
-            if (monitoringService != null)
-            {
-                await monitoringService.CompleteRequest(requestId, true, $"File {fileName} uploaded and processed successfully");
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Queued file upload failed for {FileId}", fileId);
-
             try
             {
                 using var scope = _scopeFactory.CreateScope();
+                var mediaStorageService = scope.ServiceProvider.GetRequiredService<IMediaStorageService>();
+                var ragService = scope.ServiceProvider.GetRequiredService<IRagService>();
                 var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-                var mf = await db.ManagedFiles.FirstOrDefaultAsync(f => f.Id == fileId);
-                if (mf != null)
+                var monitoringService = scope.ServiceProvider.GetService<IRequestMonitoringService>();
+
+                if (monitoringService != null)
                 {
-                    mf.StorageKey = $"FAILED: {ex.Message}";
-                    db.ManagedFiles.Update(mf);
-                    await db.SaveChangesAsync();
+                    try
+                    {
+                        await monitoringService.StartRequest("FileUpload", $"Uploading: {fileName}", requestId);
+                    }
+                    catch (Exception monitorStartEx)
+                    {
+                        _logger.LogWarning(monitorStartEx, "Failed to initialize monitoring for queued file upload {FileId}", fileId);
+                    }
                 }
-                else
+
+                if (monitoringService != null)
                 {
-                    db.ManagedFiles.Add(new ManagedFile
+                    await monitoringService.UpdateRequestStatus(requestId, "Uploading", "Uploading file to storage...");
+                }
+
+                // Upload to storage
+                using var stream = new MemoryStream(uploadedBytes);
+                var storageKey = await mediaStorageService.UploadMediaAsync(stream, fileName, contentType);
+
+                // Update existing record if present, otherwise create it here.
+                var managedFile = await db.ManagedFiles.FirstOrDefaultAsync(f => f.Id == fileId);
+                string? contentHash = null;
+                try
+                {
+                    using var hashStream = new MemoryStream(uploadedBytes, writable: false);
+                    contentHash = mediaStorageService.ComputeContentHash(hashStream);
+                }
+                catch (Exception hashEx)
+                {
+                    _logger.LogWarning(hashEx, "Failed to compute content hash for queued file upload {FileId}", fileId);
+                }
+
+                if (managedFile == null)
+                {
+                    managedFile = new ManagedFile
                     {
                         Id = fileId,
                         FileName = fileName,
                         Label = label,
                         ContentType = contentType,
-                        StorageKey = $"FAILED: {ex.Message}",
+                        StorageKey = storageKey,
+                        ContentHash = contentHash,
                         UploadedAt = DateTime.UtcNow,
                         FileSize = uploadedBytes.LongLength
-                    });
-                    await db.SaveChangesAsync();
+                    };
+                    db.ManagedFiles.Add(managedFile);
+                }
+                else
+                {
+                    managedFile.FileName = fileName;
+                    managedFile.Label = label;
+                    managedFile.ContentType = contentType;
+                    managedFile.StorageKey = storageKey;
+                    managedFile.ContentHash = contentHash;
+                    managedFile.FileSize = uploadedBytes.LongLength;
+                    db.ManagedFiles.Update(managedFile);
                 }
 
-                var monitoringService = scope.ServiceProvider.GetService<IRequestMonitoringService>();
+                await db.SaveChangesAsync();
+
+                // Make the uploaded file visible in the recent files list as soon as it is stored.
+                try { await InvalidateFilesCache(); } catch { /* best-effort */ }
+                try { await NotifyFilesChangedAsync(); } catch { /* best-effort */ }
+
                 if (monitoringService != null)
                 {
-                    await monitoringService.CompleteRequest(requestId, false, error: ex.Message);
+                    await monitoringService.UpdateRequestStatus(requestId, "Processing", "Processing file for RAG indexing...");
+                }
+
+                // Process file for RAG indexing
+                try
+                {
+                    await ragService.ProcessFileForRagAsync(fileId, fileName, contentType, storageKey);
+                    _logger.LogInformation("File {FileId} processed for RAG", fileId);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to process file {FileId} for RAG, but file was uploaded successfully", fileId);
+                }
+
+                // Invalidate cache and notify listeners so UI reflects the completed upload
+                try { await InvalidateFilesCache(); } catch { /* best-effort */ }
+                try { await NotifyFilesChangedAsync(); } catch { /* best-effort */ }
+
+                if (monitoringService != null)
+                {
+                    await monitoringService.CompleteRequest(requestId, true, $"File {fileName} uploaded and processed successfully");
                 }
             }
-            catch { /* best-effort cleanup */ }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Queued file upload failed for {FileId}", fileId);
 
-            try { await InvalidateFilesCache(); } catch { }
-            try { await NotifyFilesChangedAsync(); } catch { }
+                try
+                {
+                    using var scope = _scopeFactory.CreateScope();
+                    var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+                    var mf = await db.ManagedFiles.FirstOrDefaultAsync(f => f.Id == fileId);
+                    if (mf != null)
+                    {
+                        mf.StorageKey = $"FAILED: {ex.Message}";
+                        db.ManagedFiles.Update(mf);
+                        await db.SaveChangesAsync();
+                    }
+                    else
+                    {
+                        db.ManagedFiles.Add(new ManagedFile
+                        {
+                            Id = fileId,
+                            FileName = fileName,
+                            Label = label,
+                            ContentType = contentType,
+                            StorageKey = $"FAILED: {ex.Message}",
+                            UploadedAt = DateTime.UtcNow,
+                            FileSize = uploadedBytes.LongLength
+                        });
+                        await db.SaveChangesAsync();
+                    }
+
+                    var monitoringService = scope.ServiceProvider.GetService<IRequestMonitoringService>();
+                    if (monitoringService != null)
+                    {
+                        await monitoringService.CompleteRequest(requestId, false, error: ex.Message);
+                    }
+                }
+                catch { /* best-effort cleanup */ }
+
+                try { await InvalidateFilesCache(); } catch { }
+                try { await NotifyFilesChangedAsync(); } catch { }
+            }
+        }
+        finally
+        {
+            UploadProcessingSemaphore.Release();
         }
     }
 
