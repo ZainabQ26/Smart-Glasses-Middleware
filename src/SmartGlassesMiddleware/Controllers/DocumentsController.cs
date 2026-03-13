@@ -331,34 +331,34 @@ public class DocumentsController : ControllerBase
             _logger.LogInformation("Updating request status to 'Searching documents'...");
             await _monitoringService.UpdateRequestStatus(requestId, "Searching documents...");
 
-            // Detect or create a conversation to maintain context within groups
+            // Detect or create a conversation to maintain context within groups.
+            // Wrapped entirely in try/catch so a missing DB table (42P01, first-deploy
+            // before migrations run) degrades gracefully to stateless RAG.
             var groupId = request.GroupIds?.FirstOrDefault();
             Conversation? conversation = null;
-            if (request.ConversationId.HasValue)
+            try
             {
-                conversation = await _conversationService.GetConversationAsync(request.ConversationId.Value);
-                if (conversation == null)
+                if (request.ConversationId.HasValue)
                 {
-                    _logger.LogWarning("Conversation {ConversationId} not found, falling back to detection", request.ConversationId);
-                }
-            }
-
-            // If no conversation explicitly provided, consult global mapping for the selected group
-            if (conversation == null && groupId.HasValue && groupId != Guid.Empty && _groupConversationMappingService != null)
-            {
-                var mapped = await _groupConversationMappingService.GetConversationIdForGroupAsync(groupId.Value);
-                if (mapped.HasValue)
-                {
-                    conversation = await _conversationService.GetConversationAsync(mapped.Value);
+                    conversation = await _conversationService.GetConversationAsync(request.ConversationId.Value);
                     if (conversation == null)
+                        _logger.LogWarning("Conversation {ConversationId} not found, falling back to detection", request.ConversationId);
+                }
+
+                // If no conversation explicitly provided, consult global mapping for the selected group
+                if (conversation == null && groupId.HasValue && groupId != Guid.Empty && _groupConversationMappingService != null)
+                {
+                    var mapped = await _groupConversationMappingService.GetConversationIdForGroupAsync(groupId.Value);
+                    if (mapped.HasValue)
                     {
-                        _logger.LogWarning("Mapped conversation {ConversationId} for group {GroupId} not found", mapped, groupId);
+                        conversation = await _conversationService.GetConversationAsync(mapped.Value);
+                        if (conversation == null)
+                            _logger.LogWarning("Mapped conversation {ConversationId} for group {GroupId} not found", mapped, groupId);
                     }
                 }
-            }
 
-            conversation ??= await _conversationService.DetectOrCreateConversationAsync(request.Query, groupId);
-            _logger.LogInformation("Using conversation {ConversationId} for query", conversation.Id);
+                conversation ??= await _conversationService.DetectOrCreateConversationAsync(request.Query, groupId);
+                _logger.LogInformation("Using conversation {ConversationId} for query", conversation.Id);
 
                 // Detect topic change and possibly switch to a new conversation automatically
                 try
@@ -375,8 +375,17 @@ public class DocumentsController : ControllerBase
                     _logger.LogWarning(ex, "Topic change detection threw an exception for conversation {ConversationId}", conversation.Id);
                 }
 
-            // Add user message to conversation
+                // Add user message to conversation
                 await _conversationService.AddMessageAsync(conversation.Id, "user", request.Query, null, request.DocumentIds);
+            }
+            catch (Exception ex)
+            {
+                // Conversation table may not exist yet (DB migrations pending). Log the
+                // warning and continue with a stateless RAG query so the user still gets
+                // a response.
+                _logger.LogWarning(ex, "Conversation tracking unavailable (possibly pending DB migrations). Proceeding with stateless RAG query.");
+                conversation = null;
+            }
 
             // In-process fallback: if specific documents were requested but haven't been processed
             // by Lambda yet (IsProcessed=false, no EmbeddingVector chunks), process them now so the
@@ -423,30 +432,53 @@ public class DocumentsController : ControllerBase
                 }
             }
 
-            _logger.LogInformation("Calling RAG service QueryDocumentsWithConversationAsync...");
-            var result = await _ragService.QueryDocumentsWithConversationAsync(
-                request.Query,
-                conversation.Id,
-                request.TopK ?? 5,
-                request.GroupIds,
-                request.DocumentIds);
+            QueryResult result;
+            if (conversation != null)
+            {
+                _logger.LogInformation("Calling RAG service QueryDocumentsWithConversationAsync...");
+                result = await _ragService.QueryDocumentsWithConversationAsync(
+                    request.Query,
+                    conversation.Id,
+                    request.TopK ?? 5,
+                    request.GroupIds,
+                    request.DocumentIds);
+            }
+            else
+            {
+                _logger.LogInformation("Falling back to stateless QueryDocumentsAsync (no conversation context)...");
+                result = await _ragService.QueryDocumentsAsync(
+                    request.Query,
+                    request.TopK ?? 5,
+                    request.GroupIds,
+                    request.DocumentIds);
+            }
             _logger.LogInformation("RAG service returned result. Answer length: {Length}", result.Answer?.Length ?? 0);
 
-            // Add assistant response to conversation
-            await _conversationService.AddMessageAsync(conversation.Id, "assistant", result.Answer ?? string.Empty);
-
-            // Update global Group -> Conversation mapping (global scope)
-            try
+            if (conversation != null)
             {
-                var mappingGroupId = conversation.ResourceGroupId ?? groupId;
-                if (_groupConversationMappingService != null && mappingGroupId.HasValue && mappingGroupId != Guid.Empty)
+                // Add assistant response to conversation
+                try
                 {
-                    await _groupConversationMappingService.UpsertMappingAsync(mappingGroupId.Value, conversation.Id);
+                    await _conversationService.AddMessageAsync(conversation.Id, "assistant", result.Answer ?? string.Empty);
                 }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to upsert group->conversation mapping");
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to save assistant message to conversation {ConversationId}", conversation.Id);
+                }
+
+                // Update global Group -> Conversation mapping (global scope)
+                try
+                {
+                    var mappingGroupId = conversation.ResourceGroupId ?? groupId;
+                    if (_groupConversationMappingService != null && mappingGroupId.HasValue && mappingGroupId != Guid.Empty)
+                    {
+                        await _groupConversationMappingService.UpsertMappingAsync(mappingGroupId.Value, conversation.Id);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to upsert group->conversation mapping");
+                }
             }
 
             await _monitoringService.CompleteRequest(requestId, true, 
@@ -472,7 +504,7 @@ public class DocumentsController : ControllerBase
                 _logger.LogWarning(ex, "Failed to save document query history");
             }
 
-            result.ConversationId = conversation.Id;
+            result.ConversationId = conversation?.Id;
             return Ok(result);
         }
         catch (TimeoutException ex)
