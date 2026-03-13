@@ -383,16 +383,96 @@ async function initResourceHub() {
 const activeRequests = new Map();
 const requestActivities = new Map();
 
+function normalizeUploadFileName(value) {
+    return String(value || '')
+        .trim()
+        .replace(/\s+/g, ' ')
+        .toLowerCase();
+}
+
+function parseUploadNameFromText(text) {
+    const raw = String(text || '').trim();
+    if (!raw) {
+        return '';
+    }
+
+    const uploadingMatch = raw.match(/^uploading:\s*(.+)$/i);
+    if (uploadingMatch?.[1]) {
+        return uploadingMatch[1].trim();
+    }
+
+    const completedMatch = raw.match(/^file\s+(.+?)\s+(?:uploaded|upload failed|failed)/i);
+    if (completedMatch?.[1]) {
+        return completedMatch[1].trim();
+    }
+
+    return raw;
+}
+
+function getTaskHubUploadName(request) {
+    const directName = getProp(request, 'fileName')
+        || getProp(request, 'label')
+        || getProp(request, 'name');
+    if (directName) {
+        return String(directName).trim();
+    }
+
+    return parseUploadNameFromText(getProp(request, 'details') || getProp(request, 'description') || '');
+}
+
+function countPendingPromptFiles() {
+    if (!Array.isArray(promptSelectedFiles)) {
+        return 0;
+    }
+
+    return promptSelectedFiles.filter(fileObj => fileObj && fileObj.pending).length;
+}
+
+function findPendingPromptFileForTaskHub(requestId, request) {
+    if (!Array.isArray(promptSelectedFiles) || promptSelectedFiles.length === 0) {
+        return null;
+    }
+
+    const normalizedRequestId = String(requestId || '').trim();
+    const normalizedUploadName = normalizeUploadFileName(getTaskHubUploadName(request));
+    let firstPendingFile = null;
+
+    for (const fileObj of promptSelectedFiles) {
+        if (!fileObj || !fileObj.pending) {
+            continue;
+        }
+
+        if (!firstPendingFile) {
+            firstPendingFile = fileObj;
+        }
+
+        const fileRequestId = String(fileObj.requestId || '').trim();
+        if (normalizedRequestId && fileRequestId && fileRequestId === normalizedRequestId) {
+            return fileObj;
+        }
+
+        if (!fileRequestId && normalizedUploadName) {
+            const pendingName = normalizeUploadFileName(fileObj.file?.name || fileObj.name || '');
+            if (pendingName && pendingName === normalizedUploadName) {
+                return fileObj;
+            }
+        }
+    }
+
+    // If exactly one upload is pending, bind task updates to it even when metadata is partial.
+    if (normalizedRequestId && countPendingPromptFiles() === 1) {
+        return firstPendingFile;
+    }
+
+    return null;
+}
+
 function applyTaskHubUploadStatus(request) {
     if (!Array.isArray(promptSelectedFiles) || promptSelectedFiles.length === 0) {
         return;
     }
 
     const requestId = String(getProp(request, 'requestId') || '').trim();
-    if (!requestId) {
-        return;
-    }
-
     const statusRaw = String(getProp(request, 'status') || '').trim();
     if (!statusRaw) {
         return;
@@ -411,54 +491,75 @@ function applyTaskHubUploadStatus(request) {
     const isSuccess = status === 'completed' || status === 'complete' || status === 'success' || status === 'done';
     const isFailure = status === 'failed' || status === 'error' || status === 'cancelled' || status === 'canceled';
 
-    let updated = false;
-    promptSelectedFiles = promptSelectedFiles.filter(fileObj => {
-        if (!fileObj || !fileObj.pending) {
-            return true;
-        }
-
-        if (String(fileObj.requestId || '').trim() !== requestId) {
-            return true;
-        }
-
-        updated = true;
-
-        if (isFailure) {
-            return false;
-        }
-
-        if (progress !== null) {
-            fileObj.uploadProgress = progress;
-        }
-
-        if (isSuccess) {
-            fileObj.pending = false;
-            fileObj.statusText = '';
-            fileObj.uploadProgress = 100;
-            fileObj._availabilityMonitorStarted = false;
-            return true;
-        }
-
-        fileObj.statusText = details || (status === 'uploading' ? 'Uploading to server...' : 'Finishing upload...');
-        return true;
-    });
-
-    if (!updated) {
+    const matchedFile = findPendingPromptFileForTaskHub(requestId, request);
+    if (!matchedFile) {
         return;
     }
 
-    syncPromptSelectedFilesState();
+    if (requestId && !matchedFile.requestId) {
+        matchedFile.requestId = requestId;
+    }
 
     if (isFailure) {
+        promptSelectedFiles = promptSelectedFiles.filter(fileObj => fileObj !== matchedFile);
+        syncPromptSelectedFilesState();
         showMessage(details || 'File upload failed on the server.', 'error');
         return;
     }
 
+    if (progress !== null) {
+        matchedFile.uploadProgress = progress;
+    }
+
     if (isSuccess) {
+        matchedFile.pending = false;
+        matchedFile.statusText = '';
+        matchedFile.uploadProgress = 100;
+        matchedFile._availabilityMonitorStarted = false;
+        syncPromptSelectedFilesState();
+
         loadFiles(true).catch(error => {
             console.warn('Failed to refresh files after TaskHub completion', error);
         });
+        return;
     }
+
+    matchedFile.statusText = details || (status === 'uploading' ? 'Uploading to server...' : 'Finishing upload...');
+    syncPromptSelectedFilesState();
+}
+
+function applyTaskHubUploadActivity(activity) {
+    if (!Array.isArray(promptSelectedFiles) || promptSelectedFiles.length === 0) {
+        return;
+    }
+
+    const requestId = String(getProp(activity, 'requestId') || '').trim();
+    if (!requestId) {
+        return;
+    }
+
+    const matchedFile = findPendingPromptFileForTaskHub(requestId, activity);
+    if (!matchedFile) {
+        return;
+    }
+
+    if (!matchedFile.requestId) {
+        matchedFile.requestId = requestId;
+    }
+
+    const progressRaw = getProp(activity, 'progress');
+    const progress = Number.isFinite(Number(progressRaw)) ? Math.max(0, Math.min(100, Number(progressRaw))) : null;
+    const activityText = String(getProp(activity, 'activity') || getProp(activity, 'details') || '').trim();
+
+    if (progress !== null) {
+        matchedFile.uploadProgress = progress;
+    }
+
+    if (activityText) {
+        matchedFile.statusText = activityText;
+    }
+
+    syncPromptSelectedFilesState();
 }
 
 async function initTaskHub() {
@@ -500,6 +601,7 @@ async function initTaskHub() {
                 progress: getProp(activity, 'progress')
             });
             updateActivityDisplay(requestId);
+            applyTaskHubUploadActivity(activity);
         });
 
         await taskHubConnection.start();
@@ -1174,6 +1276,121 @@ async function waitForManagedFileReady(id, timeoutMs = 120000, intervalMs = 1500
     return hadTransientFailures ? { unavailable: true } : null;
 }
 
+function getManagedFileDisplayName(file) {
+    if (!file) {
+        return '';
+    }
+
+    const rawLabel = String(getProp(file, 'label') || '').trim();
+    if (rawLabel && rawLabel.toLowerCase() !== 'untitled') {
+        return rawLabel;
+    }
+
+    return String(getProp(file, 'fileName') || '').trim();
+}
+
+function findManagedFileMatchBySignature(filesData, expectedName, expectedSizeBytes, earliestUploadMs) {
+    if (!Array.isArray(filesData) || filesData.length === 0) {
+        return null;
+    }
+
+    for (const file of filesData) {
+        const candidateName = normalizeUploadFileName(getManagedFileDisplayName(file));
+        if (!candidateName || candidateName !== expectedName) {
+            continue;
+        }
+
+        if (Number.isFinite(expectedSizeBytes) && expectedSizeBytes > 0) {
+            const candidateSize = Number(getProp(file, 'fileSize') || 0);
+            if (Number.isFinite(candidateSize) && candidateSize > 0 && candidateSize !== expectedSizeBytes) {
+                continue;
+            }
+        }
+
+        const uploadedAtRaw = getProp(file, 'uploadedAt');
+        if (uploadedAtRaw) {
+            const uploadedAtMs = Date.parse(uploadedAtRaw);
+            if (Number.isFinite(uploadedAtMs) && uploadedAtMs < earliestUploadMs) {
+                continue;
+            }
+        }
+
+        const managedFileId = getProp(file, 'id');
+        if (!managedFileId) {
+            continue;
+        }
+
+        return {
+            managedFileId,
+            id: managedFileId,
+            fileName: getManagedFileDisplayName(file)
+        };
+    }
+
+    return null;
+}
+
+async function waitForManagedFileReference(expectedName, expectedSizeBytes = null, timeoutMs = 180000, intervalMs = 2000) {
+    const normalizedExpectedName = normalizeUploadFileName(expectedName);
+    if (!normalizedExpectedName) {
+        return { notFound: true };
+    }
+
+    const start = Date.now();
+    const earliestUploadMs = start - 60000;
+    const requestTimeoutMs = Math.max(5000, intervalMs * 4);
+    const normalizedExpectedSize = Number.isFinite(Number(expectedSizeBytes)) ? Number(expectedSizeBytes) : null;
+    let consecutiveTransientFailures = 0;
+    let hadTransientFailures = false;
+
+    while (Date.now() - start < timeoutMs) {
+        let response = null;
+
+        try {
+            const cacheBuster = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
+            response = await fetchWithTimeout(`${API_BASE}/files?page=1&pageSize=25&v=${cacheBuster}`, {
+                headers: {
+                    'Cache-Control': 'no-cache'
+                }
+            }, requestTimeoutMs);
+
+            if (response.ok) {
+                consecutiveTransientFailures = 0;
+                const payload = await response.json().catch(() => null);
+                const filesData = (payload && (payload.data || payload.Data)) || [];
+                const matched = findManagedFileMatchBySignature(filesData, normalizedExpectedName, normalizedExpectedSize, earliestUploadMs);
+                if (matched) {
+                    return matched;
+                }
+            } else if (isTransientGatewayStatus(response.status)) {
+                hadTransientFailures = true;
+                consecutiveTransientFailures++;
+                notifyUploadPollingOutage();
+                await delay(getRetryDelayMs(intervalMs, consecutiveTransientFailures));
+                continue;
+            } else {
+                consecutiveTransientFailures = 0;
+            }
+        } catch (error) {
+            if (error?.name === 'AbortError') {
+                notifyUploadPollingOutage();
+            }
+            hadTransientFailures = true;
+            consecutiveTransientFailures++;
+            await delay(getRetryDelayMs(intervalMs, consecutiveTransientFailures));
+            continue;
+        }
+
+        await delay(intervalMs);
+    }
+
+    if (hadTransientFailures) {
+        return { unavailable: true };
+    }
+
+    return { notFound: true };
+}
+
 function syncPromptSelectedFilesState() {
     window.promptSelectedFiles = promptSelectedFiles;
     updatePromptFilesList();
@@ -1185,11 +1402,33 @@ async function monitorPromptFileAvailability(fileObj, timeoutMs = 300000, interv
     fileObj._availabilityMonitorStarted = true;
     try {
         let ready = null;
+        const expectedFileName = fileObj.file?.name || fileObj.name || '';
+        const expectedFileSize = Number(fileObj.expectedSize || fileObj.file?.size || 0);
 
         if (fileObj.isManagedFile && fileObj.id) {
             ready = await waitForManagedFileReady(fileObj.id, timeoutMs, intervalMs);
         } else if (fileObj.documentId || fileObj.id) {
             ready = await waitForDocumentReady(fileObj.documentId || fileObj.id, timeoutMs, intervalMs);
+        } else if (expectedFileName) {
+            const managedFileRef = await waitForManagedFileReference(expectedFileName, expectedFileSize || null, timeoutMs, intervalMs);
+            if (managedFileRef?.managedFileId) {
+                fileObj.id = managedFileRef.managedFileId;
+                fileObj.managedFileId = managedFileRef.managedFileId;
+                fileObj.isManagedFile = true;
+                fileObj.name = managedFileRef.fileName || expectedFileName;
+                fileObj.statusText = 'Finishing upload...';
+                fileObj.uploadProgress = 100;
+                syncPromptSelectedFilesState();
+
+                ready = await waitForManagedFileReady(managedFileRef.managedFileId, timeoutMs, intervalMs);
+            } else if (managedFileRef?.unavailable) {
+                ready = { unavailable: true };
+            } else if (managedFileRef?.notFound) {
+                ready = {
+                    failed: true,
+                    error: `Unable to confirm upload for "${expectedFileName}". Please retry the upload.`
+                };
+            }
         }
 
         if (!promptSelectedFiles.includes(fileObj)) {
@@ -4325,39 +4564,21 @@ async function init() {
                         const isTimeoutLikeError = uploadErrorText.includes('timed out') || uploadErrorText.includes('504') || uploadErrorText.includes('gateway timeout');
 
                         if (isTimeoutLikeError) {
-                            try {
-                                // Fallback path: documents endpoint has separate queueing path.
-                                const fallbackData = new FormData();
-                                fallbackData.append('file', file);
-                                const fallbackRes = await fetch('/api/documents/upload', { method: 'POST', body: fallbackData });
-                                if (fallbackRes.ok || fallbackRes.status === 202) {
-                                    const fallbackJson = await fallbackRes.json().catch(() => null);
-                                    const documentId = fallbackJson?.id || fallbackJson?.Id;
-                                    const uploadRequestId = fallbackJson?.requestId || fallbackJson?.RequestId || null;
-                                    if (documentId) {
-                                        pendingFile.id = documentId;
-                                        pendingFile.documentId = documentId;
-                                        pendingFile.requestId = uploadRequestId;
-                                        pendingFile.isManagedFile = false;
-                                        pendingFile.uploadProgress = 100;
-                                        pendingFile.statusText = 'Processing document...';
-                                        syncPromptSelectedFilesState();
-                                        showMessage(`File "${file.name}" is processing. It will move to recent files once ready.`, 'info');
+                            pendingFile.expectedSize = file.size;
+                            pendingFile.statusText = 'Upload timed out waiting for server response. Verifying upload status...';
+                            pendingFile.uploadProgress = 100;
+                            syncPromptSelectedFilesState();
+                            showMessage(`Upload confirmation timed out for "${file.name}". Checking server state automatically...`, 'info');
 
-                                        monitorPromptFileAvailability(pendingFile).catch(monitorError => {
-                                            console.warn('Prompt document availability monitor failed', monitorError);
-                                        });
+                            monitorPromptFileAvailability(pendingFile, 240000, 2500).catch(monitorError => {
+                                console.warn('Prompt upload timeout recovery failed', monitorError);
+                            });
 
-                                        promptPreviewFile = null;
-                                        if (promptPreviewFilename) promptPreviewFilename.textContent = '';
-                                        if (promptPreviewContent) promptPreviewContent.innerHTML = `<div style="font-size: 48px; color: #95a5a6;">📄</div>`;
-                                        if (promptFileInput) promptFileInput.value = '';
-                                        return;
-                                    }
-                                }
-                            } catch (fallbackErr) {
-                                console.warn('Fallback upload failed:', fallbackErr);
-                            }
+                            promptPreviewFile = null;
+                            if (promptPreviewFilename) promptPreviewFilename.textContent = '';
+                            if (promptPreviewContent) promptPreviewContent.innerHTML = `<div style="font-size: 48px; color: #95a5a6;">📄</div>`;
+                            if (promptFileInput) promptFileInput.value = '';
+                            return;
                         }
 
                         promptSelectedFiles = promptSelectedFiles.filter(f => f !== pendingFile);
@@ -4396,14 +4617,14 @@ async function init() {
                             const href = documentId ? `/api/documents/${documentId}/download` : '#';
                             const linkStyle = documentId ? 'color: #0b63a6; text-decoration: underline;' : 'color: #95a5a6; text-decoration: none;';
                             const sourceId = 'source-' + Date.now() + '-' + index;
-                            
+
                             // Determine file type icon
-                            const typeIcon = documentType === 'pdf' ? '📄' : 
-                                           documentType === 'markdown' ? '📝' :
-                                           documentType === 'image' ? '🖼️' : 
-                                           documentType === 'docx' ? '📘' :
-                                           documentType === 'xml' ? '🔖' : '📋';
-                            
+                            const typeIcon = documentType === 'pdf' ? '📄'
+                                : documentType === 'markdown' ? '📝'
+                                    : documentType === 'image' ? '🖼️'
+                                        : documentType === 'docx' ? '📘'
+                                            : documentType === 'xml' ? '🔖' : '📋';
+
                             return `
                                 <div style="border: 1px solid #e0e0e0; border-radius: 4px; padding: 8px; background: #fafafa;">
                                     <div style="display: flex; align-items: center; justify-content: space-between;">
