@@ -909,8 +909,35 @@ async function deleteFile(id) {
 // Store current preview file info
 let currentPreviewFile = { id: null, fileName: null };
 
+const TRANSIENT_GATEWAY_STATUSES = new Set([502, 503, 504]);
+let lastUploadPollingOutageNoticeAt = 0;
+
 function delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function isTransientGatewayStatus(status) {
+    return TRANSIENT_GATEWAY_STATUSES.has(Number(status));
+}
+
+function getRetryDelayMs(baseIntervalMs, consecutiveFailures, maxDelayMs = 20000) {
+    const safeBase = Math.max(500, Number(baseIntervalMs) || 1500);
+    const cappedFailures = Math.min(8, Math.max(0, Number(consecutiveFailures) || 0));
+    const backoff = Math.min(maxDelayMs, Math.round(safeBase * Math.pow(1.6, cappedFailures)));
+    const jitter = Math.floor(Math.random() * Math.max(250, Math.round(backoff * 0.2)));
+    return backoff + jitter;
+}
+
+function notifyUploadPollingOutage() {
+    const now = Date.now();
+    if ((now - lastUploadPollingOutageNoticeAt) < 30000) {
+        return;
+    }
+
+    lastUploadPollingOutageNoticeAt = now;
+    if (typeof showMessage === 'function') {
+        showMessage('Server temporarily unavailable. Waiting before retrying file readiness checks.', 'info');
+    }
 }
 
 async function waitForPreviewReady(id, timeoutMs = 15000, intervalMs = 1000) {
@@ -935,11 +962,17 @@ async function waitForPreviewReady(id, timeoutMs = 15000, intervalMs = 1000) {
 
 async function waitForDocumentReady(id, timeoutMs = 300000, intervalMs = 2000) {
     const start = Date.now();
+    let consecutiveTransientFailures = 0;
+    let hadTransientFailures = false;
+
     while (Date.now() - start < timeoutMs) {
+        let response = null;
+
         try {
             const cacheBuster = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
-            const response = await fetch(`/api/documents/${id}?v=${cacheBuster}`);
+            response = await fetch(`/api/documents/${id}?v=${cacheBuster}`);
             if (response.ok) {
+                consecutiveTransientFailures = 0;
                 const documentMeta = await response.json().catch(() => null);
                 const fileSize = Number(documentMeta?.fileSize || documentMeta?.FileSize || 0);
                 const isProcessed = documentMeta?.isProcessed ?? documentMeta?.IsProcessed ?? false;
@@ -950,24 +983,41 @@ async function waitForDocumentReady(id, timeoutMs = 300000, intervalMs = 2000) {
                         fileName: documentMeta?.fileName || documentMeta?.FileName || null
                     };
                 }
+            } else if (isTransientGatewayStatus(response.status)) {
+                hadTransientFailures = true;
+                consecutiveTransientFailures++;
+                notifyUploadPollingOutage();
+                await delay(getRetryDelayMs(intervalMs, consecutiveTransientFailures));
+                continue;
+            } else {
+                consecutiveTransientFailures = 0;
             }
         } catch (error) {
-            // Keep polling until timeout.
+            hadTransientFailures = true;
+            consecutiveTransientFailures++;
+            await delay(getRetryDelayMs(intervalMs, consecutiveTransientFailures));
+            continue;
         }
 
         await delay(intervalMs);
     }
 
-    return null;
+    return hadTransientFailures ? { unavailable: true } : null;
 }
 
 async function waitForManagedFileReady(id, timeoutMs = 120000, intervalMs = 1500) {
     const start = Date.now();
+    let consecutiveTransientFailures = 0;
+    let hadTransientFailures = false;
+
     while (Date.now() - start < timeoutMs) {
+        let response = null;
+
         try {
             const cacheBuster = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
-            const response = await fetch(`${API_BASE}/files/${id}/status?v=${cacheBuster}`);
+            response = await fetch(`${API_BASE}/files/${id}/status?v=${cacheBuster}`);
             if (response.ok) {
+                consecutiveTransientFailures = 0;
                 const fileMeta = await response.json().catch(() => null);
                 const failed = fileMeta?.failed ?? false;
                 const isReady = fileMeta?.isReady ?? false;
@@ -986,15 +1036,26 @@ async function waitForManagedFileReady(id, timeoutMs = 120000, intervalMs = 1500
                         fileName: fileMeta?.fileName || fileMeta?.label || null
                     };
                 }
+            } else if (isTransientGatewayStatus(response.status)) {
+                hadTransientFailures = true;
+                consecutiveTransientFailures++;
+                notifyUploadPollingOutage();
+                await delay(getRetryDelayMs(intervalMs, consecutiveTransientFailures));
+                continue;
+            } else {
+                consecutiveTransientFailures = 0;
             }
         } catch (error) {
-            // Keep polling until timeout.
+            hadTransientFailures = true;
+            consecutiveTransientFailures++;
+            await delay(getRetryDelayMs(intervalMs, consecutiveTransientFailures));
+            continue;
         }
 
         await delay(intervalMs);
     }
 
-    return null;
+    return hadTransientFailures ? { unavailable: true } : null;
 }
 
 function syncPromptSelectedFilesState() {
@@ -1026,6 +1087,27 @@ async function monitorPromptFileAvailability(fileObj, timeoutMs = 300000, interv
             return;
         }
 
+        if (ready?.unavailable) {
+            fileObj.statusText = 'Server temporarily unavailable. Waiting to resume checks...';
+            fileObj.uploadProgress = 100;
+            fileObj._availabilityMonitorStarted = false;
+            syncPromptSelectedFilesState();
+
+            const resumeDelayMs = Math.max(12000, intervalMs * 6);
+            setTimeout(() => {
+                if (!promptSelectedFiles.includes(fileObj)) {
+                    return;
+                }
+
+                if (fileObj.pending && !fileObj._availabilityMonitorStarted) {
+                    monitorPromptFileAvailability(fileObj, timeoutMs, intervalMs).catch(retryError => {
+                        console.warn('Prompt file availability monitor retry failed', retryError);
+                    });
+                }
+            }, resumeDelayMs);
+            return;
+        }
+
         if (ready) {
             fileObj.pending = false;
             fileObj.statusText = '';
@@ -1048,15 +1130,41 @@ async function monitorPromptFileAvailability(fileObj, timeoutMs = 300000, interv
         fileObj.uploadProgress = 100;
         fileObj._availabilityMonitorStarted = false;
         syncPromptSelectedFilesState();
+
+        const resumeDelayMs = Math.max(10000, intervalMs * 5);
+        setTimeout(() => {
+            if (!promptSelectedFiles.includes(fileObj)) {
+                return;
+            }
+
+            if (fileObj.pending && !fileObj._availabilityMonitorStarted) {
+                monitorPromptFileAvailability(fileObj, timeoutMs, intervalMs).catch(retryError => {
+                    console.warn('Prompt file availability monitor retry failed', retryError);
+                });
+            }
+        }, resumeDelayMs);
     } catch (error) {
         if (!promptSelectedFiles.includes(fileObj)) {
             return;
         }
 
-        fileObj.statusText = 'Still processing on server...';
+        fileObj.statusText = 'Server temporarily unavailable. Waiting to resume checks...';
         fileObj.uploadProgress = 100;
         fileObj._availabilityMonitorStarted = false;
         syncPromptSelectedFilesState();
+
+        const resumeDelayMs = Math.max(12000, intervalMs * 6);
+        setTimeout(() => {
+            if (!promptSelectedFiles.includes(fileObj)) {
+                return;
+            }
+
+            if (fileObj.pending && !fileObj._availabilityMonitorStarted) {
+                monitorPromptFileAvailability(fileObj, timeoutMs, intervalMs).catch(retryError => {
+                    console.warn('Prompt file availability monitor retry failed', retryError);
+                });
+            }
+        }, resumeDelayMs);
     }
 }
 
