@@ -4208,21 +4208,36 @@ async function init() {
                 currentRequestController = null;
 
                 console.log('[SEND PROMPT] documents query status:', queryResponse.status, queryResponse.statusText);
-                let result;
-                try {
-                    // Try to parse JSON body (may throw)
-                    result = await queryResponse.json();
-                    lastQueryResult = result;
-                    console.log('[SEND PROMPT] documents query response JSON:', result);
-                } catch (parseErr) {
-                    const text = await queryResponse.text().catch(() => '');
-                    console.error('[SEND PROMPT] Failed to parse JSON response. Raw response:', text);
-                    throw new Error('Invalid JSON response from server');
+                const rawResponseText = await queryResponse.text().catch(() => '');
+                let result = null;
+                if (rawResponseText) {
+                    try {
+                        result = JSON.parse(rawResponseText);
+                        lastQueryResult = result;
+                        console.log('[SEND PROMPT] documents query response JSON:', result);
+                    } catch (parseErr) {
+                        console.error('[SEND PROMPT] Failed to parse JSON response. Raw response:', rawResponseText);
+                        if (!queryResponse.ok) {
+                            const normalizedBody = rawResponseText.replace(/\s+/g, ' ').trim();
+                            const timeoutLikeResponse = queryResponse.status === 504 || /gateway timeout/i.test(normalizedBody);
+                            if (timeoutLikeResponse) {
+                                throw new Error('The request timed out before the server responded. The selected document may still be processing.');
+                            }
+
+                            throw new Error(`Server error: ${queryResponse.status} ${queryResponse.statusText}`);
+                        }
+
+                        throw new Error('Server returned a non-JSON response');
+                    }
                 }
 
                 if (!queryResponse.ok) {
                     const errorMsg = result?.error || result?.details || result?.message || `Server error: ${queryResponse.status}`;
                     throw new Error(errorMsg);
+                }
+
+                if (!result) {
+                    throw new Error('Empty response from server');
                 }
 
                 const responseConversationId = result.conversationId || result.ConversationId;
