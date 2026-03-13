@@ -250,6 +250,23 @@ jobs:
     env:
       AWS_REGION: ${{ secrets.AWS_REGION }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Detect migration changes in this deploy commit
+        id: migration-changes
+        run: |
+          set -euo pipefail
+
+          if git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" | grep -q '^src/SmartGlassesMiddleware/Migrations/'; then
+            echo "required=true" >> "$GITHUB_OUTPUT"
+            echo "EF migration files changed in this deploy commit."
+          else
+            echo "required=false" >> "$GITHUB_OUTPUT"
+            echo "No EF migration files changed in this deploy commit; skipping migration task."
+          fi
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -257,6 +274,7 @@ jobs:
           aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Run one-shot migration ECS task
+        if: steps.migration-changes.outputs.required == 'true'
         run: |
           set -euo pipefail
 
@@ -273,28 +291,33 @@ jobs:
           SGS=$(echo "$SERVICE_JSON"        | jq -r '[.networkConfiguration.awsvpcConfiguration.securityGroups[]] | join(",")')
           ASSIGN_PUB=$(echo "$SERVICE_JSON" | jq -r '.networkConfiguration.awsvpcConfiguration.assignPublicIp // "DISABLED"')
 
-          echo "Running migration task on $TASK_DEF ..."
-          TASK_ARN=$(aws ecs run-task \
-            --cluster "$CLUSTER" \
-            --task-definition "$TASK_DEF" \
-            --launch-type FARGATE \
-            --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SGS],assignPublicIp=$ASSIGN_PUB}" \
-            --overrides '{"containerOverrides":[{"name":"api","environment":[{"name":"MIGRATE_ONLY","value":"true"},{"name":"MIGRATE_ON_STARTUP","value":"false"}]}]}' \
-            --count 1 \
-            --query 'tasks[0].taskArn' \
-            --output text)
+          for attempt in 1 2 3; do
+            echo "Running migration task on $TASK_DEF (attempt $attempt/3) ..."
+            TASK_ARN=$(aws ecs run-task \
+              --cluster "$CLUSTER" \
+              --task-definition "$TASK_DEF" \
+              --launch-type FARGATE \
+              --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SGS],assignPublicIp=$ASSIGN_PUB}" \
+              --overrides '{"containerOverrides":[{"name":"api","environment":[{"name":"MIGRATE_ONLY","value":"true"},{"name":"MIGRATE_ON_STARTUP","value":"false"}]}]}' \
+              --count 1 \
+              --query 'tasks[0].taskArn' \
+              --output text)
 
-          echo "Migration task ARN: $TASK_ARN"
-          aws ecs wait tasks-stopped \
-            --cluster "$CLUSTER" --tasks "$TASK_ARN" \
-            --region "$AWS_REGION"
+            echo "Migration task ARN: $TASK_ARN"
+            aws ecs wait tasks-stopped \
+              --cluster "$CLUSTER" --tasks "$TASK_ARN" \
+              --region "$AWS_REGION"
 
-          EXIT_CODE=$(aws ecs describe-tasks \
-            --cluster "$CLUSTER" --tasks "$TASK_ARN" \
-            --region "$AWS_REGION" \
-            --query 'tasks[0].containers[0].exitCode' --output text)
+            EXIT_CODE=$(aws ecs describe-tasks \
+              --cluster "$CLUSTER" --tasks "$TASK_ARN" \
+              --region "$AWS_REGION" \
+              --query 'tasks[0].containers[0].exitCode' --output text)
 
-          if [ "$EXIT_CODE" != "0" ]; then
+            if [ "$EXIT_CODE" = "0" ]; then
+              echo "Migrations applied successfully."
+              exit 0
+            fi
+
             echo "Migration task failed (exit $EXIT_CODE). Fetching logs..."
             LOG_GROUP="/ecs/smart-glasses-dev/api"
             TASK_ID=$(basename "$TASK_ARN")
@@ -303,9 +326,15 @@ jobs:
               --log-stream-name "ecs/api/$TASK_ID" \
               --limit 60 --region "$AWS_REGION" \
               --query 'events[*].message' --output text 2>/dev/null || true
-            exit 1
-          fi
-          echo "Migrations applied successfully."
+
+            if [ "$attempt" -lt 3 ]; then
+              echo "Retrying migration task after 45 seconds to allow the database/network path to warm up..."
+              sleep 45
+            fi
+          done
+
+          echo "Migration task failed after 3 attempts."
+          exit 1
 
   verify-deployment:
     name: Verify API stability and health

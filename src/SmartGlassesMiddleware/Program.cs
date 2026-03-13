@@ -22,6 +22,32 @@ using Polly.Extensions.Http;
 
 #pragma warning disable SKEXP0010
 
+static bool IsTransientMigrationConnectivityFailure(Exception ex)
+{
+    Exception? current = ex;
+    while (current != null)
+    {
+        var typeName = current.GetType().FullName ?? string.Empty;
+        var message = current.Message ?? string.Empty;
+        var connectivityRelated = typeName.Contains("Npgsql", StringComparison.OrdinalIgnoreCase)
+            || typeName.Contains("SocketException", StringComparison.OrdinalIgnoreCase)
+            || current is TimeoutException;
+
+        if (connectivityRelated &&
+            (message.Contains("Failed to connect", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("Timeout during connection attempt", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("connection attempt", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("timed out", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        current = current.InnerException;
+    }
+
+    return false;
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Configure QuestPDF license for community usage to avoid runtime license validation errors
@@ -574,7 +600,6 @@ using (var scope = app.Services.CreateScope())
 {
     try
     {
-        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
         var logger = scope.ServiceProvider.GetService<ILogger<Program>>();
 
@@ -588,27 +613,45 @@ using (var scope = app.Services.CreateScope())
 
         if (shouldMigrate)
         {
-            logger?.LogInformation("Starting database migration...");
+            var maxMigrationAttempts = migrateOnly ? 5 : 1;
+            var migrationDelay = TimeSpan.FromSeconds(migrateOnly ? 30 : 5);
+            var migrationTimeout = TimeSpan.FromSeconds(migrateOnly ? 300 : 120);
 
-            // Run migration with a timeout to prevent indefinite hangs on lock acquisition
-            var migrationTask = Task.Run(() => db.Database.Migrate());
-            var timeoutTask = Task.Delay(TimeSpan.FromSeconds(120)); // CI task needs more time
-
-            var completedTask = await Task.WhenAny(migrationTask, timeoutTask);
-
-            if (completedTask == timeoutTask)
+            for (var attempt = 1; attempt <= maxMigrationAttempts; attempt++)
             {
-                var errorMessage = "Database migration timed out after 120 seconds. " +
-                    "This usually means another instance is holding the migration lock. " +
-                    "Application startup aborted to prevent schema issues.";
-                logger?.LogCritical(errorMessage);
-                throw new TimeoutException(errorMessage);
-            }
-            else
-            {
-                // Wait for the actual task to propagate any exceptions
-                await migrationTask;
-                logger?.LogInformation("Database migration completed successfully.");
+                try
+                {
+                    logger?.LogInformation("Starting database migration (attempt {Attempt}/{Total})...", attempt, maxMigrationAttempts);
+
+                    using var migrationScope = app.Services.CreateScope();
+                    var db = migrationScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+                    var migrationTask = Task.Run(() => db.Database.Migrate());
+                    var timeoutTask = Task.Delay(migrationTimeout);
+
+                    var completedTask = await Task.WhenAny(migrationTask, timeoutTask);
+
+                    if (completedTask == timeoutTask)
+                    {
+                        var errorMessage = $"Database migration timed out after {migrationTimeout.TotalSeconds:0} seconds on attempt {attempt}/{maxMigrationAttempts}. " +
+                            "Application startup aborted to prevent schema issues.";
+                        logger?.LogCritical(errorMessage);
+                        throw new TimeoutException(errorMessage);
+                    }
+
+                    await migrationTask;
+                    logger?.LogInformation("Database migration completed successfully.");
+                    break;
+                }
+                catch (Exception ex) when (migrateOnly && attempt < maxMigrationAttempts && IsTransientMigrationConnectivityFailure(ex))
+                {
+                    logger?.LogWarning(ex,
+                        "Database migration attempt {Attempt}/{Total} failed due to transient connectivity. Retrying in {DelaySeconds}s...",
+                        attempt,
+                        maxMigrationAttempts,
+                        migrationDelay.TotalSeconds);
+                    await Task.Delay(migrationDelay);
+                }
             }
 
             // When MIGRATE_ONLY is set the container is a one-shot CI task — exit cleanly
