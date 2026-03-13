@@ -12,6 +12,18 @@ public class FileUploadRequest
 }
 
 /// <summary>
+/// Request model confirming a presigned S3 upload was completed by the browser.
+/// </summary>
+public class CompleteUploadRequest
+{
+    public string Key { get; set; } = string.Empty;
+    public string FileName { get; set; } = string.Empty;
+    public string? ContentType { get; set; }
+    public string? Label { get; set; }
+    public long FileSize { get; set; }
+}
+
+/// <summary>
 /// Request model for creating or updating a prompt
 /// </summary>
 public class PromptRequest

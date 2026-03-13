@@ -12,6 +12,11 @@ public interface IMediaStorageService
     string ComputeContentHash(Stream fileStream);
     Task<string> UploadFileAsync(string key, Stream fileStream, string contentType);
     Task<Stream> DownloadFileAsync(string key);
+    /// <summary>
+    /// Generate a presigned URL the browser can PUT a file to directly (bypasses CloudFront timeout).
+    /// Returns null if not supported in the current environment (e.g. LocalStack/Minio).
+    /// </summary>
+    Task<(string PresignedUrl, string Key)?> GetPresignedUploadUrlAsync(string fileName, string contentType, TimeSpan expiry);
 }
 
 public class MinioMediaStorageService : IMediaStorageService
@@ -155,4 +160,7 @@ public class MinioMediaStorageService : IMediaStorageService
     {
         return await DownloadMediaAsync(key);
     }
+
+    public Task<(string PresignedUrl, string Key)?> GetPresignedUploadUrlAsync(string fileName, string contentType, TimeSpan expiry)
+        => Task.FromResult<(string, string)?>(null); // Not supported on MinIO — fall back to proxied upload
 }
