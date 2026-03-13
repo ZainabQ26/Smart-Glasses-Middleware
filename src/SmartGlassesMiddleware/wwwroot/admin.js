@@ -1105,6 +1105,7 @@ async function deleteFile(id) {
 let currentPreviewFile = { id: null, fileName: null };
 
 const TRANSIENT_GATEWAY_STATUSES = new Set([502, 503, 504]);
+const PRESIGNED_COMPLETE_TIMEOUT_MS = 70000;
 let lastUploadPollingOutageNoticeAt = 0;
 
 function delay(ms) {
@@ -1159,7 +1160,7 @@ async function registerPresignedUpload(payload, maxAttempts = 4) {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
-            }, 15000);
+            }, PRESIGNED_COMPLETE_TIMEOUT_MS);
 
             if (response.ok) {
                 return await response.json();
@@ -1175,7 +1176,7 @@ async function registerPresignedUpload(payload, maxAttempts = 4) {
             lastError = error;
             const isRetryableError = error?.name === 'AbortError'
                 || /network/i.test(String(error?.message || ''))
-                || /502|503|504/.test(String(error?.message || ''));
+                || /502|503|504|timeout|timed out|aborted/.test(String(error?.message || ''));
 
             if (isRetryableError && attempt < maxAttempts) {
                 await delay(getRetryDelayMs(1500, attempt));
@@ -1184,6 +1185,10 @@ async function registerPresignedUpload(payload, maxAttempts = 4) {
 
             break;
         }
+    }
+
+    if (lastError?.name === 'AbortError') {
+        throw new Error(`Upload registration timed out after ${Math.round(PRESIGNED_COMPLETE_TIMEOUT_MS / 1000)}s`);
     }
 
     throw lastError || new Error('Failed to register upload');
@@ -4809,13 +4814,16 @@ async function init() {
                         console.error('Error uploading file:', error);
                         const uploadErrorText = String(error?.message || '').toLowerCase();
                         const isRecoverableRegistrationError = uploadErrorText.includes('timed out')
+                            || uploadErrorText.includes('timeout')
                             || uploadErrorText.includes('network')
                             || uploadErrorText.includes('502')
                             || uploadErrorText.includes('503')
                             || uploadErrorText.includes('504')
                             || uploadErrorText.includes('bad gateway')
                             || uploadErrorText.includes('service unavailable')
-                            || uploadErrorText.includes('gateway timeout');
+                            || uploadErrorText.includes('gateway timeout')
+                            || uploadErrorText.includes('aborterror')
+                            || uploadErrorText.includes('aborted');
 
                         if (isRecoverableRegistrationError) {
                             pendingFile.id = null;
