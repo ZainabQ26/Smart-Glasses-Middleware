@@ -117,4 +117,7 @@ public class S3MediaStorageService : IMediaStorageService
             return memoryStream;
         }
     }
+
+    public Task<(string PresignedUrl, string Key)?> GetPresignedUploadUrlAsync(string fileName, string contentType, TimeSpan expiry)
+        => Task.FromResult<(string, string)?>(null);
 }

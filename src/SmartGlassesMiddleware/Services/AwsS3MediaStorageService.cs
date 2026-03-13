@@ -138,4 +138,21 @@ public class AwsS3MediaStorageService : IMediaStorageService
         fileStream.Position = originalPosition;
         return Convert.ToHexString(hash);
     }
+
+    public Task<(string PresignedUrl, string Key)?> GetPresignedUploadUrlAsync(string fileName, string contentType, TimeSpan expiry)
+    {
+        var safeFileName = Path.GetFileName(fileName);
+        if (string.IsNullOrWhiteSpace(safeFileName)) safeFileName = "upload";
+        var key = $"{Guid.NewGuid()}/{safeFileName}";
+        var request = new GetPreSignedUrlRequest
+        {
+            BucketName = _bucketName,
+            Key = key,
+            Verb = HttpVerb.PUT,
+            Expires = DateTime.UtcNow.Add(expiry),
+            ContentType = contentType
+        };
+        var url = _s3Client.GetPreSignedURL(request);
+        return Task.FromResult<(string, string)?>((url, key));
+    }
 }

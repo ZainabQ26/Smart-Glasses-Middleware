@@ -191,6 +191,140 @@ public class AdminController : ControllerBase
     }
 
     /// <summary>
+    /// Returns a presigned S3 PUT URL so the browser can upload directly to S3, bypassing
+    /// the CloudFront 60-second origin_read_timeout.  Returns 501 when not available (LocalStack/MinIO).
+    /// </summary>
+    [HttpGet("files/upload-url")]
+    public async Task<IActionResult> GetPresignedUploadUrl([FromQuery] string filename, [FromQuery] string contentType = "application/octet-stream")
+    {
+        if (string.IsNullOrWhiteSpace(filename))
+            return BadRequest(new { error = "filename is required" });
+
+        var safeFilename = Path.GetFileName(filename);
+        if (string.IsNullOrWhiteSpace(safeFilename))
+            return BadRequest(new { error = "Invalid filename" });
+
+        var result = await _mediaStorageService.GetPresignedUploadUrlAsync(safeFilename, contentType, TimeSpan.FromMinutes(15));
+        if (result == null)
+            return StatusCode(StatusCodes.Status501NotImplemented, new { error = "Presigned upload not available in this environment" });
+
+        return Ok(new { presignedUrl = result.Value.PresignedUrl, key = result.Value.Key, expiresInSeconds = 900 });
+    }
+
+    /// <summary>
+    /// Called by the browser after a successful direct-to-S3 presigned upload.
+    /// Creates a DB placeholder and starts RAG processing in the background.
+    /// </summary>
+    [HttpPost("files/complete")]
+    public async Task<IActionResult> CompletePresignedUpload([FromBody] CompleteUploadRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Key) || request.Key.Contains("..") || request.Key.StartsWith('/'))
+            return BadRequest(new { error = "Invalid key" });
+        if (string.IsNullOrWhiteSpace(request.FileName))
+            return BadRequest(new { error = "FileName is required" });
+
+        var requestId = Guid.NewGuid().ToString("N");
+        var fileId = Guid.NewGuid();
+        var label = string.IsNullOrWhiteSpace(request.Label) ? request.FileName : request.Label;
+        var contentType = string.IsNullOrWhiteSpace(request.ContentType) ? "application/octet-stream" : request.ContentType;
+
+        _context.ManagedFiles.Add(new ManagedFile
+        {
+            Id = fileId,
+            FileName = request.FileName,
+            Label = label,
+            ContentType = contentType,
+            StorageKey = "PENDING: upload queued",
+            UploadedAt = DateTime.UtcNow,
+            FileSize = 0
+        });
+        await _context.SaveChangesAsync();
+
+        _ = Task.Run(() => ProcessPresignedUploadAsync(fileId, request.Key, request.FileName, contentType, label, request.FileSize, requestId));
+
+        return Accepted(new { id = fileId, requestId, status = "processing" });
+    }
+
+    private async Task ProcessPresignedUploadAsync(
+        Guid fileId,
+        string s3Key,
+        string fileName,
+        string contentType,
+        string label,
+        long fileSize,
+        string requestId)
+    {
+        await UploadProcessingSemaphore.WaitAsync();
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var ragService = scope.ServiceProvider.GetRequiredService<IRagService>();
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+            // File is already in S3 — just update the DB record
+            var managedFile = await db.ManagedFiles.FirstOrDefaultAsync(f => f.Id == fileId);
+            if (managedFile == null)
+            {
+                managedFile = new ManagedFile
+                {
+                    Id = fileId,
+                    FileName = fileName,
+                    Label = label,
+                    ContentType = contentType,
+                    StorageKey = s3Key,
+                    UploadedAt = DateTime.UtcNow,
+                    FileSize = fileSize
+                };
+                db.ManagedFiles.Add(managedFile);
+            }
+            else
+            {
+                managedFile.StorageKey = s3Key;
+                managedFile.FileSize = fileSize;
+                db.ManagedFiles.Update(managedFile);
+            }
+            await db.SaveChangesAsync();
+
+            try { await InvalidateFilesCache(); } catch { /* best-effort */ }
+            try { await NotifyFilesChangedAsync(); } catch { /* best-effort */ }
+
+            try
+            {
+                await ragService.ProcessFileForRagAsync(fileId, fileName, contentType, s3Key);
+                _logger.LogInformation("Presigned upload file {FileId} processed for RAG", fileId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "RAG processing failed for presigned upload {FileId}, file is still accessible", fileId);
+            }
+
+            try { await InvalidateFilesCache(); } catch { /* best-effort */ }
+            try { await NotifyFilesChangedAsync(); } catch { /* best-effort */ }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "ProcessPresignedUploadAsync failed for {FileId}", fileId);
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+                var mf = await db.ManagedFiles.FirstOrDefaultAsync(f => f.Id == fileId);
+                if (mf != null)
+                {
+                    mf.StorageKey = $"FAILED: {ex.Message}";
+                    db.ManagedFiles.Update(mf);
+                    await db.SaveChangesAsync();
+                }
+            }
+            catch { /* best-effort */ }
+        }
+        finally
+        {
+            UploadProcessingSemaphore.Release();
+        }
+    }
+
+    /// <summary>
     /// Upload a new file with label - queues S3 upload and RAG processing to background to avoid request timeouts
     /// </summary>
     [HttpPost("files")]

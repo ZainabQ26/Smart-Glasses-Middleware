@@ -4614,63 +4614,114 @@ async function init() {
                             promptFileInput.value = '';
                             return;
                         }
-                        
-                        // Regular file upload (documents, images, etc.)
-                        const formData = new FormData();
-                        formData.append('file', file);
-                        formData.append('label', file.name || 'Attachment');
-                        
-                        const xhr = new XMLHttpRequest();
-                        xhr.timeout = 240000;
-                        
-                        // Track upload progress
-                        xhr.upload.addEventListener('progress', (e) => {
-                            if (e.lengthComputable && progressBar) {
-                                const percentComplete = (e.loaded / e.total) * 100;
-                                progressBar.style.width = percentComplete + '%';
-                                pendingFile.uploadProgress = percentComplete;
-                                pendingFile.statusText = 'Uploading to server...';
-                                syncPromptSelectedFilesState();
+
+                        // ── Presigned S3 upload (bypasses CloudFront 60s timeout) ──
+                        // Step 1: ask the API for a presigned PUT URL
+                        let presignedUrlData = null;
+                        try {
+                            const urlResp = await fetch(`${API_BASE}/files/upload-url?filename=${encodeURIComponent(file.name)}&contentType=${encodeURIComponent(file.type || 'application/octet-stream')}`);
+                            if (urlResp.ok) {
+                                presignedUrlData = await urlResp.json();
                             }
-                        });
-                        
-                        // Handle upload completion
-                        const uploadPromise = new Promise((resolve, reject) => {
-                            xhr.addEventListener('load', () => {
-                                if (progressBar) {
-                                    progressBar.style.width = '100%';
-                                }
-                                if (xhr.status === 504) {
-                                    reject(new Error('Server timed out while processing this file. Please retry in a moment.'));
-                                    return;
-                                }
-                                if (xhr.status >= 200 && xhr.status < 300) {
-                                    try {
-                                        const fileData = JSON.parse(xhr.responseText);
-                                        resolve(fileData);
-                                    } catch (e) {
-                                        reject(new Error('Invalid JSON response'));
+                            // 501 = not available in this env → fall through to legacy flow
+                        } catch (_) { /* network error → fall through */ }
+
+                        let fileData;
+
+                        if (presignedUrlData && presignedUrlData.presignedUrl) {
+                            // Step 2: PUT directly to S3 (no CloudFront, no ECS)
+                            await new Promise((resolve, reject) => {
+                                const s3xhr = new XMLHttpRequest();
+                                s3xhr.timeout = 600000; // 10 min for large files
+                                s3xhr.upload.addEventListener('progress', (e) => {
+                                    if (e.lengthComputable && progressBar) {
+                                        const pct = (e.loaded / e.total) * 100;
+                                        progressBar.style.width = pct + '%';
+                                        pendingFile.uploadProgress = pct;
+                                        pendingFile.statusText = 'Uploading to storage...';
+                                        syncPromptSelectedFilesState();
                                     }
-                                } else {
-                                    const responsePreview = (xhr.responseText || '').slice(0, 240);
-                                    reject(new Error(`Upload failed (${xhr.status}): ${responsePreview}`));
+                                });
+                                s3xhr.addEventListener('load', () => {
+                                    if (s3xhr.status >= 200 && s3xhr.status < 300) resolve();
+                                    else reject(new Error(`S3 upload failed (${s3xhr.status})`));
+                                });
+                                s3xhr.addEventListener('error', () => reject(new Error('Network error during S3 upload')));
+                                s3xhr.addEventListener('abort', () => reject(new Error('Upload cancelled')));
+                                s3xhr.addEventListener('timeout', () => reject(new Error('S3 upload timed out')));
+                                s3xhr.open('PUT', presignedUrlData.presignedUrl);
+                                s3xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+                                s3xhr.send(file);
+                            });
+
+                            if (progressBar) progressBar.style.width = '100%';
+
+                            // Step 3: tell the API the upload is done
+                            const completeResp = await fetch(`${API_BASE}/files/complete`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    key: presignedUrlData.key,
+                                    fileName: file.name,
+                                    contentType: file.type || 'application/octet-stream',
+                                    label: file.name,
+                                    fileSize: file.size
+                                })
+                            });
+                            if (!completeResp.ok) {
+                                throw new Error(`Failed to register upload (${completeResp.status})`);
+                            }
+                            fileData = await completeResp.json();
+
+                        } else {
+                            // ── Legacy proxied upload (fallback for LocalStack / MinIO) ──
+                            const formData = new FormData();
+                            formData.append('file', file);
+                            formData.append('label', file.name || 'Attachment');
+                            
+                            const xhr = new XMLHttpRequest();
+                            xhr.timeout = 240000;
+                            
+                            xhr.upload.addEventListener('progress', (e) => {
+                                if (e.lengthComputable && progressBar) {
+                                    const percentComplete = (e.loaded / e.total) * 100;
+                                    progressBar.style.width = percentComplete + '%';
+                                    pendingFile.uploadProgress = percentComplete;
+                                    pendingFile.statusText = 'Uploading to server...';
+                                    syncPromptSelectedFilesState();
                                 }
                             });
-                            xhr.addEventListener('error', () => reject(new Error('Network error')));
-                            xhr.addEventListener('abort', () => reject(new Error('Upload cancelled')));
-                            xhr.addEventListener('timeout', () => reject(new Error('Upload timed out while waiting for the server')));
-                        });
-                        
-                        // Upload through admin files endpoint to avoid long document-conversion request timeouts.
-                        const uploadUrl = '/api/admin/files';
-                        xhr.open('POST', uploadUrl);
-                        xhr.send(formData);
-                        
-                        const fileData = await uploadPromise;
+                            
+                            fileData = await new Promise((resolve, reject) => {
+                                xhr.addEventListener('load', () => {
+                                    if (progressBar) progressBar.style.width = '100%';
+                                    if (xhr.status === 504) {
+                                        reject(new Error('Server timed out while processing this file. Please retry in a moment.'));
+                                        return;
+                                    }
+                                    if (xhr.status >= 200 && xhr.status < 300) {
+                                        try {
+                                            resolve(JSON.parse(xhr.responseText));
+                                        } catch (e) {
+                                            reject(new Error('Invalid JSON response'));
+                                        }
+                                    } else {
+                                        const responsePreview = (xhr.responseText || '').slice(0, 240);
+                                        reject(new Error(`Upload failed (${xhr.status}): ${responsePreview}`));
+                                    }
+                                });
+                                xhr.addEventListener('error', () => reject(new Error('Network error')));
+                                xhr.addEventListener('abort', () => reject(new Error('Upload cancelled')));
+                                xhr.addEventListener('timeout', () => reject(new Error('Upload timed out while waiting for the server')));
+                                xhr.open('POST', '/api/admin/files');
+                                xhr.send(formData);
+                            });
+                        } // end legacy upload branch
+
                         const managedFileId = fileData.id || fileData.Id;
                         const uploadRequestId = fileData.requestId || fileData.RequestId || null;
                         const uploadStatus = (fileData.status || fileData.Status || '').toLowerCase();
-                        const isQueued = xhr.status === 202 || uploadStatus === 'processing';
+                        const isQueued = uploadStatus === 'processing';
 
                         pendingFile.id = managedFileId;
                         pendingFile.managedFileId = managedFileId;
