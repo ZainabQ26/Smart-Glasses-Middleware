@@ -185,9 +185,10 @@ var awsRegionEndpoint = Amazon.RegionEndpoint.GetBySystemName(awsRegion);
 builder.Services.AddSingleton<Amazon.S3.IAmazonS3>(_ => new Amazon.S3.AmazonS3Client(awsRegionEndpoint));
 builder.Services.AddSingleton<Amazon.Lambda.IAmazonLambda>(_ => new Amazon.Lambda.AmazonLambdaClient(awsRegionEndpoint));
 
-// Use native AWS S3 for media storage when AI:UseBedrockAI=true (AWS deployment).
-// In local dev register the MinIO client (docker-compose provides the MinIO server).
-var useAwsStorage = builder.Configuration.GetValue<bool?>("AI:UseBedrockAI") ?? false;
+// Use native AWS S3 for media storage unless LocalStack/MinIO is explicitly enabled.
+// Storage backend must not depend on whether Bedrock is enabled.
+var useLocalStack = builder.Configuration.GetValue<bool?>("AWS:UseLocalStack") ?? false;
+var useAwsStorage = !useLocalStack;
 
 if (!useAwsStorage)
 {
