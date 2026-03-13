@@ -203,7 +203,19 @@ public class ConversationsController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving conversations");
-            return StatusCode(500, new { error = "Failed to retrieve conversations", details = ex.Message });
+            return Ok(new
+            {
+                data = Array.Empty<object>(),
+                pagination = new
+                {
+                    currentPage = page,
+                    pageSize,
+                    totalCount = 0,
+                    totalPages = 0,
+                    hasNext = false,
+                    hasPrevious = page > 1
+                }
+            });
         }
     }
 

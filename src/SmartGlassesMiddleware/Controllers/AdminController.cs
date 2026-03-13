@@ -113,53 +113,65 @@ public class AdminController : ControllerBase
 
         var cacheKey = $"admin:files:page:{page}:size:{pageSize}";
 
-        // Try to get from cache first
-        var cachedResult = await _cacheService.GetAsync<object>(cacheKey);
-        if (cachedResult != null)
+        try
         {
-            return Ok(cachedResult);
-        }
-
-        var totalCount = await _context.ManagedFiles.CountAsync();
-        var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
-
-        var files = await _context.ManagedFiles
-            .Include(f => f.FileGroups)
-            .ThenInclude(fg => fg.ResourceGroup)
-            .OrderByDescending(f => f.UploadedAt)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .Select(f => new
+            // Try to get from cache first
+            var cachedResult = await _cacheService.GetAsync<object>(cacheKey);
+            if (cachedResult != null)
             {
-                f.Id,
-                f.FileName,
-                f.Label,
-                f.ContentType,
-                f.StorageKey,
-                f.UploadedAt,
-                f.FileSize,
-                Groups = f.FileGroups.Select(fg => new { fg.ResourceGroup.Id, fg.ResourceGroup.Name })
-            })
-            .ToListAsync();
-
-        var result = new
-        {
-            Data = files,
-            Pagination = new
-            {
-                CurrentPage = page,
-                PageSize = pageSize,
-                TotalCount = totalCount,
-                TotalPages = totalPages,
-                HasPrevious = page > 1,
-                HasNext = page < totalPages
+                return Ok(cachedResult);
             }
-        };
 
-        // Cache for 30 seconds
-        await _cacheService.SetAsync(cacheKey, result, TimeSpan.FromSeconds(30));
+            var totalCount = await _context.ManagedFiles.CountAsync();
+            var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
 
-        return Ok(result);
+            var files = await _context.ManagedFiles
+                .AsNoTracking()
+                .Include(f => f.FileGroups)
+                .ThenInclude(fg => fg.ResourceGroup)
+                .OrderByDescending(f => f.UploadedAt)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(f => new
+                {
+                    f.Id,
+                    f.FileName,
+                    f.Label,
+                    f.ContentType,
+                    f.StorageKey,
+                    f.UploadedAt,
+                    f.FileSize,
+                    Groups = f.FileGroups
+                        .Where(fg => fg.ResourceGroup != null)
+                        .Select(fg => new { fg.ResourceGroup.Id, fg.ResourceGroup.Name })
+                        .ToList()
+                })
+                .ToListAsync();
+
+            var result = new
+            {
+                Data = files,
+                Pagination = new
+                {
+                    CurrentPage = page,
+                    PageSize = pageSize,
+                    TotalCount = totalCount,
+                    TotalPages = totalPages,
+                    HasPrevious = page > 1,
+                    HasNext = page < totalPages
+                }
+            };
+
+            // Cache for 30 seconds
+            await _cacheService.SetAsync(cacheKey, result, TimeSpan.FromSeconds(30));
+
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving managed files for page {Page} size {PageSize}", page, pageSize);
+            return Ok(CreateEmptyPagedResult(page, pageSize));
+        }
     }
 
     /// <summary>
@@ -673,51 +685,63 @@ public class AdminController : ControllerBase
 
         var cacheKey = $"admin:prompts:page:{page}:size:{pageSize}";
 
-        // Try to get from cache first
-        var cachedResult = await _cacheService.GetAsync<object>(cacheKey);
-        if (cachedResult != null)
+        try
         {
-            return Ok(cachedResult);
-        }
-
-        var totalCount = await _context.ManagedPrompts.CountAsync();
-        var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
-
-        var prompts = await _context.ManagedPrompts
-            .Include(p => p.PromptGroups)
-            .ThenInclude(pg => pg.ResourceGroup)
-            .OrderByDescending(p => p.CreatedAt)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .Select(p => new
+            // Try to get from cache first
+            var cachedResult = await _cacheService.GetAsync<object>(cacheKey);
+            if (cachedResult != null)
             {
-                p.Id,
-                p.Name,
-                p.PromptText,
-                p.CreatedAt,
-                p.UpdatedAt,
-                Groups = p.PromptGroups.Select(pg => new { pg.ResourceGroup.Id, pg.ResourceGroup.Name })
-            })
-            .ToListAsync();
-
-        var result = new
-        {
-            Data = prompts,
-            Pagination = new
-            {
-                CurrentPage = page,
-                PageSize = pageSize,
-                TotalCount = totalCount,
-                TotalPages = totalPages,
-                HasPrevious = page > 1,
-                HasNext = page < totalPages
+                return Ok(cachedResult);
             }
-        };
 
-        // Cache for 30 seconds
-        await _cacheService.SetAsync(cacheKey, result, TimeSpan.FromSeconds(30));
+            var totalCount = await _context.ManagedPrompts.CountAsync();
+            var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
 
-        return Ok(result);
+            var prompts = await _context.ManagedPrompts
+                .AsNoTracking()
+                .Include(p => p.PromptGroups)
+                .ThenInclude(pg => pg.ResourceGroup)
+                .OrderByDescending(p => p.CreatedAt)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(p => new
+                {
+                    p.Id,
+                    p.Name,
+                    p.PromptText,
+                    p.CreatedAt,
+                    p.UpdatedAt,
+                    Groups = p.PromptGroups
+                        .Where(pg => pg.ResourceGroup != null)
+                        .Select(pg => new { pg.ResourceGroup.Id, pg.ResourceGroup.Name })
+                        .ToList()
+                })
+                .ToListAsync();
+
+            var result = new
+            {
+                Data = prompts,
+                Pagination = new
+                {
+                    CurrentPage = page,
+                    PageSize = pageSize,
+                    TotalCount = totalCount,
+                    TotalPages = totalPages,
+                    HasPrevious = page > 1,
+                    HasNext = page < totalPages
+                }
+            };
+
+            // Cache for 30 seconds
+            await _cacheService.SetAsync(cacheKey, result, TimeSpan.FromSeconds(30));
+
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving managed prompts for page {Page} size {PageSize}", page, pageSize);
+            return Ok(CreateEmptyPagedResult(page, pageSize));
+        }
     }
 
     /// <summary>
@@ -933,100 +957,118 @@ public class AdminController : ControllerBase
 
         var cacheKey = $"admin:groups:page:{page}:size:{pageSize}";
 
-        // Try to get from cache first
-        var cachedResult = await _cacheService.GetAsync<object>(cacheKey);
-        if (cachedResult != null)
+        try
         {
-            return Ok(cachedResult);
-        }
-
-        var totalCount = await _context.ResourceGroups.AsNoTracking().CountAsync();
-        var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
-
-        var groups = await _context.ResourceGroups
-            .AsNoTracking()
-            .Include(g => g.FileGroups)
-            .ThenInclude(fg => fg.ManagedFile)
-            .Include(g => g.PromptGroups)
-            .ThenInclude(pg => pg.ManagedPrompt)
-            .Include(g => g.DocumentGroups)
-            .ThenInclude(dg => dg.DocumentMetadata)
-            .Include(g => g.Conversations)
-            .OrderByDescending(g => g.CreatedAt)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .ToListAsync();
-
-        var conversationIds = groups
-            .SelectMany(g => g.Conversations.Select(c => c.Id))
-            .Distinct()
-            .ToList();
-
-        var messageCounts = conversationIds.Count == 0
-            ? new Dictionary<Guid, int>()
-            : await _context.ChatMessages
-                .AsNoTracking()
-                .Where(m => conversationIds.Contains(m.ConversationId))
-                .GroupBy(m => m.ConversationId)
-                .Select(g => new { ConversationId = g.Key, Count = g.Count() })
-                .ToDictionaryAsync(x => x.ConversationId, x => x.Count);
-
-        var groupData = groups.Select(g => new
+            // Try to get from cache first
+            var cachedResult = await _cacheService.GetAsync<object>(cacheKey);
+            if (cachedResult != null)
             {
-                g.Id,
-                g.Name,
-                g.Description,
-                g.CreatedAt,
-                Files = g.FileGroups.Select(fg => new
-                {
-                    fg.ManagedFile.Id,
-                    fg.ManagedFile.FileName,
-                    fg.ManagedFile.Label
-                }).ToList(),
-                Prompts = g.PromptGroups.Select(pg => new
-                {
-                    pg.ManagedPrompt.Id,
-                    pg.ManagedPrompt.Name
-                }).ToList(),
-                Documents = g.DocumentGroups.Select(dg => new
-                {
-                    dg.DocumentMetadata.Id,
-                    dg.DocumentMetadata.FileName,
-                    dg.DocumentMetadata.OriginalFileName,
-                    dg.DocumentMetadata.ContentType
-                }).ToList(),
-                Conversations = g.Conversations.Select(c => new
-                {
-                    c.Id,
-                    c.Title,
-                    c.CreatedAt,
-                    c.UpdatedAt,
-                    c.IsActive,
-                    MessageCount = messageCounts.TryGetValue(c.Id, out var messageCount) ? messageCount : 0
-                }).ToList(),
-                // Keep response shape stable without running expensive reminder cross-queries per group.
-                Reminders = Array.Empty<object>()
-            })
-            .ToList();
-
-        var result = new
-        {
-            Data = groupData,
-            Pagination = new
-            {
-                CurrentPage = page,
-                PageSize = pageSize,
-                TotalCount = totalCount,
-                TotalPages = totalPages,
-                HasPrevious = page > 1,
-                HasNext = page < totalPages
+                return Ok(cachedResult);
             }
-        };
 
-        // Cache for 30 seconds
-        await _cacheService.SetAsync(cacheKey, result, TimeSpan.FromSeconds(30));
+            var totalCount = await _context.ResourceGroups.AsNoTracking().CountAsync();
+            var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
 
-        return Ok(result);
+            var groups = await _context.ResourceGroups
+                .AsNoTracking()
+                .Include(g => g.FileGroups)
+                .ThenInclude(fg => fg.ManagedFile)
+                .Include(g => g.PromptGroups)
+                .ThenInclude(pg => pg.ManagedPrompt)
+                .Include(g => g.DocumentGroups)
+                .ThenInclude(dg => dg.DocumentMetadata)
+                .Include(g => g.Conversations)
+                .AsSplitQuery()
+                .OrderByDescending(g => g.CreatedAt)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            var conversationIds = groups
+                .SelectMany(g => g.Conversations.Select(c => c.Id))
+                .Distinct()
+                .ToList();
+
+            var messageCounts = conversationIds.Count == 0
+                ? new Dictionary<Guid, int>()
+                : await _context.ChatMessages
+                    .AsNoTracking()
+                    .Where(m => conversationIds.Contains(m.ConversationId))
+                    .GroupBy(m => m.ConversationId)
+                    .Select(g => new { ConversationId = g.Key, Count = g.Count() })
+                    .ToDictionaryAsync(x => x.ConversationId, x => x.Count);
+
+            var groupData = groups.Select(g => new
+                {
+                    g.Id,
+                    g.Name,
+                    g.Description,
+                    g.CreatedAt,
+                    Files = g.FileGroups
+                        .Where(fg => fg.ManagedFile != null)
+                        .Select(fg => new
+                        {
+                            fg.ManagedFile.Id,
+                            fg.ManagedFile.FileName,
+                            fg.ManagedFile.Label
+                        })
+                        .ToList(),
+                    Prompts = g.PromptGroups
+                        .Where(pg => pg.ManagedPrompt != null)
+                        .Select(pg => new
+                        {
+                            pg.ManagedPrompt.Id,
+                            pg.ManagedPrompt.Name
+                        })
+                        .ToList(),
+                    Documents = g.DocumentGroups
+                        .Where(dg => dg.DocumentMetadata != null)
+                        .Select(dg => new
+                        {
+                            dg.DocumentMetadata.Id,
+                            dg.DocumentMetadata.FileName,
+                            dg.DocumentMetadata.OriginalFileName,
+                            dg.DocumentMetadata.ContentType
+                        })
+                        .ToList(),
+                    Conversations = g.Conversations.Select(c => new
+                    {
+                        c.Id,
+                        c.Title,
+                        c.CreatedAt,
+                        c.UpdatedAt,
+                        c.IsActive,
+                        MessageCount = messageCounts.TryGetValue(c.Id, out var messageCount) ? messageCount : 0
+                    }).ToList(),
+                    // Keep response shape stable without running expensive reminder cross-queries per group.
+                    Reminders = Array.Empty<object>()
+                })
+                .ToList();
+
+            var result = new
+            {
+                Data = groupData,
+                Pagination = new
+                {
+                    CurrentPage = page,
+                    PageSize = pageSize,
+                    TotalCount = totalCount,
+                    TotalPages = totalPages,
+                    HasPrevious = page > 1,
+                    HasNext = page < totalPages
+                }
+            };
+
+            // Cache for 30 seconds
+            await _cacheService.SetAsync(cacheKey, result, TimeSpan.FromSeconds(30));
+
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving resource groups for page {Page} size {PageSize}", page, pageSize);
+            return Ok(CreateEmptyPagedResult(page, pageSize));
+        }
     }
 
     /// <summary>
@@ -1564,6 +1606,23 @@ public class AdminController : ControllerBase
     #endregion
 
     #region Helper Methods
+
+    private static object CreateEmptyPagedResult(int page, int pageSize)
+    {
+        return new
+        {
+            Data = Array.Empty<object>(),
+            Pagination = new
+            {
+                CurrentPage = page,
+                PageSize = pageSize,
+                TotalCount = 0,
+                TotalPages = 0,
+                HasPrevious = page > 1,
+                HasNext = false
+            }
+        };
+    }
 
     private Task NotifyFilesChangedAsync()
     {

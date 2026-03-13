@@ -117,14 +117,34 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 
 // Configure Redis (only when a connection string is provided)
 var redisConnection = builder.Configuration.GetConnectionString("Redis");
+var redisAvailable = false;
 if (!builder.Environment.IsEnvironment("Testing") && !string.IsNullOrWhiteSpace(redisConnection))
 {
-    builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
+    try
     {
         var configuration = ConfigurationOptions.Parse(redisConnection);
         configuration.AbortOnConnectFail = false;
-        return ConnectionMultiplexer.Connect(configuration);
-    });
+        configuration.ConnectRetry = 1;
+        configuration.ConnectTimeout = 2000;
+        configuration.SyncTimeout = 2000;
+
+        var multiplexer = ConnectionMultiplexer.Connect(configuration);
+        if (multiplexer.IsConnected)
+        {
+            builder.Services.AddSingleton<IConnectionMultiplexer>(multiplexer);
+            redisAvailable = true;
+            _startupLogger.LogInformation("Redis connection established at startup. Using RedisCacheService.");
+        }
+        else
+        {
+            multiplexer.Dispose();
+            _startupLogger.LogWarning("Redis connection did not become ready during startup. Falling back to in-memory cache.");
+        }
+    }
+    catch (Exception ex)
+    {
+        _startupLogger.LogWarning(ex, "Redis startup connection failed. Falling back to in-memory cache.");
+    }
 }
 else
 {
@@ -194,14 +214,14 @@ if (useAwsStorage)
 else
     builder.Services.AddScoped<IMediaStorageService, MinioMediaStorageService>();
 // Register cache service: prefer Redis when configured, otherwise fall back to in-memory implementation
-if (!builder.Environment.IsEnvironment("Testing") && !string.IsNullOrWhiteSpace(redisConnection))
+if (!builder.Environment.IsEnvironment("Testing") && redisAvailable)
 {
     builder.Services.AddScoped<ICacheService, RedisCacheService>();
 }
 else
 {
     builder.Services.AddScoped<ICacheService, InMemoryCacheService>();
-    _startupLogger.LogWarning("Redis not configured or running in Testing environment — using in-memory cache fallback.");
+    _startupLogger.LogWarning("Redis not configured or unavailable — using in-memory cache fallback.");
 }
 builder.Services.AddSingleton<IMetricsService, MetricsService>();
 builder.Services.AddSingleton<IRequestMonitoringService, RequestMonitoringService>();
