@@ -19,6 +19,7 @@ public class ConversationsController : ControllerBase
     private readonly ApplicationDbContext _context;
     private readonly ICacheService _cacheService;
     private readonly IHubContext<ResourceHub>? _resourceHub;
+    private static readonly TimeSpan InitEndpointTimeout = TimeSpan.FromSeconds(8);
     private const int DefaultPageSize = 20;
     private const int MaxPageSize = 100;
 
@@ -147,6 +148,10 @@ public class ConversationsController : ControllerBase
             if (page < 1) page = 1;
             if (pageSize < 1 || pageSize > MaxPageSize) pageSize = DefaultPageSize;
 
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted);
+            timeoutCts.CancelAfter(InitEndpointTimeout);
+            var ct = timeoutCts.Token;
+
             var query = _context.Conversations
                 .AsNoTracking()
                 .Where(c => c.IsActive);
@@ -156,7 +161,7 @@ public class ConversationsController : ControllerBase
                 query = query.Where(c => c.ResourceGroupId == groupId.Value);
             }
 
-            var totalCount = await query.CountAsync();
+            var totalCount = await query.CountAsync(ct);
 
             var items = await query
                 .OrderByDescending(c => c.UpdatedAt)
@@ -169,15 +174,45 @@ public class ConversationsController : ControllerBase
                     c.CreatedAt,
                     c.UpdatedAt,
                     c.IsActive,
-                    c.ResourceGroupId,
-                    MessageCount = c.Messages.Count(),
-                    AttachmentCount = c.Messages.SelectMany(m => m.Attachments).Count(),
-                    LastMessage = c.Messages
-                        .OrderByDescending(m => m.Timestamp)
-                        .Select(m => m.Content)
-                        .FirstOrDefault()
+                    c.ResourceGroupId
                 })
-                .ToListAsync();
+                .ToListAsync(ct);
+
+            var conversationIds = items.Select(i => i.Id).ToList();
+
+            var messageCounts = conversationIds.Count == 0
+                ? new Dictionary<Guid, int>()
+                : await _context.ChatMessages
+                    .AsNoTracking()
+                    .Where(m => conversationIds.Contains(m.ConversationId))
+                    .GroupBy(m => m.ConversationId)
+                    .Select(g => new { ConversationId = g.Key, Count = g.Count() })
+                    .ToDictionaryAsync(x => x.ConversationId, x => x.Count, ct);
+
+            var attachmentCounts = conversationIds.Count == 0
+                ? new Dictionary<Guid, int>()
+                : await _context.ChatMessageAttachments
+                    .AsNoTracking()
+                    .Where(a => conversationIds.Contains(a.ChatMessage.ConversationId))
+                    .GroupBy(a => a.ChatMessage.ConversationId)
+                    .Select(g => new { ConversationId = g.Key, Count = g.Count() })
+                    .ToDictionaryAsync(x => x.ConversationId, x => x.Count, ct);
+
+            var lastMessages = conversationIds.Count == 0
+                ? new Dictionary<Guid, string?>()
+                : await _context.ChatMessages
+                    .AsNoTracking()
+                    .Where(m => conversationIds.Contains(m.ConversationId))
+                    .GroupBy(m => m.ConversationId)
+                    .Select(g => new
+                    {
+                        ConversationId = g.Key,
+                        LastMessage = g
+                            .OrderByDescending(m => m.Timestamp)
+                            .Select(m => m.Content)
+                            .FirstOrDefault()
+                    })
+                    .ToDictionaryAsync(x => x.ConversationId, x => x.LastMessage, ct);
 
             var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
             return Ok(new
@@ -190,14 +225,14 @@ public class ConversationsController : ControllerBase
                     i.UpdatedAt,
                     i.IsActive,
                     i.ResourceGroupId,
-                    i.MessageCount,
-                    i.AttachmentCount,
-                    LastMessage = string.IsNullOrWhiteSpace(i.LastMessage)
+                    MessageCount = messageCounts.TryGetValue(i.Id, out var messageCount) ? messageCount : 0,
+                    AttachmentCount = attachmentCounts.TryGetValue(i.Id, out var attachmentCount) ? attachmentCount : 0,
+                    LastMessage = !lastMessages.TryGetValue(i.Id, out var rawLastMessage) || string.IsNullOrWhiteSpace(rawLastMessage)
                         ? string.Empty
-                        : (i.LastMessage.Length > 220 ? i.LastMessage.Substring(0, 220) : i.LastMessage),
-                    Snippet = string.IsNullOrWhiteSpace(i.LastMessage)
+                        : (rawLastMessage.Length > 220 ? rawLastMessage.Substring(0, 220) : rawLastMessage),
+                    Snippet = !lastMessages.TryGetValue(i.Id, out rawLastMessage) || string.IsNullOrWhiteSpace(rawLastMessage)
                         ? string.Empty
-                        : (i.LastMessage.Length > 220 ? i.LastMessage.Substring(0, 220) : i.LastMessage)
+                        : (rawLastMessage.Length > 220 ? rawLastMessage.Substring(0, 220) : rawLastMessage)
                 }),
                 pagination = new
                 {
@@ -206,6 +241,23 @@ public class ConversationsController : ControllerBase
                     totalCount,
                     totalPages,
                     hasNext = page < totalPages,
+                    hasPrevious = page > 1
+                }
+            });
+        }
+        catch (OperationCanceledException) when (!HttpContext.RequestAborted.IsCancellationRequested)
+        {
+            _logger.LogWarning("Timed out retrieving conversations for page {Page} size {PageSize} group {GroupId}", page, pageSize, groupId);
+            return Ok(new
+            {
+                data = Array.Empty<object>(),
+                pagination = new
+                {
+                    currentPage = page,
+                    pageSize,
+                    totalCount = 0,
+                    totalPages = 0,
+                    hasNext = false,
                     hasPrevious = page > 1
                 }
             });

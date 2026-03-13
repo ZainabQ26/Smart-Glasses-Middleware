@@ -225,6 +225,7 @@ const state = {
 var conversationHubConnection = null;
 var resourceHubConnection = null;
 var taskHubConnection = null;
+const HUB_RECONNECT_DELAYS_MS = [5000, 10000, 20000, 30000, 60000];
 
 // Track individual hub connection states; banner shows if either hub is disconnected
 // Default to `true` so the banner is hidden until a hub explicitly reports disconnected.
@@ -240,7 +241,7 @@ async function initConversationHub() {
     try {
         conversationHubConnection = new signalR.HubConnectionBuilder()
             .withUrl('/hubs/conversations')
-            .withAutomaticReconnect()
+            .withAutomaticReconnect(HUB_RECONNECT_DELAYS_MS)
             .build();
 
         conversationHubConnection.on('conversationUpdated', async (payload) => {
@@ -343,7 +344,7 @@ async function initResourceHub() {
     try {
         resourceHubConnection = new signalR.HubConnectionBuilder()
             .withUrl('/hubs/resources')
-            .withAutomaticReconnect()
+            .withAutomaticReconnect(HUB_RECONNECT_DELAYS_MS)
             .build();
 
         resourceHubConnection.on('filesChanged', async () => {
@@ -391,7 +392,7 @@ async function initTaskHub() {
     try {
         taskHubConnection = new signalR.HubConnectionBuilder()
             .withUrl('/hubs/tasks')
-            .withAutomaticReconnect()
+            .withAutomaticReconnect(HUB_RECONNECT_DELAYS_MS)
             .build();
 
         // Handle request status updates
@@ -909,8 +910,50 @@ async function deleteFile(id) {
 // Store current preview file info
 let currentPreviewFile = { id: null, fileName: null };
 
+const TRANSIENT_GATEWAY_STATUSES = new Set([502, 503, 504]);
+let lastUploadPollingOutageNoticeAt = 0;
+
 function delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
+    const controller = new AbortController();
+    const safeTimeout = Math.max(1000, Number(timeoutMs) || 8000);
+    const timeoutId = setTimeout(() => controller.abort(), safeTimeout);
+
+    try {
+        return await fetch(url, {
+            ...options,
+            signal: controller.signal
+        });
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
+function isTransientGatewayStatus(status) {
+    return TRANSIENT_GATEWAY_STATUSES.has(Number(status));
+}
+
+function getRetryDelayMs(baseIntervalMs, consecutiveFailures, maxDelayMs = 20000) {
+    const safeBase = Math.max(500, Number(baseIntervalMs) || 1500);
+    const cappedFailures = Math.min(8, Math.max(0, Number(consecutiveFailures) || 0));
+    const backoff = Math.min(maxDelayMs, Math.round(safeBase * Math.pow(1.6, cappedFailures)));
+    const jitter = Math.floor(Math.random() * Math.max(250, Math.round(backoff * 0.2)));
+    return backoff + jitter;
+}
+
+function notifyUploadPollingOutage() {
+    const now = Date.now();
+    if ((now - lastUploadPollingOutageNoticeAt) < 30000) {
+        return;
+    }
+
+    lastUploadPollingOutageNoticeAt = now;
+    if (typeof showMessage === 'function') {
+        showMessage('Server temporarily unavailable. Waiting before retrying file readiness checks.', 'info');
+    }
 }
 
 async function waitForPreviewReady(id, timeoutMs = 15000, intervalMs = 1000) {
@@ -932,6 +975,241 @@ async function waitForPreviewReady(id, timeoutMs = 15000, intervalMs = 1000) {
 
     return false;
 }
+
+async function waitForDocumentReady(id, timeoutMs = 300000, intervalMs = 2000) {
+    const start = Date.now();
+    let consecutiveTransientFailures = 0;
+    let hadTransientFailures = false;
+    const requestTimeoutMs = Math.max(5000, intervalMs * 4);
+
+    while (Date.now() - start < timeoutMs) {
+        let response = null;
+
+        try {
+            const cacheBuster = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
+            response = await fetchWithTimeout(`/api/documents/${id}?v=${cacheBuster}`, {}, requestTimeoutMs);
+            if (response.ok) {
+                consecutiveTransientFailures = 0;
+                const documentMeta = await response.json().catch(() => null);
+                const fileSize = Number(documentMeta?.fileSize || documentMeta?.FileSize || 0);
+                const isProcessed = documentMeta?.isProcessed ?? documentMeta?.IsProcessed ?? false;
+                if (fileSize > 0 && isProcessed) {
+                    return {
+                        documentId: documentMeta?.id || documentMeta?.Id || id,
+                        managedFileId: documentMeta?.managedFileId || documentMeta?.ManagedFileId || null,
+                        fileName: documentMeta?.fileName || documentMeta?.FileName || null
+                    };
+                }
+            } else if (isTransientGatewayStatus(response.status)) {
+                hadTransientFailures = true;
+                consecutiveTransientFailures++;
+                notifyUploadPollingOutage();
+                await delay(getRetryDelayMs(intervalMs, consecutiveTransientFailures));
+                continue;
+            } else {
+                consecutiveTransientFailures = 0;
+            }
+        } catch (error) {
+            if (error?.name === 'AbortError') {
+                notifyUploadPollingOutage();
+            }
+            hadTransientFailures = true;
+            consecutiveTransientFailures++;
+            await delay(getRetryDelayMs(intervalMs, consecutiveTransientFailures));
+            continue;
+        }
+
+        await delay(intervalMs);
+    }
+
+    return hadTransientFailures ? { unavailable: true } : null;
+}
+
+async function waitForManagedFileReady(id, timeoutMs = 120000, intervalMs = 1500) {
+    const start = Date.now();
+    let consecutiveTransientFailures = 0;
+    let hadTransientFailures = false;
+    const requestTimeoutMs = Math.max(5000, intervalMs * 4);
+
+    while (Date.now() - start < timeoutMs) {
+        let response = null;
+
+        try {
+            const cacheBuster = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
+            response = await fetchWithTimeout(`${API_BASE}/files/${id}/status?v=${cacheBuster}`, {}, requestTimeoutMs);
+            if (response.ok) {
+                consecutiveTransientFailures = 0;
+                const fileMeta = await response.json().catch(() => null);
+                const failed = fileMeta?.failed ?? false;
+                const isReady = fileMeta?.isReady ?? false;
+
+                if (failed) {
+                    return {
+                        failed: true,
+                        error: fileMeta?.error || 'Upload failed on server.'
+                    };
+                }
+
+                if (isReady) {
+                    return {
+                        failed: false,
+                        id: fileMeta?.id || id,
+                        fileName: fileMeta?.fileName || fileMeta?.label || null
+                    };
+                }
+            } else if (isTransientGatewayStatus(response.status)) {
+                hadTransientFailures = true;
+                consecutiveTransientFailures++;
+                notifyUploadPollingOutage();
+                await delay(getRetryDelayMs(intervalMs, consecutiveTransientFailures));
+                continue;
+            } else {
+                consecutiveTransientFailures = 0;
+            }
+        } catch (error) {
+            if (error?.name === 'AbortError') {
+                notifyUploadPollingOutage();
+            }
+            hadTransientFailures = true;
+            consecutiveTransientFailures++;
+            await delay(getRetryDelayMs(intervalMs, consecutiveTransientFailures));
+            continue;
+        }
+
+        await delay(intervalMs);
+    }
+
+    return hadTransientFailures ? { unavailable: true } : null;
+}
+
+function syncPromptSelectedFilesState() {
+    window.promptSelectedFiles = promptSelectedFiles;
+    updatePromptFilesList();
+}
+
+async function monitorPromptFileAvailability(fileObj, timeoutMs = 300000, intervalMs = 2000) {
+    if (!fileObj || fileObj._availabilityMonitorStarted) return;
+
+    fileObj._availabilityMonitorStarted = true;
+    try {
+        let ready = null;
+
+        if (fileObj.isManagedFile && fileObj.id) {
+            ready = await waitForManagedFileReady(fileObj.id, timeoutMs, intervalMs);
+        } else if (fileObj.documentId || fileObj.id) {
+            ready = await waitForDocumentReady(fileObj.documentId || fileObj.id, timeoutMs, intervalMs);
+        }
+
+        if (!promptSelectedFiles.includes(fileObj)) {
+            return;
+        }
+
+        if (ready?.failed) {
+            promptSelectedFiles = promptSelectedFiles.filter(f => f !== fileObj);
+            syncPromptSelectedFilesState();
+            showMessage(ready.error || 'File upload failed on the server.', 'error');
+            return;
+        }
+
+        if (ready?.unavailable) {
+            fileObj.statusText = 'Server temporarily unavailable. Waiting to resume checks...';
+            fileObj.uploadProgress = 100;
+            fileObj._availabilityMonitorStarted = false;
+            syncPromptSelectedFilesState();
+
+            const resumeDelayMs = Math.max(12000, intervalMs * 6);
+            setTimeout(() => {
+                if (!promptSelectedFiles.includes(fileObj)) {
+                    return;
+                }
+
+                if (fileObj.pending && !fileObj._availabilityMonitorStarted) {
+                    monitorPromptFileAvailability(fileObj, timeoutMs, intervalMs).catch(retryError => {
+                        console.warn('Prompt file availability monitor retry failed', retryError);
+                    });
+                }
+            }, resumeDelayMs);
+            return;
+        }
+
+        if (ready) {
+            fileObj.pending = false;
+            fileObj.statusText = '';
+            fileObj.uploadProgress = 100;
+            fileObj.documentId = ready.documentId || fileObj.documentId;
+            fileObj.managedFileId = ready.managedFileId || fileObj.managedFileId;
+            fileObj.name = ready.fileName || fileObj.name;
+            fileObj._availabilityMonitorStarted = false;
+            syncPromptSelectedFilesState();
+
+            try {
+                await loadFiles(true);
+            } catch (error) {
+                console.warn('Failed to refresh files after prompt upload became ready', error);
+            }
+            return;
+        }
+
+        fileObj.statusText = 'Still processing on server...';
+        fileObj.uploadProgress = 100;
+        fileObj._availabilityMonitorStarted = false;
+        syncPromptSelectedFilesState();
+
+        const resumeDelayMs = Math.max(10000, intervalMs * 5);
+        setTimeout(() => {
+            if (!promptSelectedFiles.includes(fileObj)) {
+                return;
+            }
+
+            if (fileObj.pending && !fileObj._availabilityMonitorStarted) {
+                monitorPromptFileAvailability(fileObj, timeoutMs, intervalMs).catch(retryError => {
+                    console.warn('Prompt file availability monitor retry failed', retryError);
+                });
+            }
+        }, resumeDelayMs);
+    } catch (error) {
+        if (!promptSelectedFiles.includes(fileObj)) {
+            return;
+        }
+
+        fileObj.statusText = 'Server temporarily unavailable. Waiting to resume checks...';
+        fileObj.uploadProgress = 100;
+        fileObj._availabilityMonitorStarted = false;
+        syncPromptSelectedFilesState();
+
+        const resumeDelayMs = Math.max(12000, intervalMs * 6);
+        setTimeout(() => {
+            if (!promptSelectedFiles.includes(fileObj)) {
+                return;
+            }
+
+            if (fileObj.pending && !fileObj._availabilityMonitorStarted) {
+                monitorPromptFileAvailability(fileObj, timeoutMs, intervalMs).catch(retryError => {
+                    console.warn('Prompt file availability monitor retry failed', retryError);
+                });
+            }
+        }, resumeDelayMs);
+    }
+}
+
+window.previewPromptSelectedFile = function(index) {
+    const fileObj = promptSelectedFiles[index];
+    if (!fileObj || fileObj.pending) return;
+
+    const fileName = fileObj.file?.name || fileObj.name || 'Document';
+    if (fileObj.isManagedFile) {
+        const managedFileId = fileObj.managedFileId || fileObj.id;
+        if (managedFileId) {
+            previewFile(managedFileId, fileName);
+        }
+        return;
+    }
+
+    const documentId = fileObj.documentId || fileObj.id;
+    if (documentId) {
+        previewDocumentFile(documentId, fileName);
+    }
+};
 
 function parseRequestedFileNumber(input) {
     if (!input) return null;
@@ -1535,14 +1813,19 @@ function updatePromptFilesList() {
         filesList.innerHTML = promptSelectedFiles.map((fileObj, index) => {
             const fileName = fileObj.file?.name || fileObj.name || 'Document';
             const fileId = fileObj.documentId || fileObj.id || '';
+            const isPending = !!fileObj.pending;
+            const progress = Number.isFinite(fileObj.uploadProgress) ? Math.max(0, Math.min(100, Math.round(fileObj.uploadProgress))) : null;
+            const statusText = isPending ? (fileObj.statusText || 'Loading...') : (fileObj.statusText || '');
+            const previewDisabled = isPending || !fileId;
             return `
-                <div style="padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0; ${fileObj.selected ? 'background: #f0f0f0;' : ''}">
+                <div style="padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0; ${fileObj.selected ? 'background: #f0f0f0;' : ''} ${isPending ? 'opacity: 0.85;' : ''}">
                     <input type="checkbox" ${fileObj.selected ? 'checked' : ''} style="width: 16px; height: 16px; cursor: pointer; margin: 0;" onclick="togglePromptFileSelection(${index})">
-                    <span onclick="togglePromptFileSelection(${index})" style="font-size: 14px; color: #333; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; user-select: none;">
-                        ${escapeHtml(fileName)}
+                    <span onclick="togglePromptFileSelection(${index})" style="font-size: 14px; color: #333; flex: 1; overflow: hidden; text-overflow: ellipsis; cursor: pointer; user-select: none;">
+                        <span style="display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(fileName)}</span>
+                        ${statusText ? `<small style="display: block; color: ${isPending ? '#e67e22' : '#7f8c8d'}; margin-top: 2px;">${escapeHtml(statusText)}${progress !== null && isPending ? ` (${progress}%)` : ''}</small>` : ''}
                     </span>
-                    <button type="button" onclick="event.stopPropagation(); previewDocumentFile('${fileId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')" style="padding: 4px 10px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">
-                        Preview
+                    <button type="button" ${previewDisabled ? 'disabled' : ''} onclick="event.stopPropagation(); previewPromptSelectedFile(${index})" style="padding: 4px 10px; background: ${previewDisabled ? '#95a5a6' : '#0b63a6'}; color: white; border: none; border-radius: 4px; cursor: ${previewDisabled ? 'not-allowed' : 'pointer'}; font-size: 12px;">
+                        ${isPending ? 'Loading...' : 'Preview'}
                     </button>
                 </div>
             `;
@@ -1599,8 +1882,7 @@ window.deleteSelectedPromptFiles = function() {
     }
 
     promptSelectedFiles = promptSelectedFiles.filter(f => !f.selected);
-    window.promptSelectedFiles = promptSelectedFiles;
-    updatePromptFilesList();
+    syncPromptSelectedFilesState();
 };
 
 
@@ -3506,10 +3788,10 @@ async function init() {
             }
         });
 
-        // Start hub initialization in background so UI handlers attach immediately
+        // Stagger hub startup to avoid concurrent negotiate spikes during cold starts.
         initConversationHub();
-        initResourceHub();
-        initTaskHub();
+        setTimeout(() => initResourceHub(), 750);
+        setTimeout(() => initTaskHub(), 1500);
         
         // Setup prompts file management
         const promptFileInput = document.getElementById('prompt-file-input');
@@ -3834,6 +4116,21 @@ async function init() {
                         return;
                     }
 
+                    const pendingFile = {
+                        file,
+                        name: file.name,
+                        selected: false,
+                        pending: true,
+                        statusText: 'Uploading to server...',
+                        uploadProgress: 0,
+                        isManagedFile: false,
+                        managedFileId: null,
+                        documentId: null,
+                        _availabilityMonitorStarted: false
+                    };
+                    promptSelectedFiles.push(pendingFile);
+                    syncPromptSelectedFilesState();
+
                     promptUploadInFlight = true;
                     setPromptUploadLoading(true);
                     
@@ -3863,6 +4160,9 @@ async function init() {
                             if (e.lengthComputable && progressBar) {
                                 const percentComplete = (e.loaded / e.total) * 100;
                                 progressBar.style.width = percentComplete + '%';
+                                pendingFile.uploadProgress = percentComplete;
+                                pendingFile.statusText = 'Uploading to server...';
+                                syncPromptSelectedFilesState();
                             }
                         });
                         
@@ -3902,35 +4202,24 @@ async function init() {
                         const managedFileId = fileData.id || fileData.Id;
                         const uploadStatus = (fileData.status || fileData.Status || '').toLowerCase();
                         const isQueued = xhr.status === 202 || uploadStatus === 'processing';
-                        
-                        // Add uploaded file to list with managed-file ID.
-                        promptSelectedFiles.push({
-                            file: file, 
-                            name: file.name, 
-                            selected: false,
-                            id: managedFileId,
-                            managedFileId: managedFileId,
-                            isManagedFile: true
+
+                        pendingFile.id = managedFileId;
+                        pendingFile.managedFileId = managedFileId;
+                        pendingFile.isManagedFile = true;
+                        pendingFile.uploadProgress = 100;
+                        pendingFile.statusText = isQueued ? 'Finishing upload...' : 'Verifying file access...';
+                        syncPromptSelectedFilesState();
+                        showMessage(`File "${file.name}" is uploading. It will move to recent files once ready.`, 'info');
+
+                        monitorPromptFileAvailability(pendingFile).catch(error => {
+                            console.warn('Prompt file availability monitor failed', error);
                         });
-                        window.promptSelectedFiles = promptSelectedFiles;
-                        updatePromptFilesList();
-                        showMessage(
-                            isQueued
-                                ? `File "${file.name}" accepted and is processing. It will appear in recent files once ready.`
-                                : `File "${file.name}" uploaded successfully`,
-                            isQueued ? 'info' : 'success'
-                        );
                         
                         // Clear preview
                         promptPreviewFile = null;
                         if (promptPreviewFilename) promptPreviewFilename.textContent = '';
                         if (promptPreviewContent) promptPreviewContent.innerHTML = `<div style="font-size: 48px; color: #95a5a6;">📄</div>`;
                         if (promptFileInput) promptFileInput.value = '';
-                        
-                        // Reload files list to show the new file (documents are listed via /api/documents)
-                        if (typeof loadFiles === 'function') {
-                            await loadFiles(true);
-                        }
                     } catch (error) {
                         console.error('Error uploading file:', error);
                         const uploadErrorText = String(error?.message || '').toLowerCase();
@@ -3946,24 +4235,22 @@ async function init() {
                                     const fallbackJson = await fallbackRes.json().catch(() => null);
                                     const documentId = fallbackJson?.id || fallbackJson?.Id;
                                     if (documentId) {
-                                        promptSelectedFiles.push({
-                                            file: file,
-                                            name: file.name,
-                                            selected: false,
-                                            id: documentId,
-                                            documentId: documentId,
-                                            isManagedFile: false
+                                        pendingFile.id = documentId;
+                                        pendingFile.documentId = documentId;
+                                        pendingFile.isManagedFile = false;
+                                        pendingFile.uploadProgress = 100;
+                                        pendingFile.statusText = 'Processing document...';
+                                        syncPromptSelectedFilesState();
+                                        showMessage(`File "${file.name}" is processing. It will move to recent files once ready.`, 'info');
+
+                                        monitorPromptFileAvailability(pendingFile).catch(monitorError => {
+                                            console.warn('Prompt document availability monitor failed', monitorError);
                                         });
-                                        window.promptSelectedFiles = promptSelectedFiles;
-                                        updatePromptFilesList();
-                                        showMessage(`File "${file.name}" accepted via fallback upload path.`, 'info');
+
                                         promptPreviewFile = null;
                                         if (promptPreviewFilename) promptPreviewFilename.textContent = '';
                                         if (promptPreviewContent) promptPreviewContent.innerHTML = `<div style="font-size: 48px; color: #95a5a6;">📄</div>`;
                                         if (promptFileInput) promptFileInput.value = '';
-                                        if (typeof loadFiles === 'function') {
-                                            await loadFiles(true);
-                                        }
                                         return;
                                     }
                                 }
@@ -3972,6 +4259,8 @@ async function init() {
                             }
                         }
 
+                        promptSelectedFiles = promptSelectedFiles.filter(f => f !== pendingFile);
+                        syncPromptSelectedFilesState();
                         showMessage(`Failed to upload file: ${error.message}`, 'error');
                         if (promptFileInput) promptFileInput.value = '';
                     } finally {
@@ -4062,6 +4351,16 @@ async function init() {
             
             if (!promptText || !promptText.trim()) {
                 showMessage('Please enter a prompt text', 'error');
+                return;
+            }
+
+            const pendingPromptFiles = promptSelectedFiles.filter(f => f.pending);
+            if (pendingPromptFiles.length > 0) {
+                const pendingLabel = pendingPromptFiles.length === 1
+                    ? `${pendingPromptFiles[0].name || pendingPromptFiles[0].file?.name || 'The file'} is still uploading.`
+                    : `${pendingPromptFiles.length} files are still uploading.`;
+                responseContent.innerHTML = `<div style="padding: 15px; white-space: pre-wrap; color:#e67e22;">${escapeHtml(pendingLabel)} Wait until they finish and become ready before sending the prompt.</div>`;
+                showMessage('Wait for attached files to finish uploading', 'info');
                 return;
             }
             
@@ -4208,21 +4507,36 @@ async function init() {
                 currentRequestController = null;
 
                 console.log('[SEND PROMPT] documents query status:', queryResponse.status, queryResponse.statusText);
-                let result;
-                try {
-                    // Try to parse JSON body (may throw)
-                    result = await queryResponse.json();
-                    lastQueryResult = result;
-                    console.log('[SEND PROMPT] documents query response JSON:', result);
-                } catch (parseErr) {
-                    const text = await queryResponse.text().catch(() => '');
-                    console.error('[SEND PROMPT] Failed to parse JSON response. Raw response:', text);
-                    throw new Error('Invalid JSON response from server');
+                const rawResponseText = await queryResponse.text().catch(() => '');
+                let result = null;
+                if (rawResponseText) {
+                    try {
+                        result = JSON.parse(rawResponseText);
+                        lastQueryResult = result;
+                        console.log('[SEND PROMPT] documents query response JSON:', result);
+                    } catch (parseErr) {
+                        console.error('[SEND PROMPT] Failed to parse JSON response. Raw response:', rawResponseText);
+                        if (!queryResponse.ok) {
+                            const normalizedBody = rawResponseText.replace(/\s+/g, ' ').trim();
+                            const timeoutLikeResponse = queryResponse.status === 504 || /gateway timeout/i.test(normalizedBody);
+                            if (timeoutLikeResponse) {
+                                throw new Error('The request timed out before the server responded. The selected document may still be processing.');
+                            }
+
+                            throw new Error(`Server error: ${queryResponse.status} ${queryResponse.statusText}`);
+                        }
+
+                        throw new Error('Server returned a non-JSON response');
+                    }
                 }
 
                 if (!queryResponse.ok) {
                     const errorMsg = result?.error || result?.details || result?.message || `Server error: ${queryResponse.status}`;
                     throw new Error(errorMsg);
+                }
+
+                if (!result) {
+                    throw new Error('Empty response from server');
                 }
 
                 const responseConversationId = result.conversationId || result.ConversationId;
