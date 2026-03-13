@@ -228,7 +228,20 @@ public class AdminController : ControllerBase
         var label = string.IsNullOrWhiteSpace(request.Label) ? request.FileName : request.Label;
         var contentType = string.IsNullOrWhiteSpace(request.ContentType) ? "application/octet-stream" : request.ContentType;
 
-        var managedFile = await _context.ManagedFiles.FirstOrDefaultAsync(f => f.Id == fileId || f.StorageKey == request.Key);
+        // Prefer primary-key lookup first to avoid expensive OR scans on large tables.
+        var managedFile = request.FileId.HasValue
+            ? await _context.ManagedFiles.FirstOrDefaultAsync(f => f.Id == fileId)
+            : null;
+
+        if (managedFile == null)
+        {
+            managedFile = await _context.ManagedFiles.FirstOrDefaultAsync(f => f.StorageKey == request.Key);
+            if (managedFile != null)
+            {
+                fileId = managedFile.Id;
+            }
+        }
+
         if (managedFile == null)
         {
             managedFile = new ManagedFile
@@ -245,7 +258,6 @@ public class AdminController : ControllerBase
         }
         else
         {
-            managedFile.Id = fileId;
             managedFile.FileName = request.FileName;
             managedFile.Label = label;
             managedFile.ContentType = contentType;
