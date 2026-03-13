@@ -122,11 +122,16 @@ public class AdminController : ControllerBase
                 return Ok(cachedResult);
             }
 
-            var totalCount = await _context.ManagedFiles.CountAsync();
+            var visibleFilesQuery = _context.ManagedFiles
+                .AsNoTracking()
+                .Where(f => !string.IsNullOrWhiteSpace(f.StorageKey)
+                    && !EF.Functions.Like(f.StorageKey, "FAILED:%")
+                    && f.FileSize > 0);
+
+            var totalCount = await visibleFilesQuery.CountAsync();
             var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
 
-            var files = await _context.ManagedFiles
-                .AsNoTracking()
+            var files = await visibleFilesQuery
                 .Include(f => f.FileGroups)
                 .ThenInclude(fg => fg.ResourceGroup)
                 .OrderByDescending(f => f.UploadedAt)
@@ -339,6 +344,10 @@ public class AdminController : ControllerBase
             }
 
             await db.SaveChangesAsync();
+
+            // Make the uploaded file visible in the recent files list as soon as it is stored.
+            try { await InvalidateFilesCache(); } catch { /* best-effort */ }
+            try { await NotifyFilesChangedAsync(); } catch { /* best-effort */ }
 
             if (monitoringService != null)
             {
