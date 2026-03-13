@@ -4709,9 +4709,9 @@ async function init() {
 
                             // Step 3: tell the API the upload is done
                             const clientFileId = createClientGuid();
-                            pendingFile.id = clientFileId;
-                            pendingFile.managedFileId = clientFileId;
-                            pendingFile.isManagedFile = true;
+                            pendingFile.registrationFileId = clientFileId;
+                            pendingFile.expectedSize = file.size;
+                            pendingFile.uploadProgress = 100;
                             pendingFile.statusText = 'Finalizing upload...';
                             syncPromptSelectedFilesState();
 
@@ -4795,14 +4795,24 @@ async function init() {
                     } catch (error) {
                         console.error('Error uploading file:', error);
                         const uploadErrorText = String(error?.message || '').toLowerCase();
-                        const isTimeoutLikeError = uploadErrorText.includes('timed out') || uploadErrorText.includes('504') || uploadErrorText.includes('gateway timeout');
+                        const isRecoverableRegistrationError = uploadErrorText.includes('timed out')
+                            || uploadErrorText.includes('network')
+                            || uploadErrorText.includes('502')
+                            || uploadErrorText.includes('503')
+                            || uploadErrorText.includes('504')
+                            || uploadErrorText.includes('bad gateway')
+                            || uploadErrorText.includes('service unavailable')
+                            || uploadErrorText.includes('gateway timeout');
 
-                        if (isTimeoutLikeError) {
+                        if (isRecoverableRegistrationError) {
+                            pendingFile.id = null;
+                            pendingFile.managedFileId = null;
+                            pendingFile.isManagedFile = false;
                             pendingFile.expectedSize = file.size;
-                            pendingFile.statusText = 'Upload timed out waiting for server response. Verifying upload status...';
+                            pendingFile.statusText = 'Upload completed. Confirming server registration...';
                             pendingFile.uploadProgress = 100;
                             syncPromptSelectedFilesState();
-                            showMessage(`Upload confirmation timed out for "${file.name}". Checking server state automatically...`, 'info');
+                            showMessage(`Upload confirmation was interrupted for "${file.name}". Checking server state automatically...`, 'info');
 
                             monitorPromptFileAvailability(pendingFile, 240000, 2500).catch(monitorError => {
                                 console.warn('Prompt upload timeout recovery failed', monitorError);
