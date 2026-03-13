@@ -383,6 +383,84 @@ async function initResourceHub() {
 const activeRequests = new Map();
 const requestActivities = new Map();
 
+function applyTaskHubUploadStatus(request) {
+    if (!Array.isArray(promptSelectedFiles) || promptSelectedFiles.length === 0) {
+        return;
+    }
+
+    const requestId = String(getProp(request, 'requestId') || '').trim();
+    if (!requestId) {
+        return;
+    }
+
+    const statusRaw = String(getProp(request, 'status') || '').trim();
+    if (!statusRaw) {
+        return;
+    }
+
+    const requestType = String(getProp(request, 'requestType') || '').trim().toLowerCase();
+    if (requestType && requestType !== 'fileupload' && requestType !== 'documentupload') {
+        return;
+    }
+
+    const status = statusRaw.toLowerCase();
+    const details = String(getProp(request, 'details') || getProp(request, 'description') || '').trim();
+    const progressRaw = getProp(request, 'progress');
+    const progress = Number.isFinite(Number(progressRaw)) ? Math.max(0, Math.min(100, Number(progressRaw))) : null;
+
+    const isSuccess = status === 'completed' || status === 'complete' || status === 'success' || status === 'done';
+    const isFailure = status === 'failed' || status === 'error' || status === 'cancelled' || status === 'canceled';
+
+    let updated = false;
+    promptSelectedFiles = promptSelectedFiles.filter(fileObj => {
+        if (!fileObj || !fileObj.pending) {
+            return true;
+        }
+
+        if (String(fileObj.requestId || '').trim() !== requestId) {
+            return true;
+        }
+
+        updated = true;
+
+        if (isFailure) {
+            return false;
+        }
+
+        if (progress !== null) {
+            fileObj.uploadProgress = progress;
+        }
+
+        if (isSuccess) {
+            fileObj.pending = false;
+            fileObj.statusText = '';
+            fileObj.uploadProgress = 100;
+            fileObj._availabilityMonitorStarted = false;
+            return true;
+        }
+
+        fileObj.statusText = details || (status === 'uploading' ? 'Uploading to server...' : 'Finishing upload...');
+        return true;
+    });
+
+    if (!updated) {
+        return;
+    }
+
+    syncPromptSelectedFilesState();
+
+    if (isFailure) {
+        showMessage(details || 'File upload failed on the server.', 'error');
+        return;
+    }
+
+    if (isSuccess) {
+        loadFiles(true).catch(error => {
+            console.warn('Failed to refresh files after TaskHub completion', error);
+        });
+    }
+}
+
 async function initTaskHub() {
     if (!window.signalR) {
         console.warn('[SignalR] signalR client not loaded');
@@ -398,22 +476,30 @@ async function initTaskHub() {
         // Handle request status updates
         taskHubConnection.on('RequestUpdate', (request) => {
             console.log('[TaskHub] Request update:', request);
-            activeRequests.set(request.requestId, request);
+            const requestId = String(getProp(request, 'requestId') || '').trim();
+            if (requestId) {
+                activeRequests.set(requestId, request);
+            }
             updateProgressDisplay(request);
+            applyTaskHubUploadStatus(request);
         });
 
         // Handle detailed activity updates
         taskHubConnection.on('ActivityUpdate', (activity) => {
             console.log('[TaskHub] Activity update:', activity);
-            if (!requestActivities.has(activity.requestId)) {
-                requestActivities.set(activity.requestId, []);
+            const requestId = String(getProp(activity, 'requestId') || '').trim();
+            if (!requestId) {
+                return;
             }
-            requestActivities.get(activity.requestId).push({
-                timestamp: activity.timestamp || new Date().toISOString(),
-                activity: activity.activity,
-                progress: activity.progress
+            if (!requestActivities.has(requestId)) {
+                requestActivities.set(requestId, []);
+            }
+            requestActivities.get(requestId).push({
+                timestamp: getProp(activity, 'timestamp') || new Date().toISOString(),
+                activity: getProp(activity, 'activity'),
+                progress: getProp(activity, 'progress')
             });
-            updateActivityDisplay(activity.requestId);
+            updateActivityDisplay(requestId);
         });
 
         await taskHubConnection.start();
@@ -424,18 +510,24 @@ async function initTaskHub() {
 }
 
 function updateProgressDisplay(request) {
+    const requestId = String(getProp(request, 'requestId') || '').trim();
+    if (!requestId) return;
+
+    const progress = Number(getProp(request, 'progress') || 0);
+    const details = getProp(request, 'details') || getProp(request, 'status') || '';
+
     // Find any active progress bars and update them
-    const progressBars = document.querySelectorAll('[data-request-id="' + request.requestId + '"]');
+    const progressBars = document.querySelectorAll('[data-request-id="' + requestId + '"]');
     progressBars.forEach(bar => {
         if (bar.classList.contains('progress-bar')) {
-            bar.style.width = (request.progress || 0) + '%';
-            bar.setAttribute('aria-valuenow', request.progress || 0);
+            bar.style.width = progress + '%';
+            bar.setAttribute('aria-valuenow', progress);
         }
         if (bar.classList.contains('progress-text')) {
-            bar.textContent = request.details || request.status || '';
+            bar.textContent = details;
         }
         if (bar.classList.contains('progress-percentage')) {
-            bar.textContent = (request.progress || 0) + '%';
+            bar.textContent = progress + '%';
         }
     });
 }
@@ -1101,6 +1193,11 @@ async function monitorPromptFileAvailability(fileObj, timeoutMs = 300000, interv
         }
 
         if (!promptSelectedFiles.includes(fileObj)) {
+            return;
+        }
+
+        if (!fileObj.pending) {
+            fileObj._availabilityMonitorStarted = false;
             return;
         }
 
@@ -4200,11 +4297,13 @@ async function init() {
                         
                         const fileData = await uploadPromise;
                         const managedFileId = fileData.id || fileData.Id;
+                        const uploadRequestId = fileData.requestId || fileData.RequestId || null;
                         const uploadStatus = (fileData.status || fileData.Status || '').toLowerCase();
                         const isQueued = xhr.status === 202 || uploadStatus === 'processing';
 
                         pendingFile.id = managedFileId;
                         pendingFile.managedFileId = managedFileId;
+                        pendingFile.requestId = uploadRequestId;
                         pendingFile.isManagedFile = true;
                         pendingFile.uploadProgress = 100;
                         pendingFile.statusText = isQueued ? 'Finishing upload...' : 'Verifying file access...';
@@ -4234,9 +4333,11 @@ async function init() {
                                 if (fallbackRes.ok || fallbackRes.status === 202) {
                                     const fallbackJson = await fallbackRes.json().catch(() => null);
                                     const documentId = fallbackJson?.id || fallbackJson?.Id;
+                                    const uploadRequestId = fallbackJson?.requestId || fallbackJson?.RequestId || null;
                                     if (documentId) {
                                         pendingFile.id = documentId;
                                         pendingFile.documentId = documentId;
+                                        pendingFile.requestId = uploadRequestId;
                                         pendingFile.isManagedFile = false;
                                         pendingFile.uploadProgress = 100;
                                         pendingFile.statusText = 'Processing document...';
