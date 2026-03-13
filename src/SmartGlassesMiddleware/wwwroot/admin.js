@@ -225,6 +225,7 @@ const state = {
 var conversationHubConnection = null;
 var resourceHubConnection = null;
 var taskHubConnection = null;
+const HUB_RECONNECT_DELAYS_MS = [5000, 10000, 20000, 30000, 60000];
 
 // Track individual hub connection states; banner shows if either hub is disconnected
 // Default to `true` so the banner is hidden until a hub explicitly reports disconnected.
@@ -240,7 +241,7 @@ async function initConversationHub() {
     try {
         conversationHubConnection = new signalR.HubConnectionBuilder()
             .withUrl('/hubs/conversations')
-            .withAutomaticReconnect()
+            .withAutomaticReconnect(HUB_RECONNECT_DELAYS_MS)
             .build();
 
         conversationHubConnection.on('conversationUpdated', async (payload) => {
@@ -343,7 +344,7 @@ async function initResourceHub() {
     try {
         resourceHubConnection = new signalR.HubConnectionBuilder()
             .withUrl('/hubs/resources')
-            .withAutomaticReconnect()
+            .withAutomaticReconnect(HUB_RECONNECT_DELAYS_MS)
             .build();
 
         resourceHubConnection.on('filesChanged', async () => {
@@ -391,7 +392,7 @@ async function initTaskHub() {
     try {
         taskHubConnection = new signalR.HubConnectionBuilder()
             .withUrl('/hubs/tasks')
-            .withAutomaticReconnect()
+            .withAutomaticReconnect(HUB_RECONNECT_DELAYS_MS)
             .build();
 
         // Handle request status updates
@@ -3764,10 +3765,10 @@ async function init() {
             }
         });
 
-        // Start hub initialization in background so UI handlers attach immediately
+        // Stagger hub startup to avoid concurrent negotiate spikes during cold starts.
         initConversationHub();
-        initResourceHub();
-        initTaskHub();
+        setTimeout(() => initResourceHub(), 750);
+        setTimeout(() => initTaskHub(), 1500);
         
         // Setup prompts file management
         const promptFileInput = document.getElementById('prompt-file-input');
