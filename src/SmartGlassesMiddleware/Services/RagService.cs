@@ -73,7 +73,9 @@ public class RAGService : IRAGService
         _embeddingMaxConcurrency = configuration.GetValue<int?>("RAG:EmbeddingMaxConcurrency") ?? 5;
         _useVectorDB = configuration.GetValue<bool?>("RAG:UseVectorDB") ?? true;
         _vectorSimilarityThreshold = configuration.GetValue<double?>("RAG:VectorSimilarityThreshold") ?? 0.7;
-        _queryTimeoutSeconds = configuration.GetValue<int?>("RAG:QueryTimeoutSeconds") ?? 120;
+        var configuredQueryTimeoutSeconds = configuration.GetValue<int?>("RAG:QueryTimeoutSeconds") ?? 120;
+        var gatewaySafeQueryTimeoutSeconds = configuration.GetValue<int?>("RAG:GatewaySafeQueryTimeoutSeconds") ?? 25;
+        _queryTimeoutSeconds = Math.Max(5, Math.Min(configuredQueryTimeoutSeconds, gatewaySafeQueryTimeoutSeconds));
         _conversationMessageLimit = configuration.GetValue<int?>("RAG:ConversationMessageLimit") ?? 5;
         _conversationHistoryPercentage = configuration.GetValue<int?>("RAG:ConversationHistoryPercentage") ?? 25;
         // Read the expected pgvector column dimension from config (must match the EF Core migration and Lambda)
@@ -366,6 +368,7 @@ Answer:";
         List<Guid>? groupIds = null,
         List<Guid>? documentIds = null)
     {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(_queryTimeoutSeconds));
         try
         {
             // Classify the raw query FIRST before RAG wraps it in a long prompt.
@@ -378,7 +381,7 @@ Answer:";
             if (!taskDispatcherEarly.KnownTasks.Contains(directTaskName))
             {
                 // Step 2: AI classify on raw input
-                directTaskName = await _aiService.ClassifyOnlyAsync(query);
+                directTaskName = await _aiService.ClassifyOnlyAsync(query, cts.Token).WaitAsync(cts.Token);
             }
 
             if (directTaskName != "unknown" && !string.IsNullOrEmpty(directTaskName))
@@ -403,10 +406,11 @@ Answer:";
                 .OrderByDescending(m => m.Timestamp)
                 .Take(_conversationMessageLimit)
                 .OrderBy(m => m.Timestamp)
-                .ToListAsync();
+                .ToListAsync()
+                .WaitAsync(cts.Token);
 
             // Search for relevant chunks
-            var relevantChunks = await SearchChunksAsync(query, topK, groupIds, documentIds);
+            var relevantChunks = await SearchChunksAsync(query, topK, groupIds, documentIds).WaitAsync(cts.Token);
 
             // Build context from chunks (with token budgeting)
             var contextBuilder = new StringBuilder();
@@ -480,7 +484,7 @@ Answer:";
             }
 
             // Call the model directly without task detection wrapper to preserve conversation context
-            var response = await GenerateResponseWithLocalModel(prompt);
+            var response = await GenerateResponseWithLocalModel(prompt, cts.Token).WaitAsync(cts.Token);
 
             // Build sources list with position information
             var sources = relevantChunks.Select(c => new DocumentSource
@@ -513,6 +517,11 @@ Answer:";
                 Sources = sources,
                 ConversationSources = conversationSources
             };
+        }
+        catch (OperationCanceledException ex)
+        {
+            _logger.LogWarning(ex, "Conversation query timed out after {Timeout}s", _queryTimeoutSeconds);
+            throw new TimeoutException($"Query operation timed out after {_queryTimeoutSeconds} seconds. Please try again in a few seconds.", ex);
         }
         catch (Exception ex)
         {
