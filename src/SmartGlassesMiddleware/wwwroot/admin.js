@@ -961,6 +961,42 @@ async function waitForDocumentReady(id, timeoutMs = 300000, intervalMs = 2000) {
     return null;
 }
 
+async function waitForManagedFileReady(id, timeoutMs = 120000, intervalMs = 1500) {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+        try {
+            const cacheBuster = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
+            const response = await fetch(`${API_BASE}/files/${id}/status?v=${cacheBuster}`);
+            if (response.ok) {
+                const fileMeta = await response.json().catch(() => null);
+                const failed = fileMeta?.failed ?? false;
+                const isReady = fileMeta?.isReady ?? false;
+
+                if (failed) {
+                    return {
+                        failed: true,
+                        error: fileMeta?.error || 'Upload failed on server.'
+                    };
+                }
+
+                if (isReady) {
+                    return {
+                        failed: false,
+                        id: fileMeta?.id || id,
+                        fileName: fileMeta?.fileName || fileMeta?.label || null
+                    };
+                }
+            }
+        } catch (error) {
+            // Keep polling until timeout.
+        }
+
+        await delay(intervalMs);
+    }
+
+    return null;
+}
+
 function syncPromptSelectedFilesState() {
     window.promptSelectedFiles = promptSelectedFiles;
     updatePromptFilesList();
@@ -974,15 +1010,19 @@ async function monitorPromptFileAvailability(fileObj, timeoutMs = 300000, interv
         let ready = null;
 
         if (fileObj.isManagedFile && fileObj.id) {
-            const previewReady = await waitForPreviewReady(fileObj.id, timeoutMs, intervalMs);
-            if (previewReady) {
-                ready = { fileName: fileObj.name };
-            }
+            ready = await waitForManagedFileReady(fileObj.id, timeoutMs, intervalMs);
         } else if (fileObj.documentId || fileObj.id) {
             ready = await waitForDocumentReady(fileObj.documentId || fileObj.id, timeoutMs, intervalMs);
         }
 
         if (!promptSelectedFiles.includes(fileObj)) {
+            return;
+        }
+
+        if (ready?.failed) {
+            promptSelectedFiles = promptSelectedFiles.filter(f => f !== fileObj);
+            syncPromptSelectedFilesState();
+            showMessage(ready.error || 'File upload failed on the server.', 'error');
             return;
         }
 
