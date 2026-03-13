@@ -928,6 +928,15 @@ jobs:
             --cache-control "no-cache,no-store,must-revalidate" \
             --content-type "text/html"
 
+          # Root shell files (admin.html/admin.js/toasts.js/etc.) should never be long-cached.
+          aws s3 sync "$WWWROOT/" "s3://$BUCKET/" \
+            --exclude "*" \
+            --include "*.html" \
+            --include "*.js" \
+            --include "*.css" \
+            --cache-control "no-cache,no-store,must-revalidate" \
+            --delete
+
           # Hashed JS/CSS assets — immutable, long TTL
           aws s3 sync "$WWWROOT/assets/" "s3://$BUCKET/assets/" \
             --cache-control "public,max-age=31536000,immutable" \
@@ -937,6 +946,9 @@ jobs:
           aws s3 sync "$WWWROOT/" "s3://$BUCKET/" \
             --exclude "index.html" \
             --exclude "assets/*" \
+            --exclude "*.html" \
+            --exclude "*.js" \
+            --exclude "*.css" \
             --cache-control "public,max-age=31536000,immutable" \
             --delete
 
@@ -950,7 +962,7 @@ jobs:
           echo "Invalidating CloudFront distribution $CF_ID"
           RESULT=$(aws cloudfront create-invalidation \
             --distribution-id "$CF_ID" \
-            --paths "/index.html" "/*.html" \
+            --paths "/index.html" "/*.html" "/*.js" "/*.css" \
             --query "Invalidation.{Id:Id,Status:Status}" \
             --output json)
           echo "Invalidation: $RESULT"
