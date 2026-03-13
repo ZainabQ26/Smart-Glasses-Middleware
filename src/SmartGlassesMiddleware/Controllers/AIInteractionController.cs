@@ -65,8 +65,8 @@ public class AIInteractionController : ControllerBase
                     ResourceGroupName = log.ResourceGroup != null ? log.ResourceGroup.Name : null,
                     ConversationTitle = log.Conversation != null ? log.Conversation.Title : null,
                     // Truncate input/output for list view
-                    InputPreview = log.Input.Length > 200 ? log.Input.Substring(0, 200) + "..." : log.Input,
-                    OutputPreview = log.Output.Length > 200 ? log.Output.Substring(0, 200) + "..." : log.Output
+                    InputPreview = string.IsNullOrEmpty(log.Input) ? string.Empty : (log.Input.Length > 200 ? log.Input.Substring(0, 200) + "..." : log.Input),
+                    OutputPreview = string.IsNullOrEmpty(log.Output) ? string.Empty : (log.Output.Length > 200 ? log.Output.Substring(0, 200) + "..." : log.Output)
                 })
                 .ToListAsync();
 

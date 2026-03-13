@@ -18,28 +18,31 @@ public class TasksController : ControllerBase
     [HttpGet("{id}")]
     public ActionResult GetTask(Guid id)
     {
-        var entry = _queue.Get(id);
-        if (entry == null) return NotFound(new ProblemDetails { Title = "Not Found", Detail = "Task not found", Status = StatusCodes.Status404NotFound });
-
-        var result = new
+        try
         {
-            id = entry.Id,
-            status = entry.Status.ToString(),
-            createdAt = entry.CreatedAt,
-            updatedAt = entry.UpdatedAt,
-            error = entry.Error,
-            result = entry.Result
-        };
+            var entry = _queue.Get(id);
+            if (entry == null) return NotFound(new ProblemDetails { Title = "Not Found", Detail = "Task not found", Status = StatusCodes.Status404NotFound });
 
-        if (entry.Status == BackgroundTaskStatus.Completed)
-        {
-            return Ok(result);
+            var result = new
+            {
+                id = entry.Id,
+                status = entry.Status.ToString(),
+                createdAt = entry.CreatedAt,
+                updatedAt = entry.UpdatedAt,
+                error = entry.Error,
+                result = entry.Result
+            };
+
+            if (entry.Status == BackgroundTaskStatus.Completed)
+                return Ok(result);
+            if (entry.Status == BackgroundTaskStatus.Failed)
+                return StatusCode(500, result);
+
+            return Accepted($"/api/tasks/{entry.Id}", result);
         }
-        if (entry.Status == BackgroundTaskStatus.Failed)
+        catch (Exception)
         {
-            return StatusCode(500, result);
+            return NotFound(new ProblemDetails { Title = "Not Found", Detail = "Task not found", Status = StatusCodes.Status404NotFound });
         }
-
-        return Accepted($"/api/tasks/{entry.Id}", result);
     }
 }

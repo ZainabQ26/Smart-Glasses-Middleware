@@ -898,8 +898,8 @@ async function deleteFile(id) {
             await loadFiles(true);
             await loadAllGroups(true);
         } else {
-            const error = await response.json();
-            showMessage(error.detail || 'Error deleting file', 'error');
+            const error = await response.json().catch(() => null);
+            showMessage(error?.detail || 'Error deleting file', 'error');
         }
     } catch (error) {
         showMessage('Error deleting file: ' + error.message, 'error');
@@ -2194,8 +2194,8 @@ document.getElementById('group-form').addEventListener('submit', async (e) => {
             await loadGroups(true);
             await loadAllGroups(true); // Force refresh groups cache
         } else {
-            const error = await response.json();
-            showMessage(error.detail || 'Error saving reminder', 'error');
+            const error = await response.json().catch(() => null);
+            showMessage(error?.detail || 'Error saving reminder', 'error');
         }
     } catch (error) {
         showMessage('Error saving reminder: ' + error.message, 'error');
@@ -2341,8 +2341,8 @@ document.getElementById('reminder-form')?.addEventListener('submit', async (e) =
             apiCache.invalidate('/api/admin/groups');
             await loadReminders(true);
         } else {
-            const error = await response.json();
-            showMessage(error.detail || 'Error saving reminder', 'error');
+            const error = await response.json().catch(() => null);
+            showMessage(error?.detail || 'Error saving reminder', 'error');
         }
     } catch (error) {
         showMessage('Error saving reminder: ' + error.message, 'error');
