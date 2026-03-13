@@ -491,8 +491,10 @@ public class AdminController : ControllerBase
 
         try
         {
-            var stream = await _mediaStorageService.DownloadMediaAsync(storageKey);
-            stream.Position = 0; // Essential for some stream implementations
+            // DownloadFileAsync tries _mediaBucket first, then _documentsBucket as fallback.
+            // This covers both MediaController uploads (media/) and RAG-processed docs (documents/).
+            var stream = await _mediaStorageService.DownloadFileAsync(storageKey);
+            stream.Position = 0;
             
             if (contentType == "application/octet-stream")
             {
@@ -564,7 +566,8 @@ public class AdminController : ControllerBase
 
         try
         {
-            var stream = await _mediaStorageService.DownloadMediaAsync(storageKey);
+            // DownloadFileAsync tries _mediaBucket first, then _documentsBucket as fallback.
+            var stream = await _mediaStorageService.DownloadFileAsync(storageKey);
             stream.Position = 0;
 
             if (contentType == "application/octet-stream")
@@ -620,7 +623,7 @@ public class AdminController : ControllerBase
         }
         try
         {
-            var stream = await _mediaStorageService.DownloadMediaAsync(storageKey);
+            var stream = await _mediaStorageService.DownloadFileAsync(storageKey);
             stream.Position = 0;
             var header = new byte[Math.Min(16, stream.Length)];
             await stream.ReadExactlyAsync(header);
