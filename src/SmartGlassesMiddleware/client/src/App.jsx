@@ -313,7 +313,8 @@ export default function App() {
         const docName = parts.slice(3).join(":") || "Document";
         addLog(`📄 Command: select document "${docName}"`, "voice");
         setAiResponse(null);
-        setPendingAction({ type: "SELECT_DOCUMENT", id: docId, name: docName });
+        setPendingAction(null);
+        openDocumentPreview({ previewId: docId, name: docName });
       } else {
         addLog(`💡 AI: "${answer}"`, "voice");
         setPendingAction(null);
