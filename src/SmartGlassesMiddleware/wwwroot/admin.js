@@ -4678,8 +4678,9 @@ async function init() {
                         } catch (_) { /* network error → fall through */ }
 
                         let fileData;
+                        const usedPresignedUpload = !!(presignedUrlData && presignedUrlData.presignedUrl);
 
-                        if (presignedUrlData && presignedUrlData.presignedUrl) {
+                        if (usedPresignedUpload) {
                             // Step 2: PUT directly to S3 (no CloudFront, no ECS)
                             await new Promise((resolve, reject) => {
                                 const s3xhr = new XMLHttpRequest();
@@ -4779,13 +4780,25 @@ async function init() {
                         pendingFile.requestId = uploadRequestId;
                         pendingFile.isManagedFile = true;
                         pendingFile.uploadProgress = 100;
-                        pendingFile.statusText = isQueued ? 'Finishing upload...' : 'Verifying file access...';
-                        syncPromptSelectedFilesState();
-                        showMessage(`File "${file.name}" is uploading. It will move to recent files once ready.`, 'info');
 
-                        monitorPromptFileAvailability(pendingFile).catch(error => {
-                            console.warn('Prompt file availability monitor failed', error);
-                        });
+                        if (usedPresignedUpload && managedFileId) {
+                            pendingFile.pending = false;
+                            pendingFile.statusText = 'Indexing in background...';
+                            pendingFile._availabilityMonitorStarted = false;
+                            syncPromptSelectedFilesState();
+                            showMessage(`File "${file.name}" uploaded successfully. Indexing continues in the background.`, 'info');
+                            loadFiles(true).catch(error => {
+                                console.warn('Failed to refresh files after presigned upload completion', error);
+                            });
+                        } else {
+                            pendingFile.statusText = isQueued ? 'Finishing upload...' : 'Verifying file access...';
+                            syncPromptSelectedFilesState();
+                            showMessage(`File "${file.name}" is uploading. It will move to recent files once ready.`, 'info');
+
+                            monitorPromptFileAvailability(pendingFile).catch(error => {
+                                console.warn('Prompt file availability monitor failed', error);
+                            });
+                        }
                         
                         // Clear preview
                         promptPreviewFile = null;
