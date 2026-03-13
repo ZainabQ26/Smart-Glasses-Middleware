@@ -224,15 +224,19 @@ public class AdminController : ControllerBase
             return BadRequest(new { error = "FileName is required" });
 
         var requestId = Guid.NewGuid().ToString("N");
-        var fileId = Guid.NewGuid();
+        var fileId = request.FileId ?? Guid.NewGuid();
         var label = string.IsNullOrWhiteSpace(request.Label) ? request.FileName : request.Label;
         var contentType = string.IsNullOrWhiteSpace(request.ContentType) ? "application/octet-stream" : request.ContentType;
 
-        _ = Task.Run(() => ProcessPresignedUploadAsync(fileId, request.Key, request.FileName, contentType, label, request.FileSize, requestId));
+        HttpContext.Response.OnCompleted(() =>
+        {
+            _ = Task.Run(() => ProcessPresignedUploadAsync(fileId, request.Key, request.FileName, contentType, label, request.FileSize, requestId));
+            return Task.CompletedTask;
+        });
 
         return Accepted(new
         {
-            id = (Guid?)null,
+            id = fileId,
             requestId,
             status = "processing",
             registration = "deferred"
