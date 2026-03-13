@@ -917,6 +917,21 @@ function delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
+    const controller = new AbortController();
+    const safeTimeout = Math.max(1000, Number(timeoutMs) || 8000);
+    const timeoutId = setTimeout(() => controller.abort(), safeTimeout);
+
+    try {
+        return await fetch(url, {
+            ...options,
+            signal: controller.signal
+        });
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
 function isTransientGatewayStatus(status) {
     return TRANSIENT_GATEWAY_STATUSES.has(Number(status));
 }
@@ -965,13 +980,14 @@ async function waitForDocumentReady(id, timeoutMs = 300000, intervalMs = 2000) {
     const start = Date.now();
     let consecutiveTransientFailures = 0;
     let hadTransientFailures = false;
+    const requestTimeoutMs = Math.max(5000, intervalMs * 4);
 
     while (Date.now() - start < timeoutMs) {
         let response = null;
 
         try {
             const cacheBuster = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
-            response = await fetch(`/api/documents/${id}?v=${cacheBuster}`);
+            response = await fetchWithTimeout(`/api/documents/${id}?v=${cacheBuster}`, {}, requestTimeoutMs);
             if (response.ok) {
                 consecutiveTransientFailures = 0;
                 const documentMeta = await response.json().catch(() => null);
@@ -994,6 +1010,9 @@ async function waitForDocumentReady(id, timeoutMs = 300000, intervalMs = 2000) {
                 consecutiveTransientFailures = 0;
             }
         } catch (error) {
+            if (error?.name === 'AbortError') {
+                notifyUploadPollingOutage();
+            }
             hadTransientFailures = true;
             consecutiveTransientFailures++;
             await delay(getRetryDelayMs(intervalMs, consecutiveTransientFailures));
@@ -1010,13 +1029,14 @@ async function waitForManagedFileReady(id, timeoutMs = 120000, intervalMs = 1500
     const start = Date.now();
     let consecutiveTransientFailures = 0;
     let hadTransientFailures = false;
+    const requestTimeoutMs = Math.max(5000, intervalMs * 4);
 
     while (Date.now() - start < timeoutMs) {
         let response = null;
 
         try {
             const cacheBuster = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
-            response = await fetch(`${API_BASE}/files/${id}/status?v=${cacheBuster}`);
+            response = await fetchWithTimeout(`${API_BASE}/files/${id}/status?v=${cacheBuster}`, {}, requestTimeoutMs);
             if (response.ok) {
                 consecutiveTransientFailures = 0;
                 const fileMeta = await response.json().catch(() => null);
@@ -1047,6 +1067,9 @@ async function waitForManagedFileReady(id, timeoutMs = 120000, intervalMs = 1500
                 consecutiveTransientFailures = 0;
             }
         } catch (error) {
+            if (error?.name === 'AbortError') {
+                notifyUploadPollingOutage();
+            }
             hadTransientFailures = true;
             consecutiveTransientFailures++;
             await delay(getRetryDelayMs(intervalMs, consecutiveTransientFailures));

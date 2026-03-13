@@ -256,6 +256,19 @@ public class AdminController : ControllerBase
             var contentType = request.File.ContentType ?? "application/octet-stream";
             var label = string.IsNullOrWhiteSpace(request.Label) ? (request.File.FileName ?? "Untitled") : request.Label;
 
+            // Persist a lightweight placeholder immediately so status polling has a row to query.
+            _context.ManagedFiles.Add(new ManagedFile
+            {
+                Id = fileId,
+                FileName = request.File.FileName ?? "Untitled",
+                Label = label,
+                ContentType = contentType,
+                StorageKey = "PENDING: upload queued",
+                UploadedAt = DateTime.UtcNow,
+                FileSize = 0
+            });
+            await _context.SaveChangesAsync();
+
             // Queue S3 upload and RAG processing to background task (keep request fast)
             _ = Task.Run(() => ProcessQueuedFileUploadAsync(fileId, uploadedBytes, request.File.FileName ?? string.Empty, 
                 contentType, label, requestId));
@@ -629,53 +642,75 @@ public class AdminController : ControllerBase
     [HttpGet("files/{id}/status")]
     public async Task<IActionResult> FileStatus(Guid id)
     {
-        var file = await _context.ManagedFiles
-            .AsNoTracking()
-            .FirstOrDefaultAsync(f => f.Id == id);
-
-        if (file != null)
+        try
         {
-            var failed = !string.IsNullOrWhiteSpace(file.StorageKey) && file.StorageKey.StartsWith("FAILED:", StringComparison.OrdinalIgnoreCase);
-            var ready = !failed && !string.IsNullOrWhiteSpace(file.StorageKey) && file.FileSize > 0;
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(5));
+            var ct = timeoutCts.Token;
+
+            var file = await _context.ManagedFiles
+                .AsNoTracking()
+                .FirstOrDefaultAsync(f => f.Id == id, ct);
+
+            if (file != null)
+            {
+                var failed = !string.IsNullOrWhiteSpace(file.StorageKey) && file.StorageKey.StartsWith("FAILED:", StringComparison.OrdinalIgnoreCase);
+                var pending = !failed && !string.IsNullOrWhiteSpace(file.StorageKey) && file.StorageKey.StartsWith("PENDING:", StringComparison.OrdinalIgnoreCase);
+                var ready = !failed && !pending && !string.IsNullOrWhiteSpace(file.StorageKey) && file.FileSize > 0;
+                return Ok(new
+                {
+                    id = file.Id,
+                    fileName = file.FileName,
+                    label = file.Label,
+                    contentType = file.ContentType,
+                    fileSize = file.FileSize,
+                    uploadedAt = file.UploadedAt,
+                    hasStorageKey = !string.IsNullOrWhiteSpace(file.StorageKey),
+                    isReady = ready,
+                    pending,
+                    failed,
+                    error = failed ? file.StorageKey : null
+                });
+            }
+
+            var doc = await _context.DocumentMetadatas
+                .AsNoTracking()
+                .FirstOrDefaultAsync(d => d.Id == id, ct);
+
+            if (doc == null)
+            {
+                return NotFound(new { error = "Not found in ManagedFiles or DocumentMetadatas", id });
+            }
+
             return Ok(new
             {
-                id = file.Id,
-                fileName = file.FileName,
-                label = file.Label,
-                contentType = file.ContentType,
-                fileSize = file.FileSize,
-                uploadedAt = file.UploadedAt,
-                hasStorageKey = !string.IsNullOrWhiteSpace(file.StorageKey),
-                isReady = ready,
-                failed,
-                error = failed ? file.StorageKey : null
+                id = doc.Id,
+                fileName = doc.FileName,
+                contentType = doc.ContentType,
+                fileSize = doc.FileSize,
+                uploadedAt = doc.UploadedAt,
+                hasStorageKey = !string.IsNullOrWhiteSpace(doc.StorageKey),
+                isReady = !string.IsNullOrWhiteSpace(doc.StorageKey) && doc.FileSize > 0,
+                pending = false,
+                failed = !string.IsNullOrWhiteSpace(doc.ProcessingError),
+                error = doc.ProcessingError,
+                managedFileId = doc.ManagedFileId,
+                isProcessed = doc.IsProcessed,
+                processedAt = doc.ProcessedAt
             });
         }
-
-        var doc = await _context.DocumentMetadatas
-            .AsNoTracking()
-            .FirstOrDefaultAsync(d => d.Id == id);
-
-        if (doc == null)
+        catch (OperationCanceledException) when (!HttpContext.RequestAborted.IsCancellationRequested)
         {
-            return NotFound(new { error = "Not found in ManagedFiles or DocumentMetadatas", id });
+            _logger.LogWarning("Timed out retrieving file status for {FileId}", id);
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+            {
+                id,
+                isReady = false,
+                pending = true,
+                failed = false,
+                error = "Status check timed out while the server is busy"
+            });
         }
-
-        return Ok(new
-        {
-            id = doc.Id,
-            fileName = doc.FileName,
-            contentType = doc.ContentType,
-            fileSize = doc.FileSize,
-            uploadedAt = doc.UploadedAt,
-            hasStorageKey = !string.IsNullOrWhiteSpace(doc.StorageKey),
-            isReady = !string.IsNullOrWhiteSpace(doc.StorageKey) && doc.FileSize > 0,
-            failed = !string.IsNullOrWhiteSpace(doc.ProcessingError),
-            error = doc.ProcessingError,
-            managedFileId = doc.ManagedFileId,
-            isProcessed = doc.IsProcessed,
-            processedAt = doc.ProcessedAt
-        });
     }
 
     [HttpGet("files/{id}/info")]
