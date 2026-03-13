@@ -133,6 +133,7 @@ public class AdminController : ControllerBase
                 .AsNoTracking()
                 .Where(f => !string.IsNullOrWhiteSpace(f.StorageKey)
                     && !EF.Functions.Like(f.StorageKey, "FAILED:%")
+                    && !EF.Functions.Like(f.StorageKey, "PENDING:%")
                     && f.FileSize > 0);
 
             var totalCount = await visibleFilesQuery.CountAsync(ct);
@@ -539,6 +540,26 @@ public class AdminController : ControllerBase
             contentType = string.IsNullOrWhiteSpace(doc.ContentType) ? "application/octet-stream" : doc.ContentType;
         }
 
+        if (string.IsNullOrWhiteSpace(storageKey) || storageKey.StartsWith("PENDING:", StringComparison.OrdinalIgnoreCase))
+        {
+            return StatusCode(StatusCodes.Status409Conflict, new ProblemDetails
+            {
+                Title = "File not ready",
+                Detail = "The selected file is still processing. Try again in a few seconds.",
+                Status = StatusCodes.Status409Conflict
+            });
+        }
+
+        if (storageKey.StartsWith("FAILED:", StringComparison.OrdinalIgnoreCase))
+        {
+            return UnprocessableEntity(new ProblemDetails
+            {
+                Title = "File unavailable",
+                Detail = storageKey,
+                Status = StatusCodes.Status422UnprocessableEntity
+            });
+        }
+
         try
         {
             // DownloadFileAsync tries _mediaBucket first, then _documentsBucket as fallback.
@@ -745,6 +766,17 @@ public class AdminController : ControllerBase
             if (doc == null) return NotFound(new { error = "Not found in ManagedFiles or DocumentMetadatas", id });
             storageKey = doc.StorageKey; fileName = doc.FileName; storedContentType = doc.ContentType;
         }
+
+        if (string.IsNullOrWhiteSpace(storageKey) || storageKey.StartsWith("PENDING:", StringComparison.OrdinalIgnoreCase))
+        {
+            return StatusCode(StatusCodes.Status409Conflict, new { error = "File is still processing", id, status = "pending" });
+        }
+
+        if (storageKey.StartsWith("FAILED:", StringComparison.OrdinalIgnoreCase))
+        {
+            return UnprocessableEntity(new { error = "File upload failed", details = storageKey, id, status = "failed" });
+        }
+
         try
         {
             var stream = await _mediaStorageService.DownloadFileAsync(storageKey);

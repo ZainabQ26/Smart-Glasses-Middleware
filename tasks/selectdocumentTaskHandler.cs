@@ -21,7 +21,10 @@ public class SelectDocumentTaskHandler : ITaskHandler
         // Use OriginalFileName to show the user-friendly name.
         // The preview endpoint now accepts both ManagedFile IDs and DocumentMetadata IDs.
         var lastDoc = await _context.DocumentMetadatas
-            .Where(d => !string.IsNullOrWhiteSpace(d.StorageKey) && d.FileSize > 0)
+            .Where(d => !string.IsNullOrWhiteSpace(d.StorageKey)
+                && !EF.Functions.Like(d.StorageKey, "FAILED:%")
+                && !EF.Functions.Like(d.StorageKey, "PENDING:%")
+                && d.FileSize > 0)
             .OrderByDescending(d => d.UploadedAt)
             .FirstOrDefaultAsync();
 
@@ -40,12 +43,20 @@ public class SelectDocumentTaskHandler : ITaskHandler
 
         // Final fallback: labelled ManagedFiles (direct uploads without deep processing)
         var lastFile = await _context.ManagedFiles
-            .Where(f => f.Label != null && f.Label != string.Empty)
+            .Where(f => !string.IsNullOrWhiteSpace(f.StorageKey)
+                && !EF.Functions.Like(f.StorageKey, "FAILED:%")
+                && !EF.Functions.Like(f.StorageKey, "PENDING:%")
+                && f.FileSize > 0)
             .OrderByDescending(f => f.UploadedAt)
             .FirstOrDefaultAsync();
 
         if (lastFile != null)
-            return $"__ACTION:SELECT_DOCUMENT:{lastFile.Id}:{lastFile.FileName}";
+        {
+            var displayName = string.IsNullOrWhiteSpace(lastFile.Label)
+                ? lastFile.FileName
+                : lastFile.Label;
+            return $"__ACTION:SELECT_DOCUMENT:{lastFile.Id}:{displayName}";
+        }
 
         return "No documents found. Please upload a file first.";
     }
