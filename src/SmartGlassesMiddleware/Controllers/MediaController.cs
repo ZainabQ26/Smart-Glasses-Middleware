@@ -358,8 +358,11 @@ public class MediaController : ControllerBase
                 using var uploadStream = file.OpenReadStream();
                 var contentType = file.ContentType ?? "application/octet-stream";
 
-                // Compute content hash for deduplication
+                // Compute content hash for deduplication.
+                // ComputeContentHash reads the stream to EOF; reset position before upload.
                 var contentHash = _mediaStorageService.ComputeContentHash(uploadStream);
+                if (uploadStream.CanSeek)
+                    uploadStream.Seek(0, SeekOrigin.Begin);
 
                 // Check if file with same hash already exists
                 var existingFile = await _context.ManagedFiles

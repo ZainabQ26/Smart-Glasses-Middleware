@@ -68,58 +68,68 @@ public class ConversationsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetConversation(Guid id)
     {
-        var conversation = await _context.Conversations
-            .Include(c => c.ResourceGroup)
-            .FirstOrDefaultAsync(c => c.Id == id);
-
-        if (conversation == null)
-            return NotFound();
-
-        var messages = await _context.ChatMessages
-            .Where(m => m.ConversationId == id)
-            .OrderBy(m => m.Timestamp)
-            .Include(m => m.Attachments)
-                .ThenInclude(a => a.Document)
-            .ToListAsync();
-
-        var response = new
+        try
         {
-            conversation.Id,
-            conversation.Title,
-            conversation.CreatedAt,
-            conversation.UpdatedAt,
-            conversation.IsActive,
-            conversation.ResourceGroupId,
-            ResourceGroup = conversation.ResourceGroup == null ? null : new
-            {
-                conversation.ResourceGroup.Id,
-                conversation.ResourceGroup.Name,
-                conversation.ResourceGroup.Description,
-                conversation.ResourceGroup.CreatedAt
-            },
-            Messages = messages.Select(m => new
-            {
-                m.Id,
-                m.ConversationId,
-                m.Role,
-                m.Content,
-                m.Model,
-                m.Timestamp,
-                m.TokenCount,
-                Attachments = m.Attachments.Select(a => new
-                {
-                    Id = a.DocumentMetadataId,
-                    FileName = a.Document.FileName,
-                    ContentType = a.Document.ContentType,
-                    OriginalFileName = a.Document.OriginalFileName
-                }).ToList()
-            }).ToList(),
-            conversation.Summary,
-            conversation.SummaryEmbedding,
-            conversation.SummaryEmbeddingDimension
-        };
+            var conversation = await _context.Conversations
+                .Include(c => c.ResourceGroup)
+                .FirstOrDefaultAsync(c => c.Id == id);
 
-        return Ok(response);
+            if (conversation == null)
+                return NotFound();
+
+            var messages = await _context.ChatMessages
+                .Where(m => m.ConversationId == id)
+                .OrderBy(m => m.Timestamp)
+                .Include(m => m.Attachments)
+                    .ThenInclude(a => a.Document)
+                .ToListAsync();
+
+            var response = new
+            {
+                conversation.Id,
+                conversation.Title,
+                conversation.CreatedAt,
+                conversation.UpdatedAt,
+                conversation.IsActive,
+                conversation.ResourceGroupId,
+                ResourceGroup = conversation.ResourceGroup == null ? null : new
+                {
+                    conversation.ResourceGroup.Id,
+                    conversation.ResourceGroup.Name,
+                    conversation.ResourceGroup.Description,
+                    conversation.ResourceGroup.CreatedAt
+                },
+                Messages = messages.Select(m => new
+                {
+                    m.Id,
+                    m.ConversationId,
+                    m.Role,
+                    m.Content,
+                    m.Model,
+                    m.Timestamp,
+                    m.TokenCount,
+                    Attachments = m.Attachments
+                        .Where(a => a.Document != null)
+                        .Select(a => new
+                        {
+                            Id = a.DocumentMetadataId,
+                            FileName = a.Document!.FileName,
+                            ContentType = a.Document.ContentType,
+                            OriginalFileName = a.Document.OriginalFileName
+                        }).ToList()
+                }).ToList(),
+                conversation.Summary,
+                conversation.SummaryEmbedding,
+                conversation.SummaryEmbeddingDimension
+            };
+
+            return Ok(response);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving conversation {ConversationId}", id);
+            return StatusCode(500, new { error = "Failed to retrieve conversation", details = ex.Message });
+        }
     }
 
     /// <summary>
@@ -261,19 +271,27 @@ public class ConversationsController : ControllerBase
         if (request == null || string.IsNullOrWhiteSpace(request.Title))
             return BadRequest(new { error = "Title is required" });
 
-        var conversation = await _context.Conversations.FindAsync(id);
-        if (conversation == null)
-            return NotFound(new { error = "Conversation not found" });
+        try
+        {
+            var conversation = await _context.Conversations.FindAsync(id);
+            if (conversation == null)
+                return NotFound(new { error = "Conversation not found" });
 
-        conversation.Title = request.Title.Trim();
-        conversation.UpdatedAt = DateTime.UtcNow;
-        await _context.SaveChangesAsync();
+            conversation.Title = request.Title.Trim();
+            conversation.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
 
-        await InvalidateGroupsCache();
-        await NotifyGroupsChangedAsync();
-        await NotifyConversationsChangedAsync();
+            await InvalidateGroupsCache();
+            await NotifyGroupsChangedAsync();
+            await NotifyConversationsChangedAsync();
 
-        return Ok(new { conversation.Id, conversation.Title, conversation.UpdatedAt });
+            return Ok(new { conversation.Id, conversation.Title, conversation.UpdatedAt });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating conversation {ConversationId}", id);
+            return StatusCode(500, new { error = "Failed to update conversation", details = ex.Message });
+        }
     }
 
     /// <summary>
@@ -380,8 +398,16 @@ public class ConversationsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     public async Task<IActionResult> ArchiveConversation(Guid id)
     {
-        await _conversationService.ArchiveConversationAsync(id);
-        return NoContent();
+        try
+        {
+            await _conversationService.ArchiveConversationAsync(id);
+            return NoContent();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error archiving conversation {ConversationId}", id);
+            return StatusCode(500, new { error = "Failed to archive conversation", details = ex.Message });
+        }
     }
 
     /// <summary>
@@ -396,19 +422,27 @@ public class ConversationsController : ControllerBase
         if (request == null || !request.ResourceGroupId.HasValue || request.ResourceGroupId.Value == Guid.Empty)
             return BadRequest(new { error = "ResourceGroupId is required" });
 
-        var conversation = await _context.Conversations.FindAsync(id);
-        if (conversation == null)
-            return NotFound(new { error = "Conversation not found" });
+        try
+        {
+            var conversation = await _context.Conversations.FindAsync(id);
+            if (conversation == null)
+                return NotFound(new { error = "Conversation not found" });
 
-        var group = await _context.ResourceGroups.FindAsync(request.ResourceGroupId.Value);
-        if (group == null)
-            return NotFound(new { error = "Resource group not found" });
+            var group = await _context.ResourceGroups.FindAsync(request.ResourceGroupId.Value);
+            if (group == null)
+                return NotFound(new { error = "Resource group not found" });
 
-        conversation.ResourceGroupId = request.ResourceGroupId.Value;
-        conversation.UpdatedAt = DateTime.UtcNow;
-        await _context.SaveChangesAsync();
+            conversation.ResourceGroupId = request.ResourceGroupId.Value;
+            conversation.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
 
-        return Ok(new { conversation.Id, conversation.ResourceGroupId });
+            return Ok(new { conversation.Id, conversation.ResourceGroupId });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating group for conversation {ConversationId}", id);
+            return StatusCode(500, new { error = "Failed to update conversation group", details = ex.Message });
+        }
     }
 
     /// <summary>
@@ -419,23 +453,31 @@ public class ConversationsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteConversation(Guid id)
     {
-        var conversation = await _context.Conversations.FindAsync(id);
-        if (conversation == null)
+        try
+        {
+            var conversation = await _context.Conversations.FindAsync(id);
+            if (conversation == null)
+                return NoContent();
+
+            // Remove associated messages then the conversation row
+            var messages = _context.ChatMessages.Where(m => m.ConversationId == id);
+            _context.ChatMessages.RemoveRange(messages);
+            _context.Conversations.Remove(conversation);
+
+            await _context.SaveChangesAsync();
+
+            await InvalidateGroupsCache();
+            await NotifyGroupsChangedAsync();
+            await NotifyConversationsChangedAsync();
+
+            _logger.LogInformation("Permanently deleted conversation {ConversationId}", id);
             return NoContent();
-
-        // Remove associated messages then the conversation row
-        var messages = _context.ChatMessages.Where(m => m.ConversationId == id);
-        _context.ChatMessages.RemoveRange(messages);
-        _context.Conversations.Remove(conversation);
-
-        await _context.SaveChangesAsync();
-
-        await InvalidateGroupsCache();
-        await NotifyGroupsChangedAsync();
-        await NotifyConversationsChangedAsync();
-
-        _logger.LogInformation("Permanently deleted conversation {ConversationId}", id);
-        return NoContent();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deleting conversation {ConversationId}", id);
+            return StatusCode(500, new { error = "Failed to delete conversation", details = ex.Message });
+        }
     }
 
     private Task NotifyGroupsChangedAsync()

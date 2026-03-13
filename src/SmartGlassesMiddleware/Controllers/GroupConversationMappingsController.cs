@@ -20,9 +20,16 @@ namespace SmartGlassesMiddleware.Controllers;
     public async Task<IActionResult> GetMapping([FromQuery] Guid groupId)
     {
         if (groupId == Guid.Empty) return BadRequest("groupId is required");
-        var conv = await _mappingService.GetConversationIdForGroupAsync(groupId);
-        if (!conv.HasValue) return NotFound();
-        return Ok(new { ResourceGroupId = groupId, ConversationId = conv.Value });
+        try
+        {
+            var conv = await _mappingService.GetConversationIdForGroupAsync(groupId);
+            if (!conv.HasValue) return NotFound();
+            return Ok(new { ResourceGroupId = groupId, ConversationId = conv.Value });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { error = "Failed to retrieve mapping", details = ex.Message });
+        }
     }
 
     // PUT /api/conversations/mapping
@@ -31,9 +38,15 @@ namespace SmartGlassesMiddleware.Controllers;
     {
         if (dto == null || dto.ResourceGroupId == Guid.Empty || dto.ConversationId == Guid.Empty)
             return BadRequest("ResourceGroupId and ConversationId are required");
-
-        await _mappingService.UpsertMappingAsync(dto.ResourceGroupId, dto.ConversationId);
-        return NoContent();
+        try
+        {
+            await _mappingService.UpsertMappingAsync(dto.ResourceGroupId, dto.ConversationId);
+            return NoContent();
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { error = "Failed to upsert mapping", details = ex.Message });
+        }
     }
 
     // DELETE /api/conversations/mapping?groupId={groupId}
@@ -41,7 +54,14 @@ namespace SmartGlassesMiddleware.Controllers;
     public async Task<IActionResult> DeleteMapping([FromQuery] Guid groupId)
     {
         if (groupId == Guid.Empty) return BadRequest("groupId is required");
-        await _mappingService.DeleteMappingAsync(groupId);
-        return NoContent();
+        try
+        {
+            await _mappingService.DeleteMappingAsync(groupId);
+            return NoContent();
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { error = "Failed to delete mapping", details = ex.Message });
+        }
     }
 }
