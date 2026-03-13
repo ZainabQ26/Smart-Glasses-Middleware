@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { useMicVAD } from "@ricky0123/vad-react";
 import WhisperWorker from "./whisperWorker?worker";
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
@@ -25,13 +24,14 @@ export default function App() {
 
   const activatedRef        = useRef(false);
   const recognitionRef      = useRef(null);
-  const vadRef              = useRef(null);   // stable handle — avoids stale closures
+  const vadRef              = useRef(null);   // VAD removed; kept so optional calls are no-ops
   const listeningTimeoutRef = useRef(null);
   const workerRef           = useRef(null);
   const sendToAIRef         = useRef(null);
   const whisperFallbackNeededRef = useRef(false);
   const webSpeechHandledRef      = useRef(false);
   const lowConfidenceTranscriptRef = useRef(null);
+  const webSpeechSubmitBlockedRef = useRef(false); // block Web Speech submits while Whisper fallback is active
 
   const WEB_SPEECH_CONFIDENCE_THRESHOLD = 0.72;
   const isWebSpeechOnly = speechMode === "webspeech-only";
@@ -39,6 +39,8 @@ export default function App() {
   const API_TIMEOUT_MS = 20_000;
   const PREVIEW_TIMEOUT_MS = 6_000;
   const DOCUMENTS_TIMEOUT_MS = 10_000;
+  const RESTART_BACKOFF_BASE_MS = 1000;
+  const RESTART_BACKOFF_MAX_MS = 30_000;
 
   const normalizeCommandText = useCallback((value) => {
     const raw = (value ?? "").trim();
@@ -104,48 +106,9 @@ export default function App() {
     return () => { cancelled = true; };
   }, [addLog]);
 
-  // ── Silero VAD (whisper.cpp model) ────────────────────────────────────────
-  // startOnLoad:false → mic is only acquired after the wake word.
-  // The Silero v5 .onnx model and worklet bundle are served from wwwroot root
-  // (copied there by viteStaticCopy in vite.config.js).
-  const vad = useMicVAD({
-    startOnLoad: false,
-    baseAssetPath: "/",
-    ortConfig: (ort) => {
-      ort.env.wasm.wasmPaths = "/";
-      ort.env.wasm.numThreads = 1; // no SharedArrayBuffer/COOP-COEP headers needed
-    },
-    onSpeechStart: () => {
-      if (activatedRef.current) addLog("🟢 Speech detected…", "info");
-    },
-    onSpeechEnd: (audio) => {
-      // `audio` is a 16 kHz mono Float32Array — exactly what Whisper expects.
-      if (!activatedRef.current) return;
-      if (isWebSpeechOnly) return;
-      if (listeningTimeoutRef.current) {
-        clearTimeout(listeningTimeoutRef.current);
-        listeningTimeoutRef.current = null;
-      }
-      vadRef.current?.pause();
-      addLog("⏳ Whisper fallback transcript preparing…", "info");
-      // Transfer the buffer zero-copy; worker owns it from here.
-      workerRef.current?.postMessage({ type: "transcribe", audio }, [audio.buffer]);
-    },
-    onVADMisfire: () => {
-      if (activatedRef.current) addLog("(Noise ignored, still listening…)", "info");
-    },
-  });
-
-  // Keep vadRef in sync so callbacks always call the current instance.
-  vadRef.current = vad;
-
-  useEffect(() => {
-    if (!vad.loading && !vad.errored) addLog("✅ Silero VAD ready", "info");
-  }, [vad.loading]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (vad.errored) addLog(`❌ VAD error: ${vad.errored.message ?? "Silero model failed to load"}`, "error");
-  }, [vad.errored]); // eslint-disable-line react-hooks/exhaustive-deps
+  // VAD/Whisper removed: keep a harmless placeholder used by the UI so
+  // existing button/label logic doesn't need widespread changes.
+  const vad = { loading: false, errored: null, userSpeaking: false };
 
   // ── Resume SR keyword listening ───────────────────────────────────────────
   // Delay before restarting the mic on iOS Safari: gives the browser GC time
@@ -159,14 +122,25 @@ export default function App() {
     activatedRef.current = false;
     whisperFallbackNeededRef.current = false;
     webSpeechHandledRef.current = false;
+    webSpeechSubmitBlockedRef.current = false;
     lowConfidenceTranscriptRef.current = null;
     setStatus("idle");
     try { vadRef.current?.pause(); } catch (_) {}
-    setTimeout(() => { try { recognitionRef.current?.start(); } catch (_) {} }, RESUME_DELAY_MS);
+    // Keep SpeechRecognition running continuously; do not restart here.
+    // (Previously we restarted the mic after a short delay to avoid
+    // iOS Safari ONNX/WASM memory issues when recreating audio sessions.)
+    // Leaving recognition running prevents the mic from being turned off/on.
   }, [RESUME_DELAY_MS]);
 
   const resumeListeningRef = useRef(resumeListening);
   useEffect(() => { resumeListeningRef.current = resumeListening; }, [resumeListening]);
+
+  // Keep a ref copy of `status` for the recognition watchdog to avoid
+  // stale closure values inside the `onend` handler.
+  const statusRef = useRef(status);
+  useEffect(() => { statusRef.current = status; }, [status]);
+
+  const restartAttemptsRef = useRef(0);
 
   const openDocumentPreview = useCallback((document) => {
     if (!document) return;
@@ -369,14 +343,12 @@ export default function App() {
         setStatus("listening");
         addLog("🎤 Activated — speak your command", "info");
 
-        if (listeningTimeoutRef.current) clearTimeout(listeningTimeoutRef.current);
+        if (listeningTimeoutRef.current) clearTimeout(run.current);
         listeningTimeoutRef.current = setTimeout(() => {
           if (activatedRef.current) { addLog("⏱️ No speech detected — resetting.", "warn"); resumeListeningRef.current(); }
         }, 30_000);
 
-        if (!isWebSpeechOnly) {
-          try { vadRef.current.start(); } catch (_) {}
-        }
+        // VAD disabled: we do not start the VAD here.
         return;
       }
 
@@ -395,6 +367,7 @@ export default function App() {
         lowConfidenceTranscriptRef.current = latestText;
         setStatus("processing");
         addLog("⚙️ Whisper-only mode: using Whisper transcript.", "info");
+        webSpeechSubmitBlockedRef.current = true;
         return;
       }
 
@@ -403,11 +376,16 @@ export default function App() {
         lowConfidenceTranscriptRef.current = latestText;
         setStatus("processing");
         addLog(`⚠️ Web Speech confidence ${confidence.toFixed(2)} is low — using Whisper fallback.`, "warn");
+        webSpeechSubmitBlockedRef.current = true;
         return;
       }
 
       whisperFallbackNeededRef.current = false;
       lowConfidenceTranscriptRef.current = null;
+      if (webSpeechSubmitBlockedRef.current) {
+        addLog("⚠️ Web Speech submit blocked while Whisper fallback active.", "info");
+        return;
+      }
       webSpeechHandledRef.current = true;
       addLog(confidence != null
         ? `🗣️ Web Speech (${confidence.toFixed(2)}): "${latestText}"`
@@ -424,9 +402,17 @@ export default function App() {
         addLog(`Mic error: ${e.error}`, "warn");
     };
 
-    rec.onend = () => {
-      if (!activatedRef.current) { try { rec.start(); } catch (_) {} }
+    rec.onstart = () => {
+      // Successful start — reset restart attempts.
+      restartAttemptsRef.current = 0;
     };
+
+    // Do not automatically restart the recognition when it ends. The
+    // 30s timeout moves the UI back to `idle`, but the same SpeechRecognition
+    // instance remains available and will detect the wake-word without a
+    // start/stop cycle. If the recognition ends unexpectedly it will not be
+    // restarted to avoid audio-session churn.
+    rec.onend = () => {};
 
     rec.start();
     recognitionRef.current = rec;
@@ -459,6 +445,7 @@ export default function App() {
           setPendingAction(null);
           setStatus("sending");
           sendToAIRef.current?.(cleaned);
+          webSpeechSubmitBlockedRef.current = false;
         } else {
           if (whisperFallbackNeededRef.current && lowConfidenceTranscriptRef.current && !webSpeechHandledRef.current) {
             const fallbackText = lowConfidenceTranscriptRef.current;
@@ -472,6 +459,7 @@ export default function App() {
             setPendingAction(null);
             setStatus("sending");
             sendToAIRef.current?.(fallbackText);
+            webSpeechSubmitBlockedRef.current = false;
             return;
           }
           addLog("(No speech detected)", "warn");
@@ -494,6 +482,7 @@ export default function App() {
           setPendingAction(null);
           setStatus("sending");
           sendToAIRef.current?.(fallbackText);
+          webSpeechSubmitBlockedRef.current = false;
           return;
         }
         addLog(`❌ Whisper: ${message}`, "error");
@@ -502,7 +491,6 @@ export default function App() {
     };
 
     worker.onerror = (err) => {
-      // err is an ErrorEvent; .message is sometimes empty so fall back to other fields
       const msg = err.message || (err.filename ? `${err.filename}:${err.lineno}` : err.type) || "unknown error";
       if (whisperFallbackNeededRef.current && lowConfidenceTranscriptRef.current && !webSpeechHandledRef.current) {
         const fallbackText = lowConfidenceTranscriptRef.current;
@@ -516,6 +504,7 @@ export default function App() {
         setPendingAction(null);
         setStatus("sending");
         sendToAIRef.current?.(fallbackText);
+        webSpeechSubmitBlockedRef.current = false;
         return;
       }
       addLog(`❌ Whisper worker crashed: ${msg}`, "error");
@@ -546,16 +535,14 @@ export default function App() {
       listeningTimeoutRef.current = setTimeout(() => {
         if (activatedRef.current) { addLog("⏱️ No speech detected — resetting.", "warn"); resumeListening(); }
       }, 30_000);
-      if (!isWebSpeechOnly) {
-        try { vadRef.current.start(); } catch (_) {}
-      }
+      // VAD disabled: do not start VAD on manual mic button
     } else if (status === "listening") {
       if (listeningTimeoutRef.current) { clearTimeout(listeningTimeoutRef.current); listeningTimeoutRef.current = null; }
       activatedRef.current = false;
       try { vadRef.current?.pause(); } catch (_) {}
       setStatus("idle");
       addLog("Cancelled.", "info");
-      try { recognitionRef.current?.start(); } catch (_) {}
+        // Do not restart the recognition here — keep the mic running continuously.
     }
   };
 
