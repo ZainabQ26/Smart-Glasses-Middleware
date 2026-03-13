@@ -618,6 +618,58 @@ public class AdminController : ControllerBase
     /// <summary>
     /// Debug: returns size, first 16 bytes (hex), stored content-type and storage key for a file.
     /// </summary>
+    [HttpGet("files/{id}/status")]
+    public async Task<IActionResult> FileStatus(Guid id)
+    {
+        var file = await _context.ManagedFiles
+            .AsNoTracking()
+            .FirstOrDefaultAsync(f => f.Id == id);
+
+        if (file != null)
+        {
+            var failed = !string.IsNullOrWhiteSpace(file.StorageKey) && file.StorageKey.StartsWith("FAILED:", StringComparison.OrdinalIgnoreCase);
+            var ready = !failed && !string.IsNullOrWhiteSpace(file.StorageKey) && file.FileSize > 0;
+            return Ok(new
+            {
+                id = file.Id,
+                fileName = file.FileName,
+                label = file.Label,
+                contentType = file.ContentType,
+                fileSize = file.FileSize,
+                uploadedAt = file.UploadedAt,
+                hasStorageKey = !string.IsNullOrWhiteSpace(file.StorageKey),
+                isReady = ready,
+                failed,
+                error = failed ? file.StorageKey : null
+            });
+        }
+
+        var doc = await _context.DocumentMetadatas
+            .AsNoTracking()
+            .FirstOrDefaultAsync(d => d.Id == id);
+
+        if (doc == null)
+        {
+            return NotFound(new { error = "Not found in ManagedFiles or DocumentMetadatas", id });
+        }
+
+        return Ok(new
+        {
+            id = doc.Id,
+            fileName = doc.FileName,
+            contentType = doc.ContentType,
+            fileSize = doc.FileSize,
+            uploadedAt = doc.UploadedAt,
+            hasStorageKey = !string.IsNullOrWhiteSpace(doc.StorageKey),
+            isReady = !string.IsNullOrWhiteSpace(doc.StorageKey) && doc.FileSize > 0,
+            failed = !string.IsNullOrWhiteSpace(doc.ProcessingError),
+            error = doc.ProcessingError,
+            managedFileId = doc.ManagedFileId,
+            isProcessed = doc.IsProcessed,
+            processedAt = doc.ProcessedAt
+        });
+    }
+
     [HttpGet("files/{id}/info")]
     public async Task<IActionResult> FileInfo(Guid id)
     {
