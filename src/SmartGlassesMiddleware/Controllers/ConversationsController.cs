@@ -134,11 +134,61 @@ public class ConversationsController : ControllerBase
     {
         try
         {
-            var (items, totalCount) = await _conversationService.GetActiveConversationsAsync(groupId, page, pageSize);
+            if (page < 1) page = 1;
+            if (pageSize < 1 || pageSize > MaxPageSize) pageSize = DefaultPageSize;
+
+            var query = _context.Conversations
+                .AsNoTracking()
+                .Where(c => c.IsActive);
+
+            if (groupId.HasValue)
+            {
+                query = query.Where(c => c.ResourceGroupId == groupId.Value);
+            }
+
+            var totalCount = await query.CountAsync();
+
+            var items = await query
+                .OrderByDescending(c => c.UpdatedAt)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(c => new
+                {
+                    c.Id,
+                    c.Title,
+                    c.CreatedAt,
+                    c.UpdatedAt,
+                    c.IsActive,
+                    c.ResourceGroupId,
+                    MessageCount = c.Messages.Count(),
+                    AttachmentCount = c.Messages.SelectMany(m => m.Attachments).Count(),
+                    LastMessage = c.Messages
+                        .OrderByDescending(m => m.Timestamp)
+                        .Select(m => m.Content)
+                        .FirstOrDefault()
+                })
+                .ToListAsync();
+
             var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
             return Ok(new
             {
-                data = items,
+                data = items.Select(i => new
+                {
+                    i.Id,
+                    i.Title,
+                    i.CreatedAt,
+                    i.UpdatedAt,
+                    i.IsActive,
+                    i.ResourceGroupId,
+                    i.MessageCount,
+                    i.AttachmentCount,
+                    LastMessage = string.IsNullOrWhiteSpace(i.LastMessage)
+                        ? string.Empty
+                        : (i.LastMessage.Length > 220 ? i.LastMessage.Substring(0, 220) : i.LastMessage),
+                    Snippet = string.IsNullOrWhiteSpace(i.LastMessage)
+                        ? string.Empty
+                        : (i.LastMessage.Length > 220 ? i.LastMessage.Substring(0, 220) : i.LastMessage)
+                }),
                 pagination = new
                 {
                     currentPage = page,
