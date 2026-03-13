@@ -177,6 +177,12 @@ variable "ecs_idle_timeout_minutes" {
   default     = 15
 }
 
+variable "alb_idle_timeout_seconds" {
+  description = "ALB idle timeout in seconds. Increase to reduce 504/connection close on slow origin responses."
+  type        = number
+  default     = 180
+}
+
 variable "domain_name" {
   description = "Domain name for CloudFront distribution (optional)"
   type        = string

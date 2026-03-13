@@ -3869,6 +3869,45 @@ async function init() {
                         }
                     } catch (error) {
                         console.error('Error uploading file:', error);
+                        const uploadErrorText = String(error?.message || '').toLowerCase();
+                        const isTimeoutLikeError = uploadErrorText.includes('timed out') || uploadErrorText.includes('504') || uploadErrorText.includes('gateway timeout');
+
+                        if (isTimeoutLikeError) {
+                            try {
+                                // Fallback path: documents endpoint has separate queueing path.
+                                const fallbackData = new FormData();
+                                fallbackData.append('file', file);
+                                const fallbackRes = await fetch('/api/documents/upload', { method: 'POST', body: fallbackData });
+                                if (fallbackRes.ok || fallbackRes.status === 202) {
+                                    const fallbackJson = await fallbackRes.json().catch(() => null);
+                                    const documentId = fallbackJson?.id || fallbackJson?.Id;
+                                    if (documentId) {
+                                        promptSelectedFiles.push({
+                                            file: file,
+                                            name: file.name,
+                                            selected: false,
+                                            id: documentId,
+                                            documentId: documentId,
+                                            isManagedFile: false
+                                        });
+                                        window.promptSelectedFiles = promptSelectedFiles;
+                                        updatePromptFilesList();
+                                        showMessage(`File "${file.name}" accepted via fallback upload path.`, 'info');
+                                        promptPreviewFile = null;
+                                        if (promptPreviewFilename) promptPreviewFilename.textContent = '';
+                                        if (promptPreviewContent) promptPreviewContent.innerHTML = `<div style="font-size: 48px; color: #95a5a6;">📄</div>`;
+                                        if (promptFileInput) promptFileInput.value = '';
+                                        if (typeof loadFiles === 'function') {
+                                            await loadFiles(true);
+                                        }
+                                        return;
+                                    }
+                                }
+                            } catch (fallbackErr) {
+                                console.warn('Fallback upload failed:', fallbackErr);
+                            }
+                        }
+
                         showMessage(`Failed to upload file: ${error.message}`, 'error');
                         if (promptFileInput) promptFileInput.value = '';
                     } finally {
@@ -4042,6 +4081,26 @@ async function init() {
                                         console.log('[SEND PROMPT] Uploaded attached file to managed files', f.name, '=>', newId);
                                     }
                                 } else {
+                                    const shouldTryDocumentFallback = upRes.status === 504 || upRes.status >= 500;
+                                    if (shouldTryDocumentFallback) {
+                                        try {
+                                            const docRes = await fetch('/api/documents/upload', { method: 'POST', body: fd });
+                                            if (docRes.ok || docRes.status === 202) {
+                                                const docJson = await docRes.json().catch(() => null);
+                                                const docId = docJson?.id || docJson?.Id;
+                                                if (docId) {
+                                                    f.id = docId;
+                                                    f.documentId = docId;
+                                                    f.isManagedFile = false;
+                                                    console.log('[SEND PROMPT] Uploaded attached file to documents fallback', f.name, '=>', docId);
+                                                    continue;
+                                                }
+                                            }
+                                        } catch (fallbackUploadErr) {
+                                            console.warn('[SEND PROMPT] Document upload fallback failed:', fallbackUploadErr);
+                                        }
+                                    }
+
                                     console.warn('[SEND PROMPT] Failed to upload attached file:', f.name);
                                 }
                             } catch (upErr) {
