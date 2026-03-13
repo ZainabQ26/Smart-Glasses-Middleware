@@ -24,6 +24,7 @@ public class AdminController : ControllerBase
     private readonly IRequestMonitoringService _monitoringService;
     private readonly IHubContext<ResourceHub>? _resourceHub;
     private readonly IServiceScopeFactory _scopeFactory;
+    private static readonly TimeSpan InitEndpointTimeout = TimeSpan.FromSeconds(8);
     private const int DefaultPageSize = 20;
     private const int MaxPageSize = 100;
 
@@ -122,18 +123,20 @@ public class AdminController : ControllerBase
                 return Ok(cachedResult);
             }
 
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted);
+            timeoutCts.CancelAfter(InitEndpointTimeout);
+            var ct = timeoutCts.Token;
+
             var visibleFilesQuery = _context.ManagedFiles
                 .AsNoTracking()
                 .Where(f => !string.IsNullOrWhiteSpace(f.StorageKey)
                     && !EF.Functions.Like(f.StorageKey, "FAILED:%")
                     && f.FileSize > 0);
 
-            var totalCount = await visibleFilesQuery.CountAsync();
+            var totalCount = await visibleFilesQuery.CountAsync(ct);
             var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
 
             var files = await visibleFilesQuery
-                .Include(f => f.FileGroups)
-                .ThenInclude(fg => fg.ResourceGroup)
                 .OrderByDescending(f => f.UploadedAt)
                 .Skip((page - 1) * pageSize)
                 .Take(pageSize)
@@ -151,7 +154,7 @@ public class AdminController : ControllerBase
                         .Select(fg => new { fg.ResourceGroup.Id, fg.ResourceGroup.Name })
                         .ToList()
                 })
-                .ToListAsync();
+                .ToListAsync(ct);
 
             var result = new
             {
@@ -171,6 +174,11 @@ public class AdminController : ControllerBase
             await _cacheService.SetAsync(cacheKey, result, TimeSpan.FromSeconds(30));
 
             return Ok(result);
+        }
+        catch (OperationCanceledException) when (!HttpContext.RequestAborted.IsCancellationRequested)
+        {
+            _logger.LogWarning("Timed out retrieving managed files for page {Page} size {PageSize}", page, pageSize);
+            return Ok(CreateEmptyPagedResult(page, pageSize));
         }
         catch (Exception ex)
         {
@@ -1030,28 +1038,88 @@ public class AdminController : ControllerBase
                 return Ok(cachedResult);
             }
 
-            var totalCount = await _context.ResourceGroups.AsNoTracking().CountAsync();
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted);
+            timeoutCts.CancelAfter(InitEndpointTimeout);
+            var ct = timeoutCts.Token;
+
+            var totalCount = await _context.ResourceGroups.AsNoTracking().CountAsync(ct);
             var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
 
             var groups = await _context.ResourceGroups
                 .AsNoTracking()
-                .Include(g => g.FileGroups)
-                .ThenInclude(fg => fg.ManagedFile)
-                .Include(g => g.PromptGroups)
-                .ThenInclude(pg => pg.ManagedPrompt)
-                .Include(g => g.DocumentGroups)
-                .ThenInclude(dg => dg.DocumentMetadata)
-                .Include(g => g.Conversations)
-                .AsSplitQuery()
                 .OrderByDescending(g => g.CreatedAt)
                 .Skip((page - 1) * pageSize)
                 .Take(pageSize)
-                .ToListAsync();
+                .Select(g => new
+                {
+                    g.Id,
+                    g.Name,
+                    g.Description,
+                    g.CreatedAt
+                })
+                .ToListAsync(ct);
 
-            var conversationIds = groups
-                .SelectMany(g => g.Conversations.Select(c => c.Id))
-                .Distinct()
-                .ToList();
+            var groupIds = groups.Select(g => g.Id).ToList();
+
+            var fileRows = groupIds.Count == 0
+                ? new List<GroupFileRow>()
+                : await _context.Set<ManagedFileGroup>()
+                    .AsNoTracking()
+                    .Where(fg => groupIds.Contains(fg.ResourceGroupId))
+                    .Select(fg => new GroupFileRow
+                    {
+                        ResourceGroupId = fg.ResourceGroupId,
+                        Id = fg.ManagedFile.Id,
+                        FileName = fg.ManagedFile.FileName,
+                        Label = fg.ManagedFile.Label
+                    })
+                    .ToListAsync(ct);
+
+            var promptRows = groupIds.Count == 0
+                ? new List<GroupPromptRow>()
+                : await _context.Set<ManagedPromptGroup>()
+                    .AsNoTracking()
+                    .Where(pg => groupIds.Contains(pg.ResourceGroupId))
+                    .Select(pg => new GroupPromptRow
+                    {
+                        ResourceGroupId = pg.ResourceGroupId,
+                        Id = pg.ManagedPrompt.Id,
+                        Name = pg.ManagedPrompt.Name
+                    })
+                    .ToListAsync(ct);
+
+            var documentRows = groupIds.Count == 0
+                ? new List<GroupDocumentRow>()
+                : await _context.DocumentGroups
+                    .AsNoTracking()
+                    .Where(dg => groupIds.Contains(dg.ResourceGroupId))
+                    .Select(dg => new GroupDocumentRow
+                    {
+                        ResourceGroupId = dg.ResourceGroupId,
+                        Id = dg.DocumentMetadata.Id,
+                        FileName = dg.DocumentMetadata.FileName,
+                        OriginalFileName = dg.DocumentMetadata.OriginalFileName,
+                        ContentType = dg.DocumentMetadata.ContentType
+                    })
+                    .ToListAsync(ct);
+
+            var conversationRows = groupIds.Count == 0
+                ? new List<GroupConversationRow>()
+                : await _context.Conversations
+                    .AsNoTracking()
+                    .Where(c => c.ResourceGroupId.HasValue && groupIds.Contains(c.ResourceGroupId.Value))
+                    .Select(c => new GroupConversationRow
+                    {
+                        Id = c.Id,
+                        ResourceGroupId = c.ResourceGroupId!.Value,
+                        Title = c.Title,
+                        CreatedAt = c.CreatedAt,
+                        UpdatedAt = c.UpdatedAt,
+                        IsActive = c.IsActive
+                    })
+                    .ToListAsync(ct);
+
+            var conversationIds = conversationRows.Select(c => c.Id).Distinct().ToList();
 
             var messageCounts = conversationIds.Count == 0
                 ? new Dictionary<Guid, int>()
@@ -1060,7 +1128,7 @@ public class AdminController : ControllerBase
                     .Where(m => conversationIds.Contains(m.ConversationId))
                     .GroupBy(m => m.ConversationId)
                     .Select(g => new { ConversationId = g.Key, Count = g.Count() })
-                    .ToDictionaryAsync(x => x.ConversationId, x => x.Count);
+                    .ToDictionaryAsync(x => x.ConversationId, x => x.Count, ct);
 
             var groupData = groups.Select(g => new
                 {
@@ -1068,42 +1136,45 @@ public class AdminController : ControllerBase
                     g.Name,
                     g.Description,
                     g.CreatedAt,
-                    Files = g.FileGroups
-                        .Where(fg => fg.ManagedFile != null)
-                        .Select(fg => new
+                    Files = fileRows
+                        .Where(f => f.ResourceGroupId == g.Id)
+                        .Select(f => new
                         {
-                            fg.ManagedFile.Id,
-                            fg.ManagedFile.FileName,
-                            fg.ManagedFile.Label
+                            f.Id,
+                            f.FileName,
+                            f.Label
                         })
                         .ToList(),
-                    Prompts = g.PromptGroups
-                        .Where(pg => pg.ManagedPrompt != null)
-                        .Select(pg => new
+                    Prompts = promptRows
+                        .Where(p => p.ResourceGroupId == g.Id)
+                        .Select(p => new
                         {
-                            pg.ManagedPrompt.Id,
-                            pg.ManagedPrompt.Name
+                            p.Id,
+                            p.Name
                         })
                         .ToList(),
-                    Documents = g.DocumentGroups
-                        .Where(dg => dg.DocumentMetadata != null)
-                        .Select(dg => new
+                    Documents = documentRows
+                        .Where(d => d.ResourceGroupId == g.Id)
+                        .Select(d => new
                         {
-                            dg.DocumentMetadata.Id,
-                            dg.DocumentMetadata.FileName,
-                            dg.DocumentMetadata.OriginalFileName,
-                            dg.DocumentMetadata.ContentType
+                            d.Id,
+                            d.FileName,
+                            d.OriginalFileName,
+                            d.ContentType
                         })
                         .ToList(),
-                    Conversations = g.Conversations.Select(c => new
-                    {
-                        c.Id,
-                        c.Title,
-                        c.CreatedAt,
-                        c.UpdatedAt,
-                        c.IsActive,
-                        MessageCount = messageCounts.TryGetValue(c.Id, out var messageCount) ? messageCount : 0
-                    }).ToList(),
+                    Conversations = conversationRows
+                        .Where(c => c.ResourceGroupId == g.Id)
+                        .Select(c => new
+                        {
+                            c.Id,
+                            c.Title,
+                            c.CreatedAt,
+                            c.UpdatedAt,
+                            c.IsActive,
+                            MessageCount = messageCounts.TryGetValue(c.Id, out var messageCount) ? messageCount : 0
+                        })
+                        .ToList(),
                     // Keep response shape stable without running expensive reminder cross-queries per group.
                     Reminders = Array.Empty<object>()
                 })
@@ -1127,6 +1198,11 @@ public class AdminController : ControllerBase
             await _cacheService.SetAsync(cacheKey, result, TimeSpan.FromSeconds(30));
 
             return Ok(result);
+        }
+        catch (OperationCanceledException) when (!HttpContext.RequestAborted.IsCancellationRequested)
+        {
+            _logger.LogWarning("Timed out retrieving resource groups for page {Page} size {PageSize}", page, pageSize);
+            return Ok(CreateEmptyPagedResult(page, pageSize));
         }
         catch (Exception ex)
         {
@@ -1670,6 +1746,40 @@ public class AdminController : ControllerBase
     #endregion
 
     #region Helper Methods
+
+    private sealed class GroupFileRow
+    {
+        public Guid ResourceGroupId { get; set; }
+        public Guid Id { get; set; }
+        public string FileName { get; set; } = string.Empty;
+        public string Label { get; set; } = string.Empty;
+    }
+
+    private sealed class GroupPromptRow
+    {
+        public Guid ResourceGroupId { get; set; }
+        public Guid Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+    }
+
+    private sealed class GroupDocumentRow
+    {
+        public Guid ResourceGroupId { get; set; }
+        public Guid Id { get; set; }
+        public string FileName { get; set; } = string.Empty;
+        public string OriginalFileName { get; set; } = string.Empty;
+        public string ContentType { get; set; } = string.Empty;
+    }
+
+    private sealed class GroupConversationRow
+    {
+        public Guid ResourceGroupId { get; set; }
+        public Guid Id { get; set; }
+        public string Title { get; set; } = string.Empty;
+        public DateTime CreatedAt { get; set; }
+        public DateTime UpdatedAt { get; set; }
+        public bool IsActive { get; set; }
+    }
 
     private static object CreateEmptyPagedResult(int page, int pageSize)
     {
