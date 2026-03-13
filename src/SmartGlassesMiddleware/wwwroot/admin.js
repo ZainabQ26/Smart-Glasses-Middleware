@@ -933,6 +933,63 @@ async function waitForPreviewReady(id, timeoutMs = 15000, intervalMs = 1000) {
     return false;
 }
 
+function parseRequestedFileNumber(input) {
+    if (!input) return null;
+    const indexed = input.match(/\b(?:file|document)\s*(?:number\s*)?(\d{1,2})\b/i);
+    if (indexed && indexed[1]) {
+        const num = Number.parseInt(indexed[1], 10);
+        return Number.isFinite(num) && num > 0 ? num : null;
+    }
+
+    const fallback = input.match(/\b(\d{1,2})\b/);
+    if (fallback && fallback[1]) {
+        const num = Number.parseInt(fallback[1], 10);
+        return Number.isFinite(num) && num > 0 ? num : null;
+    }
+
+    return null;
+}
+
+async function fetchRecentFilesForAction(limit = 5) {
+    const pageSize = Math.max(limit, 10);
+    const response = await fetchWithRetry(`${API_BASE}/files?page=1&pageSize=${pageSize}`);
+    if (!response.ok) {
+        throw new Error(`Failed to load recent files (${response.status})`);
+    }
+
+    const result = await response.json().catch(() => ({}));
+    const filesData = result.data || result.Data || [];
+
+    return filesData
+        .map(file => ({
+            id: getProp(file, 'id'),
+            fileName: getProp(file, 'label') || getProp(file, 'fileName') || 'Untitled file',
+            uploadedAt: getProp(file, 'uploadedAt') || getProp(file, 'UploadedAt') || null
+        }))
+        .filter(file => file.id)
+        .slice(0, limit);
+}
+
+async function openFileFromAction(fileId, fileName, responseContent) {
+    const filesTab = document.querySelector('[data-tab="files"]') || document.getElementById('files-tab');
+    if (filesTab) filesTab.click();
+
+    const previewReady = await waitForPreviewReady(fileId, 15000, 1000);
+    if (!previewReady) {
+        if (responseContent) {
+            responseContent.innerHTML = '<div style="padding: 15px; white-space: pre-wrap; color:#e74c3c;">Unable to open preview right now. The file may still be processing.</div>';
+        }
+        return false;
+    }
+
+    if (responseContent) {
+        responseContent.innerHTML = `<div style="padding: 15px; white-space: pre-wrap;">Opening <strong>${escapeHtml(fileName || 'selected file')}</strong>...</div>`;
+    }
+
+    setTimeout(() => previewFile(fileId, fileName || 'selected file'), 200);
+    return true;
+}
+
 async function previewFile(id, fileName) {
     const previewContainer = document.getElementById('file-preview');
     const previewContent = document.getElementById('preview-content');
@@ -974,29 +1031,17 @@ async function previewFile(id, fileName) {
             return;
         }
 
-        // PDF — open directly in a new browser tab using the API URL
-        // (Chrome's native PDF viewer works perfectly for direct navigation but not for embeds/iframes)
+        // PDF: render from fetched bytes to avoid flaky browser-tab preview behavior.
         if (contentType.includes('pdf') || header === '%PDF') {
-            // Use the same cachebuster URL already fetched — avoids stale cached responses.
-            // If popup is blocked (common for non-user-triggered voice actions), fall back inline.
-            const popup = window.open(previewUrl, '_blank');
-            if (popup && !popup.closed) {
-                previewContent.innerHTML = `<div style="padding:24px; text-align:center;">
-                    <div style="font-size:48px; margin-bottom:12px;">📄</div>
-                    <p style="font-weight:600; margin:0 0 6px;">${escapeHtml(fileName)}</p>
-                    <p style="color:#888; font-size:13px; margin:0 0 16px;">PDF opened in a new tab.</p>
-                    <button onclick="window.open('${previewUrl}', '_blank')" style="padding:8px 18px; background:#3498db; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:13px;">Open again ↗</button>
-                    <br><br><a href="${API_BASE}/files/${id}/info" target="_blank" style="font-size:11px; color:#aaa;">Check file info (debug)</a>
-                </div>`;
-            } else {
-                previewContent.innerHTML = `<div style="padding:12px; text-align:center;">
-                    <p style="margin:0 0 10px; color:#666; font-size:13px;">Popup blocked. Showing inline preview.</p>
-                    <iframe src="${previewUrl}" title="${escapeHtml(fileName)}" style="width:100%; height:500px; border:1px solid #ddd; border-radius:6px;"></iframe>
-                    <div style="margin-top:10px;">
-                        <a href="${previewUrl}" target="_blank" rel="noopener" style="font-size:12px; color:#3498db;">Open in new tab ↗</a>
-                    </div>
-                </div>`;
-            }
+            const pdfBlobUrl = URL.createObjectURL(new Blob([buffer], { type: 'application/pdf' }));
+            previewContent.dataset.blobUrl = pdfBlobUrl;
+            previewContent.innerHTML = `<div style="padding:12px; text-align:center;">
+                <embed src="${pdfBlobUrl}" type="application/pdf" width="100%" height="540px" style="border:1px solid #ddd; border-radius:6px;" />
+                <div style="margin-top:10px; display:flex; justify-content:center; gap:12px; align-items:center; flex-wrap:wrap;">
+                    <a href="${pdfBlobUrl}" target="_blank" rel="noopener" style="font-size:12px; color:#3498db;">Open in new tab ↗</a>
+                    <a href="${API_BASE}/files/${id}/download" target="_blank" rel="noopener" style="font-size:12px; color:#3498db;">Download file</a>
+                </div>
+            </div>`;
             return;
         }
 
@@ -4245,24 +4290,72 @@ async function init() {
                     return;
                 }
 
+                // Intercept recent files action and render a numbered list in the chat pane.
+                if (answer.trim() === '__ACTION:SHOW_RECENT_FILES__') {
+                    try {
+                        const recentFiles = await fetchRecentFilesForAction(6);
+                        if (!recentFiles.length) {
+                            responseContent.innerHTML = '<div style="padding: 15px; white-space: pre-wrap;">No recent files found. Upload one first, then try again.</div>';
+                            return;
+                        }
+
+                        const requestedNumber = parseRequestedFileNumber(promptText);
+                        if (requestedNumber !== null) {
+                            const selected = recentFiles[requestedNumber - 1];
+                            if (selected) {
+                                await openFileFromAction(selected.id, selected.fileName, responseContent);
+                                return;
+                            }
+                        }
+
+                        const listHtml = recentFiles
+                            .map((file, idx) => {
+                                const uploadedLabel = file.uploadedAt
+                                    ? new Date(file.uploadedAt).toLocaleString()
+                                    : 'Unknown time';
+                                return `
+                                    <li style="margin-bottom:8px; display:flex; justify-content:space-between; gap:10px; align-items:center;">
+                                        <span><strong>${idx + 1}.</strong> ${escapeHtml(file.fileName)}<br><small style="color:#7f8c8d;">${escapeHtml(uploadedLabel)}</small></span>
+                                        <button type="button" data-action-open-index="${idx}" style="padding:4px 10px; border:none; border-radius:4px; background:#0b63a6; color:#fff; cursor:pointer;">Open</button>
+                                    </li>
+                                `;
+                            })
+                            .join('');
+
+                        const hint = requestedNumber !== null
+                            ? `<p style="margin: 8px 0 0; color:#e67e22;">I only found ${recentFiles.length} recent files. Choose a number from 1 to ${recentFiles.length}.</p>`
+                            : `<p style="margin: 8px 0 0; color:#2f3a3f;">Say <strong>open file 2</strong> (or click Open) to preview one.</p>`;
+
+                        responseContent.innerHTML = `
+                            <div style="padding: 15px; white-space: normal;">
+                                <div style="font-weight: 600; margin-bottom: 10px;">Recent files</div>
+                                <ol style="margin:0; padding-left:20px;">${listHtml}</ol>
+                                ${hint}
+                            </div>
+                        `;
+
+                        responseContent.querySelectorAll('button[data-action-open-index]').forEach(btn => {
+                            btn.addEventListener('click', async () => {
+                                const idx = Number.parseInt(btn.getAttribute('data-action-open-index') || '-1', 10);
+                                if (Number.isFinite(idx) && idx >= 0 && idx < recentFiles.length) {
+                                    const selected = recentFiles[idx];
+                                    await openFileFromAction(selected.id, selected.fileName, responseContent);
+                                }
+                            });
+                        });
+                    } catch (error) {
+                        responseContent.innerHTML = '<div style="padding: 15px; white-space: pre-wrap; color:#e74c3c;">Could not load recent files right now.</div>';
+                    }
+                    return;
+                }
+
                 // Intercept select document action — navigate to Files tab and open preview
                 if (answer.trim().startsWith('__ACTION:SELECT_DOCUMENT:')) {
                     const parts = answer.trim().split(':');
                     // format: __ACTION:SELECT_DOCUMENT:<id>:<filename>
                     const fileId = parts[2];
                     const fileName = parts.slice(3).join(':'); // handle colons in filenames
-                    // Switch to the Files tab
-                    const filesTab = document.querySelector('[data-tab="files"]') || document.getElementById('files-tab');
-                    if (filesTab) filesTab.click();
-
-                    const previewReady = await waitForPreviewReady(fileId, 15000, 1000);
-                    if (!previewReady) {
-                        responseContent.innerHTML = '<div style="padding: 15px; white-space: pre-wrap;">timed out</div>';
-                        return;
-                    }
-
-                    // Wait briefly for tab to render then open preview
-                    setTimeout(() => previewFile(fileId, fileName), 200);
+                    await openFileFromAction(fileId, fileName, responseContent);
                     return;
                 }
 
