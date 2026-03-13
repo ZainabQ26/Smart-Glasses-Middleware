@@ -1555,6 +1555,24 @@ function parseRequestedFileNumber(input) {
         return Number.isFinite(num) && num > 0 ? num : null;
     }
 
+    const ordinals = [
+        ['first', 1],
+        ['one', 1],
+        ['second', 2],
+        ['two', 2],
+        ['third', 3],
+        ['three', 3],
+        ['fourth', 4],
+        ['four', 4],
+        ['fifth', 5],
+        ['five', 5]
+    ];
+    for (const [word, number] of ordinals) {
+        if (new RegExp(`\\b${word}\\b`, 'i').test(input)) {
+            return number;
+        }
+    }
+
     const fallback = input.match(/\b(\d{1,2})\b/);
     if (fallback && fallback[1]) {
         const num = Number.parseInt(fallback[1], 10);
@@ -1562,6 +1580,79 @@ function parseRequestedFileNumber(input) {
     }
 
     return null;
+}
+
+function clearPendingRecentFileChoices() {
+    pendingRecentFileChoices = null;
+    pendingRecentFileChoicesExpiresAt = 0;
+}
+
+function setPendingRecentFileChoices(files) {
+    if (!Array.isArray(files) || files.length === 0) {
+        clearPendingRecentFileChoices();
+        return;
+    }
+
+    pendingRecentFileChoices = files.slice();
+    pendingRecentFileChoicesExpiresAt = Date.now() + RECENT_FILE_SELECTION_WINDOW_MS;
+}
+
+function isRecentFileSelectionIntent(input) {
+    const text = String(input || '').trim();
+    if (!text) {
+        return false;
+    }
+
+    if (/^\d{1,2}$/.test(text)) {
+        return true;
+    }
+
+    if (/^(?:the\s+)?(?:first|second|third|fourth|fifth|one|two|three|four|five)(?:\s+(?:one|file|document))?$/i.test(text)) {
+        return true;
+    }
+
+    if (/\b(?:file|document)\s*(?:number\s*)?\d{1,2}\b/i.test(text)) {
+        return true;
+    }
+
+    const hasActionWord = /\b(open|preview|show|select|pick)\b/i.test(text);
+    const hasFileWord = /\b(file|document)\b/i.test(text);
+    return hasActionWord && hasFileWord;
+}
+
+function resolvePendingRecentFileChoice(input) {
+    if (!Array.isArray(pendingRecentFileChoices) || pendingRecentFileChoices.length === 0) {
+        return { state: 'none' };
+    }
+
+    if (pendingRecentFileChoicesExpiresAt && Date.now() > pendingRecentFileChoicesExpiresAt) {
+        clearPendingRecentFileChoices();
+        return { state: 'expired' };
+    }
+
+    if (!isRecentFileSelectionIntent(input)) {
+        return { state: 'none' };
+    }
+
+    const requestedNumber = parseRequestedFileNumber(input);
+    if (requestedNumber === null) {
+        return { state: 'needs-number', max: pendingRecentFileChoices.length };
+    }
+
+    const idx = requestedNumber - 1;
+    if (idx < 0 || idx >= pendingRecentFileChoices.length) {
+        return {
+            state: 'out-of-range',
+            requested: requestedNumber,
+            max: pendingRecentFileChoices.length
+        };
+    }
+
+    return {
+        state: 'selected',
+        requested: requestedNumber,
+        file: pendingRecentFileChoices[idx]
+    };
 }
 
 async function fetchRecentFilesForAction(limit = 5) {
@@ -1584,9 +1675,47 @@ async function fetchRecentFilesForAction(limit = 5) {
         .slice(0, limit);
 }
 
+async function getFileStatusForAction(fileId) {
+    if (!fileId) {
+        return null;
+    }
+
+    const cacheBuster = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    try {
+        const response = await fetchWithTimeout(`${API_BASE}/files/${fileId}/status?v=${cacheBuster}`, {
+            headers: {
+                'Cache-Control': 'no-cache'
+            }
+        }, 8000);
+
+        if (!response.ok) {
+            return null;
+        }
+
+        return await response.json().catch(() => null);
+    } catch (error) {
+        return null;
+    }
+}
+
 async function openFileFromAction(fileId, fileName, responseContent) {
     const filesTab = document.querySelector('[data-tab="files"]') || document.getElementById('files-tab');
     if (filesTab) filesTab.click();
+
+    const status = await getFileStatusForAction(fileId);
+    if (status?.failed) {
+        if (responseContent) {
+            responseContent.innerHTML = `<div style="padding: 15px; white-space: pre-wrap; color:#e74c3c;">Unable to open <strong>${escapeHtml(fileName || 'selected file')}</strong>. Upload failed on the server.</div>`;
+        }
+        return false;
+    }
+
+    if (status && (status.pending || status.isReady === false)) {
+        if (responseContent) {
+            responseContent.innerHTML = `<div style="padding: 15px; white-space: pre-wrap; color:#e67e22;"><strong>${escapeHtml(fileName || 'Selected file')}</strong> is still processing. Choose another recent file or try again shortly.</div>`;
+        }
+        return false;
+    }
 
     const previewReady = await waitForPreviewReady(fileId, 15000, 1000);
     if (!previewReady) {
@@ -1990,6 +2119,9 @@ let currentConversationHistory = []; // Track conversation messages
 let activePromptGroupId = null;
 // conversation mapping is now server-side; frontend will not persist ConversationId
 let activeConversationId = null;
+let pendingRecentFileChoices = null;
+let pendingRecentFileChoicesExpiresAt = 0;
+const RECENT_FILE_SELECTION_WINDOW_MS = 180000;
 window.promptSelectedFiles = promptSelectedFiles;
 window.reminderSelectedFiles = reminderSelectedFiles;
 let lastAutoSavedSnapshot = null;
@@ -4676,6 +4808,24 @@ async function init() {
                 return;
             }
 
+            const pendingRecentChoice = resolvePendingRecentFileChoice(promptText);
+            if (pendingRecentChoice.state === 'out-of-range') {
+                responseContent.innerHTML = `<div style="padding: 15px; white-space: pre-wrap; color:#e67e22;">I only have ${pendingRecentChoice.max} recent files in the current list. Choose a number from 1 to ${pendingRecentChoice.max}.</div>`;
+                showMessage(`Choose a number between 1 and ${pendingRecentChoice.max}`, 'info');
+                return;
+            }
+
+            if (pendingRecentChoice.state === 'selected' && pendingRecentChoice.file) {
+                const selected = pendingRecentChoice.file;
+                const opened = await openFileFromAction(selected.id, selected.fileName, responseContent);
+                if (opened) {
+                    clearPendingRecentFileChoices();
+                }
+
+                document.getElementById('prompt-name').value = '';
+                return;
+            }
+
             const pendingPromptFiles = promptSelectedFiles.filter(f => f.pending);
             if (pendingPromptFiles.length > 0) {
                 const pendingLabel = pendingPromptFiles.length === 1
@@ -4929,20 +5079,14 @@ async function init() {
                 // Intercept recent files action and render a numbered list in the chat pane.
                 if (answer.trim() === '__ACTION:SHOW_RECENT_FILES__') {
                     try {
-                        const recentFiles = await fetchRecentFilesForAction(6);
+                        const recentFiles = await fetchRecentFilesForAction(5);
                         if (!recentFiles.length) {
+                            clearPendingRecentFileChoices();
                             responseContent.innerHTML = '<div style="padding: 15px; white-space: pre-wrap;">No recent files found. Upload one first, then try again.</div>';
                             return;
                         }
 
-                        const requestedNumber = parseRequestedFileNumber(promptText);
-                        if (requestedNumber !== null) {
-                            const selected = recentFiles[requestedNumber - 1];
-                            if (selected) {
-                                await openFileFromAction(selected.id, selected.fileName, responseContent);
-                                return;
-                            }
-                        }
+                        setPendingRecentFileChoices(recentFiles);
 
                         const listHtml = recentFiles
                             .map((file, idx) => {
@@ -4958,9 +5102,7 @@ async function init() {
                             })
                             .join('');
 
-                        const hint = requestedNumber !== null
-                            ? `<p style="margin: 8px 0 0; color:#e67e22;">I only found ${recentFiles.length} recent files. Choose a number from 1 to ${recentFiles.length}.</p>`
-                            : `<p style="margin: 8px 0 0; color:#2f3a3f;">Say <strong>open file 2</strong> (or click Open) to preview one.</p>`;
+                        const hint = `<p style="margin: 8px 0 0; color:#2f3a3f;">Say a number (for example <strong>2</strong> or <strong>open file 2</strong>) or click Open below.</p>`;
 
                         responseContent.innerHTML = `
                             <div style="padding: 15px; white-space: normal;">
@@ -4975,11 +5117,15 @@ async function init() {
                                 const idx = Number.parseInt(btn.getAttribute('data-action-open-index') || '-1', 10);
                                 if (Number.isFinite(idx) && idx >= 0 && idx < recentFiles.length) {
                                     const selected = recentFiles[idx];
-                                    await openFileFromAction(selected.id, selected.fileName, responseContent);
+                                    const opened = await openFileFromAction(selected.id, selected.fileName, responseContent);
+                                    if (opened) {
+                                        clearPendingRecentFileChoices();
+                                    }
                                 }
                             });
                         });
                     } catch (error) {
+                        clearPendingRecentFileChoices();
                         responseContent.innerHTML = '<div style="padding: 15px; white-space: pre-wrap; color:#e74c3c;">Could not load recent files right now.</div>';
                     }
                     return;
@@ -4992,6 +5138,7 @@ async function init() {
                     const fileId = parts[2];
                     const fileName = parts.slice(3).join(':'); // handle colons in filenames
                     await openFileFromAction(fileId, fileName, responseContent);
+                    clearPendingRecentFileChoices();
                     return;
                 }
 
