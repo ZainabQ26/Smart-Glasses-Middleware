@@ -179,6 +179,7 @@ public class DocumentsController : ControllerBase
         {
             using var scope = _scopeFactory.CreateScope();
             var processingService = scope.ServiceProvider.GetRequiredService<IDocumentProcessingService>();
+            var ragService = scope.ServiceProvider.GetRequiredService<IRAGService>();
             var mediaStorageService = scope.ServiceProvider.GetRequiredService<IMediaStorageService>();
             var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
             var monitoringService = scope.ServiceProvider.GetService<IRequestMonitoringService>();
@@ -239,7 +240,15 @@ public class DocumentsController : ControllerBase
 
             if (monitoringService != null)
             {
-                await monitoringService.CompleteRequest(requestId, true, $"Document {pdfFileName} uploaded to S3");
+                await monitoringService.UpdateRequestStatus(requestId, "Processing", "Extracting text and generating embeddings...", 75);
+            }
+
+            await processingService.ReprocessDocumentAsync(documentId);
+            await ragService.GenerateEmbeddingsAsync(documentId);
+
+            if (monitoringService != null)
+            {
+                await monitoringService.CompleteRequest(requestId, true, $"Document {pdfFileName} uploaded and indexed");
             }
         }
         catch (Exception ex)
@@ -387,49 +396,98 @@ public class DocumentsController : ControllerBase
                 conversation = null;
             }
 
-            // In-process fallback: if specific documents were requested but haven't been processed
-            // by Lambda yet (IsProcessed=false, no EmbeddingVector chunks), process them now so the
-            // query has something to work with. This handles the race between upload and query.
-            //
-            // IMPORTANT: Run each document through a fresh DI scope so the processing service gets
-            // its own ApplicationDbContext. The controller's _context already has these entities
-            // tracked (Unchanged). Sharing the same context causes 'Unexpected entry.EntityState:
-            // Detached' when DocumentProcessingService tries to set metadata.Chunks on the
-            // already-tracked entity.
+            List<Guid>? effectiveDocumentIds = request.DocumentIds;
             if (request.DocumentIds != null && request.DocumentIds.Any())
             {
-                // Use a plain list of IDs to avoid passing tracked entities across scope boundaries
-                var unprocessedIds = await _context.DocumentMetadatas
-                    .Where(d => request.DocumentIds.Contains(d.Id) && !d.IsProcessed && d.StorageKey != null)
-                    .Select(d => new { d.Id, d.FileName, d.StorageKey })
+                var requestedDocuments = await _context.DocumentMetadatas
+                    .Where(d => request.DocumentIds.Contains(d.Id))
+                    .Select(d => new
+                    {
+                        d.Id,
+                        DisplayName = string.IsNullOrWhiteSpace(d.OriginalFileName) ? d.FileName : d.OriginalFileName,
+                        d.IsProcessed,
+                        d.ProcessingError
+                    })
                     .ToListAsync();
 
-                if (unprocessedIds.Any())
-                {
-                    _logger.LogInformation("Documents not yet processed by Lambda: {Ids}. Running in-process fallback.",
-                        string.Join(", ", unprocessedIds.Select(d => d.Id)));
-                    await _monitoringService.UpdateRequestStatus(requestId!, "Processing",
-                        $"Processing {unprocessedIds.Count} document(s) in-process (Lambda not yet complete)", 35);
+                var failedDocuments = requestedDocuments
+                    .Where(d => !string.IsNullOrWhiteSpace(d.ProcessingError))
+                    .ToList();
 
-                    foreach (var doc in unprocessedIds)
+                if (failedDocuments.Any())
+                {
+                    var failureResult = new QueryResult
+                    {
+                        Answer = failedDocuments.Count == 1
+                            ? $"{failedDocuments[0].DisplayName} could not be processed yet. {failedDocuments[0].ProcessingError}"
+                            : "One or more selected documents could not be processed yet. Re-upload them or try again later.",
+                        ConversationId = conversation?.Id,
+                        Sources = new List<DocumentSource>(),
+                        ReferencedSources = new List<DocumentSource>(),
+                        ConversationSources = new List<ConversationSource>(),
+                        UsedAdvancedModel = false,
+                        ModelUsed = "document-processing-error",
+                        TokenCount = 0
+                    };
+
+                    if (conversation != null)
                     {
                         try
                         {
-                            // Fresh scope = fresh DbContext: no tracking conflicts with the controller's context
-                            using var fallbackScope = _scopeFactory.CreateScope();
-                            var scopedProcessing = fallbackScope.ServiceProvider.GetRequiredService<IDocumentProcessingService>();
-                            var scopedRag = fallbackScope.ServiceProvider.GetRequiredService<IRAGService>();
-                            using var pdfStream = await _mediaStorageService.DownloadFileAsync(doc.StorageKey!);
-                            await scopedProcessing.ProcessDocumentAsync(pdfStream, doc.FileName, "application/pdf", requestId, doc.Id);
-                            await scopedRag.GenerateEmbeddingsAsync(doc.Id);
-                            _logger.LogInformation("In-process fallback complete for document {DocumentId}", doc.Id);
+                            await _conversationService.AddMessageAsync(conversation.Id, "assistant", failureResult.Answer);
                         }
                         catch (Exception ex)
                         {
-                            _logger.LogWarning(ex, "In-process fallback failed for document {DocumentId} — query will proceed without it", doc.Id);
+                            _logger.LogWarning(ex, "Failed to save processing-error assistant message to conversation {ConversationId}", conversation.Id);
                         }
                     }
+
+                    await _monitoringService.CompleteRequest(requestId, true, "Document processing error returned to client");
+                    return Ok(failureResult);
                 }
+
+                var pendingDocuments = requestedDocuments
+                    .Where(d => !d.IsProcessed)
+                    .ToList();
+
+                if (pendingDocuments.Any())
+                {
+                    _logger.LogInformation("Requested documents are still processing: {Ids}",
+                        string.Join(", ", pendingDocuments.Select(d => d.Id)));
+                    await _monitoringService.UpdateRequestStatus(requestId!, "Processing",
+                        $"Waiting for {pendingDocuments.Count} document(s) to finish indexing", 35);
+
+                    var pendingResult = new QueryResult
+                    {
+                        Answer = pendingDocuments.Count == 1
+                            ? $"{pendingDocuments[0].DisplayName} is still being processed. Try again in a few seconds."
+                            : $"{pendingDocuments.Count} selected documents are still being processed. Try again in a few seconds.",
+                        ConversationId = conversation?.Id,
+                        Sources = new List<DocumentSource>(),
+                        ReferencedSources = new List<DocumentSource>(),
+                        ConversationSources = new List<ConversationSource>(),
+                        UsedAdvancedModel = false,
+                        ModelUsed = "document-processing-pending",
+                        TokenCount = 0
+                    };
+
+                    if (conversation != null)
+                    {
+                        try
+                        {
+                            await _conversationService.AddMessageAsync(conversation.Id, "assistant", pendingResult.Answer);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to save pending assistant message to conversation {ConversationId}", conversation.Id);
+                        }
+                    }
+
+                    await _monitoringService.CompleteRequest(requestId, true, "Documents still processing");
+                    return Ok(pendingResult);
+                }
+
+                effectiveDocumentIds = requestedDocuments.Select(d => d.Id).ToList();
             }
 
             QueryResult result;
@@ -441,7 +499,7 @@ public class DocumentsController : ControllerBase
                     conversation.Id,
                     request.TopK ?? 5,
                     request.GroupIds,
-                    request.DocumentIds);
+                    effectiveDocumentIds);
             }
             else
             {
@@ -450,7 +508,7 @@ public class DocumentsController : ControllerBase
                     request.Query,
                     request.TopK ?? 5,
                     request.GroupIds,
-                    request.DocumentIds);
+                    effectiveDocumentIds);
             }
             _logger.LogInformation("RAG service returned result. Answer length: {Length}", result.Answer?.Length ?? 0);
 
