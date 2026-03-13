@@ -61,7 +61,7 @@ function getProp(obj, propName) {
 // Enhanced fetch with retry logic, caching, and deduplication
 const pendingRequests = new Map();
 
-async function fetchWithRetry(url, options = {}, retries = 2) {
+async function fetchWithRetry(url, options = {}, retries = 1) {
     const method = options.method || 'GET';
     const cacheKey = `${method}:${url}`;
     
@@ -118,9 +118,9 @@ async function fetchWithRetry(url, options = {}, retries = 2) {
                     });
                 }
 
-                if (!response.ok && response.status >= 500 && i < retries - 1) {
-                    console.warn(`[API] Server error, retrying in ${(i + 1) * 500}ms...`);
-                    await new Promise(resolve => setTimeout(resolve, (i + 1) * 500));
+                if (!response.ok && response.status >= 500 && response.status !== 504 && i < retries - 1) {
+                    console.warn(`[API] Server error, retrying in ${(i + 1) * 1000}ms...`);
+                    await new Promise(resolve => setTimeout(resolve, (i + 1) * 1000));
                     continue;
                 }
 
@@ -128,7 +128,7 @@ async function fetchWithRetry(url, options = {}, retries = 2) {
             } catch (error) {
                 console.error(`[API] Network error on attempt ${i + 1}:`, error);
                 if (i < retries - 1) {
-                    await new Promise(resolve => setTimeout(resolve, (i + 1) * 500));
+                    await new Promise(resolve => setTimeout(resolve, (i + 1) * 1000));
                     continue;
                 }
                 throw error;
@@ -356,7 +356,7 @@ async function initResourceHub() {
             apiCache.invalidate('groups');
             apiCache.invalidate('batch');
             await loadGroups(true);
-            await loadAllGroups(true);
+            state.allGroups = [];
         });
 
         resourceHubConnection.on('conversationsChanged', async () => {
@@ -480,7 +480,6 @@ document.querySelectorAll('.tab').forEach(tab => {
             loadReminders(true);
         } else if (tabName === 'groups') {
             loadGroups(true);
-            loadAllGroups();
         }
     });
 });
@@ -741,11 +740,8 @@ async function loadPrompts(reset = false) {
             });
             if (list) list.appendChild(fragment);
 
-            try {
-                refreshConversationFileCounts(items);
-            } catch (e) {
-                console.warn('Failed to refresh conversation file counts', e);
-            }
+            // Avoid per-conversation follow-up requests during list load; this can
+            // create request storms under load and trigger gateway timeouts.
 
             state.prompts.hasMore = pagination.hasNext || pagination.HasNext || false;
             state.prompts.page++;
@@ -1416,7 +1412,7 @@ async function autoSaveCurrentConversation(reason) {
                     savedPrompt = (savedJson && (savedJson.data || savedJson)) || savedJson || null;
                 } else if (savedRes.status === 405 || savedRes.status === 404) {
                     // Fallback: fetch the prompts list and find the saved item
-                    const listRes = await fetchWithRetry(`${API_BASE}/prompts?page=1&pageSize=1000`);
+                    const listRes = await fetchWithRetry(`${API_BASE}/prompts?page=1&pageSize=100`);
                     if (listRes.ok) {
                         const listJson = await listRes.json().catch(() => null);
                         const prompts = (listJson && (listJson.data || listJson.Data)) || listJson || [];
@@ -2461,7 +2457,7 @@ async function loadPromptById(promptId, promptName) {
         }
 
         if (!prompt) {
-            const listRes = await fetchWithRetry(`${API_BASE}/prompts?page=1&pageSize=1000`);
+            const listRes = await fetchWithRetry(`${API_BASE}/prompts?page=1&pageSize=100`);
             if (listRes.ok) {
                 const listJson = await listRes.json().catch(() => null);
                 const prompts = (listJson && (listJson.data || listJson.Data)) || listJson || [];
@@ -2489,7 +2485,7 @@ async function manageGroupResources(groupId, groupName) {
         
         // ALWAYS fetch fresh group data to avoid stale cache
         console.log('[MANAGE] Fetching fresh group data...');
-        const groupRes = await fetchWithRetry(`${API_BASE}/groups?page=1&pageSize=1000`);
+        const groupRes = await fetchWithRetry(`${API_BASE}/groups?page=1&pageSize=100`);
         if (!groupRes.ok) {
             throw new Error(`Failed to fetch groups: ${groupRes.status}`);
         }
@@ -2583,7 +2579,7 @@ async function manageGroupResources(groupId, groupName) {
         let convReferencedFiles = [];
         try {
             console.log('[MANAGE] Fetching conversations for group to collect referenced files...');
-            const convsRes = await fetchWithRetry(`/api/conversations?groupId=${groupId}&page=1&pageSize=1000`);
+            const convsRes = await fetchWithRetry(`/api/conversations?groupId=${groupId}&page=1&pageSize=100`);
             if (convsRes.ok) {
                 const convsJson = await convsRes.json().catch(() => null);
                 const convs = convsJson?.data || convsJson || [];
@@ -2915,7 +2911,7 @@ async function manageGroupResources(groupId, groupName) {
 async function loadAllGroups(force = false) {
     try {
         console.log('[LOAD ALL GROUPS] Force refresh:', force);
-        const response = await fetchWithRetry(`${API_BASE}/groups?page=1&pageSize=1000`);
+        const response = await fetchWithRetry(`${API_BASE}/groups?page=1&pageSize=100`);
         
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -3157,7 +3153,7 @@ async function previewReminderFile(fileId, fileName) {
 async function resolveDocumentIdByName(fileName) {
     if (!fileName) return null;
     try {
-        const response = await fetch('/api/documents?page=1&pageSize=1000');
+        const response = await fetch('/api/documents?page=1&pageSize=100');
         if (!response.ok) return null;
         const data = await response.json();
         const docs = data.documents || data.Documents || [];

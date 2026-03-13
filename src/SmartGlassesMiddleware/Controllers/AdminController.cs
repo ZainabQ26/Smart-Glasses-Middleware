@@ -927,10 +927,11 @@ public class AdminController : ControllerBase
             return Ok(cachedResult);
         }
 
-        var totalCount = await _context.ResourceGroups.CountAsync();
+        var totalCount = await _context.ResourceGroups.AsNoTracking().CountAsync();
         var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
 
         var groups = await _context.ResourceGroups
+            .AsNoTracking()
             .Include(g => g.FileGroups)
             .ThenInclude(fg => fg.ManagedFile)
             .Include(g => g.PromptGroups)
@@ -938,11 +939,24 @@ public class AdminController : ControllerBase
             .Include(g => g.DocumentGroups)
             .ThenInclude(dg => dg.DocumentMetadata)
             .Include(g => g.Conversations)
-            .ThenInclude(c => c.Messages)
             .OrderByDescending(g => g.CreatedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync();
+
+        var conversationIds = groups
+            .SelectMany(g => g.Conversations.Select(c => c.Id))
+            .Distinct()
+            .ToList();
+
+        var messageCounts = conversationIds.Count == 0
+            ? new Dictionary<Guid, int>()
+            : await _context.ChatMessages
+                .AsNoTracking()
+                .Where(m => conversationIds.Contains(m.ConversationId))
+                .GroupBy(m => m.ConversationId)
+                .Select(g => new { ConversationId = g.Key, Count = g.Count() })
+                .ToDictionaryAsync(x => x.ConversationId, x => x.Count);
 
         var groupData = groups.Select(g => new
             {
@@ -975,17 +989,10 @@ public class AdminController : ControllerBase
                     c.CreatedAt,
                     c.UpdatedAt,
                     c.IsActive,
-                    MessageCount = c.Messages.Count
+                    MessageCount = messageCounts.TryGetValue(c.Id, out var messageCount) ? messageCount : 0
                 }).ToList(),
-                // Count reminders that reference this group
-                Reminders = _context.ResourceGroups
-                    .Where(rg => rg.Description != null && rg.Description.ToLower() == "reminder")
-                    .Where(rg => rg.Conversations.Any(c => c.ResourceGroupId == g.Id))
-                    .Select(rg => new
-                    {
-                        rg.Id,
-                        rg.Name
-                    }).ToList()
+                // Keep response shape stable without running expensive reminder cross-queries per group.
+                Reminders = Array.Empty<object>()
             })
             .ToList();
 
