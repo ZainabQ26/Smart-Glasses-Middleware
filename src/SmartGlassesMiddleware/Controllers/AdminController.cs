@@ -227,39 +227,20 @@ public class AdminController : ControllerBase
             _logger.LogInformation("File upload received and queued: {FileName}, {Size} bytes, Label: {Label}", 
                 request.File.FileName, uploadedBytes.LongLength, request.Label);
 
-            // Create placeholder ManagedFile immediately (empty StorageKey = not-yet-uploaded)
             var fileId = Guid.NewGuid();
             var contentType = request.File.ContentType ?? "application/octet-stream";
-            var managedFile = new ManagedFile
-            {
-                Id = fileId,
-                FileName = request.File.FileName ?? string.Empty,
-                Label = string.IsNullOrWhiteSpace(request.Label) ? (request.File.FileName ?? "Untitled") : request.Label,
-                ContentType = contentType,
-                StorageKey = string.Empty,  // Will be populated when background upload completes
-                ContentHash = null,
-                UploadedAt = DateTime.UtcNow,
-                FileSize = 0  // Will be populated when background upload completes
-            };
-
-            _context.ManagedFiles.Add(managedFile);
-            await _context.SaveChangesAsync();
-
-            // Invalidate cache so placeholder appears immediately
-            try { await InvalidateFilesCache(); } catch { /* best-effort */ }
-            try { await NotifyFilesChangedAsync(); } catch { /* best-effort */ }
+            var label = string.IsNullOrWhiteSpace(request.Label) ? (request.File.FileName ?? "Untitled") : request.Label;
 
             // Queue S3 upload and RAG processing to background task (keep request fast)
             _ = Task.Run(() => ProcessQueuedFileUploadAsync(fileId, uploadedBytes, request.File.FileName ?? string.Empty, 
-                contentType, requestId));
+                contentType, label, requestId));
 
             return Accepted(new { id = fileId, requestId, status = "processing" });
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error uploading file");
-            if (requestId != null)
-                await _monitoringService.CompleteRequest(requestId, false, error: ex.Message);
+            await _monitoringService.CompleteRequest(requestId, false, error: ex.Message);
             return StatusCode(500, new ProblemDetails
             {
                 Title = "Internal Server Error",
@@ -274,6 +255,7 @@ public class AdminController : ControllerBase
         byte[] uploadedBytes,
         string fileName,
         string contentType,
+        string label,
         string requestId)
     {
         try
@@ -305,29 +287,46 @@ public class AdminController : ControllerBase
             using var stream = new MemoryStream(uploadedBytes);
             var storageKey = await mediaStorageService.UploadMediaAsync(stream, fileName, contentType);
 
-            // Update ManagedFile with actual storage details
+            // Update existing record if present, otherwise create it here.
             var managedFile = await db.ManagedFiles.FirstOrDefaultAsync(f => f.Id == fileId);
-            if (managedFile != null)
+            string? contentHash = null;
+            try
             {
-                string? contentHash = null;
-                try
-                {
-                    using var hashStream = new MemoryStream(uploadedBytes, writable: false);
-                    contentHash = mediaStorageService.ComputeContentHash(hashStream);
-                }
-                catch (Exception hashEx)
-                {
-                    _logger.LogWarning(hashEx, "Failed to compute content hash for queued file upload {FileId}", fileId);
-                }
+                using var hashStream = new MemoryStream(uploadedBytes, writable: false);
+                contentHash = mediaStorageService.ComputeContentHash(hashStream);
+            }
+            catch (Exception hashEx)
+            {
+                _logger.LogWarning(hashEx, "Failed to compute content hash for queued file upload {FileId}", fileId);
+            }
 
+            if (managedFile == null)
+            {
+                managedFile = new ManagedFile
+                {
+                    Id = fileId,
+                    FileName = fileName,
+                    Label = label,
+                    ContentType = contentType,
+                    StorageKey = storageKey,
+                    ContentHash = contentHash,
+                    UploadedAt = DateTime.UtcNow,
+                    FileSize = uploadedBytes.LongLength
+                };
+                db.ManagedFiles.Add(managedFile);
+            }
+            else
+            {
                 managedFile.FileName = fileName;
+                managedFile.Label = label;
                 managedFile.ContentType = contentType;
                 managedFile.StorageKey = storageKey;
                 managedFile.ContentHash = contentHash;
                 managedFile.FileSize = uploadedBytes.LongLength;
                 db.ManagedFiles.Update(managedFile);
-                await db.SaveChangesAsync();
             }
+
+            await db.SaveChangesAsync();
 
             if (monitoringService != null)
             {
@@ -367,6 +366,20 @@ public class AdminController : ControllerBase
                 {
                     mf.StorageKey = $"FAILED: {ex.Message}";
                     db.ManagedFiles.Update(mf);
+                    await db.SaveChangesAsync();
+                }
+                else
+                {
+                    db.ManagedFiles.Add(new ManagedFile
+                    {
+                        Id = fileId,
+                        FileName = fileName,
+                        Label = label,
+                        ContentType = contentType,
+                        StorageKey = $"FAILED: {ex.Message}",
+                        UploadedAt = DateTime.UtcNow,
+                        FileSize = uploadedBytes.LongLength
+                    });
                     await db.SaveChangesAsync();
                 }
 
