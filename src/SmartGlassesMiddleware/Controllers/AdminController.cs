@@ -228,21 +228,15 @@ public class AdminController : ControllerBase
         var label = string.IsNullOrWhiteSpace(request.Label) ? request.FileName : request.Label;
         var contentType = string.IsNullOrWhiteSpace(request.ContentType) ? "application/octet-stream" : request.ContentType;
 
-        _context.ManagedFiles.Add(new ManagedFile
-        {
-            Id = fileId,
-            FileName = request.FileName,
-            Label = label,
-            ContentType = contentType,
-            StorageKey = "PENDING: upload queued",
-            UploadedAt = DateTime.UtcNow,
-            FileSize = 0
-        });
-        await _context.SaveChangesAsync();
-
         _ = Task.Run(() => ProcessPresignedUploadAsync(fileId, request.Key, request.FileName, contentType, label, request.FileSize, requestId));
 
-        return Accepted(new { id = fileId, requestId, status = "processing" });
+        return Accepted(new
+        {
+            id = (Guid?)null,
+            requestId,
+            status = "processing",
+            registration = "deferred"
+        });
     }
 
     private async Task ProcessPresignedUploadAsync(
