@@ -1,37 +1,11 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import { viteStaticCopy } from 'vite-plugin-static-copy'
+// vite-plugin-static-copy removed; no static VAD/Whisper assets to copy
 
 export default defineConfig({
   plugins: [
     react(),
-    // We are now loading VAD files from the CDN by removing baseAssetPath="/" in App.jsx
-    // So we don't strictly need to copy them locally anymore, but keeping them as backup is fine.
-    viteStaticCopy({
-      targets: [
-        {
-          src: 'node_modules/@ricky0123/vad-web/dist/silero_vad_legacy.onnx',
-          dest: './',
-        },
-        {
-          src: 'node_modules/@ricky0123/vad-web/dist/silero_vad_v5.onnx',
-          dest: './',
-        },
-        {
-          src: 'node_modules/@ricky0123/vad-web/dist/vad.worklet.bundle.min.js',
-          dest: './',
-        },
-        {
-          src: 'node_modules/onnxruntime-web/dist/*.wasm',
-          dest: './',
-        },
-        {
-          // .mjs companion files — ONNX Runtime loads these dynamically as ES modules
-          src: 'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded*.mjs',
-          dest: './',
-        },
-      ],
-    }),
+    // VAD/Whisper assets no longer copied; VAD removed from client.
   ],
   build: {
     // Output directly into wwwroot so ASP.NET Core serves the built SPA as static files.
