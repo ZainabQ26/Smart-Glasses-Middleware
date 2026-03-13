@@ -2911,18 +2911,37 @@ async function manageGroupResources(groupId, groupName) {
 async function loadAllGroups(force = false) {
     try {
         console.log('[LOAD ALL GROUPS] Force refresh:', force);
-        const response = await fetchWithRetry(`${API_BASE}/groups?page=1&pageSize=100`);
-        
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        const pageSize = 20;
+        const maxPages = 10;
+        let page = 1;
+        const allGroups = [];
+
+        while (page <= maxPages) {
+            const response = await fetchWithRetry(`${API_BASE}/groups?page=${page}&pageSize=${pageSize}`);
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const result = await response.json();
+            const groupsPage = result.data || result.Data || [];
+            const pagination = result.pagination || result.Pagination || {};
+            const hasNext = !!(pagination.hasNext || pagination.HasNext);
+
+            allGroups.push(...groupsPage);
+
+            if (!hasNext || groupsPage.length === 0) {
+                break;
+            }
+
+            page++;
         }
-        
-        const result = await response.json();
-        // Handle both lowercase and uppercase from API
-        state.allGroups = result.data || result.Data || [];
+
+        state.allGroups = allGroups;
         console.log('[LOAD ALL GROUPS] Loaded', state.allGroups.length, 'groups');
     } catch (error) {
         console.error('Error loading all groups:', error);
+        state.allGroups = [];
     }
 }
 
@@ -4969,9 +4988,7 @@ async function init() {
         const results = await Promise.allSettled([
             loadFiles(true),
             loadPrompts(true),
-            loadReminders(true),
-            loadGroups(true),
-            loadAllGroups()
+            loadGroups(true)
         ]);
         
         // Check for failures
