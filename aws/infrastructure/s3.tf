@@ -160,6 +160,18 @@ resource "aws_s3_bucket_public_access_block" "documents" {
   restrict_public_buckets = true
 }
 
+resource "aws_s3_bucket_cors_configuration" "documents" {
+  bucket = aws_s3_bucket.documents.id
+
+  cors_rule {
+    allowed_headers = ["*"]
+    allowed_methods = ["GET", "PUT", "POST", "DELETE", "HEAD"]
+    allowed_origins = ["*"] # Update with your frontend domain in production
+    expose_headers  = ["ETag"]
+    max_age_seconds = 3000
+  }
+}
+
 # S3 Bucket for Frontend Website
 resource "aws_s3_bucket" "frontend" {
   bucket = var.s3_bucket_suffix != "" ? "${var.project_name}-${var.environment}-frontend-${var.s3_bucket_suffix}" : "${var.project_name}-${var.environment}-frontend"
