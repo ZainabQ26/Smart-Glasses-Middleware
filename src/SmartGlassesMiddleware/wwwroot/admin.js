@@ -4736,6 +4736,11 @@ async function init() {
                         const managedFileId = fileData.id || fileData.Id;
                         const uploadRequestId = fileData.requestId || fileData.RequestId || null;
                         const uploadStatus = (fileData.status || fileData.Status || '').toLowerCase();
+                        const registrationState = (fileData.registration || fileData.Registration || '').toLowerCase();
+                        const registrationDeferred = registrationState === 'deferred'
+                            || registrationState === 'queued'
+                            || registrationState === 'in-progress'
+                            || registrationState === 'processing';
                         const isQueued = uploadStatus === 'processing';
 
                         pendingFile.id = managedFileId;
@@ -4744,7 +4749,7 @@ async function init() {
                         pendingFile.isManagedFile = true;
                         pendingFile.uploadProgress = 100;
 
-                        if (usedPresignedUpload && managedFileId) {
+                        if (usedPresignedUpload && managedFileId && !registrationDeferred) {
                             pendingFile.pending = false;
                             pendingFile.statusText = 'Indexing in background...';
                             pendingFile._availabilityMonitorStarted = false;
@@ -4754,7 +4759,9 @@ async function init() {
                                 console.warn('Failed to refresh files after presigned upload completion', error);
                             });
                         } else {
-                            pendingFile.statusText = isQueued ? 'Finishing upload...' : 'Verifying file access...';
+                            pendingFile.statusText = usedPresignedUpload
+                                ? 'Upload completed. Confirming server registration...'
+                                : (isQueued ? 'Finishing upload...' : 'Verifying file access...');
                             syncPromptSelectedFilesState();
                             showMessage(`File "${file.name}" is uploading. It will move to recent files once ready.`, 'info');
 

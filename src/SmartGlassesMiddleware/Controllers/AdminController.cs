@@ -5,6 +5,7 @@ using SmartGlassesMiddleware.Models;
 using SmartGlassesMiddleware.Services;
 using Microsoft.AspNetCore.SignalR;
 using SmartGlassesMiddleware.Hubs;
+using System.Collections.Concurrent;
 
 namespace SmartGlassesMiddleware.Controllers;
 
@@ -26,6 +27,9 @@ public class AdminController : ControllerBase
     private readonly IServiceScopeFactory _scopeFactory;
     private static readonly TimeSpan InitEndpointTimeout = TimeSpan.FromSeconds(8);
     private static readonly SemaphoreSlim UploadProcessingSemaphore = new(2, 2);
+    private static readonly TimeSpan PresignedQuickPersistTimeout = TimeSpan.FromSeconds(4);
+    private static readonly TimeSpan PresignedBackgroundPersistTimeout = TimeSpan.FromSeconds(12);
+    private static readonly ConcurrentDictionary<Guid, DateTime> PresignedCompletionsInFlight = new();
     private const long MaxAdminUploadBytes = 100L * 1024 * 1024; // 100 MB
     private const int DefaultPageSize = 20;
     private const int MaxPageSize = 100;
@@ -225,60 +229,115 @@ public class AdminController : ControllerBase
 
         var requestId = Guid.NewGuid().ToString("N");
         var fileId = request.FileId ?? Guid.NewGuid();
+        var inFlightKey = fileId;
         var label = string.IsNullOrWhiteSpace(request.Label) ? request.FileName : request.Label;
         var contentType = string.IsNullOrWhiteSpace(request.ContentType) ? "application/octet-stream" : request.ContentType;
 
-        // Prefer primary-key lookup first to avoid expensive OR scans on large tables.
-        var managedFile = request.FileId.HasValue
-            ? await _context.ManagedFiles.FirstOrDefaultAsync(f => f.Id == fileId)
-            : null;
-
-        if (managedFile == null)
+        // Idempotency guard: retries for the same client-generated fileId should not spawn duplicate work.
+        if (!PresignedCompletionsInFlight.TryAdd(inFlightKey, DateTime.UtcNow))
         {
-            managedFile = await _context.ManagedFiles.FirstOrDefaultAsync(f => f.StorageKey == request.Key);
-            if (managedFile != null)
+            return Accepted(new
             {
-                fileId = managedFile.Id;
+                id = fileId,
+                requestId,
+                status = "processing",
+                registration = "in-progress"
+            });
+        }
+
+        var registration = "deferred";
+        var status = "processing";
+
+        try
+        {
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted);
+            timeoutCts.CancelAfter(PresignedQuickPersistTimeout);
+            var ct = timeoutCts.Token;
+
+            // Keep request path bounded: attempt a quick write, then defer if DB is slow.
+            var managedFile = request.FileId.HasValue
+                ? await _context.ManagedFiles.FirstOrDefaultAsync(f => f.Id == fileId, ct)
+                : null;
+
+            if (managedFile == null && !request.FileId.HasValue)
+            {
+                managedFile = await _context.ManagedFiles.FirstOrDefaultAsync(f => f.StorageKey == request.Key, ct);
+                if (managedFile != null)
+                {
+                    fileId = managedFile.Id;
+                    registration = "existing";
+                }
             }
-        }
 
-        if (managedFile == null)
-        {
-            managedFile = new ManagedFile
+            if (managedFile == null)
             {
-                Id = fileId,
-                FileName = request.FileName,
-                Label = label,
-                ContentType = contentType,
-                StorageKey = request.Key,
-                UploadedAt = DateTime.UtcNow,
-                FileSize = request.FileSize
-            };
-            _context.ManagedFiles.Add(managedFile);
-        }
-        else
-        {
-            managedFile.FileName = request.FileName;
-            managedFile.Label = label;
-            managedFile.ContentType = contentType;
-            managedFile.StorageKey = request.Key;
-            managedFile.FileSize = request.FileSize;
-            _context.ManagedFiles.Update(managedFile);
-        }
-        await _context.SaveChangesAsync();
+                managedFile = new ManagedFile
+                {
+                    Id = fileId,
+                    FileName = request.FileName,
+                    Label = label,
+                    ContentType = contentType,
+                    StorageKey = request.Key,
+                    UploadedAt = DateTime.UtcNow,
+                    FileSize = request.FileSize
+                };
+                _context.ManagedFiles.Add(managedFile);
+                registration = "saved";
+            }
+            else
+            {
+                managedFile.FileName = request.FileName;
+                managedFile.Label = label;
+                managedFile.ContentType = contentType;
+                managedFile.StorageKey = request.Key;
+                managedFile.FileSize = request.FileSize;
+                _context.ManagedFiles.Update(managedFile);
+                if (!string.Equals(registration, "existing", StringComparison.OrdinalIgnoreCase))
+                {
+                    registration = "saved";
+                }
+            }
 
-        HttpContext.Response.OnCompleted(() =>
+            await _context.SaveChangesAsync(ct);
+            status = "registered";
+        }
+        catch (OperationCanceledException) when (!HttpContext.RequestAborted.IsCancellationRequested)
         {
-            _ = Task.Run(() => ProcessPresignedUploadAsync(fileId, request.Key, request.FileName, contentType, label, request.FileSize, requestId));
-            return Task.CompletedTask;
+            _logger.LogWarning("Timed out persisting presigned upload metadata for {FileId}; deferring persistence to background worker", fileId);
+            try { _context.ChangeTracker.Clear(); } catch { /* best-effort */ }
+            registration = "deferred";
+            status = "processing";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to persist presigned upload metadata for {FileId}; deferring persistence to background worker", fileId);
+            try { _context.ChangeTracker.Clear(); } catch { /* best-effort */ }
+            registration = "deferred";
+            status = "processing";
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await ProcessPresignedUploadAsync(fileId, request.Key, request.FileName, contentType, label, request.FileSize, requestId);
+            }
+            finally
+            {
+                PresignedCompletionsInFlight.TryRemove(inFlightKey, out _);
+                if (fileId != inFlightKey)
+                {
+                    PresignedCompletionsInFlight.TryRemove(fileId, out _);
+                }
+            }
         });
 
         return Accepted(new
         {
             id = fileId,
             requestId,
-            status = "registered",
-            registration = "saved"
+            status,
+            registration
         });
     }
 
@@ -298,7 +357,10 @@ public class AdminController : ControllerBase
             var ragService = scope.ServiceProvider.GetRequiredService<IRagService>();
             var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
-            var managedFile = await db.ManagedFiles.FirstOrDefaultAsync(f => f.Id == fileId);
+            using var dbTimeoutCts = new CancellationTokenSource(PresignedBackgroundPersistTimeout);
+            var dbCt = dbTimeoutCts.Token;
+
+            var managedFile = await db.ManagedFiles.FirstOrDefaultAsync(f => f.Id == fileId, dbCt);
             if (managedFile == null)
             {
                 managedFile = new ManagedFile
@@ -312,7 +374,22 @@ public class AdminController : ControllerBase
                     FileSize = fileSize
                 };
                 db.ManagedFiles.Add(managedFile);
-                await db.SaveChangesAsync();
+                await db.SaveChangesAsync(dbCt);
+            }
+            else
+            {
+                var changed = false;
+                if (!string.Equals(managedFile.FileName, fileName, StringComparison.Ordinal)) { managedFile.FileName = fileName; changed = true; }
+                if (!string.Equals(managedFile.Label, label, StringComparison.Ordinal)) { managedFile.Label = label; changed = true; }
+                if (!string.Equals(managedFile.ContentType, contentType, StringComparison.Ordinal)) { managedFile.ContentType = contentType; changed = true; }
+                if (!string.Equals(managedFile.StorageKey, s3Key, StringComparison.Ordinal)) { managedFile.StorageKey = s3Key; changed = true; }
+                if (managedFile.FileSize != fileSize) { managedFile.FileSize = fileSize; changed = true; }
+
+                if (changed)
+                {
+                    db.ManagedFiles.Update(managedFile);
+                    await db.SaveChangesAsync(dbCt);
+                }
             }
 
             try { await InvalidateFilesCache(); } catch { /* best-effort */ }

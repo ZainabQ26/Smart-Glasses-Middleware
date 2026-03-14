@@ -136,8 +136,8 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
     {
         o.UseVector();
         o.EnableRetryOnFailure(
-            maxRetryCount: 10,
-            maxRetryDelay: TimeSpan.FromSeconds(10),
+            maxRetryCount: 3,
+            maxRetryDelay: TimeSpan.FromSeconds(2),
             errorCodesToAdd: null);
     }));
 
