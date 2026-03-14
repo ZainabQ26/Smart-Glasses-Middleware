@@ -48,6 +48,36 @@ static bool IsTransientMigrationConnectivityFailure(Exception ex)
     return false;
 }
 
+static async Task EnsureAdminListPerformanceIndexesAsync(IServiceProvider services, ILogger? logger)
+{
+    using var scope = services.CreateScope();
+    var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+    var provider = db.Database.ProviderName ?? string.Empty;
+    if (!provider.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+    {
+        return;
+    }
+
+    // These indexes target the exact predicates used by admin files/groups list endpoints.
+    var sqlStatements = new[]
+    {
+        "CREATE INDEX IF NOT EXISTS \"IX_ManagedFiles_UploadedAt\" ON \"ManagedFiles\" (\"UploadedAt\" DESC)",
+        "CREATE INDEX IF NOT EXISTS \"IX_ResourceGroups_CreatedAt\" ON \"ResourceGroups\" (\"CreatedAt\" DESC)",
+        "CREATE INDEX IF NOT EXISTS \"IX_ManagedFileGroups_ResourceGroupId\" ON \"ManagedFileGroups\" (\"ResourceGroupId\")",
+        "CREATE INDEX IF NOT EXISTS \"IX_ManagedPromptGroups_ResourceGroupId\" ON \"ManagedPromptGroups\" (\"ResourceGroupId\")",
+        "CREATE INDEX IF NOT EXISTS \"IX_DocumentGroups_ResourceGroupId\" ON \"DocumentGroups\" (\"ResourceGroupId\")",
+        "CREATE INDEX IF NOT EXISTS \"IX_Conversations_ResourceGroupId\" ON \"Conversations\" (\"ResourceGroupId\")",
+        "CREATE INDEX IF NOT EXISTS \"IX_ChatMessages_ConversationId\" ON \"ChatMessages\" (\"ConversationId\")"
+    };
+
+    foreach (var sql in sqlStatements)
+    {
+        await db.Database.ExecuteSqlRawAsync(sql);
+    }
+
+    logger?.LogInformation("Ensured admin list performance indexes");
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Configure QuestPDF license for community usage to avoid runtime license validation errors
@@ -655,17 +685,27 @@ using (var scope = app.Services.CreateScope())
                 }
             }
 
-            // When MIGRATE_ONLY is set the container is a one-shot CI task — exit cleanly
-            // so ECS marks it as stopped with exit code 0 and the CI job succeeds.
-            if (migrateOnly)
-            {
-                _startupLogger.LogInformation("MIGRATE_ONLY=true — migrations complete, exiting.");
-                return;
-            }
         }
         else
         {
             logger?.LogInformation("Skipping database migration on startup (MIGRATE_ON_STARTUP not set).");
+        }
+
+        try
+        {
+            await EnsureAdminListPerformanceIndexesAsync(app.Services, logger);
+        }
+        catch (Exception ex)
+        {
+            logger?.LogWarning(ex, "Failed to ensure admin list performance indexes during startup; continuing");
+        }
+
+        // When MIGRATE_ONLY is set the container is a one-shot CI task — exit cleanly
+        // so ECS marks it as stopped with exit code 0 and the CI job succeeds.
+        if (migrateOnly)
+        {
+            _startupLogger.LogInformation("MIGRATE_ONLY=true — migrations complete, exiting.");
+            return;
         }
     }
     catch (InvalidOperationException ex)

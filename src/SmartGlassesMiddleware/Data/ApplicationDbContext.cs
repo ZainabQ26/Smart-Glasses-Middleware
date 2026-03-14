@@ -78,6 +78,8 @@ public class ApplicationDbContext : DbContext
 
             // Add index for ContentHash for deduplication lookups
             entity.HasIndex(e => e.ContentHash);
+            // Speeds up latest-files list queries
+            entity.HasIndex(e => e.UploadedAt);
         });
 
         modelBuilder.Entity<ManagedPrompt>(entity =>
@@ -93,6 +95,8 @@ public class ApplicationDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Name).IsRequired().HasMaxLength(255);
             entity.Property(e => e.CreatedAt).IsRequired();
+            // Speeds up latest-groups list queries
+            entity.HasIndex(e => e.CreatedAt);
         });
 
         modelBuilder.Entity<ManagedFileGroup>(entity =>
@@ -104,6 +108,8 @@ public class ApplicationDbContext : DbContext
             entity.HasOne(e => e.ResourceGroup)
                 .WithMany(g => g.FileGroups)
                 .HasForeignKey(e => e.ResourceGroupId);
+            // Composite PK starts with ManagedFileId, so add lookup index for ResourceGroupId-based filters.
+            entity.HasIndex(e => e.ResourceGroupId);
         });
 
         modelBuilder.Entity<ManagedPromptGroup>(entity =>
@@ -115,6 +121,8 @@ public class ApplicationDbContext : DbContext
             entity.HasOne(e => e.ResourceGroup)
                 .WithMany(g => g.PromptGroups)
                 .HasForeignKey(e => e.ResourceGroupId);
+            // Composite PK starts with ManagedPromptId, so add lookup index for ResourceGroupId-based filters.
+            entity.HasIndex(e => e.ResourceGroupId);
         });
         modelBuilder.Entity<RagEntry>(entity =>
         {
@@ -192,6 +200,8 @@ public class ApplicationDbContext : DbContext
             entity.HasOne(e => e.ResourceGroup)
                 .WithMany(g => g.DocumentGroups)
                 .HasForeignKey(e => e.ResourceGroupId);
+            // Composite PK starts with DocumentMetadataId, so add lookup index for ResourceGroupId-based filters.
+            entity.HasIndex(e => e.ResourceGroupId);
         });
 
         modelBuilder.Entity<Conversation>(entity =>
@@ -201,6 +211,8 @@ public class ApplicationDbContext : DbContext
             entity.Property(e => e.CreatedAt).IsRequired();
             entity.Property(e => e.UpdatedAt).IsRequired();
             entity.Property(e => e.IsActive).IsRequired();
+
+            entity.HasIndex(e => e.ResourceGroupId);
 
             entity.HasOne(e => e.ResourceGroup)
                 .WithMany(g => g.Conversations)
@@ -214,6 +226,8 @@ public class ApplicationDbContext : DbContext
             entity.Property(e => e.Role).IsRequired().HasMaxLength(50);
             entity.Property(e => e.Content).IsRequired();
             entity.Property(e => e.Timestamp).IsRequired();
+
+            entity.HasIndex(e => e.ConversationId);
 
             entity.HasOne(e => e.Conversation)
                 .WithMany(c => c.Messages)
