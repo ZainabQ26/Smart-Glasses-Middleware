@@ -4,6 +4,8 @@ const themeStorageKey = 'uiTheme';
 const MAX_UPLOAD_STATUS_TRANSIENTS_BEFORE_DEFER = 5;
 const MIN_UPLOAD_STATUS_DEFER_RETRY_MS = 60000;
 const MAX_UPLOAD_STATUS_DEFER_RETRY_MS = 300000;
+// After this many deferred retries the upload is presumed permanently stuck; the user is told to re-upload.
+const MAX_POLL_DEFERRED_BEFORE_ABANDON = 8;
 
 // In-memory cache for API responses (no browser storage)
 const apiCache = {
@@ -1586,8 +1588,9 @@ async function registerPresignedUpload(payload, maxAttempts = 4) {
 }
 
 function notifyUploadPollingOutage() {
-    noteServiceOutage('upload readiness polling');
-
+    // Do NOT feed into the global service-outage backoff here — upload-polling DB timeouts
+    // are separate from API/hub availability and should not delay hub reconnects.
+    // (503 responses on the status endpoint call noteServiceOutage directly instead.)
     const now = Date.now();
     if ((now - lastUploadPollingOutageNoticeAt) < 30000) {
         return;
@@ -1741,6 +1744,8 @@ async function waitForManagedFileReady(id, timeoutMs = 120000, intervalMs = 1500
             } else if (isTransientGatewayStatus(response.status)) {
                 hadTransientFailures = true;
                 consecutiveTransientFailures++;
+                // A genuine gateway/rate-limit error on the status endpoint IS a service outage signal.
+                noteServiceOutage(`file status ${response.status}`);
                 notifyUploadPollingOutage();
                 if (consecutiveTransientFailures >= MAX_UPLOAD_STATUS_TRANSIENTS_BEFORE_DEFER) {
                     return { deferred: true, retryAfterMs: getDeferredRetryMs() };
@@ -1953,6 +1958,19 @@ async function monitorPromptFileAvailability(fileObj, timeoutMs = 300000, interv
         if (ready?.deferred) {
             const deferredCount = Number(fileObj._pollDeferredCount || 0) + 1;
             fileObj._pollDeferredCount = deferredCount;
+
+            // After too many deferrals the file is presumed permanently stuck on the server.
+            // Tell the user to re-upload rather than looping forever.
+            if (deferredCount >= MAX_POLL_DEFERRED_BEFORE_ABANDON) {
+                fileObj._pollDeferredCount = 0;
+                fileObj._pollDeferredNotified = false;
+                fileObj._availabilityMonitorStarted = false;
+                promptSelectedFiles = promptSelectedFiles.filter(f => f !== fileObj);
+                syncPromptSelectedFilesState();
+                const fileLabel = fileObj.name || fileObj.file?.name || 'The file';
+                showMessage(`"${fileLabel}" could not be confirmed after repeated retries. Please remove and re-upload it.`, 'error');
+                return;
+            }
 
             const requestedDelayMs = Math.max(0, Number(ready.retryAfterMs) || 0);
             const autoDelayMs = getRetryDelayMs(

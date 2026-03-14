@@ -48,6 +48,35 @@ static bool IsTransientMigrationConnectivityFailure(Exception ex)
     return false;
 }
 
+static async Task ResetStalePendingUploadsAsync(IServiceProvider services, ILogger? logger)
+{
+    try
+    {
+        using var scope = services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+        // Files stuck in PENDING state for more than 20 minutes are almost certainly
+        // orphaned by a worker crash or server restart. Mark them as failed so clients
+        // can surface a clear error instead of polling forever.
+        var staleCutoff = DateTime.UtcNow.AddMinutes(-20);
+        var staleFiles = await db.ManagedFiles
+            .Where(f => f.StorageKey.StartsWith("PENDING:") && f.UploadedAt < staleCutoff)
+            .ToListAsync();
+
+        if (staleFiles.Count > 0)
+        {
+            foreach (var file in staleFiles)
+                file.StorageKey = "FAILED: Upload processing timed out. Please re-upload the file.";
+            await db.SaveChangesAsync();
+            logger?.LogInformation("Marked {Count} stale pending upload(s) as failed at startup", staleFiles.Count);
+        }
+    }
+    catch (Exception ex)
+    {
+        logger?.LogWarning(ex, "Failed to reset stale pending uploads at startup (non-fatal)");
+    }
+}
+
 static async Task EnsureAdminListPerformanceIndexesAsync(IServiceProvider services, ILogger? logger)
 {
     using var scope = services.CreateScope();
@@ -698,6 +727,15 @@ using (var scope = app.Services.CreateScope())
         catch (Exception ex)
         {
             logger?.LogWarning(ex, "Failed to ensure admin list performance indexes during startup; continuing");
+        }
+
+        try
+        {
+            await ResetStalePendingUploadsAsync(app.Services, logger);
+        }
+        catch (Exception ex)
+        {
+            logger?.LogWarning(ex, "Failed to reset stale pending uploads at startup; continuing");
         }
 
         // When MIGRATE_ONLY is set the container is a one-shot CI task — exit cleanly
