@@ -193,8 +193,19 @@ builder.Services.AddHttpLogging(options =>
 // Configure PostgreSQL
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
     ?? "Host=localhost;Database=smartglasses;Username=postgres;Password=postgres";
+
+// db.t3.micro has ~112 max_connections. Npgsql's default pool is 100 per process,
+// which would monopolise the entire DB budget and cause connection starvation.
+// Cap the pool and set a short command timeout so slow queries fail fast
+// and release connections back to the pool quickly.
+var npgsqlConnBuilder = new Npgsql.NpgsqlConnectionStringBuilder(connectionString);
+if (npgsqlConnBuilder.MaxPoolSize >= 90)   npgsqlConnBuilder.MaxPoolSize   = 20;
+if (npgsqlConnBuilder.MinPoolSize > 2)     npgsqlConnBuilder.MinPoolSize   = 1;
+if (npgsqlConnBuilder.CommandTimeout >= 30) npgsqlConnBuilder.CommandTimeout = 10;
+var tunedConnectionString = npgsqlConnBuilder.ConnectionString;
+
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseNpgsql(connectionString, o =>
+    options.UseNpgsql(tunedConnectionString, o =>
     {
         o.UseVector();
         o.EnableRetryOnFailure(
