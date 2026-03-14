@@ -800,6 +800,7 @@ async function loadFiles(reset = false) {
         
         const result = await response.json();
         console.log('Files API response:', result);
+        const degraded = isDegradedPagedResult(result);
         // Handle both lowercase and uppercase from API
         const filesData = result.data || result.Data || [];
         const pagination = result.pagination || result.Pagination || {};
@@ -809,6 +810,24 @@ async function loadFiles(reset = false) {
         const list = document.getElementById('files-list');
         
         hideLoading('files-list');
+
+        if (degraded) {
+            if (reset && state.files.data.length === 0) {
+                list.innerHTML = '<div class="empty-state"><p>Server is busy. File list will refresh automatically.</p></div>';
+            }
+
+            if (!filesDegradedRefreshTimer) {
+                filesDegradedRefreshTimer = setTimeout(() => {
+                    filesDegradedRefreshTimer = null;
+                    loadFiles(true).catch(err => {
+                        console.warn('Automatic files refresh after degraded response failed', err);
+                    });
+                }, 10000);
+            }
+
+            state.files.loading = false;
+            return;
+        }
         
         if (filesData && filesData.length > 0) {
             state.files.data.push(...filesData);
@@ -1179,6 +1198,8 @@ let currentPreviewFile = { id: null, fileName: null };
 const TRANSIENT_GATEWAY_STATUSES = new Set([502, 503, 504]);
 const PRESIGNED_COMPLETE_TIMEOUT_MS = 70000;
 let lastUploadPollingOutageNoticeAt = 0;
+let filesDegradedRefreshTimer = null;
+let groupsDegradedRefreshTimer = null;
 
 function delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -1209,6 +1230,16 @@ function getRetryDelayMs(baseIntervalMs, consecutiveFailures, maxDelayMs = 20000
     const backoff = Math.min(maxDelayMs, Math.round(safeBase * Math.pow(1.6, cappedFailures)));
     const jitter = Math.floor(Math.random() * Math.max(250, Math.round(backoff * 0.2)));
     return backoff + jitter;
+}
+
+function isDegradedPagedResult(result) {
+    if (!result || typeof result !== 'object') {
+        return false;
+    }
+
+    const degraded = result.degraded ?? result.Degraded ?? false;
+    const error = String(result.error || result.Error || '').trim().toLowerCase();
+    return degraded === true || error === 'temporary_unavailable';
 }
 
 function createClientGuid() {
@@ -1362,8 +1393,18 @@ async function waitForManagedFileReady(id, timeoutMs = 120000, intervalMs = 1500
             if (response.ok) {
                 consecutiveTransientFailures = 0;
                 const fileMeta = await response.json().catch(() => null);
+                if (!fileMeta) {
+                    hadTransientFailures = true;
+                    consecutiveTransientFailures++;
+                    await delay(getRetryDelayMs(intervalMs, consecutiveTransientFailures));
+                    continue;
+                }
+
                 const failed = fileMeta?.failed ?? false;
                 const isReady = fileMeta?.isReady ?? false;
+                const pending = fileMeta?.pending ?? false;
+                const hasStorageKey = fileMeta?.hasStorageKey;
+                const statusError = String(fileMeta?.error || '').toLowerCase();
 
                 if (failed) {
                     return {
@@ -1379,11 +1420,27 @@ async function waitForManagedFileReady(id, timeoutMs = 120000, intervalMs = 1500
                         fileName: fileMeta?.fileName || fileMeta?.label || null
                     };
                 }
+
+                const isBusyTimeout = pending
+                    && (statusError.includes('timed out') || statusError.includes('server is busy'));
+                const isRegistrationLag = pending && hasStorageKey === false;
+                if (isBusyTimeout || isRegistrationLag) {
+                    hadTransientFailures = true;
+                    consecutiveTransientFailures++;
+                    notifyUploadPollingOutage();
+                    await delay(getRetryDelayMs(intervalMs, consecutiveTransientFailures, 30000));
+                    continue;
+                }
             } else if (isTransientGatewayStatus(response.status)) {
                 hadTransientFailures = true;
                 consecutiveTransientFailures++;
                 notifyUploadPollingOutage();
                 await delay(getRetryDelayMs(intervalMs, consecutiveTransientFailures));
+                continue;
+            } else if (response.status === 404) {
+                hadTransientFailures = true;
+                consecutiveTransientFailures++;
+                await delay(getRetryDelayMs(intervalMs, consecutiveTransientFailures, 25000));
                 continue;
             } else {
                 consecutiveTransientFailures = 0;
@@ -2903,6 +2960,7 @@ async function loadGroups(reset = false) {
         
         const result = await response.json();
         console.log('Groups API response:', result);
+        const degraded = isDegradedPagedResult(result);
         // Handle both lowercase and uppercase from API
         const groupsData = result.data || result.Data || [];
         const pagination = result.pagination || result.Pagination || {};
@@ -2911,6 +2969,24 @@ async function loadGroups(reset = false) {
         const list = document.getElementById('groups-list');
         
         hideLoading('groups-list');
+
+        if (degraded) {
+            if (reset && state.groups.data.length === 0) {
+                list.innerHTML = '<div class="empty-state"><p>Server is busy. Group list will refresh automatically.</p></div>';
+            }
+
+            if (!groupsDegradedRefreshTimer) {
+                groupsDegradedRefreshTimer = setTimeout(() => {
+                    groupsDegradedRefreshTimer = null;
+                    loadGroups(true).catch(err => {
+                        console.warn('Automatic groups refresh after degraded response failed', err);
+                    });
+                }, 10000);
+            }
+
+            state.groups.loading = false;
+            return;
+        }
         
         if (groupsData && groupsData.length > 0) {
             state.groups.data.push(...groupsData);
@@ -3932,6 +4008,11 @@ async function loadAllGroups(force = false) {
             }
 
             const result = await response.json();
+            if (isDegradedPagedResult(result)) {
+                console.warn('[LOAD ALL GROUPS] Received degraded response; preserving cached groups');
+                break;
+            }
+
             const groupsPage = result.data || result.Data || [];
             const pagination = result.pagination || result.Pagination || {};
             const hasNext = !!(pagination.hasNext || pagination.HasNext);
