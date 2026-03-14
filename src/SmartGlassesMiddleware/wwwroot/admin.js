@@ -226,6 +226,9 @@ var conversationHubConnection = null;
 var resourceHubConnection = null;
 var taskHubConnection = null;
 const HUB_RECONNECT_DELAYS_MS = [5000, 10000, 20000, 30000, 60000];
+let taskHubConnectInProgress = false;
+let taskHubReconnectTimer = null;
+let taskHubReconnectAttempt = 0;
 
 // Track individual hub connection states; banner shows if either hub is disconnected
 // Default to `true` so the banner is hidden until a hub explicitly reports disconnected.
@@ -302,6 +305,34 @@ function setResourceHubState(connected) {
 function setConversationHubState(connected) {
     conversationHubConnected = !!connected;
     updateSignalRBanner();
+}
+
+function clearTaskHubReconnectTimer() {
+    if (taskHubReconnectTimer) {
+        clearTimeout(taskHubReconnectTimer);
+        taskHubReconnectTimer = null;
+    }
+}
+
+function scheduleTaskHubReconnect(reason = '') {
+    if (taskHubReconnectTimer) {
+        return;
+    }
+
+    const maxIdx = HUB_RECONNECT_DELAYS_MS.length - 1;
+    const delayIdx = Math.min(taskHubReconnectAttempt, maxIdx);
+    const delayMs = HUB_RECONNECT_DELAYS_MS[delayIdx] || 5000;
+    taskHubReconnectAttempt = Math.min(taskHubReconnectAttempt + 1, maxIdx);
+
+    console.warn(`[SignalR] Scheduling TaskHub reconnect in ${delayMs}ms${reason ? ` (${reason})` : ''}`);
+
+    taskHubReconnectTimer = setTimeout(() => {
+        taskHubReconnectTimer = null;
+        initTaskHub().catch((err) => {
+            console.warn('[SignalR] Task hub reconnect attempt failed:', err);
+            scheduleTaskHubReconnect('retry failed');
+        });
+    }, delayMs);
 }
 
 // Backwards-compatible wrapper used by tests and any callers that expect the old API
@@ -565,49 +596,81 @@ function applyTaskHubUploadActivity(activity) {
 async function initTaskHub() {
     if (!window.signalR) {
         console.warn('[SignalR] signalR client not loaded');
+        scheduleTaskHubReconnect('signalR client not loaded');
         return;
     }
 
+    const hubState = signalR.HubConnectionState;
+    if (taskHubConnection && hubState && taskHubConnection.state === hubState.Connected) {
+        return;
+    }
+
+    if (taskHubConnectInProgress) {
+        return;
+    }
+
+    taskHubConnectInProgress = true;
+
     try {
-        taskHubConnection = new signalR.HubConnectionBuilder()
-            .withUrl('/hubs/tasks')
-            .withAutomaticReconnect(HUB_RECONNECT_DELAYS_MS)
-            .build();
+        if (!taskHubConnection) {
+            taskHubConnection = new signalR.HubConnectionBuilder()
+                .withUrl('/hubs/tasks')
+                .withAutomaticReconnect(HUB_RECONNECT_DELAYS_MS)
+                .build();
 
-        // Handle request status updates
-        taskHubConnection.on('RequestUpdate', (request) => {
-            console.log('[TaskHub] Request update:', request);
-            const requestId = String(getProp(request, 'requestId') || '').trim();
-            if (requestId) {
-                activeRequests.set(requestId, request);
-            }
-            updateProgressDisplay(request);
-            applyTaskHubUploadStatus(request);
-        });
-
-        // Handle detailed activity updates
-        taskHubConnection.on('ActivityUpdate', (activity) => {
-            console.log('[TaskHub] Activity update:', activity);
-            const requestId = String(getProp(activity, 'requestId') || '').trim();
-            if (!requestId) {
-                return;
-            }
-            if (!requestActivities.has(requestId)) {
-                requestActivities.set(requestId, []);
-            }
-            requestActivities.get(requestId).push({
-                timestamp: getProp(activity, 'timestamp') || new Date().toISOString(),
-                activity: getProp(activity, 'activity'),
-                progress: getProp(activity, 'progress')
+            // Handle request status updates
+            taskHubConnection.on('RequestUpdate', (request) => {
+                console.log('[TaskHub] Request update:', request);
+                const requestId = String(getProp(request, 'requestId') || '').trim();
+                if (requestId) {
+                    activeRequests.set(requestId, request);
+                }
+                updateProgressDisplay(request);
+                applyTaskHubUploadStatus(request);
             });
-            updateActivityDisplay(requestId);
-            applyTaskHubUploadActivity(activity);
-        });
+
+            // Handle detailed activity updates
+            taskHubConnection.on('ActivityUpdate', (activity) => {
+                console.log('[TaskHub] Activity update:', activity);
+                const requestId = String(getProp(activity, 'requestId') || '').trim();
+                if (!requestId) {
+                    return;
+                }
+                if (!requestActivities.has(requestId)) {
+                    requestActivities.set(requestId, []);
+                }
+                requestActivities.get(requestId).push({
+                    timestamp: getProp(activity, 'timestamp') || new Date().toISOString(),
+                    activity: getProp(activity, 'activity'),
+                    progress: getProp(activity, 'progress')
+                });
+                updateActivityDisplay(requestId);
+                applyTaskHubUploadActivity(activity);
+            });
+
+            taskHubConnection.onreconnecting((err) => {
+                console.warn('[SignalR] Task hub reconnecting:', err);
+            });
+            taskHubConnection.onreconnected(() => {
+                taskHubReconnectAttempt = 0;
+                clearTaskHubReconnectTimer();
+                console.log('[SignalR] Task hub reconnected');
+            });
+            taskHubConnection.onclose((err) => {
+                console.warn('[SignalR] Task hub closed:', err);
+                scheduleTaskHubReconnect('connection closed');
+            });
+        }
 
         await taskHubConnection.start();
+        taskHubReconnectAttempt = 0;
+        clearTaskHubReconnectTimer();
         console.log('[SignalR] Task hub connected');
     } catch (err) {
         console.warn('[SignalR] Failed to connect task hub:', err);
+        scheduleTaskHubReconnect('start failed');
+    } finally {
+        taskHubConnectInProgress = false;
     }
 }
 
@@ -1709,6 +1772,91 @@ function resolvePendingRecentFileChoice(input) {
         requested: requestedNumber,
         file: pendingRecentFileChoices[idx]
     };
+}
+
+function isDirectRecentDocumentPreviewCommand(input) {
+    const text = String(input || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    if (!text) {
+        return false;
+    }
+
+    return /^(please\s+)?(select|open|preview|show)\s+(the\s+)?(latest|last|most recent|recent)?\s*(document|file)\s*\.?$/.test(text)
+        || /^(please\s+)?select\s+document\s*\.?$/.test(text)
+        || /^(please\s+)?open\s+last\s+document\s*\.?$/.test(text)
+        || /^(please\s+)?open\s+latest\s+document\s*\.?$/.test(text);
+}
+
+function renderRecentFilesAction(responseContent, recentFiles) {
+    if (!responseContent) {
+        return;
+    }
+
+    const listHtml = recentFiles
+        .map((file, idx) => {
+            const uploadedLabel = file.uploadedAt
+                ? new Date(file.uploadedAt).toLocaleString()
+                : 'Unknown time';
+            return `
+                <li style="margin-bottom:8px; display:flex; justify-content:space-between; gap:10px; align-items:center;">
+                    <span><strong>${idx + 1}.</strong> ${escapeHtml(file.fileName)}<br><small style="color:#7f8c8d;">${escapeHtml(uploadedLabel)}</small></span>
+                    <button type="button" data-action-open-index="${idx}" style="padding:4px 10px; border:none; border-radius:4px; background:#0b63a6; color:#fff; cursor:pointer;">Open</button>
+                </li>
+            `;
+        })
+        .join('');
+
+    const hint = `<p style="margin: 8px 0 0; color:#2f3a3f;">Say a number (for example <strong>2</strong> or <strong>open file 2</strong>) or click Open below.</p>`;
+
+    responseContent.innerHTML = `
+        <div style="padding: 15px; white-space: normal;">
+            <div style="font-weight: 600; margin-bottom: 10px;">Recent files</div>
+            <ol style="margin:0; padding-left:20px;">${listHtml}</ol>
+            ${hint}
+        </div>
+    `;
+
+    responseContent.querySelectorAll('button[data-action-open-index]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const idx = Number.parseInt(btn.getAttribute('data-action-open-index') || '-1', 10);
+            if (Number.isFinite(idx) && idx >= 0 && idx < recentFiles.length) {
+                const selected = recentFiles[idx];
+                const opened = await openFileFromAction(selected.id, selected.fileName, responseContent);
+                if (opened) {
+                    clearPendingRecentFileChoices();
+                }
+            }
+        });
+    });
+}
+
+async function openMostRecentDocumentPreview(responseContent) {
+    try {
+        const recentFiles = await fetchRecentFilesForAction(5);
+        if (!recentFiles.length) {
+            clearPendingRecentFileChoices();
+            if (responseContent) {
+                responseContent.innerHTML = '<div style="padding: 15px; white-space: pre-wrap;">No recent files found. Upload one first, then try again.</div>';
+            }
+            return true;
+        }
+
+        setPendingRecentFileChoices(recentFiles);
+        const primary = recentFiles[0];
+        const opened = await openFileFromAction(primary.id, primary.fileName, responseContent);
+        if (opened) {
+            clearPendingRecentFileChoices();
+        } else {
+            renderRecentFilesAction(responseContent, recentFiles);
+        }
+
+        return true;
+    } catch (error) {
+        clearPendingRecentFileChoices();
+        if (responseContent) {
+            responseContent.innerHTML = '<div style="padding: 15px; white-space: pre-wrap; color:#e74c3c;">Could not load recent files right now.</div>';
+        }
+        return false;
+    }
 }
 
 async function fetchRecentFilesForAction(limit = 5) {
@@ -4935,6 +5083,12 @@ async function init() {
                 return;
             }
 
+            if (isDirectRecentDocumentPreviewCommand(promptText)) {
+                await openMostRecentDocumentPreview(responseContent);
+                document.getElementById('prompt-name').value = '';
+                return;
+            }
+
             const pendingPromptFiles = promptSelectedFiles.filter(f => f.pending);
             if (pendingPromptFiles.length > 0) {
                 const pendingLabel = pendingPromptFiles.length === 1
@@ -5142,16 +5296,17 @@ async function init() {
                 }
 
                 const answer = result.answer || result.Answer || result.AnswerText || result?.AnswerHtml || result?.answerText || 'No response received';
+                const normalizedAnswer = String(answer || '').trim();
 
                 // Intercept file picker action
-                if (answer.trim() === '__ACTION:OPEN_FILE_PICKER__') {
+                if (normalizedAnswer.includes('__ACTION:OPEN_FILE_PICKER__')) {
                     const fileInput = document.getElementById('file-input');
                     if (fileInput) fileInput.click();
                     return;
                 }
 
                 // Intercept recent files action and render a numbered list in the chat pane.
-                if (answer.trim() === '__ACTION:SHOW_RECENT_FILES__') {
+                if (normalizedAnswer.includes('__ACTION:SHOW_RECENT_FILES__')) {
                     try {
                         const recentFiles = await fetchRecentFilesForAction(5);
                         if (!recentFiles.length) {
@@ -5161,43 +5316,7 @@ async function init() {
                         }
 
                         setPendingRecentFileChoices(recentFiles);
-
-                        const listHtml = recentFiles
-                            .map((file, idx) => {
-                                const uploadedLabel = file.uploadedAt
-                                    ? new Date(file.uploadedAt).toLocaleString()
-                                    : 'Unknown time';
-                                return `
-                                    <li style="margin-bottom:8px; display:flex; justify-content:space-between; gap:10px; align-items:center;">
-                                        <span><strong>${idx + 1}.</strong> ${escapeHtml(file.fileName)}<br><small style="color:#7f8c8d;">${escapeHtml(uploadedLabel)}</small></span>
-                                        <button type="button" data-action-open-index="${idx}" style="padding:4px 10px; border:none; border-radius:4px; background:#0b63a6; color:#fff; cursor:pointer;">Open</button>
-                                    </li>
-                                `;
-                            })
-                            .join('');
-
-                        const hint = `<p style="margin: 8px 0 0; color:#2f3a3f;">Say a number (for example <strong>2</strong> or <strong>open file 2</strong>) or click Open below.</p>`;
-
-                        responseContent.innerHTML = `
-                            <div style="padding: 15px; white-space: normal;">
-                                <div style="font-weight: 600; margin-bottom: 10px;">Recent files</div>
-                                <ol style="margin:0; padding-left:20px;">${listHtml}</ol>
-                                ${hint}
-                            </div>
-                        `;
-
-                        responseContent.querySelectorAll('button[data-action-open-index]').forEach(btn => {
-                            btn.addEventListener('click', async () => {
-                                const idx = Number.parseInt(btn.getAttribute('data-action-open-index') || '-1', 10);
-                                if (Number.isFinite(idx) && idx >= 0 && idx < recentFiles.length) {
-                                    const selected = recentFiles[idx];
-                                    const opened = await openFileFromAction(selected.id, selected.fileName, responseContent);
-                                    if (opened) {
-                                        clearPendingRecentFileChoices();
-                                    }
-                                }
-                            });
-                        });
+                        renderRecentFilesAction(responseContent, recentFiles);
                     } catch (error) {
                         clearPendingRecentFileChoices();
                         responseContent.innerHTML = '<div style="padding: 15px; white-space: pre-wrap; color:#e74c3c;">Could not load recent files right now.</div>';
@@ -5206,18 +5325,17 @@ async function init() {
                 }
 
                 // Intercept select document action — navigate to Files tab and open preview
-                if (answer.trim().startsWith('__ACTION:SELECT_DOCUMENT:')) {
-                    const parts = answer.trim().split(':');
-                    // format: __ACTION:SELECT_DOCUMENT:<id>:<filename>
-                    const fileId = parts[2];
-                    const fileName = parts.slice(3).join(':'); // handle colons in filenames
+                const selectDocumentMatch = normalizedAnswer.match(/__ACTION:SELECT_DOCUMENT:([0-9a-fA-F-]{36}):([\s\S]*)$/i);
+                if (selectDocumentMatch) {
+                    const fileId = selectDocumentMatch[1];
+                    const fileName = selectDocumentMatch[2].trim().replace(/^['"]+|['"]+$/g, '');
                     await openFileFromAction(fileId, fileName, responseContent);
                     clearPendingRecentFileChoices();
                     return;
                 }
 
                 // Intercept PDF page navigation actions
-                if (answer.trim() === '__ACTION:NEXT_PDF_PAGE__') {
+                if (normalizedAnswer.includes('__ACTION:NEXT_PDF_PAGE__')) {
                     responseContent.innerHTML = '<div style="padding: 15px; white-space: pre-wrap;">Next page</div>';
                     // Send message to PDF viewer iframe/embed to go to next page
                     if (window.pdfViewer && window.pdfViewer.pdfDocument) {
@@ -5230,7 +5348,7 @@ async function init() {
                     return;
                 }
 
-                if (answer.trim() === '__ACTION:PREVIOUS_PDF_PAGE__') {
+                if (normalizedAnswer.includes('__ACTION:PREVIOUS_PDF_PAGE__')) {
                     responseContent.innerHTML = '<div style="padding: 15px; white-space: pre-wrap;">Previous page</div>';
                     // Send message to PDF viewer iframe/embed to go to previous page
                     if (window.pdfViewer && window.pdfViewer.pdfDocument) {
