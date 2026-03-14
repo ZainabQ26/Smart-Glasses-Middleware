@@ -4758,6 +4758,17 @@ async function init() {
                             loadFiles(true).catch(error => {
                                 console.warn('Failed to refresh files after presigned upload completion', error);
                             });
+                        } else if (usedPresignedUpload && managedFileId && registrationDeferred) {
+                            pendingFile.pending = false;
+                            pendingFile.statusText = 'Upload accepted. Finishing server registration in background...';
+                            pendingFile._availabilityMonitorStarted = false;
+                            syncPromptSelectedFilesState();
+                            showMessage(`File "${file.name}" upload was accepted. Server registration is finishing in background.`, 'info');
+                            setTimeout(() => {
+                                loadFiles(true).catch(error => {
+                                    console.warn('Failed to refresh files after deferred presigned registration', error);
+                                });
+                            }, 12000);
                         } else {
                             pendingFile.statusText = usedPresignedUpload
                                 ? 'Upload completed. Confirming server registration...'
@@ -4800,7 +4811,7 @@ async function init() {
                             syncPromptSelectedFilesState();
                             showMessage(`Upload confirmation was interrupted for "${file.name}". Checking server state automatically...`, 'info');
 
-                            monitorPromptFileAvailability(pendingFile, 240000, 2500).catch(monitorError => {
+                            monitorPromptFileAvailability(pendingFile, 300000, 15000).catch(monitorError => {
                                 console.warn('Prompt upload timeout recovery failed', monitorError);
                             });
 

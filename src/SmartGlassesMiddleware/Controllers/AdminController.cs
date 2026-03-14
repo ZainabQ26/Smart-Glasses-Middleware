@@ -27,7 +27,6 @@ public class AdminController : ControllerBase
     private readonly IServiceScopeFactory _scopeFactory;
     private static readonly TimeSpan InitEndpointTimeout = TimeSpan.FromSeconds(8);
     private static readonly SemaphoreSlim UploadProcessingSemaphore = new(2, 2);
-    private static readonly TimeSpan PresignedQuickPersistTimeout = TimeSpan.FromSeconds(4);
     private static readonly TimeSpan PresignedBackgroundPersistTimeout = TimeSpan.FromSeconds(12);
     private static readonly ConcurrentDictionary<Guid, DateTime> PresignedCompletionsInFlight = new();
     private const long MaxAdminUploadBytes = 100L * 1024 * 1024; // 100 MB
@@ -220,7 +219,7 @@ public class AdminController : ControllerBase
     /// Creates a DB placeholder and starts RAG processing in the background.
     /// </summary>
     [HttpPost("files/complete")]
-    public async Task<IActionResult> CompletePresignedUpload([FromBody] CompleteUploadRequest request)
+    public IActionResult CompletePresignedUpload([FromBody] CompleteUploadRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.Key) || request.Key.Contains("..") || request.Key.StartsWith('/'))
             return BadRequest(new { error = "Invalid key" });
@@ -234,6 +233,13 @@ public class AdminController : ControllerBase
         var contentType = string.IsNullOrWhiteSpace(request.ContentType) ? "application/octet-stream" : request.ContentType;
 
         // Idempotency guard: retries for the same client-generated fileId should not spawn duplicate work.
+        // Evict stale in-flight entries to avoid rare stuck-key scenarios after worker interruptions.
+        if (PresignedCompletionsInFlight.TryGetValue(inFlightKey, out var startedAt)
+            && (DateTime.UtcNow - startedAt) > TimeSpan.FromMinutes(10))
+        {
+            PresignedCompletionsInFlight.TryRemove(inFlightKey, out _);
+        }
+
         if (!PresignedCompletionsInFlight.TryAdd(inFlightKey, DateTime.UtcNow))
         {
             return Accepted(new
@@ -243,77 +249,6 @@ public class AdminController : ControllerBase
                 status = "processing",
                 registration = "in-progress"
             });
-        }
-
-        var registration = "deferred";
-        var status = "processing";
-
-        try
-        {
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted);
-            timeoutCts.CancelAfter(PresignedQuickPersistTimeout);
-            var ct = timeoutCts.Token;
-
-            // Keep request path bounded: attempt a quick write, then defer if DB is slow.
-            var managedFile = request.FileId.HasValue
-                ? await _context.ManagedFiles.FirstOrDefaultAsync(f => f.Id == fileId, ct)
-                : null;
-
-            if (managedFile == null && !request.FileId.HasValue)
-            {
-                managedFile = await _context.ManagedFiles.FirstOrDefaultAsync(f => f.StorageKey == request.Key, ct);
-                if (managedFile != null)
-                {
-                    fileId = managedFile.Id;
-                    registration = "existing";
-                }
-            }
-
-            if (managedFile == null)
-            {
-                managedFile = new ManagedFile
-                {
-                    Id = fileId,
-                    FileName = request.FileName,
-                    Label = label,
-                    ContentType = contentType,
-                    StorageKey = request.Key,
-                    UploadedAt = DateTime.UtcNow,
-                    FileSize = request.FileSize
-                };
-                _context.ManagedFiles.Add(managedFile);
-                registration = "saved";
-            }
-            else
-            {
-                managedFile.FileName = request.FileName;
-                managedFile.Label = label;
-                managedFile.ContentType = contentType;
-                managedFile.StorageKey = request.Key;
-                managedFile.FileSize = request.FileSize;
-                _context.ManagedFiles.Update(managedFile);
-                if (!string.Equals(registration, "existing", StringComparison.OrdinalIgnoreCase))
-                {
-                    registration = "saved";
-                }
-            }
-
-            await _context.SaveChangesAsync(ct);
-            status = "registered";
-        }
-        catch (OperationCanceledException) when (!HttpContext.RequestAborted.IsCancellationRequested)
-        {
-            _logger.LogWarning("Timed out persisting presigned upload metadata for {FileId}; deferring persistence to background worker", fileId);
-            try { _context.ChangeTracker.Clear(); } catch { /* best-effort */ }
-            registration = "deferred";
-            status = "processing";
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to persist presigned upload metadata for {FileId}; deferring persistence to background worker", fileId);
-            try { _context.ChangeTracker.Clear(); } catch { /* best-effort */ }
-            registration = "deferred";
-            status = "processing";
         }
 
         _ = Task.Run(async () =>
@@ -336,8 +271,8 @@ public class AdminController : ControllerBase
         {
             id = fileId,
             requestId,
-            status,
-            registration
+            status = "processing",
+            registration = "queued"
         });
     }
 
