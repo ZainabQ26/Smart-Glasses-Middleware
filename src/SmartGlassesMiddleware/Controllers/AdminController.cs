@@ -239,7 +239,9 @@ public class AdminController : ControllerBase
             var totalCount = await visibleFilesQuery.CountAsync(ct);
             var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
 
-            var files = await visibleFilesQuery
+            // Fetch files without the Groups navigation property to avoid a correlated
+            // subquery (N+1) that issues one extra SQL round-trip per file row.
+            var fileList = await visibleFilesQuery
                 .OrderByDescending(f => f.UploadedAt)
                 .Skip((page - 1) * pageSize)
                 .Take(pageSize)
@@ -251,13 +253,45 @@ public class AdminController : ControllerBase
                     f.ContentType,
                     f.StorageKey,
                     f.UploadedAt,
-                    f.FileSize,
-                    Groups = f.FileGroups
-                        .Where(fg => fg.ResourceGroup != null)
-                        .Select(fg => new { fg.ResourceGroup.Id, fg.ResourceGroup.Name })
-                        .ToList()
+                    f.FileSize
                 })
                 .ToListAsync(ct);
+
+            // Bulk-fetch groups for the returned file IDs in a single query.
+            var fileIds = fileList.Select(f => f.Id).ToList();
+            var groupRowsForFiles = fileIds.Count == 0
+                ? new List<(Guid FileId, Guid GroupId, string GroupName)>()
+                : await _context.Set<ManagedFileGroup>()
+                    .AsNoTracking()
+                    .Where(fg => fileIds.Contains(fg.ManagedFileId))
+                    .Select(fg => new
+                    {
+                        fg.ManagedFileId,
+                        fg.ResourceGroup.Id,
+                        fg.ResourceGroup.Name
+                    })
+                    .ToListAsync(ct)
+                    .ContinueWith(t => t.Result
+                        .Select(x => (FileId: x.ManagedFileId, GroupId: x.Id, GroupName: x.Name))
+                        .ToList(), TaskContinuationOptions.ExecuteSynchronously);
+
+            var groupsByFileId = groupRowsForFiles
+                .GroupBy(r => r.FileId)
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            var files = fileList.Select(f => new
+            {
+                f.Id,
+                f.FileName,
+                f.Label,
+                f.ContentType,
+                f.StorageKey,
+                f.UploadedAt,
+                f.FileSize,
+                Groups = groupsByFileId.TryGetValue(f.Id, out var grps)
+                    ? grps.Select(g => new { Id = g.GroupId, Name = g.GroupName }).ToList<object>()
+                    : new List<object>()
+            }).ToList();
 
             var result = new
             {
