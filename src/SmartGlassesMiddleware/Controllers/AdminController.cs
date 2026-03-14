@@ -2119,6 +2119,7 @@ public class AdminController : ControllerBase
             Data = Array.Empty<object>(),
             Degraded = true,
             Error = "temporary_unavailable",
+            RetryAfterSeconds = 30,
             Pagination = new
             {
                 CurrentPage = page,

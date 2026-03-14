@@ -112,7 +112,11 @@ async function fetchWithRetry(url, options = {}, retries = 1) {
                 if (response.ok && method === 'GET') {
                     const clone = response.clone();
                     clone.json().then(data => {
-                        apiCache.set(cacheKey, data);
+                        // Never cache degraded fallback payloads; they represent
+                        // temporary backend pressure and would otherwise create stale loops.
+                        if (!isDegradedPagedResult(data)) {
+                            apiCache.set(cacheKey, data);
+                        }
                     }).catch(() => {
                         // Ignore cache errors
                     });
@@ -792,7 +796,8 @@ async function loadFiles(reset = false) {
     showLoading('files-list');
     
     try {
-        const response = await fetchWithRetry(`${API_BASE}/files?page=${state.files.page}&pageSize=${state.files.pageSize}`);
+        const cacheBust = reset ? `&cb=${Date.now()}` : '';
+        const response = await fetchWithRetry(`${API_BASE}/files?page=${state.files.page}&pageSize=${state.files.pageSize}${cacheBust}`);
         
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -816,18 +821,24 @@ async function loadFiles(reset = false) {
                 list.innerHTML = '<div class="empty-state"><p>Server is busy. File list will refresh automatically.</p></div>';
             }
 
+            filesDegradedRetryCount += 1;
+            const retryAfterSeconds = Number(result.retryAfterSeconds || result.RetryAfterSeconds || 0);
+            const retryDelayMs = getDegradedRetryDelayMs(filesDegradedRetryCount, retryAfterSeconds);
+
             if (!filesDegradedRefreshTimer) {
                 filesDegradedRefreshTimer = setTimeout(() => {
                     filesDegradedRefreshTimer = null;
                     loadFiles(true).catch(err => {
                         console.warn('Automatic files refresh after degraded response failed', err);
                     });
-                }, 10000);
+                }, retryDelayMs);
             }
 
             state.files.loading = false;
             return;
         }
+
+        filesDegradedRetryCount = 0;
         
         if (filesData && filesData.length > 0) {
             state.files.data.push(...filesData);
@@ -1200,6 +1211,8 @@ const PRESIGNED_COMPLETE_TIMEOUT_MS = 70000;
 let lastUploadPollingOutageNoticeAt = 0;
 let filesDegradedRefreshTimer = null;
 let groupsDegradedRefreshTimer = null;
+let filesDegradedRetryCount = 0;
+let groupsDegradedRetryCount = 0;
 
 function delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -1230,6 +1243,12 @@ function getRetryDelayMs(baseIntervalMs, consecutiveFailures, maxDelayMs = 20000
     const backoff = Math.min(maxDelayMs, Math.round(safeBase * Math.pow(1.6, cappedFailures)));
     const jitter = Math.floor(Math.random() * Math.max(250, Math.round(backoff * 0.2)));
     return backoff + jitter;
+}
+
+function getDegradedRetryDelayMs(retryCount, retryAfterSeconds = 0) {
+    const retryBaseMs = Math.max(20000, Number(retryAfterSeconds || 0) * 1000);
+    const autoBackoffMs = getRetryDelayMs(20000, retryCount, 120000);
+    return Math.max(retryBaseMs, autoBackoffMs);
 }
 
 function isDegradedPagedResult(result) {
@@ -1429,6 +1448,14 @@ async function waitForManagedFileReady(id, timeoutMs = 120000, intervalMs = 1500
                     consecutiveTransientFailures++;
                     notifyUploadPollingOutage();
                     await delay(getRetryDelayMs(intervalMs, consecutiveTransientFailures, 30000));
+                    continue;
+                }
+
+                if (pending) {
+                    hadTransientFailures = true;
+                    consecutiveTransientFailures++;
+                    const pendingDelayMs = getRetryDelayMs(Math.max(intervalMs, 6000), consecutiveTransientFailures, 45000);
+                    await delay(pendingDelayMs);
                     continue;
                 }
             } else if (isTransientGatewayStatus(response.status)) {
@@ -2975,18 +3002,24 @@ async function loadGroups(reset = false) {
                 list.innerHTML = '<div class="empty-state"><p>Server is busy. Group list will refresh automatically.</p></div>';
             }
 
+            groupsDegradedRetryCount += 1;
+            const retryAfterSeconds = Number(result.retryAfterSeconds || result.RetryAfterSeconds || 0);
+            const retryDelayMs = getDegradedRetryDelayMs(groupsDegradedRetryCount, retryAfterSeconds);
+
             if (!groupsDegradedRefreshTimer) {
                 groupsDegradedRefreshTimer = setTimeout(() => {
                     groupsDegradedRefreshTimer = null;
                     loadGroups(true).catch(err => {
                         console.warn('Automatic groups refresh after degraded response failed', err);
                     });
-                }, 10000);
+                }, retryDelayMs);
             }
 
             state.groups.loading = false;
             return;
         }
+
+        groupsDegradedRetryCount = 0;
         
         if (groupsData && groupsData.length > 0) {
             state.groups.data.push(...groupsData);
