@@ -4897,26 +4897,19 @@ async function init() {
                         pendingFile.isManagedFile = true;
                         pendingFile.uploadProgress = 100;
 
-                        if (usedPresignedUpload && managedFileId && !registrationDeferred) {
-                            pendingFile.pending = false;
-                            pendingFile.statusText = 'Indexing in background...';
+                        if (usedPresignedUpload && managedFileId) {
+                            // Keep the file pending until the backend confirms it is ready.
+                            pendingFile.pending = true;
+                            pendingFile.statusText = registrationDeferred
+                                ? 'Upload accepted. Finalizing server registration...'
+                                : 'Upload completed. Confirming server readiness...';
                             pendingFile._availabilityMonitorStarted = false;
                             syncPromptSelectedFilesState();
-                            showMessage(`File "${file.name}" uploaded successfully. Indexing continues in the background.`, 'info');
-                            loadFiles(true).catch(error => {
-                                console.warn('Failed to refresh files after presigned upload completion', error);
+                            showMessage(`File "${file.name}" uploaded. Waiting for server confirmation...`, 'info');
+
+                            monitorPromptFileAvailability(pendingFile).catch(error => {
+                                console.warn('Prompt file availability monitor failed', error);
                             });
-                        } else if (usedPresignedUpload && managedFileId && registrationDeferred) {
-                            pendingFile.pending = false;
-                            pendingFile.statusText = 'Upload accepted. Finishing server registration in background...';
-                            pendingFile._availabilityMonitorStarted = false;
-                            syncPromptSelectedFilesState();
-                            showMessage(`File "${file.name}" upload was accepted. Server registration is finishing in background.`, 'info');
-                            setTimeout(() => {
-                                loadFiles(true).catch(error => {
-                                    console.warn('Failed to refresh files after deferred presigned registration', error);
-                                });
-                            }, 12000);
                         } else {
                             pendingFile.statusText = usedPresignedUpload
                                 ? 'Upload completed. Confirming server registration...'
