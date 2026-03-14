@@ -1410,7 +1410,6 @@ async function waitForManagedFileReady(id, timeoutMs = 120000, intervalMs = 1500
             const cacheBuster = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
             response = await fetchWithTimeout(`${API_BASE}/files/${id}/status?v=${cacheBuster}`, {}, requestTimeoutMs);
             if (response.ok) {
-                consecutiveTransientFailures = 0;
                 const fileMeta = await response.json().catch(() => null);
                 if (!fileMeta) {
                     hadTransientFailures = true;
@@ -1447,7 +1446,7 @@ async function waitForManagedFileReady(id, timeoutMs = 120000, intervalMs = 1500
                     hadTransientFailures = true;
                     consecutiveTransientFailures++;
                     notifyUploadPollingOutage();
-                    await delay(getRetryDelayMs(intervalMs, consecutiveTransientFailures, 30000));
+                    await delay(getRetryDelayMs(Math.max(intervalMs, 6000), consecutiveTransientFailures, 30000));
                     continue;
                 }
 
