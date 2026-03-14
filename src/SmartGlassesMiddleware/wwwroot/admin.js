@@ -510,7 +510,16 @@ function applyTaskHubUploadStatus(request) {
     }
 
     const requestType = String(getProp(request, 'requestType') || '').trim().toLowerCase();
-    if (requestType && requestType !== 'fileupload' && requestType !== 'documentupload') {
+    const isUploadType = requestType === 'fileupload' || requestType === 'documentupload';
+    const hasExactRequestMatch = !!(requestId && promptSelectedFiles.some(fileObj => {
+        if (!fileObj || !fileObj.pending) {
+            return false;
+        }
+        const fileRequestId = String(fileObj.requestId || '').trim();
+        return fileRequestId && fileRequestId === requestId;
+    }));
+
+    if (!isUploadType && !hasExactRequestMatch) {
         return;
     }
 
