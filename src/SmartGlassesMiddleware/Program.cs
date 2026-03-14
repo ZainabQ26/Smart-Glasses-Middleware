@@ -90,6 +90,9 @@ static async Task EnsureAdminListPerformanceIndexesAsync(IServiceProvider servic
     // These indexes target the exact predicates used by admin files/groups list endpoints.
     var sqlStatements = new[]
     {
+        // Partial index covering the exact filter used by GetFiles (visible files only).
+        // Dramatically speeds up both the COUNT(*) and the paginated SELECT.
+        "CREATE INDEX IF NOT EXISTS \"IX_ManagedFiles_Visible_UploadedAt\" ON \"ManagedFiles\" (\"UploadedAt\" DESC) WHERE \"FileSize\" > 0 AND \"StorageKey\" IS NOT NULL AND \"StorageKey\" != '' AND \"StorageKey\" NOT LIKE 'FAILED:%' AND \"StorageKey\" NOT LIKE 'PENDING:%'",
         "CREATE INDEX IF NOT EXISTS \"IX_ManagedFiles_UploadedAt\" ON \"ManagedFiles\" (\"UploadedAt\" DESC)",
         "CREATE INDEX IF NOT EXISTS \"IX_ResourceGroups_CreatedAt\" ON \"ResourceGroups\" (\"CreatedAt\" DESC)",
         "CREATE INDEX IF NOT EXISTS \"IX_ManagedFileGroups_ResourceGroupId\" ON \"ManagedFileGroups\" (\"ResourceGroupId\")",
