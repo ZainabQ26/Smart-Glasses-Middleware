@@ -5002,65 +5002,24 @@ async function init() {
                 if (activeConversationId) {
                     payload.ConversationId = activeConversationId;
                 }
-                // Ensure any locally attached files are uploaded to the server first
+                // Never upload files during Send. Attachments must already be registered by the
+                // auto-upload flow so sending a prompt cannot trigger a second heavy upload request.
                 if (promptSelectedFiles && promptSelectedFiles.length > 0) {
-                    for (let i = 0; i < promptSelectedFiles.length; i++) {
-                        const f = promptSelectedFiles[i];
+                    const unresolvedFiles = promptSelectedFiles.filter(f => {
                         const hasManagedRegistration = !!(f.isManagedFile && (f.managedFileId || f.id));
-                        const hasDocumentRegistration = !!(f.documentId || (!f.isManagedFile && f.id));
-                        if (hasManagedRegistration || hasDocumentRegistration || !f.file) {
-                            continue;
-                        }
+                        const hasDocumentRegistration = !!(!f.isManagedFile && (f.documentId || f.id));
+                        return !hasManagedRegistration && !hasDocumentRegistration;
+                    });
 
-                        if (!f.documentId && f.file) {
-                            try {
-                                const fd = new FormData();
-                                fd.append('file', f.file);
-                                fd.append('label', f.name || f.file?.name || 'Attachment');
-
-                                // Use admin files endpoint to keep prompt uploads responsive.
-                                const uploadUrlFallback = '/api/admin/files';
-                                const upRes = await fetch(uploadUrlFallback, { method: 'POST', body: fd });
-                                if (upRes.ok) {
-                                    const fdJson = await upRes.json().catch(() => null);
-                                    const newId = fdJson?.id || fdJson?.Id;
-                                    if (newId) {
-                                        f.id = newId;
-                                        f.managedFileId = newId;
-                                        f.isManagedFile = true;
-                                        console.log('[SEND PROMPT] Uploaded attached file to managed files', f.name, '=>', newId);
-                                    }
-                                } else {
-                                    const shouldTryDocumentFallback = upRes.status === 504 || upRes.status >= 500;
-                                    if (shouldTryDocumentFallback) {
-                                        try {
-                                            const docRes = await fetch('/api/documents/upload', { method: 'POST', body: fd });
-                                            if (docRes.ok || docRes.status === 202) {
-                                                const docJson = await docRes.json().catch(() => null);
-                                                const docId = docJson?.id || docJson?.Id;
-                                                if (docId) {
-                                                    f.id = docId;
-                                                    f.documentId = docId;
-                                                    f.isManagedFile = false;
-                                                    console.log('[SEND PROMPT] Uploaded attached file to documents fallback', f.name, '=>', docId);
-                                                    continue;
-                                                }
-                                            }
-                                        } catch (fallbackUploadErr) {
-                                            console.warn('[SEND PROMPT] Document upload fallback failed:', fallbackUploadErr);
-                                        }
-                                    }
-
-                                    console.warn('[SEND PROMPT] Failed to upload attached file:', f.name);
-                                }
-                            } catch (upErr) {
-                                console.warn('[SEND PROMPT] Error uploading attached file:', upErr);
-                            }
-                        }
+                    if (unresolvedFiles.length > 0) {
+                        const unresolvedPlural = unresolvedFiles.length === 1 ? 'is' : 'are';
+                        const unresolvedLabel = unresolvedFiles.length === 1
+                            ? (unresolvedFiles[0].name || unresolvedFiles[0].file?.name || 'Attached file')
+                            : `${unresolvedFiles.length} attached files`;
+                        responseContent.innerHTML = `<div style="padding: 15px; white-space: pre-wrap; color:#e67e22;">${escapeHtml(unresolvedLabel)} ${unresolvedPlural} still being registered. Wait a moment, then send again.</div>`;
+                        showMessage('Waiting for file registration before sending prompt', 'info');
+                        return;
                     }
-                    // sync window global
-                    window.promptSelectedFiles = promptSelectedFiles;
-                    updatePromptFilesList();
                 }
 
                 // Recompute selected files and documentIds after any uploads
