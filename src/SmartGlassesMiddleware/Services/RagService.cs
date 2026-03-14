@@ -97,7 +97,7 @@ public class RAGService : IRAGService
             if (!taskDispatcherQ.KnownTasks.Contains(directTaskNameQ))
             {
                 // Step 2: AI classify on raw input
-                directTaskNameQ = await _aiService.ClassifyOnlyAsync(query, cts.Token);
+                directTaskNameQ = await _aiService.ClassifyOnlyAsync(query, cts.Token).WaitAsync(cts.Token);
             }
 
             if (directTaskNameQ != "unknown" && !string.IsNullOrEmpty(directTaskNameQ))
@@ -140,7 +140,7 @@ Answer:";
                 try
                 {
                     // Use AI service to answer the question
-                    var (_, aiResponse, wasAdvanced) = await _aiService.ProcessRequestAsync(noContextPrompt, cts.Token);
+                    var (_, aiResponse, wasAdvanced) = await _aiService.ProcessRequestAsync(noContextPrompt, cts.Token).WaitAsync(cts.Token);
                     
                     return new QueryResult
                     {
@@ -231,7 +231,7 @@ Answer:";
             else
             {
                 try { if (!string.IsNullOrEmpty(monitoringRequestId)) { _monitoringService?.UpdateRequestStatus(monitoringRequestId, "AI", "Processing with local model", 70); } } catch {}
-                var (_, aiResponse, wasAdvanced) = await _aiService.ProcessRequestAsync(promptTemplate, cts.Token);
+                var (_, aiResponse, wasAdvanced) = await _aiService.ProcessRequestAsync(promptTemplate, cts.Token).WaitAsync(cts.Token);
                 try { if (!string.IsNullOrEmpty(monitoringRequestId)) { _monitoringService?.UpdateRequestStatus(monitoringRequestId, "AI", "AI response received", 95); } } catch {}
                 response = aiResponse ?? "I couldn't generate a response.";
                 usedAdvancedModel = wasAdvanced;
