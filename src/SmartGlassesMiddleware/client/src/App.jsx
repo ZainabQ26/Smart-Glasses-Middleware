@@ -347,7 +347,12 @@ export default function App() {
     } finally {
       if (keepMicActive) {
         // Stay in listening state so the user can say a file number directly.
+        // Reset speech-recognition state so the next utterance is processed.
         activatedRef.current = true;
+        webSpeechHandledRef.current = false;
+        whisperFallbackNeededRef.current = false;
+        webSpeechSubmitBlockedRef.current = false;
+        lowConfidenceTranscriptRef.current = null;
         setStatus("listening");
         if (listeningTimeoutRef.current) clearTimeout(listeningTimeoutRef.current);
         listeningTimeoutRef.current = setTimeout(() => {
@@ -447,7 +452,6 @@ export default function App() {
         : `🗣️ Web Speech: "${latestText}"`, "voice");
       setTranscript(latestText);
       setAiResponse(null);
-      setPendingAction(null);
       setStatus("sending");
       sendToAIRef.current?.(latestText);
     };
@@ -497,7 +501,6 @@ export default function App() {
           addLog(`🗣️ Whisper: "${cleaned}"`, "voice");
           setTranscript(cleaned);
           setAiResponse(null);
-          setPendingAction(null);
           setStatus("sending");
           sendToAIRef.current?.(cleaned);
           webSpeechSubmitBlockedRef.current = false;
@@ -511,7 +514,6 @@ export default function App() {
             addLog(`🗣️ Web Speech fallback: "${fallbackText}"`, "voice");
             setTranscript(fallbackText);
             setAiResponse(null);
-            setPendingAction(null);
             setStatus("sending");
             sendToAIRef.current?.(fallbackText);
             webSpeechSubmitBlockedRef.current = false;
@@ -534,7 +536,6 @@ export default function App() {
           addLog(`🗣️ Web Speech fallback: "${fallbackText}"`, "voice");
           setTranscript(fallbackText);
           setAiResponse(null);
-          setPendingAction(null);
           setStatus("sending");
           sendToAIRef.current?.(fallbackText);
           webSpeechSubmitBlockedRef.current = false;
@@ -556,7 +557,6 @@ export default function App() {
         addLog(`🗣️ Web Speech fallback: "${fallbackText}"`, "voice");
         setTranscript(fallbackText);
         setAiResponse(null);
-        setPendingAction(null);
         setStatus("sending");
         sendToAIRef.current?.(fallbackText);
         webSpeechSubmitBlockedRef.current = false;
