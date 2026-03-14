@@ -27,7 +27,8 @@ public class AdminController : ControllerBase
     private readonly IServiceScopeFactory _scopeFactory;
     private static readonly TimeSpan InitEndpointTimeout = TimeSpan.FromSeconds(8);
     private static readonly SemaphoreSlim UploadProcessingSemaphore = new(2, 2);
-    private static readonly TimeSpan PresignedBackgroundPersistTimeout = TimeSpan.FromSeconds(12);
+    private static readonly TimeSpan PresignedBackgroundPersistTimeout = TimeSpan.FromSeconds(45);
+    private static readonly TimeSpan PresignedInitialPersistTimeout = TimeSpan.FromSeconds(6);
     private static readonly ConcurrentDictionary<Guid, DateTime> PresignedCompletionsInFlight = new();
     private const long MaxAdminUploadBytes = 100L * 1024 * 1024; // 100 MB
     private const int DefaultPageSize = 20;
@@ -219,8 +220,11 @@ public class AdminController : ControllerBase
     /// Creates a DB placeholder and starts RAG processing in the background.
     /// </summary>
     [HttpPost("files/complete")]
-    public IActionResult CompletePresignedUpload([FromBody] CompleteUploadRequest request)
+    public async Task<IActionResult> CompletePresignedUpload([FromBody] CompleteUploadRequest request)
     {
+        if (request == null)
+            return BadRequest(new { error = "Request body is required" });
+
         if (string.IsNullOrWhiteSpace(request.Key) || request.Key.Contains("..") || request.Key.StartsWith('/'))
             return BadRequest(new { error = "Invalid key" });
         if (string.IsNullOrWhiteSpace(request.FileName))
@@ -231,6 +235,24 @@ public class AdminController : ControllerBase
         var inFlightKey = fileId;
         var label = string.IsNullOrWhiteSpace(request.Label) ? request.FileName : request.Label;
         var contentType = string.IsNullOrWhiteSpace(request.ContentType) ? "application/octet-stream" : request.ContentType;
+        var safeFileSize = Math.Max(0, request.FileSize);
+
+        // Persist an immediate placeholder so /status can observe this upload before the
+        // background worker starts processing.
+        try
+        {
+            using var initPersistCts = CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted);
+            initPersistCts.CancelAfter(PresignedInitialPersistTimeout);
+            await EnsurePresignedPlaceholderAsync(fileId, request.FileName, contentType, label, safeFileSize, initPersistCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning("Timed out creating presigned placeholder for {FileId}; background processing will continue", fileId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Unable to persist presigned placeholder for {FileId}; background processing will continue", fileId);
+        }
 
         // Idempotency guard: retries for the same client-generated fileId should not spawn duplicate work.
         // Evict stale in-flight entries to avoid rare stuck-key scenarios after worker interruptions.
@@ -255,7 +277,7 @@ public class AdminController : ControllerBase
         {
             try
             {
-                await ProcessPresignedUploadAsync(fileId, request.Key, request.FileName, contentType, label, request.FileSize, requestId);
+                await ProcessPresignedUploadAsync(fileId, request.Key, request.FileName, contentType, label, safeFileSize, requestId);
             }
             finally
             {
@@ -274,6 +296,52 @@ public class AdminController : ControllerBase
             status = "processing",
             registration = "queued"
         });
+    }
+
+    private async Task EnsurePresignedPlaceholderAsync(
+        Guid fileId,
+        string fileName,
+        string contentType,
+        string label,
+        long fileSize,
+        CancellationToken ct)
+    {
+        var managedFile = await _context.ManagedFiles.FirstOrDefaultAsync(f => f.Id == fileId, ct);
+        if (managedFile == null)
+        {
+            _context.ManagedFiles.Add(new ManagedFile
+            {
+                Id = fileId,
+                FileName = fileName,
+                Label = label,
+                ContentType = contentType,
+                StorageKey = "PENDING: presigned upload registered",
+                UploadedAt = DateTime.UtcNow,
+                FileSize = fileSize
+            });
+
+            await _context.SaveChangesAsync(ct);
+            return;
+        }
+
+        var changed = false;
+        if (!string.Equals(managedFile.FileName, fileName, StringComparison.Ordinal)) { managedFile.FileName = fileName; changed = true; }
+        if (!string.Equals(managedFile.Label, label, StringComparison.Ordinal)) { managedFile.Label = label; changed = true; }
+        if (!string.Equals(managedFile.ContentType, contentType, StringComparison.Ordinal)) { managedFile.ContentType = contentType; changed = true; }
+        if (managedFile.FileSize != fileSize) { managedFile.FileSize = fileSize; changed = true; }
+        if (string.IsNullOrWhiteSpace(managedFile.StorageKey)
+            || managedFile.StorageKey.StartsWith("FAILED:", StringComparison.OrdinalIgnoreCase)
+            || managedFile.StorageKey.StartsWith("PENDING:", StringComparison.OrdinalIgnoreCase))
+        {
+            managedFile.StorageKey = "PENDING: presigned upload registered";
+            changed = true;
+        }
+
+        if (changed)
+        {
+            _context.ManagedFiles.Update(managedFile);
+            await _context.SaveChangesAsync(ct);
+        }
     }
 
     private async Task ProcessPresignedUploadAsync(
