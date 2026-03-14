@@ -19,7 +19,12 @@ export default function App() {
   const [aiResponse, setAiResponse] = useState(null);
   const [usedAdvancedModel, setUsedAdvancedModel] = useState(false);
   const [speechMode, setSpeechMode] = useState("auto"); // auto | webspeech-only | whisper-only
-  const [pendingAction, setPendingAction] = useState(null); // { type: "SHOW_RECENT_FILES", files } | { type: "SELECT_DOCUMENT", id, name } | null
+  const [pendingAction, _setPendingActionState] = useState(null); // { type: "SHOW_RECENT_FILES", files } | { type: "SELECT_DOCUMENT", id, name } | null
+  // Wrapper keeps the ref in sync so async callbacks always read the current value.
+  const setPendingAction = useCallback((val) => {
+    pendingActionRef.current = typeof val === "function" ? val(pendingActionRef.current) : val;
+    _setPendingActionState(val);
+  }, []);
   const [logOpen, setLogOpen]     = useState(false);
 
   const activatedRef        = useRef(false);
@@ -32,6 +37,9 @@ export default function App() {
   const webSpeechHandledRef      = useRef(false);
   const lowConfidenceTranscriptRef = useRef(null);
   const webSpeechSubmitBlockedRef = useRef(false); // block Web Speech submits while Whisper fallback is active
+  // Tracks the latest pendingAction value without closure-staleness issues.
+  // Updated synchronously inside the setPendingAction wrapper defined above.
+  const pendingActionRef = useRef(null);
 
   const WEB_SPEECH_CONFIDENCE_THRESHOLD = 0.72;
   const isWebSpeechOnly = speechMode === "webspeech-only";
@@ -41,6 +49,9 @@ export default function App() {
   const DOCUMENTS_TIMEOUT_MS = 10_000;
   const RESTART_BACKOFF_BASE_MS = 1000;
   const RESTART_BACKOFF_MAX_MS = 30_000;
+  // How long to keep the mic listening after showing the file list so the user
+  // can say a number without repeating the "activate" wake-word.
+  const FILE_SELECTION_TIMEOUT_MS = 60_000;
 
   const normalizeCommandText = useCallback((value) => {
     const raw = (value ?? "").trim();
@@ -237,6 +248,10 @@ export default function App() {
 
   // ── Send transcript to AI ─────────────────────────────────────────────────
   const sendToAI = useCallback(async (text) => {
+    // When keepMicActive is true the finally block keeps the mic in listening
+    // state instead of resetting to idle. Used after showing the file list so
+    // the user can say a number without repeating "activate".
+    let keepMicActive = false;
     try {
       const commandText = normalizeCommandText(text);
       if (!commandText) {
@@ -244,6 +259,30 @@ export default function App() {
         setPendingAction(null);
         setAiResponse("I didn't catch that command. Please try again.");
         return;
+      }
+
+      // ── Shortcut: numeric file selection when the recent-files list is shown ─
+      const capturedPending = pendingActionRef.current;
+      if (capturedPending?.type === "SHOW_RECENT_FILES") {
+        const num = parseFileSelectionNumber(commandText);
+        if (num !== null) {
+          const files = capturedPending.files ?? [];
+          if (num >= 1 && num <= files.length) {
+            addLog(`📂 Opening file ${num}: "${files[num - 1].name}"`, "voice");
+            setTranscript(commandText);
+            setPendingAction(null);
+            openDocumentPreview(files[num - 1]);
+            return; // mic will reset via finally (keepMicActive = false)
+          } else {
+            // Number out of range — keep the list visible and stay listening.
+            addLog(`⚠️ File number ${num} is not in the list (1–${files.length}).`, "warn");
+            setTranscript(commandText);
+            setAiResponse(`There are only ${files.length} files. Say a number between 1 and ${files.length}.`);
+            setPendingAction(capturedPending); // restore list
+            keepMicActive = true;
+            return;
+          }
+        }
       }
 
       // Preview whether the backend will delegate this request to the advanced model
@@ -281,6 +320,8 @@ export default function App() {
         addLog("📂 Command: show recent uploaded files", "voice");
         setAiResponse(null);
         await fetchRecentDocuments();
+        // Keep mic active so the user can immediately say a number.
+        keepMicActive = true;
       } else if (answer.startsWith("__ACTION:SELECT_DOCUMENT:")) {
         const parts = answer.split(":");
         const docId   = parts[2];
@@ -304,9 +345,23 @@ export default function App() {
         ? "The request timed out. Please try again."
         : "I couldn't process that command right now. Please try again.");
     } finally {
-      resumeListeningRef.current();
+      if (keepMicActive) {
+        // Stay in listening state so the user can say a file number directly.
+        activatedRef.current = true;
+        setStatus("listening");
+        if (listeningTimeoutRef.current) clearTimeout(listeningTimeoutRef.current);
+        listeningTimeoutRef.current = setTimeout(() => {
+          if (activatedRef.current) {
+            addLog("⏱️ File selection timed out — resetting.", "warn");
+            setPendingAction(null);
+            resumeListeningRef.current();
+          }
+        }, FILE_SELECTION_TIMEOUT_MS);
+      } else {
+        resumeListeningRef.current();
+      }
     }
-  }, [addLog, fetchRecentDocuments, fetchJsonWithTimeout, normalizeCommandText]);
+  }, [addLog, fetchRecentDocuments, fetchJsonWithTimeout, normalizeCommandText, openDocumentPreview, setPendingAction]);
 
   sendToAIRef.current = sendToAI;
   useEffect(() => { sendToAIRef.current = sendToAI; }, [sendToAI]);
@@ -612,7 +667,7 @@ export default function App() {
             {pendingAction?.type === "SHOW_RECENT_FILES" && (
               <div style={styles.actionCard}>
                 <p style={styles.actionCardTitle}>📂 Recent Uploaded Files</p>
-                <p style={styles.actionCardHint}>Pick one of the last 5 uploaded files to open.</p>
+                <p style={styles.actionCardHint}>Say a number (1–{pendingAction.files.length}) or tap a file to open it.</p>
                 <div style={styles.actionList}>
                   {pendingAction.files.map((file, index) => (
                     <button
@@ -684,6 +739,31 @@ function formatActionTime(value) {
   if (Number.isNaN(parsed.getTime())) return "";
 
   return parsed.toLocaleString();
+}
+
+// Parses a voice/typed command into a 1-based file-list index.
+// Handles bare digits ("2"), "file 2", "number 3", "second", "open the third", etc.
+// Returns a number 1–9 when a numeric intent is detected; the caller is
+// responsible for bounds-checking against the actual file-list length.
+function parseFileSelectionNumber(text) {
+  if (!text) return null;
+  const s = text.trim().toLowerCase();
+
+  // Word ordinals / cardinals (covers the typical 1–5 list size)
+  const words = { one: 1, first: 1, two: 2, second: 2, three: 3, third: 3, four: 4, fourth: 4, five: 5, fifth: 5 };
+  for (const [word, num] of Object.entries(words)) {
+    if (new RegExp(`\\b${word}\\b`).test(s)) return num;
+  }
+
+  // Patterns like "file 2", "number 3", "open 4", "#5", "pick 1", "select 2"
+  const prefixMatch = s.match(/(?:file|number|open|pick|select|item)\s*#?\s*([1-9])\b/);
+  if (prefixMatch) return parseInt(prefixMatch[1], 10);
+
+  // Bare single digit (possibly surrounded by whitespace or punctuation)
+  const bareMatch = s.match(/^\s*([1-9])\s*$/);
+  if (bareMatch) return parseInt(bareMatch[1], 10);
+
+  return null;
 }
 
 function logBg(type) {
