@@ -5006,6 +5006,12 @@ async function init() {
                 if (promptSelectedFiles && promptSelectedFiles.length > 0) {
                     for (let i = 0; i < promptSelectedFiles.length; i++) {
                         const f = promptSelectedFiles[i];
+                        const hasManagedRegistration = !!(f.isManagedFile && (f.managedFileId || f.id));
+                        const hasDocumentRegistration = !!(f.documentId || (!f.isManagedFile && f.id));
+                        if (hasManagedRegistration || hasDocumentRegistration || !f.file) {
+                            continue;
+                        }
+
                         if (!f.documentId && f.file) {
                             try {
                                 const fd = new FormData();
