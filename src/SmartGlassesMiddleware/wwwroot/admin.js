@@ -1,6 +1,9 @@
 const API_BASE = '/api/admin';
 const ADMIN_DEBUG = !!window.__ADMIN_DEBUG__;
 const themeStorageKey = 'uiTheme';
+const MAX_UPLOAD_STATUS_TRANSIENTS_BEFORE_DEFER = 5;
+const MIN_UPLOAD_STATUS_DEFER_RETRY_MS = 60000;
+const MAX_UPLOAD_STATUS_DEFER_RETRY_MS = 300000;
 
 // In-memory cache for API responses (no browser storage)
 const apiCache = {
@@ -1402,6 +1405,7 @@ async function waitForManagedFileReady(id, timeoutMs = 120000, intervalMs = 1500
     let consecutiveTransientFailures = 0;
     let hadTransientFailures = false;
     const requestTimeoutMs = Math.max(5000, intervalMs * 4);
+    const getDeferredRetryMs = () => getRetryDelayMs(Math.max(intervalMs, 15000), consecutiveTransientFailures, 90000);
 
     while (Date.now() - start < timeoutMs) {
         let response = null;
@@ -1414,6 +1418,9 @@ async function waitForManagedFileReady(id, timeoutMs = 120000, intervalMs = 1500
                 if (!fileMeta) {
                     hadTransientFailures = true;
                     consecutiveTransientFailures++;
+                    if (consecutiveTransientFailures >= MAX_UPLOAD_STATUS_TRANSIENTS_BEFORE_DEFER) {
+                        return { deferred: true, retryAfterMs: getDeferredRetryMs() };
+                    }
                     await delay(getRetryDelayMs(intervalMs, consecutiveTransientFailures));
                     continue;
                 }
@@ -1446,6 +1453,9 @@ async function waitForManagedFileReady(id, timeoutMs = 120000, intervalMs = 1500
                     hadTransientFailures = true;
                     consecutiveTransientFailures++;
                     notifyUploadPollingOutage();
+                    if (consecutiveTransientFailures >= MAX_UPLOAD_STATUS_TRANSIENTS_BEFORE_DEFER) {
+                        return { deferred: true, retryAfterMs: getDeferredRetryMs() };
+                    }
                     await delay(getRetryDelayMs(Math.max(intervalMs, 6000), consecutiveTransientFailures, 30000));
                     continue;
                 }
@@ -1453,6 +1463,9 @@ async function waitForManagedFileReady(id, timeoutMs = 120000, intervalMs = 1500
                 if (pending) {
                     hadTransientFailures = true;
                     consecutiveTransientFailures++;
+                    if (consecutiveTransientFailures >= MAX_UPLOAD_STATUS_TRANSIENTS_BEFORE_DEFER) {
+                        return { deferred: true, retryAfterMs: getDeferredRetryMs() };
+                    }
                     const pendingDelayMs = getRetryDelayMs(Math.max(intervalMs, 6000), consecutiveTransientFailures, 45000);
                     await delay(pendingDelayMs);
                     continue;
@@ -1461,11 +1474,17 @@ async function waitForManagedFileReady(id, timeoutMs = 120000, intervalMs = 1500
                 hadTransientFailures = true;
                 consecutiveTransientFailures++;
                 notifyUploadPollingOutage();
+                if (consecutiveTransientFailures >= MAX_UPLOAD_STATUS_TRANSIENTS_BEFORE_DEFER) {
+                    return { deferred: true, retryAfterMs: getDeferredRetryMs() };
+                }
                 await delay(getRetryDelayMs(intervalMs, consecutiveTransientFailures));
                 continue;
             } else if (response.status === 404) {
                 hadTransientFailures = true;
                 consecutiveTransientFailures++;
+                if (consecutiveTransientFailures >= MAX_UPLOAD_STATUS_TRANSIENTS_BEFORE_DEFER) {
+                    return { deferred: true, retryAfterMs: getDeferredRetryMs() };
+                }
                 await delay(getRetryDelayMs(intervalMs, consecutiveTransientFailures, 25000));
                 continue;
             } else {
@@ -1477,6 +1496,9 @@ async function waitForManagedFileReady(id, timeoutMs = 120000, intervalMs = 1500
             }
             hadTransientFailures = true;
             consecutiveTransientFailures++;
+            if (consecutiveTransientFailures >= MAX_UPLOAD_STATUS_TRANSIENTS_BEFORE_DEFER) {
+                return { deferred: true, retryAfterMs: getDeferredRetryMs() };
+            }
             await delay(getRetryDelayMs(intervalMs, consecutiveTransientFailures));
             continue;
         }
@@ -1652,9 +1674,47 @@ async function monitorPromptFileAvailability(fileObj, timeoutMs = 300000, interv
         }
 
         if (ready?.failed) {
+            fileObj._pollDeferredCount = 0;
+            fileObj._pollDeferredNotified = false;
             promptSelectedFiles = promptSelectedFiles.filter(f => f !== fileObj);
             syncPromptSelectedFilesState();
             showMessage(ready.error || 'File upload failed on the server.', 'error');
+            return;
+        }
+
+        if (ready?.deferred) {
+            const deferredCount = Number(fileObj._pollDeferredCount || 0) + 1;
+            fileObj._pollDeferredCount = deferredCount;
+
+            const requestedDelayMs = Math.max(0, Number(ready.retryAfterMs) || 0);
+            const autoDelayMs = getRetryDelayMs(
+                Math.max(intervalMs, MIN_UPLOAD_STATUS_DEFER_RETRY_MS),
+                deferredCount,
+                MAX_UPLOAD_STATUS_DEFER_RETRY_MS
+            );
+            const resumeDelayMs = Math.max(MIN_UPLOAD_STATUS_DEFER_RETRY_MS, requestedDelayMs, autoDelayMs);
+
+            fileObj.statusText = 'Processing in background. Live updates will finish this upload.';
+            fileObj.uploadProgress = 100;
+            fileObj._availabilityMonitorStarted = false;
+            syncPromptSelectedFilesState();
+
+            if (!fileObj._pollDeferredNotified) {
+                fileObj._pollDeferredNotified = true;
+                showMessage('Upload is still processing. Switched to background checks while waiting for live updates.', 'info');
+            }
+
+            setTimeout(() => {
+                if (!promptSelectedFiles.includes(fileObj)) {
+                    return;
+                }
+
+                if (fileObj.pending && !fileObj._availabilityMonitorStarted) {
+                    monitorPromptFileAvailability(fileObj, timeoutMs, intervalMs).catch(retryError => {
+                        console.warn('Prompt file availability monitor retry failed', retryError);
+                    });
+                }
+            }, resumeDelayMs);
             return;
         }
 
@@ -1681,6 +1741,8 @@ async function monitorPromptFileAvailability(fileObj, timeoutMs = 300000, interv
 
         if (ready) {
             fileObj.pending = false;
+            fileObj._pollDeferredCount = 0;
+            fileObj._pollDeferredNotified = false;
             fileObj.statusText = '';
             fileObj.uploadProgress = 100;
             fileObj.documentId = ready.documentId || fileObj.documentId;

@@ -26,13 +26,26 @@ public class AdminController : ControllerBase
     private readonly IHubContext<ResourceHub>? _resourceHub;
     private readonly IServiceScopeFactory _scopeFactory;
     private static readonly TimeSpan InitEndpointTimeout = TimeSpan.FromSeconds(8);
-    private static readonly SemaphoreSlim UploadProcessingSemaphore = new(2, 2);
+    private static readonly int UploadProcessingConcurrency = ResolveUploadProcessingConcurrency();
+    private static readonly SemaphoreSlim UploadProcessingSemaphore = new(UploadProcessingConcurrency, UploadProcessingConcurrency);
     private static readonly TimeSpan PresignedBackgroundPersistTimeout = TimeSpan.FromSeconds(45);
     private static readonly TimeSpan PresignedInitialPersistTimeout = TimeSpan.FromSeconds(6);
     private static readonly ConcurrentDictionary<Guid, DateTime> PresignedCompletionsInFlight = new();
     private const long MaxAdminUploadBytes = 100L * 1024 * 1024; // 100 MB
     private const int DefaultPageSize = 20;
     private const int MaxPageSize = 100;
+
+    private static int ResolveUploadProcessingConcurrency()
+    {
+        var raw = Environment.GetEnvironmentVariable("ADMIN_UPLOAD_PROCESSING_CONCURRENCY");
+        if (int.TryParse(raw, out var parsed))
+        {
+            return Math.Clamp(parsed, 1, 8);
+        }
+
+        // Safer default under load: process one admin upload at a time unless explicitly tuned.
+        return 1;
+    }
 
     public AdminController(
         ApplicationDbContext context,
