@@ -1759,12 +1759,13 @@
             document.body.appendChild(dompurifyScript);
         }
 
-        ensureShowMessageFallback();
-
         // Load shared toasts first (global showMessage)
         const toastsScript = document.createElement('script');
         toastsScript.src = `toasts.js?v=${timestamp}`;
         toastsScript.onload = () => {
+            if (typeof window.showMessage !== 'function') {
+                ensureShowMessageFallback();
+            }
             loadDomPurifyThenMarked();
         };
         toastsScript.onerror = () => {

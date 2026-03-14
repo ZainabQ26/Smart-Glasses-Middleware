@@ -2117,6 +2117,8 @@ public class AdminController : ControllerBase
         return new
         {
             Data = Array.Empty<object>(),
+            Degraded = true,
+            Error = "temporary_unavailable",
             Pagination = new
             {
                 CurrentPage = page,
