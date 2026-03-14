@@ -31,9 +31,20 @@ public class AdminController : ControllerBase
     private static readonly TimeSpan PresignedBackgroundPersistTimeout = TimeSpan.FromSeconds(45);
     private static readonly TimeSpan PresignedInitialPersistTimeout = TimeSpan.FromSeconds(6);
     private static readonly ConcurrentDictionary<Guid, DateTime> PresignedCompletionsInFlight = new();
+    private static readonly ConcurrentDictionary<Guid, PresignedStatusSnapshot> PresignedStatusSnapshots = new();
+    private static readonly TimeSpan PresignedStatusSnapshotTtl = TimeSpan.FromMinutes(30);
     private const long MaxAdminUploadBytes = 100L * 1024 * 1024; // 100 MB
     private const int DefaultPageSize = 20;
     private const int MaxPageSize = 100;
+
+    private sealed class PresignedStatusSnapshot
+    {
+        public string State { get; set; } = "queued";
+        public string? FileName { get; set; }
+        public long? FileSize { get; set; }
+        public string? Error { get; set; }
+        public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
+    }
 
     private static int ResolveUploadProcessingConcurrency()
     {
@@ -45,6 +56,78 @@ public class AdminController : ControllerBase
 
         // Safer default under load: process one admin upload at a time unless explicitly tuned.
         return 1;
+    }
+
+    private static void SetPresignedStatus(Guid fileId, string state, string? fileName = null, long? fileSize = null, string? error = null)
+    {
+        PresignedStatusSnapshots.AddOrUpdate(
+            fileId,
+            _ => new PresignedStatusSnapshot
+            {
+                State = state,
+                FileName = fileName,
+                FileSize = fileSize,
+                Error = string.IsNullOrWhiteSpace(error) ? null : error,
+                UpdatedAtUtc = DateTime.UtcNow
+            },
+            (_, existing) =>
+            {
+                existing.State = state;
+                if (!string.IsNullOrWhiteSpace(fileName))
+                {
+                    existing.FileName = fileName;
+                }
+
+                if (fileSize.HasValue)
+                {
+                    existing.FileSize = fileSize;
+                }
+
+                existing.Error = string.IsNullOrWhiteSpace(error) ? existing.Error : error;
+                existing.UpdatedAtUtc = DateTime.UtcNow;
+                return existing;
+            });
+    }
+
+    private static bool TryGetRecentPresignedStatus(Guid fileId, out PresignedStatusSnapshot snapshot)
+    {
+        if (PresignedStatusSnapshots.TryGetValue(fileId, out var existing))
+        {
+            if ((DateTime.UtcNow - existing.UpdatedAtUtc) <= PresignedStatusSnapshotTtl)
+            {
+                snapshot = existing;
+                return true;
+            }
+
+            PresignedStatusSnapshots.TryRemove(fileId, out _);
+        }
+
+        snapshot = null!;
+        return false;
+    }
+
+    private static object BuildPresignedStatusFallbackResponse(Guid id, PresignedStatusSnapshot snapshot)
+    {
+        var normalized = string.IsNullOrWhiteSpace(snapshot.State)
+            ? "processing"
+            : snapshot.State.Trim().ToLowerInvariant();
+
+        var isReady = normalized is "ready" or "completed";
+        var isFailed = normalized is "failed" or "error";
+        var isPending = !isReady && !isFailed;
+
+        return new
+        {
+            id,
+            fileName = snapshot.FileName,
+            fileSize = snapshot.FileSize,
+            hasStorageKey = isReady,
+            isReady,
+            pending = isPending,
+            failed = isFailed,
+            error = isFailed ? (snapshot.Error ?? "Upload failed while processing in background") : null,
+            source = "presigned-status-snapshot"
+        };
     }
 
     public AdminController(
@@ -249,6 +332,7 @@ public class AdminController : ControllerBase
         var label = string.IsNullOrWhiteSpace(request.Label) ? request.FileName : request.Label;
         var contentType = string.IsNullOrWhiteSpace(request.ContentType) ? "application/octet-stream" : request.ContentType;
         var safeFileSize = Math.Max(0, request.FileSize);
+        SetPresignedStatus(fileId, "queued", request.FileName, safeFileSize);
 
         // Persist an immediate placeholder so /status can observe this upload before the
         // background worker starts processing.
@@ -277,6 +361,7 @@ public class AdminController : ControllerBase
 
         if (!PresignedCompletionsInFlight.TryAdd(inFlightKey, DateTime.UtcNow))
         {
+            SetPresignedStatus(fileId, "processing", request.FileName, safeFileSize);
             return Accepted(new
             {
                 id = fileId,
@@ -369,6 +454,7 @@ public class AdminController : ControllerBase
         await UploadProcessingSemaphore.WaitAsync();
         try
         {
+            SetPresignedStatus(fileId, "processing", fileName, fileSize);
             using var scope = _scopeFactory.CreateScope();
             var ragService = scope.ServiceProvider.GetRequiredService<IRagService>();
             var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
@@ -408,6 +494,8 @@ public class AdminController : ControllerBase
                 }
             }
 
+            SetPresignedStatus(fileId, "ready", fileName, fileSize);
+
             try { await InvalidateFilesCache(); } catch { /* best-effort */ }
             try { await NotifyFilesChangedAsync(); } catch { /* best-effort */ }
 
@@ -427,6 +515,7 @@ public class AdminController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "ProcessPresignedUploadAsync failed for {FileId}", fileId);
+            SetPresignedStatus(fileId, "failed", fileName, fileSize, ex.Message);
             try
             {
                 using var scope = _scopeFactory.CreateScope();
@@ -955,6 +1044,12 @@ public class AdminController : ControllerBase
                 var failed = !string.IsNullOrWhiteSpace(file.StorageKey) && file.StorageKey.StartsWith("FAILED:", StringComparison.OrdinalIgnoreCase);
                 var pending = !failed && !string.IsNullOrWhiteSpace(file.StorageKey) && file.StorageKey.StartsWith("PENDING:", StringComparison.OrdinalIgnoreCase);
                 var ready = !failed && !pending && !string.IsNullOrWhiteSpace(file.StorageKey) && file.FileSize > 0;
+
+                if (ready || failed)
+                {
+                    PresignedStatusSnapshots.TryRemove(file.Id, out _);
+                }
+
                 return Ok(new
                 {
                     id = file.Id,
@@ -1000,6 +1095,12 @@ public class AdminController : ControllerBase
         catch (OperationCanceledException) when (!HttpContext.RequestAborted.IsCancellationRequested)
         {
             _logger.LogWarning("Timed out retrieving file status for {FileId}", id);
+
+            if (TryGetRecentPresignedStatus(id, out var snapshot))
+            {
+                return Ok(BuildPresignedStatusFallbackResponse(id, snapshot));
+            }
+
             return Ok(new
             {
                 id,
@@ -1007,6 +1108,24 @@ public class AdminController : ControllerBase
                 pending = true,
                 failed = false,
                 error = "Status check timed out while the server is busy"
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed retrieving file status for {FileId}", id);
+
+            if (TryGetRecentPresignedStatus(id, out var snapshot))
+            {
+                return Ok(BuildPresignedStatusFallbackResponse(id, snapshot));
+            }
+
+            return Ok(new
+            {
+                id,
+                isReady = false,
+                pending = true,
+                failed = false,
+                error = "Status check failed while the server is busy"
             });
         }
     }
