@@ -98,10 +98,16 @@ async function fetchWithRetry(url, options = {}, retries = 1) {
     
     const fetchOptions = {
         ...options,
-        headers: {
-            ...options.headers,
-            'Content-Type': options.headers?.['Content-Type'] || 'application/json'
-        }
+        // Do not override Content-Type when the body is FormData; the browser sets the
+        // correct multipart/form-data boundary automatically when the header is absent.
+        ...(options.body instanceof FormData
+            ? {}
+            : {
+                headers: {
+                    ...options.headers,
+                    'Content-Type': options.headers?.['Content-Type'] || 'application/json'
+                }
+            })
     };
     
     // Create the fetch promise
@@ -1364,24 +1370,92 @@ if (mainFileInput) {
         // Auto-generate label from filename
         formData.append('label', file.name || 'Untitled');
 
-        try {
-            const response = await fetch(`${API_BASE}/files`, {
-                method: 'POST',
-                body: formData
-            });
+        // Retry on transient server errors (500 / 502 / 503) up to 3 attempts.
+        const MAX_UPLOAD_ATTEMPTS = 3;
+        let lastError = null;
+        let uploadedFileId = null;
 
-            if (response.ok) {
-                showMessage('File uploaded successfully', 'success');
-                mainFileInput.value = '';
-                await loadFiles(true);
-                await loadAllGroups(true);
-            } else {
-                let msg = 'Error uploading file';
-                try { const error = await response.json(); msg = error.detail || msg; } catch (e){}
-                showMessage(msg, 'error');
+        showMessage('Uploading file…', 'info');
+
+        for (let attempt = 1; attempt <= MAX_UPLOAD_ATTEMPTS; attempt++) {
+            try {
+                if (attempt > 1) {
+                    const backoffMs = attempt * 1500;
+                    showMessage(`Upload attempt ${attempt} of ${MAX_UPLOAD_ATTEMPTS}…`, 'info');
+                    await new Promise(r => setTimeout(r, backoffMs));
+                }
+
+                const response = await fetch(`${API_BASE}/files`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (response.ok || response.status === 202) {
+                    const data = await response.json().catch(() => ({}));
+                    uploadedFileId = data.id || data.Id || null;
+                    lastError = null;
+                    break; // success
+                }
+
+                const status = response.status;
+                // Retry on transient errors; bail immediately on client errors (4xx).
+                if (status >= 400 && status < 500) {
+                    let msg = 'Error uploading file';
+                    try { const err = await response.json(); msg = err.detail || err.title || msg; } catch (_) {}
+                    showMessage(msg, 'error');
+                    mainFileInput.value = '';
+                    return;
+                }
+
+                lastError = `Server error ${status}`;
+            } catch (err) {
+                lastError = err.message || 'Network error';
             }
-        } catch (err) {
-            showMessage('Error uploading file: ' + err.message, 'error');
+        }
+
+        if (lastError) {
+            showMessage(`Error uploading file: ${lastError}`, 'error');
+            mainFileInput.value = '';
+            return;
+        }
+
+        mainFileInput.value = '';
+        showMessage('File uploaded — processing…', 'success');
+        await loadFiles(true);
+        await loadAllGroups(true);
+
+        // Poll for background processing completion (up to ~30 s).
+        if (uploadedFileId) {
+            const POLL_INTERVAL_MS = 2000;
+            const POLL_TIMEOUT_MS = 30000;
+            const pollStart = Date.now();
+            let ready = false;
+
+            while (Date.now() - pollStart < POLL_TIMEOUT_MS) {
+                await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+                try {
+                    const cacheBuster = `${Date.now()}`;
+                    const statusRes = await fetch(`${API_BASE}/files/${uploadedFileId}/status?v=${cacheBuster}`, {
+                        headers: { 'Cache-Control': 'no-cache' }
+                    });
+                    if (statusRes.ok) {
+                        const statusData = await statusRes.json().catch(() => null);
+                        if (statusData?.failed) {
+                            showMessage('File processing failed. The file may not be usable.', 'error');
+                            break;
+                        }
+                        if (statusData?.isReady && !statusData?.pending) {
+                            ready = true;
+                            break;
+                        }
+                    }
+                } catch (_) { /* keep polling */ }
+            }
+
+            if (ready) {
+                showMessage('File ready.', 'success');
+                await loadFiles(true);
+            }
         }
     });
 }
@@ -1603,14 +1677,23 @@ function notifyUploadPollingOutage() {
 }
 
 async function waitForPreviewReady(id, timeoutMs = 15000, intervalMs = 1000) {
+    // Use the lightweight /status endpoint (DB-only check) rather than /info which
+    // downloads the first bytes from object storage and fails when storage is slow.
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
         try {
             const cacheBuster = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
-            const infoUrl = `${API_BASE}/files/${id}/info?v=${cacheBuster}`;
-            const res = await fetch(infoUrl);
+            const res = await fetchWithTimeout(
+                `${API_BASE}/files/${id}/status?v=${cacheBuster}`,
+                { headers: { 'Cache-Control': 'no-cache' } },
+                5000
+            );
             if (res.ok) {
-                return true;
+                const data = await res.json().catch(() => null);
+                // isReady true and not pending/failed → file is ready for preview
+                if (data && data.isReady && !data.pending && !data.failed) return true;
+                // Processing has definitively failed; no point waiting further
+                if (data && data.failed) return false;
             }
         } catch (error) {
             // Keep polling until timeout.
@@ -2418,12 +2501,12 @@ async function previewFile(id, fileName) {
             return;
         }
 
-        // PDF: render from fetched bytes to avoid flaky browser-tab preview behavior.
+        // PDF: render via an <iframe> for reliable cross-browser display.
         if (contentType.includes('pdf') || header === '%PDF') {
             const pdfBlobUrl = URL.createObjectURL(new Blob([buffer], { type: 'application/pdf' }));
             previewContent.dataset.blobUrl = pdfBlobUrl;
             previewContent.innerHTML = `<div style="padding:12px; text-align:center;">
-                <embed src="${pdfBlobUrl}" type="application/pdf" width="100%" height="540px" style="border:1px solid #ddd; border-radius:6px;" />
+                <iframe src="${pdfBlobUrl}" title="${escapeHtml(fileName)}" style="width:100%; height:560px; border:1px solid #ddd; border-radius:6px; background:#fff;"></iframe>
                 <div style="margin-top:10px; display:flex; justify-content:center; gap:12px; align-items:center; flex-wrap:wrap;">
                     <a href="${pdfBlobUrl}" target="_blank" rel="noopener" style="font-size:12px; color:#3498db;">Open in new tab ↗</a>
                     <a href="${API_BASE}/files/${id}/download" target="_blank" rel="noopener" style="font-size:12px; color:#3498db;">Download file</a>
@@ -2449,7 +2532,13 @@ async function previewFile(id, fileName) {
         // Unknown binary: show download link
         previewContent.innerHTML = '<p style="color: #e74c3c;">No preview available for this file type. Use download.</p>';
     } catch (error) {
-        previewContent.innerHTML = '<p style="color: #e74c3c;">Failed to load file preview.</p>';
+        previewContent.innerHTML = `<div style="padding: 12px; text-align: center;">
+            <p style="color: #e74c3c; margin-bottom: 10px;">Failed to load file preview. The file may still be processing or the server encountered an error.</p>
+            <div style="display:flex; justify-content:center; gap:12px; flex-wrap:wrap;">
+                <a href="${API_BASE}/files/${id}/download" target="_blank" rel="noopener" style="font-size:13px; color:#3498db;">Download file instead</a>
+                <button type="button" data-preview-id="${escapeHtml(String(id))}" data-preview-name="${escapeHtml(fileName || '')}" onclick="previewFile(this.dataset.previewId, this.dataset.previewName);" style="font-size:13px; padding:4px 10px; background:#0b63a6; color:white; border:none; border-radius:4px; cursor:pointer;">Retry</button>
+            </div>
+        </div>`;
     }
 }
 
@@ -4620,7 +4709,7 @@ async function previewReminderFile(fileId, fileName) {
             } else {
                 const blobUrl = URL.createObjectURL(new Blob([buffer], { type: 'application/pdf' }));
                 modalContent.dataset.blobUrl = blobUrl;
-                modalContent.innerHTML = `<embed src="${blobUrl}" type="application/pdf" width="100%" height="55vh" style="border-radius: 4px; min-height: 400px;">`;
+                modalContent.innerHTML = `<div style="text-align:center;"><iframe src="${blobUrl}" title="${escapeHtml(safeName || fileName || 'Document')}" style="width:100%; height:55vh; min-height:400px; border:none; border-radius:4px; background:#fff;"></iframe><div style="margin-top:8px;"><a href="${blobUrl}" target="_blank" rel="noopener" style="font-size:12px; color:#3498db;">Open in new tab ↗</a></div></div>`;
             }
         } catch (error) {
             modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load file.</p>';
@@ -4721,7 +4810,7 @@ async function previewDocumentFile(documentId, fileName) {
             } else {
                 const blobUrl = URL.createObjectURL(new Blob([buffer], { type: 'application/pdf' }));
                 modalContent.dataset.blobUrl = blobUrl;
-                modalContent.innerHTML = `<embed src="${blobUrl}" type="application/pdf" width="100%" height="55vh" style="border-radius: 4px; min-height: 400px;">`;
+                modalContent.innerHTML = `<div style="text-align:center;"><iframe src="${blobUrl}" title="${escapeHtml(safeName || fileName || 'Document')}" style="width:100%; height:55vh; min-height:400px; border:none; border-radius:4px; background:#fff;"></iframe><div style="margin-top:8px;"><a href="${blobUrl}" target="_blank" rel="noopener" style="font-size:12px; color:#3498db;">Open in new tab ↗</a></div></div>`;
             }
         } catch (error) {
             modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load file.</p>';
@@ -6180,7 +6269,7 @@ async function init() {
                     } else if (ext === 'pdf') {
                         const reader = new FileReader();
                         reader.onload = function(e) {
-                            groupPreviewContent.innerHTML = `<embed src="${e.target.result}" type="application/pdf" width="100%" height="200px" style="border-radius: 4px;">`;
+                            groupPreviewContent.innerHTML = `<iframe src="${e.target.result}" title="PDF preview" style="width:100%; height:200px; border:none; border-radius:4px; background:#fff;"></iframe>`;
                         };
                         reader.readAsDataURL(file);
                     } else if (ext === 'md') {
@@ -6302,7 +6391,7 @@ async function init() {
             } else if (ext === 'pdf') {
                 const reader = new FileReader();
                 reader.onload = function(e) {
-                    modalContent.innerHTML = `<embed src="${e.target.result}" type="application/pdf" width="100%" height="55vh" style="border-radius: 4px; min-height: 400px;">`;
+                    modalContent.innerHTML = `<div style="text-align:center;"><iframe src="${e.target.result}" title="${escapeHtml(file.name || 'Document')}" style="width:100%; height:55vh; min-height:400px; border:none; border-radius:4px; background:#fff;"></iframe><div style="margin-top:8px; font-size:12px; color:#95a5a6;">PDF preview</div></div>`;
                 };
                 reader.onerror = function() {
                     modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load PDF.</p>';
@@ -6446,7 +6535,7 @@ async function init() {
                         const reader = new FileReader();
                         reader.onload = function(e) {
                             if (currentPreviewToken !== reminderPreviewToken) return;
-                            reminderPreviewContent.innerHTML = `<embed src="${e.target.result}" type="application/pdf" width="100%" height="200px" style="border-radius: 4px;">`;
+                            reminderPreviewContent.innerHTML = `<iframe src="${e.target.result}" title="PDF preview" style="width:100%; height:200px; border:none; border-radius:4px; background:#fff;"></iframe>`;
                         };
                         reader.readAsDataURL(file);
                     } else if (ext === 'md') {
