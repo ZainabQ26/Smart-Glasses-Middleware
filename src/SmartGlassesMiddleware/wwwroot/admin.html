@@ -1704,28 +1704,73 @@
         })();
         // Force reload with timestamp
         const timestamp = new Date().getTime();
+        const SIGNALR_VERSION = '8.0.7';
+        let adminScriptLoaded = false;
+
+        function ensureShowMessageFallback() {
+            window.showMessage = window.showMessage || function(message, type) {
+                const level = String(type || '').toLowerCase() === 'error' ? 'error' : 'log';
+                try {
+                    console[level]('[toast-fallback]', message);
+                } catch (e) {
+                    // no-op
+                }
+            };
+        }
+
+        function appendAdminScript() {
+            if (adminScriptLoaded) return;
+            adminScriptLoaded = true;
+            const script = document.createElement('script');
+            script.src = `admin.js?v=${timestamp}`;
+            document.body.appendChild(script);
+        }
+
+        function loadSignalRThenAdmin() {
+            const signalRScript = document.createElement('script');
+            signalRScript.src = `https://cdn.jsdelivr.net/npm/@microsoft/signalr@${SIGNALR_VERSION}/dist/browser/signalr.min.js`;
+            signalRScript.onload = appendAdminScript;
+            signalRScript.onerror = () => {
+                console.warn('Failed to load SignalR from CDN; continuing without realtime updates until refresh.');
+                appendAdminScript();
+            };
+            document.body.appendChild(signalRScript);
+        }
+
+        function loadMarkedThenSignalR() {
+            const markedScript = document.createElement('script');
+            markedScript.src = 'https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js';
+            markedScript.onload = loadSignalRThenAdmin;
+            markedScript.onerror = () => {
+                console.warn('Failed to load marked; markdown rendering will use fallback mode.');
+                loadSignalRThenAdmin();
+            };
+            document.body.appendChild(markedScript);
+        }
+
+        function loadDomPurifyThenMarked() {
+            const dompurifyScript = document.createElement('script');
+            dompurifyScript.src = 'https://cdn.jsdelivr.net/npm/dompurify@3.0.9/dist/purify.min.js';
+            dompurifyScript.onload = loadMarkedThenSignalR;
+            dompurifyScript.onerror = () => {
+                console.warn('Failed to load DOMPurify; continuing with markdown fallback sanitization.');
+                loadMarkedThenSignalR();
+            };
+            document.body.appendChild(dompurifyScript);
+        }
+
+        ensureShowMessageFallback();
+
         // Load shared toasts first (global showMessage)
         const toastsScript = document.createElement('script');
         toastsScript.src = `toasts.js?v=${timestamp}`;
         toastsScript.onload = () => {
-            const dompurifyScript = document.createElement('script');
-            dompurifyScript.src = 'https://cdn.jsdelivr.net/npm/dompurify@3.0.9/dist/purify.min.js';
-            dompurifyScript.onload = () => {
-                const markedScript = document.createElement('script');
-                markedScript.src = 'https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js';
-                markedScript.onload = () => {
-                    const signalRScript = document.createElement('script');
-                    signalRScript.src = 'https://cdn.jsdelivr.net/npm/@microsoft/signalr@latest/dist/browser/signalr.min.js';
-                    signalRScript.onload = () => {
-                        const script = document.createElement('script');
-                        script.src = `admin.js?v=${timestamp}`;
-                        document.body.appendChild(script);
-                    };
-                    document.body.appendChild(signalRScript);
-                };
-                document.body.appendChild(markedScript);
-            };
-            document.body.appendChild(dompurifyScript);
+            loadDomPurifyThenMarked();
+        };
+        toastsScript.onerror = () => {
+            console.warn('Failed to load toasts.js; using console fallback notifications.');
+            ensureShowMessageFallback();
+            loadDomPurifyThenMarked();
         };
         document.body.appendChild(toastsScript);
     </script>
