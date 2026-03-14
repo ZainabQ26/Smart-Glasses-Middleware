@@ -111,6 +111,12 @@ async function fetchWithRetry(url, options = {}, retries = 1) {
                 const response = await fetch(bustUrl, fetchOptions);
                 console.log(`[API] Response: ${response.status} ${response.statusText} for ${url}`);
 
+                if (response.status === 503) {
+                    noteServiceOutage(`HTTP 503 from ${url}`);
+                } else if (response.ok) {
+                    clearServiceOutage(`HTTP ${response.status} from ${url}`);
+                }
+
                 // Clone response for caching
                 if (response.ok && method === 'GET') {
                     const clone = response.clone();
@@ -134,6 +140,9 @@ async function fetchWithRetry(url, options = {}, retries = 1) {
                 return response;
             } catch (error) {
                 console.error(`[API] Network error on attempt ${i + 1}:`, error);
+                if (isServiceUnavailableError(error)) {
+                    noteServiceOutage(`network failure for ${url}`);
+                }
                 if (i < retries - 1) {
                     await new Promise(resolve => setTimeout(resolve, (i + 1) * 1000));
                     continue;
@@ -232,8 +241,14 @@ const state = {
 var conversationHubConnection = null;
 var resourceHubConnection = null;
 var taskHubConnection = null;
-const HUB_RECONNECT_DELAYS_MS = [5000, 10000, 20000, 30000, 60000];
+const HUB_RECONNECT_DELAYS_MS = [10000, 20000, 40000, 80000, 120000];
+let conversationHubConnectInProgress = false;
+let resourceHubConnectInProgress = false;
 let taskHubConnectInProgress = false;
+let conversationHubReconnectTimer = null;
+let conversationHubReconnectAttempt = 0;
+let resourceHubReconnectTimer = null;
+let resourceHubReconnectAttempt = 0;
 let taskHubReconnectTimer = null;
 let taskHubReconnectAttempt = 0;
 
@@ -242,32 +257,137 @@ let taskHubReconnectAttempt = 0;
 let resourceHubConnected = true;
 let conversationHubConnected = true;
 
-async function initConversationHub() {
-    if (!window.signalR) {
-        console.warn('[SignalR] signalR client not loaded');
+function createHubReconnectDelaysMs() {
+    return HUB_RECONNECT_DELAYS_MS.map(ms => ms + Math.floor(Math.random() * 2000));
+}
+
+function getHubReconnectDelayMs(retryAttempt) {
+    const maxIdx = HUB_RECONNECT_DELAYS_MS.length - 1;
+    const delayIdx = Math.min(Math.max(0, Number(retryAttempt) || 0), maxIdx);
+    const baseDelayMs = HUB_RECONNECT_DELAYS_MS[delayIdx] || 10000;
+    const jitterMs = Math.floor(Math.random() * Math.max(1000, Math.round(baseDelayMs * 0.2)));
+    const outageCooldownMs = getServiceOutageCooldownMs();
+    return Math.max(baseDelayMs + jitterMs, outageCooldownMs);
+}
+
+function clearConversationHubReconnectTimer() {
+    if (conversationHubReconnectTimer) {
+        clearTimeout(conversationHubReconnectTimer);
+        conversationHubReconnectTimer = null;
+    }
+}
+
+function scheduleConversationHubReconnect(reason = '') {
+    if (conversationHubReconnectTimer) {
         return;
     }
 
-    try {
-        conversationHubConnection = new signalR.HubConnectionBuilder()
-            .withUrl('/hubs/conversations')
-            .withAutomaticReconnect(HUB_RECONNECT_DELAYS_MS)
-            .build();
+    const maxIdx = HUB_RECONNECT_DELAYS_MS.length - 1;
+    const delayMs = getHubReconnectDelayMs(conversationHubReconnectAttempt);
+    conversationHubReconnectAttempt = Math.min(conversationHubReconnectAttempt + 1, maxIdx);
 
-        conversationHubConnection.on('conversationUpdated', async (payload) => {
-            const convoId = payload?.conversationId || payload?.ConversationId;
-            if (convoId && activeConversationId && String(convoId) === String(activeConversationId)) {
-                await loadConversationIntoView(activeConversationId);
-            }
+    console.warn(`[SignalR] Scheduling ConversationHub reconnect in ${delayMs}ms${reason ? ` (${reason})` : ''}`);
+
+    conversationHubReconnectTimer = setTimeout(() => {
+        conversationHubReconnectTimer = null;
+        initConversationHub().catch((err) => {
+            console.warn('[SignalR] Conversation hub reconnect attempt failed:', err);
+            scheduleConversationHubReconnect('retry failed');
         });
+    }, delayMs);
+}
 
-        // Track reconnect events for the conversation hub and update banner state
-        conversationHubConnection.onreconnecting(() => setConversationHubState(false));
-        conversationHubConnection.onreconnected(() => setConversationHubState(true));
-        conversationHubConnection.onclose(() => setConversationHubState(false));
+function clearResourceHubReconnectTimer() {
+    if (resourceHubReconnectTimer) {
+        clearTimeout(resourceHubReconnectTimer);
+        resourceHubReconnectTimer = null;
+    }
+}
+
+function scheduleResourceHubReconnect(reason = '') {
+    if (resourceHubReconnectTimer) {
+        return;
+    }
+
+    const maxIdx = HUB_RECONNECT_DELAYS_MS.length - 1;
+    const delayMs = getHubReconnectDelayMs(resourceHubReconnectAttempt);
+    resourceHubReconnectAttempt = Math.min(resourceHubReconnectAttempt + 1, maxIdx);
+
+    console.warn(`[SignalR] Scheduling ResourceHub reconnect in ${delayMs}ms${reason ? ` (${reason})` : ''}`);
+
+    resourceHubReconnectTimer = setTimeout(() => {
+        resourceHubReconnectTimer = null;
+        initResourceHub().catch((err) => {
+            console.warn('[SignalR] Resource hub reconnect attempt failed:', err);
+            scheduleResourceHubReconnect('retry failed');
+        });
+    }, delayMs);
+}
+
+async function initConversationHub() {
+    if (!window.signalR) {
+        console.warn('[SignalR] signalR client not loaded');
+        scheduleConversationHubReconnect('signalR client not loaded');
+        return;
+    }
+
+    const outageCooldownMs = getServiceOutageCooldownMs();
+    if (outageCooldownMs > 0) {
+        scheduleConversationHubReconnect('service unavailable cooldown');
+        return;
+    }
+
+    const hubState = signalR.HubConnectionState;
+    if (conversationHubConnection && hubState && (
+        conversationHubConnection.state === hubState.Connected
+        || conversationHubConnection.state === hubState.Connecting
+        || conversationHubConnection.state === hubState.Reconnecting
+    )) {
+        return;
+    }
+
+    if (conversationHubConnectInProgress) {
+        return;
+    }
+
+    conversationHubConnectInProgress = true;
+
+    try {
+        if (!conversationHubConnection) {
+            conversationHubConnection = new signalR.HubConnectionBuilder()
+                .withUrl('/hubs/conversations')
+                .withAutomaticReconnect(createHubReconnectDelaysMs())
+                .build();
+
+            conversationHubConnection.on('conversationUpdated', async (payload) => {
+                const convoId = payload?.conversationId || payload?.ConversationId;
+                if (convoId && activeConversationId && String(convoId) === String(activeConversationId)) {
+                    await loadConversationIntoView(activeConversationId);
+                }
+            });
+
+            // Track reconnect events for the conversation hub and update banner state
+            conversationHubConnection.onreconnecting(() => setConversationHubState(false));
+            conversationHubConnection.onreconnected(() => {
+                setConversationHubState(true);
+                clearServiceOutage('conversation hub reconnected');
+                conversationHubReconnectAttempt = 0;
+                clearConversationHubReconnectTimer();
+            });
+            conversationHubConnection.onclose((err) => {
+                setConversationHubState(false);
+                if (isServiceUnavailableError(err)) {
+                    noteServiceOutage('conversation hub closed');
+                }
+                scheduleConversationHubReconnect('connection closed');
+            });
+        }
 
         await conversationHubConnection.start();
         setConversationHubState(true);
+        clearServiceOutage('conversation hub connected');
+        conversationHubReconnectAttempt = 0;
+        clearConversationHubReconnectTimer();
         console.log('[SignalR] Conversation hub connected');
 
         if (activeConversationId) {
@@ -275,7 +395,13 @@ async function initConversationHub() {
         }
     } catch (err) {
         console.warn('[SignalR] Failed to connect conversation hub:', err);
+        if (isServiceUnavailableError(err)) {
+            noteServiceOutage('conversation hub start failed');
+        }
         setConversationHubState(false);
+        scheduleConversationHubReconnect('start failed');
+    } finally {
+        conversationHubConnectInProgress = false;
     }
 }
 
@@ -327,8 +453,7 @@ function scheduleTaskHubReconnect(reason = '') {
     }
 
     const maxIdx = HUB_RECONNECT_DELAYS_MS.length - 1;
-    const delayIdx = Math.min(taskHubReconnectAttempt, maxIdx);
-    const delayMs = HUB_RECONNECT_DELAYS_MS[delayIdx] || 5000;
+    const delayMs = getHubReconnectDelayMs(taskHubReconnectAttempt);
     taskHubReconnectAttempt = Math.min(taskHubReconnectAttempt + 1, maxIdx);
 
     console.warn(`[SignalR] Scheduling TaskHub reconnect in ${delayMs}ms${reason ? ` (${reason})` : ''}`);
@@ -376,44 +501,88 @@ function setSignalRIndicatorState(connected) {
 async function initResourceHub() {
     if (!window.signalR) {
         console.warn('[SignalR] signalR client not loaded');
+        scheduleResourceHubReconnect('signalR client not loaded');
         return;
     }
 
+    const outageCooldownMs = getServiceOutageCooldownMs();
+    if (outageCooldownMs > 0) {
+        scheduleResourceHubReconnect('service unavailable cooldown');
+        return;
+    }
+
+    const hubState = signalR.HubConnectionState;
+    if (resourceHubConnection && hubState && (
+        resourceHubConnection.state === hubState.Connected
+        || resourceHubConnection.state === hubState.Connecting
+        || resourceHubConnection.state === hubState.Reconnecting
+    )) {
+        return;
+    }
+
+    if (resourceHubConnectInProgress) {
+        return;
+    }
+
+    resourceHubConnectInProgress = true;
+
     try {
-        resourceHubConnection = new signalR.HubConnectionBuilder()
-            .withUrl('/hubs/resources')
-            .withAutomaticReconnect(HUB_RECONNECT_DELAYS_MS)
-            .build();
+        if (!resourceHubConnection) {
+            resourceHubConnection = new signalR.HubConnectionBuilder()
+                .withUrl('/hubs/resources')
+                .withAutomaticReconnect(createHubReconnectDelaysMs())
+                .build();
 
-        resourceHubConnection.on('filesChanged', async () => {
-            apiCache.invalidate('files');
-            apiCache.invalidate('batch');
-            await loadFiles(true);
-        });
+            resourceHubConnection.on('filesChanged', async () => {
+                apiCache.invalidate('files');
+                apiCache.invalidate('batch');
+                await loadFiles(true);
+            });
 
-        resourceHubConnection.on('groupsChanged', async () => {
-            apiCache.invalidate('groups');
-            apiCache.invalidate('batch');
-            await loadGroups(true);
-            state.allGroups = [];
-        });
+            resourceHubConnection.on('groupsChanged', async () => {
+                apiCache.invalidate('groups');
+                apiCache.invalidate('batch');
+                await loadGroups(true);
+                state.allGroups = [];
+            });
 
-        resourceHubConnection.on('conversationsChanged', async () => {
-            apiCache.invalidate('prompts');
-            apiCache.invalidate('batch');
-            await loadPrompts(true);
-        });
+            resourceHubConnection.on('conversationsChanged', async () => {
+                apiCache.invalidate('prompts');
+                apiCache.invalidate('batch');
+                await loadPrompts(true);
+            });
 
-        resourceHubConnection.onreconnecting(() => setResourceHubState(false));
-        resourceHubConnection.onreconnected(() => setResourceHubState(true));
-        resourceHubConnection.onclose(() => setResourceHubState(false));
+            resourceHubConnection.onreconnecting(() => setResourceHubState(false));
+            resourceHubConnection.onreconnected(() => {
+                setResourceHubState(true);
+                clearServiceOutage('resource hub reconnected');
+                resourceHubReconnectAttempt = 0;
+                clearResourceHubReconnectTimer();
+            });
+            resourceHubConnection.onclose((err) => {
+                setResourceHubState(false);
+                if (isServiceUnavailableError(err)) {
+                    noteServiceOutage('resource hub closed');
+                }
+                scheduleResourceHubReconnect('connection closed');
+            });
+        }
 
         await resourceHubConnection.start();
         setResourceHubState(true);
+        clearServiceOutage('resource hub connected');
+        resourceHubReconnectAttempt = 0;
+        clearResourceHubReconnectTimer();
         console.log('[SignalR] Resource hub connected');
     } catch (err) {
         console.warn('[SignalR] Failed to connect resource hub:', err);
+        if (isServiceUnavailableError(err)) {
+            noteServiceOutage('resource hub start failed');
+        }
         setResourceHubState(false);
+        scheduleResourceHubReconnect('start failed');
+    } finally {
+        resourceHubConnectInProgress = false;
     }
 }
 
@@ -616,8 +785,18 @@ async function initTaskHub() {
         return;
     }
 
+    const outageCooldownMs = getServiceOutageCooldownMs();
+    if (outageCooldownMs > 0) {
+        scheduleTaskHubReconnect('service unavailable cooldown');
+        return;
+    }
+
     const hubState = signalR.HubConnectionState;
-    if (taskHubConnection && hubState && taskHubConnection.state === hubState.Connected) {
+    if (taskHubConnection && hubState && (
+        taskHubConnection.state === hubState.Connected
+        || taskHubConnection.state === hubState.Connecting
+        || taskHubConnection.state === hubState.Reconnecting
+    )) {
         return;
     }
 
@@ -631,7 +810,7 @@ async function initTaskHub() {
         if (!taskHubConnection) {
             taskHubConnection = new signalR.HubConnectionBuilder()
                 .withUrl('/hubs/tasks')
-                .withAutomaticReconnect(HUB_RECONNECT_DELAYS_MS)
+                .withAutomaticReconnect(createHubReconnectDelaysMs())
                 .build();
 
             // Handle request status updates
@@ -670,10 +849,14 @@ async function initTaskHub() {
             taskHubConnection.onreconnected(() => {
                 taskHubReconnectAttempt = 0;
                 clearTaskHubReconnectTimer();
+                clearServiceOutage('task hub reconnected');
                 console.log('[SignalR] Task hub reconnected');
             });
             taskHubConnection.onclose((err) => {
                 console.warn('[SignalR] Task hub closed:', err);
+                if (isServiceUnavailableError(err)) {
+                    noteServiceOutage('task hub closed');
+                }
                 scheduleTaskHubReconnect('connection closed');
             });
         }
@@ -681,9 +864,13 @@ async function initTaskHub() {
         await taskHubConnection.start();
         taskHubReconnectAttempt = 0;
         clearTaskHubReconnectTimer();
+        clearServiceOutage('task hub connected');
         console.log('[SignalR] Task hub connected');
     } catch (err) {
         console.warn('[SignalR] Failed to connect task hub:', err);
+        if (isServiceUnavailableError(err)) {
+            noteServiceOutage('task hub start failed');
+        }
         scheduleTaskHubReconnect('start failed');
     } finally {
         taskHubConnectInProgress = false;
@@ -801,8 +988,33 @@ async function loadFiles(reset = false) {
     try {
         const cacheBust = reset ? `&cb=${Date.now()}` : '';
         const response = await fetchWithRetry(`${API_BASE}/files?page=${state.files.page}&pageSize=${state.files.pageSize}${cacheBust}`);
+        const list = document.getElementById('files-list');
         
         if (!response.ok) {
+            if (isTransientGatewayStatus(response.status)) {
+                hideLoading('files-list');
+
+                if (reset && state.files.data.length === 0) {
+                    list.innerHTML = '<div class="empty-state"><p>Server is temporarily unavailable. File list will refresh automatically.</p></div>';
+                }
+
+                filesDegradedRetryCount += 1;
+                noteServiceOutage('files endpoint transient failure', 30);
+                const retryDelayMs = getDegradedRetryDelayMs(filesDegradedRetryCount, 30);
+
+                if (!filesDegradedRefreshTimer) {
+                    filesDegradedRefreshTimer = setTimeout(() => {
+                        filesDegradedRefreshTimer = null;
+                        loadFiles(true).catch(err => {
+                            console.warn('Automatic files refresh after transient failure failed', err);
+                        });
+                    }, retryDelayMs);
+                }
+
+                state.files.loading = false;
+                return;
+            }
+
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
         
@@ -814,8 +1026,6 @@ async function loadFiles(reset = false) {
         const pagination = result.pagination || result.Pagination || {};
         console.log('Files data length:', filesData.length);
         console.log('Files pagination:', pagination);
-        
-        const list = document.getElementById('files-list');
         
         hideLoading('files-list');
 
@@ -1212,6 +1422,9 @@ let currentPreviewFile = { id: null, fileName: null };
 const TRANSIENT_GATEWAY_STATUSES = new Set([502, 503, 504]);
 const PRESIGNED_COMPLETE_TIMEOUT_MS = 70000;
 let lastUploadPollingOutageNoticeAt = 0;
+let serviceOutageBackoffAttempt = 0;
+let serviceOutageUntilMs = 0;
+let lastServiceOutageNoticeAt = 0;
 let filesDegradedRefreshTimer = null;
 let groupsDegradedRefreshTimer = null;
 let filesDegradedRetryCount = 0;
@@ -1254,6 +1467,50 @@ function getDegradedRetryDelayMs(retryCount, retryAfterSeconds = 0) {
     return Math.max(retryBaseMs, autoBackoffMs);
 }
 
+function getServiceOutageCooldownMs() {
+    return Math.max(0, Number(serviceOutageUntilMs || 0) - Date.now());
+}
+
+function isServiceUnavailableError(error) {
+    const text = String(error?.message || error || '').toLowerCase();
+    return text.includes('503')
+        || text.includes('service unavailable')
+        || text.includes('failed to complete negotiation')
+        || text.includes('failed to start the connection');
+}
+
+function noteServiceOutage(source = '', retryAfterSeconds = 0) {
+    serviceOutageBackoffAttempt = Math.min(serviceOutageBackoffAttempt + 1, 10);
+    const baseRetryMs = Math.max(15000, Number(retryAfterSeconds || 0) * 1000);
+    const retryDelayMs = getRetryDelayMs(baseRetryMs, serviceOutageBackoffAttempt, 180000);
+    serviceOutageUntilMs = Math.max(serviceOutageUntilMs, Date.now() + retryDelayMs);
+
+    const now = Date.now();
+    if (typeof showMessage === 'function' && (now - lastServiceOutageNoticeAt) >= 30000) {
+        lastServiceOutageNoticeAt = now;
+        showMessage('Server is temporarily unavailable. Continuing retries in the background.', 'info');
+    }
+
+    if (source) {
+        console.warn(`[OUTAGE] ${source}; cooling down for ${retryDelayMs}ms`);
+    }
+
+    return retryDelayMs;
+}
+
+function clearServiceOutage(source = '') {
+    if (serviceOutageUntilMs <= 0 && serviceOutageBackoffAttempt === 0) {
+        return;
+    }
+
+    serviceOutageBackoffAttempt = 0;
+    serviceOutageUntilMs = 0;
+
+    if (source) {
+        console.log(`[OUTAGE] Cleared by ${source}`);
+    }
+}
+
 function isDegradedPagedResult(result) {
     if (!result || typeof result !== 'object') {
         return false;
@@ -1288,7 +1545,12 @@ async function registerPresignedUpload(payload, maxAttempts = 4) {
             }, PRESIGNED_COMPLETE_TIMEOUT_MS);
 
             if (response.ok) {
+                clearServiceOutage('upload registration');
                 return await response.json();
+            }
+
+            if (response.status === 503) {
+                noteServiceOutage('upload registration 503');
             }
 
             if (isTransientGatewayStatus(response.status) && attempt < maxAttempts) {
@@ -1302,6 +1564,10 @@ async function registerPresignedUpload(payload, maxAttempts = 4) {
             const isRetryableError = error?.name === 'AbortError'
                 || /network/i.test(String(error?.message || ''))
                 || /502|503|504|timeout|timed out|aborted/.test(String(error?.message || ''));
+
+            if (isRetryableError) {
+                noteServiceOutage('upload registration transient error');
+            }
 
             if (isRetryableError && attempt < maxAttempts) {
                 await delay(getRetryDelayMs(1500, attempt));
@@ -1320,6 +1586,8 @@ async function registerPresignedUpload(payload, maxAttempts = 4) {
 }
 
 function notifyUploadPollingOutage() {
+    noteServiceOutage('upload readiness polling');
+
     const now = Date.now();
     if ((now - lastUploadPollingOutageNoticeAt) < 30000) {
         return;
@@ -3041,8 +3309,33 @@ async function loadGroups(reset = false) {
     try {
         const cacheBust = reset ? `&cb=${Date.now()}` : '';
         const response = await fetchWithRetry(`${API_BASE}/groups?page=${state.groups.page}&pageSize=${state.groups.pageSize}${cacheBust}`);
+        const list = document.getElementById('groups-list');
         
         if (!response.ok) {
+            if (isTransientGatewayStatus(response.status)) {
+                hideLoading('groups-list');
+
+                if (reset && state.groups.data.length === 0) {
+                    list.innerHTML = '<div class="empty-state"><p>Server is temporarily unavailable. Group list will refresh automatically.</p></div>';
+                }
+
+                groupsDegradedRetryCount += 1;
+                noteServiceOutage('groups endpoint transient failure', 30);
+                const retryDelayMs = getDegradedRetryDelayMs(groupsDegradedRetryCount, 30);
+
+                if (!groupsDegradedRefreshTimer) {
+                    groupsDegradedRefreshTimer = setTimeout(() => {
+                        groupsDegradedRefreshTimer = null;
+                        loadGroups(true).catch(err => {
+                            console.warn('Automatic groups refresh after transient failure failed', err);
+                        });
+                    }, retryDelayMs);
+                }
+
+                state.groups.loading = false;
+                return;
+            }
+
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
         
@@ -3053,8 +3346,6 @@ async function loadGroups(reset = false) {
         const groupsData = result.data || result.Data || [];
         const pagination = result.pagination || result.Pagination || {};
         console.log('Groups data length:', groupsData.length);
-        
-        const list = document.getElementById('groups-list');
         
         hideLoading('groups-list');
 
