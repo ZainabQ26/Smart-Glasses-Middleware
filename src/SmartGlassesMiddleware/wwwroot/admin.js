@@ -4579,55 +4579,13 @@ async function init() {
                         promptPreviewFilename.textContent = file.name;
                     }
                     
-                    // Show actual preview based on file type (like reminders)
                     const ext = file.name.split('.').pop().toLowerCase();
-                    if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) {
-                        const reader = new FileReader();
-                        reader.onload = function(e) {
-                            promptPreviewContent.innerHTML = `<img src="${e.target.result}" style="max-width: 100%; max-height: 200px; border-radius: 4px; object-fit: contain;">`;
-                        };
-                        reader.readAsDataURL(file);
-                    } else if (ext === 'pdf') {
-                        const reader = new FileReader();
-                        reader.onload = function(e) {
-                            promptPreviewContent.innerHTML = `<embed src="${e.target.result}" type="application/pdf" width="100%" height="200px" style="border-radius: 4px;">`;
-                        };
-                        reader.readAsDataURL(file);
-                    } else if (['wav', 'mp3', 'm4a', 'ogg', 'webm'].includes(ext)) {
-                        const reader = new FileReader();
-                        reader.onload = function(e) {
-                            promptPreviewContent.innerHTML = `
-                                <div style="text-align: center;">
-                                    <div style="font-size: 64px; margin-bottom: 10px;">🎤</div>
-                                    <audio controls style="width: 100%; margin-top: 10px;">
-                                        <source src="${e.target.result}" type="audio/${ext}">
-                                    </audio>
-                                </div>
-                            `;
-                        };
-                        reader.readAsDataURL(file);
-                    } else if (ext === 'md') {
-                        // Render markdown files
-                        const reader = new FileReader();
-                        reader.onload = function(e) {
-                            const text = e.target.result;
-                            const renderedHtml = renderMarkdown(text);
-                            promptPreviewContent.innerHTML = `<div style="text-align: left; max-height: 200px; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 12px;">${renderedHtml}</div>`;
-                        };
-                        reader.readAsText(file);
-                    } else if (['txt', 'json', 'xml', 'csv'].includes(ext)) {
-                        // Show text files as plain text
-                        const reader = new FileReader();
-                        reader.onload = function(e) {
-                            const text = e.target.result;
-                            promptPreviewContent.innerHTML = `<pre style="text-align: left; max-height: 200px; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 11px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(text)}</pre>`;
-                        };
-                        reader.readAsText(file);
-                    } else {
+                    // Keep upload independent from preview rendering.
+                    if (promptPreviewContent) {
                         promptPreviewContent.innerHTML = `
                             <div style="text-align: center;">
-                                <div style="font-size: 64px; margin-bottom: 10px;">📄</div>
-                                <div style="color: #2f3a3f; font-size: 12px;">Preview not available</div>
+                                <div style="font-size: 48px; margin-bottom: 10px;">⬆</div>
+                                <div style="color: #2f3a3f; font-size: 12px;">Uploading first. Preview will be available from the file list after upload.</div>
                             </div>
                         `;
                     }
