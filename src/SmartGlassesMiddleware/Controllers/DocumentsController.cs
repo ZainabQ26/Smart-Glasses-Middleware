@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using SmartGlassesMiddleware.Data;
 using Microsoft.AspNetCore.SignalR;
 using SmartGlassesMiddleware.Hubs;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace SmartGlassesMiddleware.Controllers;
 
@@ -28,6 +29,10 @@ public class DocumentsController : ControllerBase
     private readonly IServiceScopeFactory _scopeFactory;
     private const int DefaultPageSize = 20;
     private const int MaxPageSize = 100;
+    private static readonly TimeSpan QueryMonitoringTimeout = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan QueryDocumentLookupTimeout = TimeSpan.FromSeconds(8);
+    private static readonly TimeSpan QueryExecutionTimeout = TimeSpan.FromSeconds(35);
+    private static readonly TimeSpan QueryHistorySaveTimeout = TimeSpan.FromSeconds(3);
 
     public DocumentsController(
         ILogger<DocumentsController> logger,
@@ -319,7 +324,7 @@ public class DocumentsController : ControllerBase
         _logger.LogInformation("=== DOCUMENT QUERY REQUEST RECEIVED ===");
         _logger.LogInformation("Query: {Query}", request.Query);
         _logger.LogInformation("TopK: {TopK}, GroupIds: {GroupIds}, DocumentIds: {DocumentIds}", request.TopK, request.GroupIds?.Count ?? 0, request.DocumentIds?.Count ?? 0);
-        
+
         if (string.IsNullOrWhiteSpace(request.Query))
         {
             _logger.LogWarning("Query is empty, returning BadRequest");
@@ -327,88 +332,101 @@ public class DocumentsController : ControllerBase
         }
 
         string? requestId = null;
+        var groupId = request.GroupIds?.FirstOrDefault();
+        Conversation? conversation = null;
+
         try
         {
-            _logger.LogInformation("Starting monitoring request...");
-            // Use the client-provided RequestId for progress tracking via SignalR, otherwise generate one
             var clientRequestId = !string.IsNullOrWhiteSpace(request.RequestId) ? request.RequestId : null;
-            requestId = await _monitoringService.StartRequest("DocumentQuery", 
+            requestId = await StartMonitoringRequestSafelyAsync(
+                "DocumentQuery",
                 $"Query: {request.Query.Substring(0, Math.Min(50, request.Query.Length))}...",
                 clientRequestId);
-            _logger.LogInformation("Monitoring request started with ID: {RequestId}", requestId);
 
-            _logger.LogInformation("Updating request status to 'Searching documents'...");
-            await _monitoringService.UpdateRequestStatus(requestId, "Searching documents...");
+            await TryUpdateMonitoringStatusAsync(requestId, "Searching documents...");
 
-            // Detect or create a conversation to maintain context within groups.
-            // Wrapped entirely in try/catch so a missing DB table (42P01, first-deploy
-            // before migrations run) degrades gracefully to stateless RAG.
-            var groupId = request.GroupIds?.FirstOrDefault();
-            Conversation? conversation = null;
-            try
+            var enableConversationTracking = _configuration.GetValue<bool?>("RAG:EnableConversationTrackingInQuery") ?? false;
+            if (enableConversationTracking)
             {
-                if (request.ConversationId.HasValue)
-                {
-                    conversation = await _conversationService.GetConversationAsync(request.ConversationId.Value);
-                    if (conversation == null)
-                        _logger.LogWarning("Conversation {ConversationId} not found, falling back to detection", request.ConversationId);
-                }
-
-                // If no conversation explicitly provided, consult global mapping for the selected group
-                if (conversation == null && groupId.HasValue && groupId != Guid.Empty && _groupConversationMappingService != null)
-                {
-                    var mapped = await _groupConversationMappingService.GetConversationIdForGroupAsync(groupId.Value);
-                    if (mapped.HasValue)
-                    {
-                        conversation = await _conversationService.GetConversationAsync(mapped.Value);
-                        if (conversation == null)
-                            _logger.LogWarning("Mapped conversation {ConversationId} for group {GroupId} not found", mapped, groupId);
-                    }
-                }
-
-                conversation ??= await _conversationService.DetectOrCreateConversationAsync(request.Query, groupId);
-                _logger.LogInformation("Using conversation {ConversationId} for query", conversation.Id);
-
-                // Detect topic change and possibly switch to a new conversation automatically
                 try
                 {
-                    var (topicChanged, newConversation) = await _conversationService.DetectTopicChangeAsync(conversation.Id, request.Query);
-                    if (topicChanged && newConversation != null)
+                    if (request.ConversationId.HasValue)
                     {
-                        _logger.LogInformation("Auto-switching conversation due to topic change: {NewId}", newConversation.Id);
-                        conversation = newConversation;
+                        conversation = await _conversationService.GetConversationAsync(request.ConversationId.Value);
+                        if (conversation == null)
+                        {
+                            _logger.LogWarning("Conversation {ConversationId} not found, falling back to detection", request.ConversationId);
+                        }
                     }
+
+                    if (conversation == null && groupId.HasValue && groupId != Guid.Empty && _groupConversationMappingService != null)
+                    {
+                        var mapped = await _groupConversationMappingService.GetConversationIdForGroupAsync(groupId.Value);
+                        if (mapped.HasValue)
+                        {
+                            conversation = await _conversationService.GetConversationAsync(mapped.Value);
+                            if (conversation == null)
+                            {
+                                _logger.LogWarning("Mapped conversation {ConversationId} for group {GroupId} not found", mapped, groupId);
+                            }
+                        }
+                    }
+
+                    conversation ??= await _conversationService.DetectOrCreateConversationAsync(request.Query, groupId);
+                    _logger.LogInformation("Using conversation {ConversationId} for query", conversation.Id);
+
+                    try
+                    {
+                        var (topicChanged, newConversation) = await _conversationService.DetectTopicChangeAsync(conversation.Id, request.Query);
+                        if (topicChanged && newConversation != null)
+                        {
+                            _logger.LogInformation("Auto-switching conversation due to topic change: {NewId}", newConversation.Id);
+                            conversation = newConversation;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Topic change detection threw an exception for conversation {ConversationId}", conversation.Id);
+                    }
+
+                    await _conversationService.AddMessageAsync(conversation.Id, "user", request.Query, null, request.DocumentIds);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Topic change detection threw an exception for conversation {ConversationId}", conversation.Id);
+                    _logger.LogWarning(ex, "Conversation tracking unavailable (possibly pending DB migrations). Proceeding with stateless RAG query.");
+                    conversation = null;
                 }
-
-                // Add user message to conversation
-                await _conversationService.AddMessageAsync(conversation.Id, "user", request.Query, null, request.DocumentIds);
             }
-            catch (Exception ex)
+            else
             {
-                // Conversation table may not exist yet (DB migrations pending). Log the
-                // warning and continue with a stateless RAG query so the user still gets
-                // a response.
-                _logger.LogWarning(ex, "Conversation tracking unavailable (possibly pending DB migrations). Proceeding with stateless RAG query.");
-                conversation = null;
+                _logger.LogInformation("Conversation tracking disabled for query endpoint. Running stateless document query.");
             }
 
             List<Guid>? effectiveDocumentIds = request.DocumentIds;
             if (request.DocumentIds != null && request.DocumentIds.Any())
             {
-                var requestedDocuments = await _context.DocumentMetadatas
-                    .Where(d => request.DocumentIds.Contains(d.Id))
-                    .Select(d => new
-                    {
-                        d.Id,
-                        DisplayName = string.IsNullOrWhiteSpace(d.OriginalFileName) ? d.FileName : d.OriginalFileName,
-                        d.IsProcessed,
-                        d.ProcessingError
-                    })
-                    .ToListAsync();
+                List<(Guid Id, string DisplayName, bool IsProcessed, string? ProcessingError)> requestedDocuments;
+                try
+                {
+                    using var lookupCts = CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted);
+                    lookupCts.CancelAfter(QueryDocumentLookupTimeout);
+                    requestedDocuments = await _context.DocumentMetadatas
+                        .Where(d => request.DocumentIds.Contains(d.Id))
+                        .Select(d => new
+                        {
+                            d.Id,
+                            DisplayName = string.IsNullOrWhiteSpace(d.OriginalFileName) ? d.FileName : d.OriginalFileName,
+                            d.IsProcessed,
+                            d.ProcessingError
+                        })
+                        .Select(d => new ValueTuple<Guid, string, bool, string?>(d.Id, d.DisplayName, d.IsProcessed, d.ProcessingError))
+                        .ToListAsync(lookupCts.Token);
+                }
+                catch (OperationCanceledException ex)
+                {
+                    _logger.LogWarning(ex, "Timed out loading requested document metadata; continuing without readiness gating.");
+                    requestedDocuments = new List<(Guid Id, string DisplayName, bool IsProcessed, string? ProcessingError)>();
+                }
 
                 var failedDocuments = requestedDocuments
                     .Where(d => !string.IsNullOrWhiteSpace(d.ProcessingError))
@@ -442,7 +460,7 @@ public class DocumentsController : ControllerBase
                         }
                     }
 
-                    await _monitoringService.CompleteRequest(requestId, true, "Document processing error returned to client");
+                    await TryCompleteMonitoringRequestAsync(requestId, true, result: "Document processing error returned to client");
                     return Ok(failureResult);
                 }
 
@@ -454,7 +472,7 @@ public class DocumentsController : ControllerBase
                 {
                     _logger.LogInformation("Requested documents are still processing: {Ids}",
                         string.Join(", ", pendingDocuments.Select(d => d.Id)));
-                    await _monitoringService.UpdateRequestStatus(requestId!, "Processing",
+                    await TryUpdateMonitoringStatusAsync(requestId, "Processing",
                         $"Waiting for {pendingDocuments.Count} document(s) to finish indexing", 35);
 
                     var pendingResult = new QueryResult
@@ -483,11 +501,14 @@ public class DocumentsController : ControllerBase
                         }
                     }
 
-                    await _monitoringService.CompleteRequest(requestId, true, "Documents still processing");
+                    await TryCompleteMonitoringRequestAsync(requestId, true, result: "Documents still processing");
                     return Ok(pendingResult);
                 }
 
-                effectiveDocumentIds = requestedDocuments.Select(d => d.Id).ToList();
+                if (requestedDocuments.Any())
+                {
+                    effectiveDocumentIds = requestedDocuments.Select(d => d.Id).ToList();
+                }
             }
 
             QueryResult result;
@@ -499,7 +520,7 @@ public class DocumentsController : ControllerBase
                     conversation.Id,
                     request.TopK ?? 5,
                     request.GroupIds,
-                    effectiveDocumentIds);
+                    effectiveDocumentIds).WaitAsync(QueryExecutionTimeout);
             }
             else
             {
@@ -508,13 +529,14 @@ public class DocumentsController : ControllerBase
                     request.Query,
                     request.TopK ?? 5,
                     request.GroupIds,
-                    effectiveDocumentIds);
+                    effectiveDocumentIds,
+                    monitoringRequestId: requestId).WaitAsync(QueryExecutionTimeout);
             }
+
             _logger.LogInformation("RAG service returned result. Answer length: {Length}", result.Answer?.Length ?? 0);
 
             if (conversation != null)
             {
-                // Add assistant response to conversation
                 try
                 {
                     await _conversationService.AddMessageAsync(conversation.Id, "assistant", result.Answer ?? string.Empty);
@@ -524,7 +546,6 @@ public class DocumentsController : ControllerBase
                     _logger.LogWarning(ex, "Failed to save assistant message to conversation {ConversationId}", conversation.Id);
                 }
 
-                // Update global Group -> Conversation mapping (global scope)
                 try
                 {
                     var mappingGroupId = conversation.ResourceGroupId ?? groupId;
@@ -539,28 +560,11 @@ public class DocumentsController : ControllerBase
                 }
             }
 
-            await _monitoringService.CompleteRequest(requestId, true, 
-                $"Found {result.Sources?.Count ?? 0} sources");
+            await TryCompleteMonitoringRequestAsync(requestId, true,
+                result: $"Found {result.Sources?.Count ?? 0} sources");
             _logger.LogInformation("=== DOCUMENT QUERY COMPLETED SUCCESSFULLY ===");
 
-            // Persist a DocumentQuery history entry and attach the monitoring request id so UI can group
-            try
-            {
-                var hist = new RequestHistory
-                {
-                    RequestType = "DocumentQuery",
-                    InputText = request.Query,
-                    Response = $"Found {result.Sources?.Count ?? 0} sources",
-                    DetectedTask = "document_query",
-                    CorrelationId = requestId
-                };
-
-                await _historyService.SaveRequestAsync(hist);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to save document query history");
-            }
+            QueueDocumentQueryHistorySave(request.Query, result.Sources?.Count ?? 0, requestId);
 
             result.ConversationId = conversation?.Id;
             return Ok(result);
@@ -569,24 +573,121 @@ public class DocumentsController : ControllerBase
         {
             _logger.LogWarning(ex, "Query timed out for query: {Query}", request.Query);
             if (requestId != null)
-                await _monitoringService.CompleteRequest(requestId, false, error: "Request timed out");
+                await TryCompleteMonitoringRequestAsync(requestId, false, error: "Request timed out");
             return StatusCode(504, new { error = "Request timed out", details = ex.Message });
         }
         catch (OperationCanceledException ex)
         {
             _logger.LogWarning(ex, "Query was cancelled (client disconnected) for query: {Query}", request.Query);
             if (requestId != null)
-                await _monitoringService.CompleteRequest(requestId, false, error: "Request cancelled by client");
+                await TryCompleteMonitoringRequestAsync(requestId, false, error: "Request cancelled by client");
             return StatusCode(499, new { error = "Request cancelled", details = "Client disconnected" });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "=== ERROR QUERYING DOCUMENTS === Message: {Message}, StackTrace: {StackTrace}", 
+            _logger.LogError(ex, "=== ERROR QUERYING DOCUMENTS === Message: {Message}, StackTrace: {StackTrace}",
                 ex.Message, ex.StackTrace);
             if (requestId != null)
-                await _monitoringService.CompleteRequest(requestId, false, error: ex.Message);
+                await TryCompleteMonitoringRequestAsync(requestId, false, error: ex.Message);
             return StatusCode(500, new { error = "Failed to query documents", details = ex.Message });
         }
+    }
+
+    private async Task<string> StartMonitoringRequestSafelyAsync(string requestType, string description, string? requestId = null)
+    {
+        var fallbackId = !string.IsNullOrWhiteSpace(requestId) ? requestId! : Guid.NewGuid().ToString();
+        try
+        {
+            return await _monitoringService
+                .StartRequest(requestType, description, requestId)
+                .WaitAsync(QueryMonitoringTimeout);
+        }
+        catch (TimeoutException)
+        {
+            _logger.LogWarning("StartRequest timed out for {RequestType}; continuing without blocking", requestType);
+            return fallbackId;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "StartRequest failed for {RequestType}; continuing without blocking", requestType);
+            return fallbackId;
+        }
+    }
+
+    private async Task TryUpdateMonitoringStatusAsync(string? requestId, string status, string? details = null, int? progress = null)
+    {
+        if (string.IsNullOrWhiteSpace(requestId))
+        {
+            return;
+        }
+
+        try
+        {
+            await _monitoringService
+                .UpdateRequestStatus(requestId, status, details, progress)
+                .WaitAsync(QueryMonitoringTimeout);
+        }
+        catch (TimeoutException)
+        {
+            _logger.LogWarning("UpdateRequestStatus timed out for request {RequestId}", requestId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "UpdateRequestStatus failed for request {RequestId}", requestId);
+        }
+    }
+
+    private async Task TryCompleteMonitoringRequestAsync(string? requestId, bool success, string? result = null, string? error = null)
+    {
+        if (string.IsNullOrWhiteSpace(requestId))
+        {
+            return;
+        }
+
+        try
+        {
+            await _monitoringService
+                .CompleteRequest(requestId, success, result, error)
+                .WaitAsync(QueryMonitoringTimeout);
+        }
+        catch (TimeoutException)
+        {
+            _logger.LogWarning("CompleteRequest timed out for request {RequestId}", requestId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "CompleteRequest failed for request {RequestId}", requestId);
+        }
+    }
+
+    private void QueueDocumentQueryHistorySave(string query, int sourceCount, string? requestId)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var historyService = scope.ServiceProvider.GetRequiredService<IHistoryService>();
+                var hist = new RequestHistory
+                {
+                    RequestType = "DocumentQuery",
+                    InputText = query,
+                    Response = $"Found {sourceCount} sources",
+                    DetectedTask = "document_query",
+                    CorrelationId = requestId
+                };
+
+                await historyService.SaveRequestAsync(hist).WaitAsync(QueryHistorySaveTimeout);
+            }
+            catch (TimeoutException)
+            {
+                _logger.LogWarning("Timed out while saving document query history");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to save document query history");
+            }
+        });
     }
 
     /// <summary>
