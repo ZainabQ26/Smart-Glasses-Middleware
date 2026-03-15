@@ -1,14 +1,20 @@
 using SmartGlassesMiddleware.Services;
 
 /// <summary>
-/// Handles the "highlight word" voice command.
-/// Extracts the word or phrase to highlight from the user's input and returns
-/// an action token that the frontend uses to highlight it in the open PDF.
+/// Handles the "highlight word" and "search" voice commands.
+/// Extracts the word or phrase to highlight/search from the user's input and
+/// returns an action token that the frontend uses to highlight it in the open PDF.
+///
+/// "Search" and "highlight" are treated as aliases — both highlight the term in
+/// the currently open document using the client-side PDF rendering engine.
 ///
 /// Expected input examples:
 ///   "highlight the word example"
 ///   "highlight security"
 ///   "highlight patient information"
+///   "search for patient"
+///   "find the word security"
+///   "search patient information"
 /// </summary>
 public class HighlightWordTaskHandler : ITaskHandler
 {
@@ -28,8 +34,9 @@ public class HighlightWordTaskHandler : ITaskHandler
     }
 
     /// <summary>
-    /// Strips common leading phrases ("highlight the word", "highlight") from
-    /// the raw input to extract the target word or phrase.
+    /// Strips common leading phrases from the raw input to extract the target
+    /// word or phrase. Supports both "highlight" and "search"/"find" prefixes
+    /// so either command highlights the same term in the open PDF.
     /// </summary>
     private static string ExtractHighlightTarget(string input)
     {
@@ -38,8 +45,7 @@ public class HighlightWordTaskHandler : ITaskHandler
 
         var trimmed = input.Trim();
 
-        // Remove leading prefixes like "highlight the word", "highlight word",
-        // "highlight the", "highlight" so what remains is the target.
+        // Remove leading prefixes. Order matters — longer/more-specific prefixes first.
         string[] prefixes =
         [
             "highlight the word ",
@@ -48,6 +54,18 @@ public class HighlightWordTaskHandler : ITaskHandler
             "highlight phrase ",
             "highlight the ",
             "highlight ",
+            "search for the word ",
+            "search for the phrase ",
+            "search for the ",
+            "search for ",
+            "search the word ",
+            "search the phrase ",
+            "search the ",
+            "search ",
+            "find the word ",
+            "find the phrase ",
+            "find the ",
+            "find ",
         ];
 
         foreach (var prefix in prefixes)

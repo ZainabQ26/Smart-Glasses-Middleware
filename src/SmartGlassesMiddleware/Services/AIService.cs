@@ -251,15 +251,15 @@ Please provide a helpful and concise response:";
         ["reminder"]           = "user wants to set, add, or create a new reminder or alarm",
         ["edit-reminder"]      = "user wants to change or update an existing reminder",
         ["delete-reminder"]    = "user wants to remove, cancel, or delete a reminder",
-        ["document-search"]    = "user wants to search through their documents",
         ["document-query"]     = "user wants to ask a question about the contents of a document",
-        ["document-highlight"] = "user wants to highlight text or a section in a document",
+        ["highlight-word"]     = "user wants to highlight, search for, or find a word or phrase in the currently open document. Use when the user says 'highlight X', 'search for X', 'find X', or any variant of highlighting or searching text.",
         ["ocr"]                = "user wants to scan text, read text from an image, or perform OCR",
         ["ocr-retry"]          = "user wants to retry or redo an OCR scan",
         ["open-file"]          = "user wants to browse or choose from a list of recently uploaded files (shows 5 recent files to pick from). Use when the user wants to see options, pick a file, or browse recent uploads.",
         ["select-document"]    = "user wants to immediately open/preview the most recently uploaded document without browsing. Use when the user says 'select document', 'open last file', 'open latest document', 'select and open', or wants the last/most-recent document directly.",
         ["next-page"]          = "user wants to go to the next page in a document or PDF",
         ["previous-page"]      = "user wants to go to the previous page in a document or PDF",
+        ["open-admin-panel"]   = "user wants to open, navigate to, or access the admin panel or administration page",
         ["advanced"]           = "user wants advanced features, settings, or RAG document processing",
         ["template"]           = "user wants to use or fill in a template",
     };
@@ -396,6 +396,31 @@ Task:";
         if (ContainsAnyPhrase(normalized, "previous page", "prev page", "back page", "page up"))
         {
             return "previous-page";
+        }
+
+        // "highlight" / "search" / "find" commands → highlight word in the open PDF (client-side)
+        if (ContainsAnyPhrase(normalized,
+            "highlight ",
+            "search for ",
+            "search the ",
+            "find the word",
+            "find the phrase",
+            "find "))
+        {
+            return "highlight-word";
+        }
+
+        // "open admin panel" / "go to admin" family → open the admin panel page
+        if (ContainsAnyPhrase(normalized,
+            "open admin",
+            "admin panel",
+            "go to admin",
+            "show admin",
+            "administration panel",
+            "go to administration",
+            "open administration"))
+        {
+            return "open-admin-panel";
         }
 
         return null;

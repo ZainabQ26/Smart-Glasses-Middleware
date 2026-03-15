@@ -302,39 +302,17 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
 
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
-    <div style={styles.overlay}>
-      {/* ── Header bar ─────────────────────────────────────────────────────── */}
-      <div style={styles.header}>
-        <span style={styles.docName} title={documentName}>
+    <div style={styles.container}>
+
+      {/* ── Info bar — file name (left) and page indicator (right) ─────────── */}
+      <div style={styles.infoBar}>
+        <span style={styles.infoBarName} title={documentName}>
           📄 {documentName || "Document"}
         </span>
-        <span style={styles.pageIndicator}>
+        <span style={styles.infoBarPage}>
           {loading ? "Loading…" : totalPages > 0 ? `${currentPage} / ${totalPages}` : ""}
         </span>
-        <button style={styles.closeBtn} onClick={onClose} title="Close document">
-          ✕ Close
-        </button>
       </div>
-
-      {/* ── Navigation controls ─────────────────────────────────────────────── */}
-      {!loading && !error && (
-        <div style={styles.navBar}>
-          <button
-            style={{ ...styles.navBtn, opacity: currentPage <= 1 ? 0.4 : 1 }}
-            onClick={prevPage}
-            disabled={currentPage <= 1}
-          >
-            ◀ Prev
-          </button>
-          <button
-            style={{ ...styles.navBtn, opacity: currentPage >= totalPages ? 0.4 : 1 }}
-            onClick={nextPage}
-            disabled={currentPage >= totalPages}
-          >
-            Next ▶
-          </button>
-        </div>
-      )}
 
       {/* ── Highlight status toast (fixed so it never shifts the layout) ──── */}
       {highlightStatus && (
@@ -381,74 +359,46 @@ export default PdfViewer;
 // ── Styles ────────────────────────────────────────────────────────────────────
 const styles = {
   /**
-   * position: fixed + inset: 0 pins the overlay to the viewport.
-   * will-change: transform creates an independent compositing layer so that
-   * parent re-renders (voice status, logs, etc.) do not cause any visual
-   * layout recalculation inside the overlay.
+   * Inline container — sits below the conversation area inside <main>.
+   * flex: 1 lets it expand to fill all remaining vertical space.
+   * overflow: hidden keeps the canvas/legend within bounds without
+   * triggering page-level scroll.
    */
-  overlay: {
-    position: "fixed",
-    inset: 0,
-    background: "#111",
-    zIndex: 100,
+  container: {
+    flex: 1,
     display: "flex",
     flexDirection: "column",
     overflow: "hidden",
-    willChange: "transform",
+    background: "#111",
+    minHeight: 0,
   },
-  header: {
+  // Slim read-only bar above the canvas: file name on the left, page x/y on right.
+  infoBar: {
+    flexShrink: 0,
     display: "flex",
     alignItems: "center",
-    gap: 12,
-    padding: "10px 16px",
+    justifyContent: "space-between",
+    padding: "6px 14px",
     background: "#1a1a2e",
-    borderBottom: "1px solid #333",
-    flexShrink: 0,
+    borderBottom: "1px solid #2a2a3a",
   },
-  docName: {
-    flex: 1,
-    fontSize: "0.9rem",
+  infoBarName: {
+    fontSize: "0.85rem",
     color: "#7ec8e3",
     fontWeight: 600,
     whiteSpace: "nowrap",
     overflow: "hidden",
     textOverflow: "ellipsis",
+    maxWidth: "70%",
   },
-  pageIndicator: {
-    fontSize: "0.85rem",
+  infoBarPage: {
+    fontSize: "0.82rem",
     color: "#aaa",
     whiteSpace: "nowrap",
-  },
-  closeBtn: {
-    background: "transparent",
-    border: "1px solid #555",
-    color: "#ccc",
-    borderRadius: 6,
-    padding: "4px 12px",
-    cursor: "pointer",
-    fontSize: "0.82rem",
     flexShrink: 0,
-  },
-  navBar: {
-    display: "flex",
-    gap: 8,
-    padding: "8px 16px",
-    background: "#161625",
-    borderBottom: "1px solid #2a2a3a",
-    flexShrink: 0,
-  },
-  navBtn: {
-    background: "#2a3a5a",
-    border: "none",
-    color: "#fff",
-    borderRadius: 6,
-    padding: "6px 16px",
-    cursor: "pointer",
-    fontSize: "0.85rem",
-    transition: "background 0.15s",
   },
   // The toast is position: fixed so it never contributes to layout height and
-  // the rest of the overlay stays perfectly still when it appears/disappears.
+  // the rest of the container stays perfectly still when it appears/disappears.
   toast: {
     position: "fixed",
     top: 70,
@@ -474,7 +424,7 @@ const styles = {
     fontSize: "0.95rem",
   },
   // flex: 1 lets the canvas area take all remaining vertical space between the
-  // nav bar and the legend, keeping both anchored at all times.
+  // top of the container and the legend, keeping both anchored at all times.
   canvasWrapper: {
     flex: 1,
     overflow: "auto",
@@ -486,7 +436,6 @@ const styles = {
   },
   canvas: {
     maxWidth: "100%",
-    boxShadow: "0 4px 24px rgba(0,0,0,0.6)",
     background: "#fff",
   },
   // Legend panel sits below the canvas, above the bottom of the viewport.
