@@ -34,6 +34,11 @@ export default function App() {
   const [openPdf, setOpenPdf] = useState(null);
   const pdfViewerRef = useRef(null);
 
+  // Stable callback passed as the onClose prop — avoids recreating a new
+  // function reference on every App re-render, which would cause PdfViewer to
+  // see a changed prop and needlessly re-render.
+  const handleClosePdf = useCallback(() => setOpenPdf(null), []);
+
   const activatedRef        = useRef(false);
   const recognitionRef      = useRef(null);
   const vadRef              = useRef(null);   // VAD removed; kept so optional calls are no-ops
@@ -372,6 +377,31 @@ export default function App() {
         } else {
           setAiResponse("No document is open.");
         }
+      } else if (answer.startsWith("__ACTION:GO_TO_PAGE:")) {
+        // Format: __ACTION:GO_TO_PAGE:<number>__
+        const rawPage = answer.replace("__ACTION:GO_TO_PAGE:", "").replace(/__$/, "").trim();
+        const pageNumber = parseInt(rawPage, 10);
+        addLog(`📄 Command: go to page ${pageNumber}`, "voice");
+        setAiResponse(null);
+        setPendingAction(null);
+        if (pdfViewerRef.current && !Number.isNaN(pageNumber)) {
+          pdfViewerRef.current.goToPage(pageNumber);
+        } else if (!pdfViewerRef.current) {
+          setAiResponse("No document is open. Open a document first.");
+        } else {
+          setAiResponse("Sorry, I couldn't understand the page number.");
+        }
+      } else if (answer.startsWith("__ACTION:GO_TO_LOINC:")) {
+        // Format: __ACTION:GO_TO_LOINC:<code>__
+        const loincCode = answer.replace("__ACTION:GO_TO_LOINC:", "").replace(/__$/, "").trim();
+        addLog(`🔬 Command: go to LOINC code "${loincCode}"`, "voice");
+        setAiResponse(null);
+        setPendingAction(null);
+        if (pdfViewerRef.current && loincCode) {
+          pdfViewerRef.current.goToLoincCode(loincCode);
+        } else if (!pdfViewerRef.current) {
+          setAiResponse("No document is open. Open a document first.");
+        }
       } else if (answer === "__ACTION:CLOSE_DOCUMENT__") {
         addLog("📄 Command: close document", "voice");
         setAiResponse(null);
@@ -675,12 +705,16 @@ export default function App() {
   return (
     <div style={styles.page}>
       {/* ── Inline PDF Viewer overlay — shown only when a document is open ── */}
+      {/* key={openPdf.id} forces a full remount whenever the document changes.
+          This guarantees that switching documents clears all viewer state
+          (highlights, page position, etc.) and the old canvas is discarded. */}
       {openPdf && (
         <PdfViewer
+          key={openPdf.id}
           ref={pdfViewerRef}
           documentId={openPdf.id}
           documentName={openPdf.name}
-          onClose={() => setOpenPdf(null)}
+          onClose={handleClosePdf}
         />
       )}
 
