@@ -224,12 +224,55 @@ The middleware dispatches AI-classified requests to typed task handlers. Handler
 | `OCRRetryTaskHandler` | `ocr-retry` | Retries a failed OCR job |
 | `AdvancedTaskHandler` | `advanced` | Forwards to the configured external REST API endpoint |
 | `TemplateTaskHandler` | `template` | Starter template for new handlers |
+| `NextPageTaskHandler` | `next-page` | Navigates the inline PDF viewer to the next page |
+| `PreviousPageTaskHandler` | `previous-page` | Navigates the inline PDF viewer to the previous page |
+| `HighlightWordTaskHandler` | `highlight-word` | Highlights a word/phrase in the open PDF; cycles color on repeat |
+| `RemoveHighlightsTaskHandler` | `remove-highlights` | Clears all keyword highlights from the open PDF |
+| `CloseDocumentTaskHandler` | `close-document` | Closes the inline PDF viewer and returns to the home screen |
 
 ### Adding a custom handler
 
 1. Create a `.cs` file implementing `ITaskHandler` in the `tasks/` folder
 2. It is compiled into `SmartGlassesMiddleware.dll` at `dotnet publish` time via `<Compile Include>` in the `.csproj`
 3. Alternatively, drop a compiled `.dll` into a `tasks/` directory alongside the running binary for runtime hot-loading (local dev only)
+
+## Inline PDF Viewer
+
+The home screen includes a built-in PDF viewer powered by [PDF.js](https://mozilla.github.io/pdf.js/).  The viewer is **hidden by default** and appears as a full-screen overlay only when a document is opened.
+
+### Opening a document
+
+Say **"activate"** and then one of:
+
+| Voice command | What happens |
+|--------------|--------------|
+| `"open my files"` / `"show recent files"` | Lists the last 5 uploaded files; say a number to open one |
+| `"open the last document"` / `"select document"` | Opens the most recently uploaded document |
+
+### Navigating pages
+
+| Voice command | Action |
+|--------------|--------|
+| `"next page"` | Advance to the next page |
+| `"previous page"` / `"go back"` | Return to the previous page |
+
+### Highlighting keywords
+
+| Voice command | Action |
+|--------------|--------|
+| `"highlight <word>"` | Highlights every occurrence of `<word>` in yellow |
+| `"highlight <word>"` *(said again)* | Re-highlights in the next color (sky blue → green → coral → lavender → grey, cycling) |
+| `"remove highlights"` / `"clear highlights"` | Removes all keyword highlights |
+
+Highlighting supports multi-word phrases (e.g. `"highlight patient information"`).
+
+### Closing the viewer
+
+| Voice command | Action |
+|--------------|--------|
+| `"close document"` | Hides the PDF viewer and returns to the home screen |
+
+The ✕ **Close** button in the viewer header also closes it.
 
 ## API Endpoints
 
