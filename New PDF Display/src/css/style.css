@@ -1,0 +1,17 @@
+/* Classes */
+
+
+/* Individual */
+
+/* #pdf-container {
+    position: relative;
+    width: fit-content;
+    margin: 20px auto;
+} */
+
+#pdf-container {
+    border: 1px solid black;
+    
+    /* Test this out */
+    /* direction: ltr; */
+}
