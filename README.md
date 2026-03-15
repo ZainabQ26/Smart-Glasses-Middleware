@@ -229,6 +229,8 @@ The middleware dispatches AI-classified requests to typed task handlers. Handler
 | `HighlightWordTaskHandler` | `highlight-word` | Highlights a word/phrase in the open PDF; cycles color on repeat |
 | `RemoveHighlightsTaskHandler` | `remove-highlights` | Clears all keyword highlights from the open PDF |
 | `CloseDocumentTaskHandler` | `close-document` | Closes the inline PDF viewer and returns to the home screen |
+| `GoToPageTaskHandler` | `go-to-page` | Navigates the inline PDF viewer to a specific page number |
+| `GoToLoincPageTaskHandler` | `go-to-loinc` | Searches for a LOINC code in the open PDF, navigates to its page, and highlights it |
 
 ### Adding a custom handler
 
@@ -238,7 +240,7 @@ The middleware dispatches AI-classified requests to typed task handlers. Handler
 
 ## Inline PDF Viewer
 
-The home screen includes a built-in PDF viewer powered by [PDF.js](https://mozilla.github.io/pdf.js/).  The viewer is **hidden by default** and appears as a full-screen overlay only when a document is opened.
+The home screen includes a built-in PDF viewer powered by [PDF.js](https://mozilla.github.io/pdf.js/).  The viewer is **hidden by default** and appears as a full-screen overlay only when a document is opened.  Opening a different document while one is already open automatically closes the old document and starts fresh — highlights do **not** carry over between documents.
 
 ### Opening a document
 
@@ -255,6 +257,17 @@ Say **"activate"** and then one of:
 |--------------|--------|
 | `"next page"` | Advance to the next page |
 | `"previous page"` / `"go back"` | Return to the previous page |
+| `"go to page 5"` / `"jump to page 12"` | Jump directly to page 5 / 12 |
+
+Highlights are preserved when changing pages — they carry over to every page in the document and the legend always shows where each keyword was found.
+
+### Navigating by LOINC code
+
+| Voice command | Action |
+|--------------|--------|
+| `"go to LOINC code 8480-6"` | Searches the document for LOINC code `8480-6`, jumps to the first matching page, and highlights the code |
+| `"find LOINC 1558-6"` | Same, for code `1558-6` |
+| `"show me LOINC 8480 dash 6"` | Spoken form also accepted |
 
 ### Highlighting keywords
 
@@ -265,6 +278,8 @@ Say **"activate"** and then one of:
 | `"remove highlights"` / `"clear highlights"` | Removes all keyword highlights |
 
 Highlighting supports multi-word phrases (e.g. `"highlight patient information"`).
+
+A **Highlights legend** is displayed below the PDF canvas.  It shows each highlighted keyword alongside its color and the sorted list of page numbers on which it was found.  The legend updates automatically when highlights are added or removed.
 
 ### Closing the viewer
 
