@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import WhisperWorker from "./whisperWorker?worker";
+import PdfViewer from "./PdfViewer.jsx";
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 //
@@ -26,6 +27,12 @@ export default function App() {
     _setPendingActionState(val);
   }, []);
   const [logOpen, setLogOpen]     = useState(false);
+
+  // ── PDF Viewer state ──────────────────────────────────────────────────────
+  // openPdf holds the currently loaded document { id, name } or null when
+  // no document is open.  The PdfViewer overlay is shown only when this is set.
+  const [openPdf, setOpenPdf] = useState(null);
+  const pdfViewerRef = useRef(null);
 
   const activatedRef        = useRef(false);
   const recognitionRef      = useRef(null);
@@ -166,14 +173,11 @@ export default function App() {
       return;
     }
 
-    const targetUrl = `/admin.html?preview=${previewId}&name=${encodeURIComponent(name)}`;
+    // Load the document in the inline PDF viewer instead of a new tab.
     setPendingAction(null);
-
-    const previewWindow = window.open(targetUrl, "_blank");
-    if (!previewWindow) {
-      window.location.assign(targetUrl);
-    }
-  }, [addLog]);
+    setOpenPdf({ id: previewId, name });
+    addLog(`📄 Opening document: "${name}"`, "info");
+  }, [addLog, setPendingAction]);
 
   const fetchRecentDocuments = useCallback(async () => {
     try {
@@ -330,6 +334,49 @@ export default function App() {
         setAiResponse(null);
         setPendingAction(null);
         openDocumentPreview({ previewId: docId, name: docName });
+      } else if (answer === "__ACTION:NEXT_PDF_PAGE__") {
+        addLog("📄 Command: next page", "voice");
+        setAiResponse(null);
+        setPendingAction(null);
+        if (pdfViewerRef.current) {
+          pdfViewerRef.current.nextPage();
+        } else {
+          setAiResponse("No document is open. Open a document first.");
+        }
+      } else if (answer === "__ACTION:PREVIOUS_PDF_PAGE__") {
+        addLog("📄 Command: previous page", "voice");
+        setAiResponse(null);
+        setPendingAction(null);
+        if (pdfViewerRef.current) {
+          pdfViewerRef.current.prevPage();
+        } else {
+          setAiResponse("No document is open. Open a document first.");
+        }
+      } else if (answer.startsWith("__ACTION:HIGHLIGHT_WORD:")) {
+        // Format: __ACTION:HIGHLIGHT_WORD:<word>__
+        const word = answer.replace("__ACTION:HIGHLIGHT_WORD:", "").replace(/__$/, "").trim();
+        addLog(`🖊️ Command: highlight "${word}"`, "voice");
+        setAiResponse(null);
+        setPendingAction(null);
+        if (pdfViewerRef.current && word) {
+          pdfViewerRef.current.highlightWord(word);
+        } else if (!pdfViewerRef.current) {
+          setAiResponse("No document is open. Open a document first.");
+        }
+      } else if (answer === "__ACTION:REMOVE_HIGHLIGHTS__") {
+        addLog("🗑️ Command: remove all highlights", "voice");
+        setAiResponse(null);
+        setPendingAction(null);
+        if (pdfViewerRef.current) {
+          pdfViewerRef.current.removeHighlights();
+        } else {
+          setAiResponse("No document is open.");
+        }
+      } else if (answer === "__ACTION:CLOSE_DOCUMENT__") {
+        addLog("📄 Command: close document", "voice");
+        setAiResponse(null);
+        setPendingAction(null);
+        setOpenPdf(null);
       } else {
         addLog(`💡 AI: "${answer}"`, "voice");
         setPendingAction(null);
@@ -627,6 +674,16 @@ export default function App() {
 
   return (
     <div style={styles.page}>
+      {/* ── Inline PDF Viewer overlay — shown only when a document is open ── */}
+      {openPdf && (
+        <PdfViewer
+          ref={pdfViewerRef}
+          documentId={openPdf.id}
+          documentName={openPdf.name}
+          onClose={() => setOpenPdf(null)}
+        />
+      )}
+
       <div style={styles.indicator}>
         <span style={dotStyle} />
         <span style={styles.indicatorText}>{btnLabel}</span>
