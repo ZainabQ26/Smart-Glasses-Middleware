@@ -304,6 +304,16 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
   return (
     <div style={styles.container}>
 
+      {/* ── Info bar — file name (left) and page indicator (right) ─────────── */}
+      <div style={styles.infoBar}>
+        <span style={styles.infoBarName} title={documentName}>
+          📄 {documentName || "Document"}
+        </span>
+        <span style={styles.infoBarPage}>
+          {loading ? "Loading…" : totalPages > 0 ? `${currentPage} / ${totalPages}` : ""}
+        </span>
+      </div>
+
       {/* ── Highlight status toast (fixed so it never shifts the layout) ──── */}
       {highlightStatus && (
         <div style={styles.toast}>{highlightStatus}</div>
@@ -361,6 +371,31 @@ const styles = {
     overflow: "hidden",
     background: "#111",
     minHeight: 0,
+  },
+  // Slim read-only bar above the canvas: file name on the left, page x/y on right.
+  infoBar: {
+    flexShrink: 0,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "6px 14px",
+    background: "#1a1a2e",
+    borderBottom: "1px solid #2a2a3a",
+  },
+  infoBarName: {
+    fontSize: "0.85rem",
+    color: "#7ec8e3",
+    fontWeight: 600,
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    maxWidth: "70%",
+  },
+  infoBarPage: {
+    fontSize: "0.82rem",
+    color: "#aaa",
+    whiteSpace: "nowrap",
+    flexShrink: 0,
   },
   // The toast is position: fixed so it never contributes to layout height and
   // the rest of the container stays perfectly still when it appears/disappears.
