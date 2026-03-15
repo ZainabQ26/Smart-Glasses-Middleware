@@ -30,7 +30,7 @@ export default function App() {
 
   // ── PDF Viewer state ──────────────────────────────────────────────────────
   // openPdf holds the currently loaded document { id, name } or null when
-  // no document is open.  The PdfViewer overlay is shown only when this is set.
+  // no document is open.  The PdfViewer is shown inline below the conversation.
   const [openPdf, setOpenPdf] = useState(null);
   const pdfViewerRef = useRef(null);
 
@@ -38,6 +38,12 @@ export default function App() {
   // function reference on every App re-render, which would cause PdfViewer to
   // see a changed prop and needlessly re-render.
   const handleClosePdf = useCallback(() => setOpenPdf(null), []);
+
+  // ── Mic error state ───────────────────────────────────────────────────────
+  // Set to true when the microphone cannot be accessed (e.g. permission denied).
+  // Turns the status dot red and shows "Error" next to it.
+  const [micError, setMicError] = useState(false);
+  const micErrorRef = useRef(false);
 
   const activatedRef        = useRef(false);
   const recognitionRef      = useRef(null);
@@ -407,6 +413,11 @@ export default function App() {
         setAiResponse(null);
         setPendingAction(null);
         setOpenPdf(null);
+      } else if (answer === "__ACTION:OPEN_ADMIN_PANEL__") {
+        addLog("🔧 Command: open admin panel", "voice");
+        setAiResponse(null);
+        setPendingAction(null);
+        window.location.href = "/admin.html";
       } else {
         addLog(`💡 AI: "${answer}"`, "voice");
         setPendingAction(null);
@@ -483,7 +494,7 @@ export default function App() {
         if (listeningTimeoutRef.current) clearTimeout(run.current);
         listeningTimeoutRef.current = setTimeout(() => {
           if (activatedRef.current) { addLog("⏱️ No speech detected — resetting.", "warn"); resumeListeningRef.current(); }
-        }, 30_000);
+        }, 5_000);
 
         // VAD disabled: we do not start the VAD here.
         return;
@@ -534,8 +545,13 @@ export default function App() {
     };
 
     rec.onerror = (e) => {
-      if (e.error !== "no-speech" && e.error !== "aborted")
+      if (e.error === "not-allowed" || e.error === "audio-capture") {
+        micErrorRef.current = true;
+        setMicError(true);
+        addLog(`🔴 Mic error: ${e.error} — microphone cannot be accessed.`, "error");
+      } else if (e.error !== "no-speech" && e.error !== "aborted") {
         addLog(`Mic error: ${e.error}`, "warn");
+      }
     };
 
     rec.onstart = () => {
@@ -543,12 +559,17 @@ export default function App() {
       restartAttemptsRef.current = 0;
     };
 
-    // Do not automatically restart the recognition when it ends. The
-    // 30s timeout moves the UI back to `idle`, but the same SpeechRecognition
-    // instance remains available and will detect the wake-word without a
-    // start/stop cycle. If the recognition ends unexpectedly it will not be
-    // restarted to avoid audio-session churn.
-    rec.onend = () => {};
+    // Restart recognition when it ends so the mic stays continuously active
+    // and can detect the "activate" wake-word after each command.
+    rec.onend = () => {
+      if (!micErrorRef.current) {
+        try {
+          rec.start();
+        } catch (err) {
+          addLog(`⚠️ Could not restart mic: ${err?.message ?? err}`, "warn");
+        }
+      }
+    };
 
     rec.start();
     recognitionRef.current = rec;
@@ -655,6 +676,19 @@ export default function App() {
     };
   }, []);
 
+  // ── Message fade-out ──────────────────────────────────────────────────────
+  // After the AI response is displayed and the status returns to idle, clear
+  // the transcript and response after a few seconds so only the PDF remains.
+  useEffect(() => {
+    if (status === "idle" && !pendingAction && (aiResponse || transcript)) {
+      const timer = setTimeout(() => {
+        setAiResponse(null);
+        setTranscript(null);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [status, pendingAction, aiResponse, transcript]);
+
   // ── Manual tap button ─────────────────────────────────────────────────────
   const handleMicButton = () => {
     if (status === "idle") {
@@ -666,7 +700,7 @@ export default function App() {
       if (listeningTimeoutRef.current) clearTimeout(listeningTimeoutRef.current);
       listeningTimeoutRef.current = setTimeout(() => {
         if (activatedRef.current) { addLog("⏱️ No speech detected — resetting.", "warn"); resumeListening(); }
-      }, 30_000);
+      }, 5_000);
       // VAD disabled: do not start VAD on manual mic button
     } else if (status === "listening") {
       if (listeningTimeoutRef.current) { clearTimeout(listeningTimeoutRef.current); listeningTimeoutRef.current = null; }
@@ -682,18 +716,22 @@ export default function App() {
   const isListening  = status === "listening";
   const isProcessing = status === "processing";
   const isSending    = status === "sending";
-  const btnLabel = isSending
-    ? "🤖 Sending to AI…"
-    : isProcessing
-      ? "⏳ Transcribing…"
-      : isListening
-        ? (vad.userSpeaking ? "🗣️ Speaking…" : "🎤 Listening")
-        : vad.loading
-          ? "⏱️ Loading Silero VAD…"
-          : vad.errored
-            ? "⚠️ VAD error — say Activate to retry"
-            : 'Say "Activate"';
-  const dotColor = isSending    ? "#3498db"
+  const btnLabel = micError
+    ? "Error"
+    : isSending
+      ? "🤖 Sending to AI…"
+      : isProcessing
+        ? "⏳ Transcribing…"
+        : isListening
+          ? (vad.userSpeaking ? "🗣️ Speaking…" : "🎤 Listening")
+          : vad.loading
+            ? "⏱️ Loading Silero VAD…"
+            : vad.errored
+              ? "⚠️ VAD error — say Activate to retry"
+              : 'Say "Activate"';
+  const dotColor = micError
+    ? "#e74c3c"
+    : isSending    ? "#3498db"
     : isProcessing ? "#9b59b6"
     : isListening  ? "#e67e22"
     : vad.errored  ? "#e74c3c"
@@ -704,24 +742,10 @@ export default function App() {
 
   return (
     <div style={styles.page}>
-      {/* ── Inline PDF Viewer overlay — shown only when a document is open ── */}
-      {/* key={openPdf.id} forces a full remount whenever the document changes.
-          This guarantees that switching documents clears all viewer state
-          (highlights, page position, etc.) and the old canvas is discarded. */}
-      {openPdf && (
-        <PdfViewer
-          key={openPdf.id}
-          ref={pdfViewerRef}
-          documentId={openPdf.id}
-          documentName={openPdf.name}
-          onClose={handleClosePdf}
-        />
-      )}
-
       <div style={styles.indicator}>
         <span style={dotStyle} />
-        <span style={styles.indicatorText}>{btnLabel}</span>
-        {usedAdvancedModel && (
+        <span style={micError ? styles.indicatorTextError : styles.indicatorText}>{btnLabel}</span>
+        {usedAdvancedModel && !micError && (
           <div title="Advanced model selected" style={{display:'inline-flex', alignItems:'center', gap:6, marginLeft:6}}>
             <span style={{fontSize:14, color:'#7ec8e3'}}>⚡</span>
           </div>
@@ -730,7 +754,7 @@ export default function App() {
 
       <main style={styles.main}>
 
-        {(transcript || isSending) && (
+        {(transcript || isSending || aiResponse || pendingAction) && (
           <section style={styles.conversationArea}>
             {transcript && (
               <div style={styles.transcriptBubble}>
@@ -758,7 +782,7 @@ export default function App() {
             {pendingAction?.type === "SHOW_RECENT_FILES" && (
               <div style={styles.actionCard}>
                 <p style={styles.actionCardTitle}>📂 Recent Uploaded Files</p>
-                <p style={styles.actionCardHint}>Say a number (1–{pendingAction.files.length}) or tap a file to open it.</p>
+                <p style={styles.actionCardHint}>Say a number (1–{pendingAction.files.length}) to open a file.</p>
                 <div style={styles.actionList}>
                   {pendingAction.files.map((file, index) => (
                     <button
@@ -783,15 +807,23 @@ export default function App() {
               <div style={styles.actionCard}>
                 <p style={styles.actionCardTitle}>📄 Last Uploaded Document</p>
                 <p style={styles.actionCardDoc}>{pendingAction.name}</p>
-                <button
-                  style={styles.actionBtnSecondary}
-                  onClick={() => openDocumentPreview({ previewId: pendingAction.id, name: pendingAction.name })}
-                >
-                  Preview Document →
-                </button>
               </div>
             )}
           </section>
+        )}
+
+        {/* ── Inline PDF Viewer — shown below conversation when a document is open ── */}
+        {/* key={openPdf.id} forces a full remount whenever the document changes.
+            This guarantees that switching documents clears all viewer state
+            (highlights, page position, etc.) and the old canvas is discarded. */}
+        {openPdf && (
+          <PdfViewer
+            key={openPdf.id}
+            ref={pdfViewerRef}
+            documentId={openPdf.id}
+            documentName={openPdf.name}
+            onClose={handleClosePdf}
+          />
         )}
       </main>
 
@@ -834,14 +866,29 @@ function formatActionTime(value) {
 
 // Parses a voice/typed command into a 1-based file-list index.
 // Handles bare digits ("2"), "file 2", "number 3", "second", "open the third", etc.
+// Also handles common speech-recognition homophones:
+//   "to" / "too" → 2,  "for" → 4,  "won" → 1,  "ate" → 8
+// Standalone homophones ("to", "too", "for") are only matched when the ENTIRE
+// input is that word to avoid false positives (e.g. "go to page 3" → 2).
 // Returns a number 1–9 when a numeric intent is detected; the caller is
 // responsible for bounds-checking against the actual file-list length.
 function parseFileSelectionNumber(text) {
   if (!text) return null;
   const s = text.trim().toLowerCase();
 
-  // Word ordinals / cardinals (covers the typical 1–5 list size)
-  const words = { one: 1, first: 1, two: 2, second: 2, three: 3, third: 3, four: 4, fourth: 4, five: 5, fifth: 5 };
+  // Homophone-only matches: only when the ENTIRE input is that word
+  // (avoids "go to page 3" matching "to" → 2 by mistake).
+  if (/^\s*(to|too)\s*$/.test(s)) return 2;
+  if (/^\s*for\s*$/.test(s)) return 4;
+
+  // Word ordinals / cardinals including common homophones (covers 1–5 list)
+  const words = {
+    one: 1, won: 1, first: 1,
+    two: 2, second: 2,
+    three: 3, third: 3,
+    four: 4, fourth: 4,
+    five: 5, fifth: 5,
+  };
   for (const [word, num] of Object.entries(words)) {
     if (new RegExp(`\\b${word}\\b`).test(s)) return num;
   }
@@ -863,13 +910,14 @@ function logBg(type) {
 
 const styles = {
   page: {
-    minHeight: "100vh",
+    height: "100vh",
     background: "#000",
     color: "#e0e0e0",
     display: "flex",
     flexDirection: "column",
     fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
     position: "relative",
+    overflow: "hidden",
   },
   indicator: {
     position: "absolute",
@@ -882,15 +930,14 @@ const styles = {
   },
   dot: { width: 12, height: 12, borderRadius: "50%" },
   indicatorText: { fontSize: "0.85rem", color: "#ccc" },
+  indicatorTextError: { fontSize: "0.85rem", color: "#e74c3c", fontWeight: 700 },
   main: {
     flex: 1,
-    maxWidth: 680,
     width: "100%",
-    margin: "48px auto 32px",
-    padding: "0 16px",
     display: "flex",
     flexDirection: "column",
-    gap: 24,
+    paddingTop: 48,
+    overflow: "hidden",
   },
   btnWrap: {
     display: "flex",
@@ -914,7 +961,11 @@ const styles = {
     display: "flex",
     flexDirection: "column",
     gap: 12,
-    padding: "0 4px",
+    padding: "8px 16px",
+    maxWidth: 680,
+    width: "100%",
+    margin: "0 auto",
+    flexShrink: 0,
   },
   transcriptBubble: {
     background: "#1e3a5f",
