@@ -10,6 +10,12 @@ public class SelectDocumentTaskHandler : ITaskHandler
 
     public string Name => "select-document";
 
+    public IReadOnlyList<string> Keywords => new[]
+    {
+        "open document", "select document", "open the document", "open pdf", "open the pdf",
+        "load document", "view document"
+    };
+
     public SelectDocumentTaskHandler(ApplicationDbContext context)
     {
         _context = context;

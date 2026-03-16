@@ -14,6 +14,11 @@ public class OCRTaskHandler : ITaskHandler
 
     public string Name => "ocr";
 
+    public IReadOnlyList<string> Keywords => new[]
+    {
+        "run ocr", "scan document", "ocr document", "read the text", "extract text"
+    };
+
     public OCRTaskHandler(ILogger<OCRTaskHandler> logger, IDocumentProcessingService processingService, IRAGService ragService)
     {
         _logger = logger;

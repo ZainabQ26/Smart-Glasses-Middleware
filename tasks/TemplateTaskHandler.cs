@@ -9,6 +9,8 @@ public class TemplateTaskHandler : ITaskHandler
     // The task name should be lowercase and unique.
     public string Name => "template";
 
+    public IReadOnlyList<string> Keywords => Array.Empty<string>(); // no direct keyword trigger
+
     // Implement your task logic here. Return a user-facing response string.
     public Task<string> HandleAsync(string input)
     {

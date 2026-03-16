@@ -14,6 +14,11 @@ public class AdminPanelTaskHandler : ITaskHandler
 {
     public string Name => "open-admin-panel";
 
+    public IReadOnlyList<string> Keywords => new[]
+    {
+        "open admin panel", "go to admin", "show admin", "admin panel", "admin"
+    };
+
     public Task<string> HandleAsync(string input)
     {
         return Task.FromResult("__ACTION:OPEN_ADMIN_PANEL__");

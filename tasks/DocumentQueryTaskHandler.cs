@@ -14,6 +14,12 @@ public class DocumentQueryTaskHandler : ITaskHandler
 
     public string Name => "document-query";
 
+    public IReadOnlyList<string> Keywords => new[]
+    {
+        "ask the document", "query document", "what does the document say", "summarize document",
+        "explain in the document", "according to the document", "based on the document"
+    };
+
     public DocumentQueryTaskHandler(IRAGService ragService, ILogger<DocumentQueryTaskHandler> _logger)
     {
         _ragService = ragService;

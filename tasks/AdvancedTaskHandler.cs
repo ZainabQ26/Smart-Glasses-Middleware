@@ -17,6 +17,8 @@ public class AdvancedTaskHandler : ITaskHandler
 
     public string Name => "advanced";
 
+    public IReadOnlyList<string> Keywords => Array.Empty<string>(); // AI fallback — no direct keywords
+
     public async Task<string> HandleAsync(string input)
     {
         var endpoint = _configuration["AI:AdvancedModelEndpoint"];

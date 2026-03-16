@@ -10,6 +10,11 @@ public class ReminderTaskHandler : ITaskHandler
 
     public string Name => "reminder";
 
+    public IReadOnlyList<string> Keywords => new[]
+    {
+        "remind me", "set a reminder", "add a reminder", "create reminder", "set reminder"
+    };
+
     public ReminderTaskHandler(IHistoryService historyService, ILogger<ReminderTaskHandler> logger, IRequestMonitoringService? monitoringService = null)
     {
         _historyService = historyService;

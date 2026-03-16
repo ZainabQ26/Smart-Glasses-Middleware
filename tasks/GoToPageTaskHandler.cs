@@ -15,6 +15,11 @@ public class GoToPageTaskHandler : ITaskHandler
 {
     public string Name => "go-to-page";
 
+    public IReadOnlyList<string> Keywords => new[]
+    {
+        "go to page", "jump to page", "navigate to page", "turn to page", "open page"
+    };
+
     // Matches one or more digits optionally preceded by ordinal suffixes (e.g. "1st", "2nd").
     private static readonly Regex PageNumberRegex =
         new Regex(@"\b(\d+)(?:st|nd|rd|th)?\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);

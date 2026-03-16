@@ -10,6 +10,11 @@ public class DeleteReminderTaskHandler : ITaskHandler
 
     public string Name => "delete-reminder";
 
+    public IReadOnlyList<string> Keywords => new[]
+    {
+        "delete reminder", "remove reminder", "cancel reminder", "delete the reminder"
+    };
+
     public DeleteReminderTaskHandler(IHistoryService historyService, ILogger<DeleteReminderTaskHandler> logger)
     {
         _historyService = historyService;
