@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import WhisperWorker from "./whisperWorker?worker";
+import PdfViewer from "./PdfViewer.jsx";
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 //
@@ -27,6 +28,11 @@ export default function App() {
     _setPendingActionState(val);
   }, []);
   const [logOpen, setLogOpen]     = useState(false);
+
+  // Inline PDF viewer state.
+  const [openPdf, setOpenPdf] = useState(null); // { id, name } | null
+  const pdfViewerRef = useRef(null);
+  const handleClosePdf = useCallback(() => setOpenPdf(null), []);
 
   const activatedRef        = useRef(false);
   const recognitionRef      = useRef(null);
@@ -171,14 +177,10 @@ export default function App() {
       return;
     }
 
-    const targetUrl = `/admin.html?preview=${previewId}&name=${encodeURIComponent(name)}`;
     setPendingAction(null);
-
-    const previewWindow = window.open(targetUrl, "_blank");
-    if (!previewWindow) {
-      window.location.assign(targetUrl);
-    }
-  }, [addLog]);
+    setOpenPdf({ id: previewId, name });
+    addLog(`📄 Opening document: "${name}"`, "info");
+  }, [addLog, setPendingAction]);
 
   const fetchRecentDocuments = useCallback(async () => {
     try {
@@ -335,6 +337,76 @@ export default function App() {
         setAiResponse(null);
         setPendingAction(null);
         openDocumentPreview({ previewId: docId, name: docName });
+      } else if (answer === "__ACTION:NEXT_PDF_PAGE__") {
+        addLog("📄 Command: next page", "voice");
+        setAiResponse(null);
+        setPendingAction(null);
+        if (pdfViewerRef.current) {
+          pdfViewerRef.current.nextPage();
+        } else {
+          setAiResponse("No document is open. Open a document first.");
+        }
+      } else if (answer === "__ACTION:PREVIOUS_PDF_PAGE__") {
+        addLog("📄 Command: previous page", "voice");
+        setAiResponse(null);
+        setPendingAction(null);
+        if (pdfViewerRef.current) {
+          pdfViewerRef.current.prevPage();
+        } else {
+          setAiResponse("No document is open. Open a document first.");
+        }
+      } else if (answer.startsWith("__ACTION:HIGHLIGHT_WORD:")) {
+        const word = answer.replace("__ACTION:HIGHLIGHT_WORD:", "").replace(/__$/, "").trim();
+        addLog(`🖊️ Command: highlight "${word}"`, "voice");
+        setAiResponse(null);
+        setPendingAction(null);
+        if (pdfViewerRef.current && word) {
+          pdfViewerRef.current.highlightWord(word);
+        } else if (!pdfViewerRef.current) {
+          setAiResponse("No document is open. Open a document first.");
+        }
+      } else if (answer === "__ACTION:REMOVE_HIGHLIGHTS__") {
+        addLog("🗑️ Command: remove all highlights", "voice");
+        setAiResponse(null);
+        setPendingAction(null);
+        if (pdfViewerRef.current) {
+          pdfViewerRef.current.removeHighlights();
+        } else {
+          setAiResponse("No document is open.");
+        }
+      } else if (answer.startsWith("__ACTION:GO_TO_PAGE:")) {
+        const rawPage = answer.replace("__ACTION:GO_TO_PAGE:", "").replace(/__$/, "").trim();
+        const pageNumber = parseInt(rawPage, 10);
+        addLog(`📄 Command: go to page ${pageNumber}`, "voice");
+        setAiResponse(null);
+        setPendingAction(null);
+        if (pdfViewerRef.current && !Number.isNaN(pageNumber)) {
+          pdfViewerRef.current.goToPage(pageNumber);
+        } else if (!pdfViewerRef.current) {
+          setAiResponse("No document is open. Open a document first.");
+        } else {
+          setAiResponse("Sorry, I couldn't understand the page number.");
+        }
+      } else if (answer.startsWith("__ACTION:GO_TO_LOINC:")) {
+        const loincCode = answer.replace("__ACTION:GO_TO_LOINC:", "").replace(/__$/, "").trim();
+        addLog(`🔬 Command: go to LOINC code "${loincCode}"`, "voice");
+        setAiResponse(null);
+        setPendingAction(null);
+        if (pdfViewerRef.current && loincCode) {
+          pdfViewerRef.current.goToLoincCode(loincCode);
+        } else if (!pdfViewerRef.current) {
+          setAiResponse("No document is open. Open a document first.");
+        }
+      } else if (answer === "__ACTION:CLOSE_DOCUMENT__") {
+        addLog("📄 Command: close document", "voice");
+        setAiResponse(null);
+        setPendingAction(null);
+        setOpenPdf(null);
+      } else if (answer === "__ACTION:OPEN_ADMIN_PANEL__") {
+        addLog("🔧 Command: open admin panel", "voice");
+        setAiResponse(null);
+        setPendingAction(null);
+        window.location.href = "/admin.html";
       } else {
         addLog(`💡 AI: "${answer}"`, "voice");
         setPendingAction(null);
@@ -726,7 +798,7 @@ export default function App() {
 
       <main style={styles.main}>
 
-        {(transcript || isSending) && (
+        {(transcript || isSending || aiResponse || pendingAction) && (
           <section style={styles.conversationArea}>
             {transcript && (
               <div style={styles.transcriptBubble}>
@@ -788,6 +860,16 @@ export default function App() {
               </div>
             )}
           </section>
+        )}
+
+        {openPdf && (
+          <PdfViewer
+            key={openPdf.id}
+            ref={pdfViewerRef}
+            documentId={openPdf.id}
+            documentName={openPdf.name}
+            onClose={handleClosePdf}
+          />
         )}
       </main>
 
