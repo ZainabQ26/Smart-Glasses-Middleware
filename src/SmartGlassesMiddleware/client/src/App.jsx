@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import WhisperWorker from "./whisperWorker?worker";
-import PdfViewer from "./PdfViewer.jsx";
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 //
@@ -19,6 +18,7 @@ export default function App() {
   const [transcript, setTranscript] = useState(null);
   const [aiResponse, setAiResponse] = useState(null);
   const [usedAdvancedModel, setUsedAdvancedModel] = useState(false);
+  const [wakeWordReady, setWakeWordReady] = useState(false);
   const [speechMode, setSpeechMode] = useState("auto"); // auto | webspeech-only | whisper-only
   const [pendingAction, _setPendingActionState] = useState(null); // { type: "SHOW_RECENT_FILES", files } | { type: "SELECT_DOCUMENT", id, name } | null
   // Wrapper keeps the ref in sync so async callbacks always read the current value.
@@ -28,25 +28,12 @@ export default function App() {
   }, []);
   const [logOpen, setLogOpen]     = useState(false);
 
-  // ── PDF Viewer state ──────────────────────────────────────────────────────
-  // openPdf holds the currently loaded document { id, name } or null when
-  // no document is open.  The PdfViewer is shown inline below the conversation.
-  const [openPdf, setOpenPdf] = useState(null);
-  const pdfViewerRef = useRef(null);
-
-  // Stable callback passed as the onClose prop — avoids recreating a new
-  // function reference on every App re-render, which would cause PdfViewer to
-  // see a changed prop and needlessly re-render.
-  const handleClosePdf = useCallback(() => setOpenPdf(null), []);
-
-  // ── Mic error state ───────────────────────────────────────────────────────
-  // Set to true when the microphone cannot be accessed (e.g. permission denied).
-  // Turns the status dot red and shows "Error" next to it.
-  const [micError, setMicError] = useState(false);
-  const micErrorRef = useRef(false);
-
   const activatedRef        = useRef(false);
   const recognitionRef      = useRef(null);
+  const recognitionRunningRef = useRef(false);
+  const recognitionRestartTimeoutRef = useRef(null);
+  const recognitionBlockedRef = useRef(false);
+  const ensureRecognitionRunningRef = useRef(() => {});
   const vadRef              = useRef(null);   // VAD removed; kept so optional calls are no-ops
   const listeningTimeoutRef = useRef(null);
   const workerRef           = useRef(null);
@@ -184,11 +171,14 @@ export default function App() {
       return;
     }
 
-    // Load the document in the inline PDF viewer instead of a new tab.
+    const targetUrl = `/admin.html?preview=${previewId}&name=${encodeURIComponent(name)}`;
     setPendingAction(null);
-    setOpenPdf({ id: previewId, name });
-    addLog(`📄 Opening document: "${name}"`, "info");
-  }, [addLog, setPendingAction]);
+
+    const previewWindow = window.open(targetUrl, "_blank");
+    if (!previewWindow) {
+      window.location.assign(targetUrl);
+    }
+  }, [addLog]);
 
   const fetchRecentDocuments = useCallback(async () => {
     try {
@@ -345,79 +335,6 @@ export default function App() {
         setAiResponse(null);
         setPendingAction(null);
         openDocumentPreview({ previewId: docId, name: docName });
-      } else if (answer === "__ACTION:NEXT_PDF_PAGE__") {
-        addLog("📄 Command: next page", "voice");
-        setAiResponse(null);
-        setPendingAction(null);
-        if (pdfViewerRef.current) {
-          pdfViewerRef.current.nextPage();
-        } else {
-          setAiResponse("No document is open. Open a document first.");
-        }
-      } else if (answer === "__ACTION:PREVIOUS_PDF_PAGE__") {
-        addLog("📄 Command: previous page", "voice");
-        setAiResponse(null);
-        setPendingAction(null);
-        if (pdfViewerRef.current) {
-          pdfViewerRef.current.prevPage();
-        } else {
-          setAiResponse("No document is open. Open a document first.");
-        }
-      } else if (answer.startsWith("__ACTION:HIGHLIGHT_WORD:")) {
-        // Format: __ACTION:HIGHLIGHT_WORD:<word>__
-        const word = answer.replace("__ACTION:HIGHLIGHT_WORD:", "").replace(/__$/, "").trim();
-        addLog(`🖊️ Command: highlight "${word}"`, "voice");
-        setAiResponse(null);
-        setPendingAction(null);
-        if (pdfViewerRef.current && word) {
-          pdfViewerRef.current.highlightWord(word);
-        } else if (!pdfViewerRef.current) {
-          setAiResponse("No document is open. Open a document first.");
-        }
-      } else if (answer === "__ACTION:REMOVE_HIGHLIGHTS__") {
-        addLog("🗑️ Command: remove all highlights", "voice");
-        setAiResponse(null);
-        setPendingAction(null);
-        if (pdfViewerRef.current) {
-          pdfViewerRef.current.removeHighlights();
-        } else {
-          setAiResponse("No document is open.");
-        }
-      } else if (answer.startsWith("__ACTION:GO_TO_PAGE:")) {
-        // Format: __ACTION:GO_TO_PAGE:<number>__
-        const rawPage = answer.replace("__ACTION:GO_TO_PAGE:", "").replace(/__$/, "").trim();
-        const pageNumber = parseInt(rawPage, 10);
-        addLog(`📄 Command: go to page ${pageNumber}`, "voice");
-        setAiResponse(null);
-        setPendingAction(null);
-        if (pdfViewerRef.current && !Number.isNaN(pageNumber)) {
-          pdfViewerRef.current.goToPage(pageNumber);
-        } else if (!pdfViewerRef.current) {
-          setAiResponse("No document is open. Open a document first.");
-        } else {
-          setAiResponse("Sorry, I couldn't understand the page number.");
-        }
-      } else if (answer.startsWith("__ACTION:GO_TO_LOINC:")) {
-        // Format: __ACTION:GO_TO_LOINC:<code>__
-        const loincCode = answer.replace("__ACTION:GO_TO_LOINC:", "").replace(/__$/, "").trim();
-        addLog(`🔬 Command: go to LOINC code "${loincCode}"`, "voice");
-        setAiResponse(null);
-        setPendingAction(null);
-        if (pdfViewerRef.current && loincCode) {
-          pdfViewerRef.current.goToLoincCode(loincCode);
-        } else if (!pdfViewerRef.current) {
-          setAiResponse("No document is open. Open a document first.");
-        }
-      } else if (answer === "__ACTION:CLOSE_DOCUMENT__") {
-        addLog("📄 Command: close document", "voice");
-        setAiResponse(null);
-        setPendingAction(null);
-        setOpenPdf(null);
-      } else if (answer === "__ACTION:OPEN_ADMIN_PANEL__") {
-        addLog("🔧 Command: open admin panel", "voice");
-        setAiResponse(null);
-        setPendingAction(null);
-        window.location.href = "/admin.html";
       } else {
         addLog(`💡 AI: "${answer}"`, "voice");
         setPendingAction(null);
@@ -463,14 +380,75 @@ export default function App() {
   useEffect(() => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) {
+      setWakeWordReady(false);
       addLog("⚠️ Wake-word not available — use the mic button below.", "warn");
       return;
     }
 
+    let disposed = false;
     const rec = new SR();
     rec.continuous     = true;
     rec.interimResults = true;
     rec.lang           = "en-US";
+
+    const clearRecognitionRestart = () => {
+      if (recognitionRestartTimeoutRef.current) {
+        window.clearTimeout(recognitionRestartTimeoutRef.current);
+        recognitionRestartTimeoutRef.current = null;
+      }
+    };
+
+    const markRecognitionUnavailable = (message) => {
+      recognitionBlockedRef.current = true;
+      recognitionRunningRef.current = false;
+      clearRecognitionRestart();
+      setWakeWordReady(false);
+      addLog(message, "error");
+    };
+
+    const scheduleRecognitionRestart = (reason = "") => {
+      if (disposed || recognitionBlockedRef.current) return;
+
+      clearRecognitionRestart();
+      setWakeWordReady(false);
+
+      const attempt = restartAttemptsRef.current;
+      const delay = Math.min(RESTART_BACKOFF_BASE_MS * (2 ** attempt), RESTART_BACKOFF_MAX_MS);
+      restartAttemptsRef.current = attempt + 1;
+
+      if (attempt === 0 || reason) {
+        addLog(`⚠️ Wake-word listener stopped${reason ? ` (${reason})` : ""} — retrying.`, "warn");
+      }
+
+      recognitionRestartTimeoutRef.current = window.setTimeout(() => {
+        if (disposed) return;
+        ensureRecognitionRunningRef.current();
+      }, delay);
+    };
+
+    const ensureRecognitionRunning = () => {
+      if (disposed || recognitionBlockedRef.current || recognitionRunningRef.current) return;
+
+      clearRecognitionRestart();
+
+      try {
+        rec.start();
+      } catch (err) {
+        const message = `${err?.message || err || ""}`;
+        if (/already started/i.test(message)) {
+          recognitionRunningRef.current = true;
+          setWakeWordReady(true);
+          return;
+        }
+        if (/not-allowed|permission|denied|audio-capture/i.test(message)) {
+          markRecognitionUnavailable(`🔴 Mic error: ${message || "microphone unavailable"}`);
+          return;
+        }
+        scheduleRecognitionRestart("start failed");
+      }
+    };
+
+    ensureRecognitionRunningRef.current = ensureRecognitionRunning;
 
     rec.onresult = (event) => {
       const transcript = Array.from(event.results)
@@ -491,10 +469,10 @@ export default function App() {
         setStatus("listening");
         addLog("🎤 Activated — speak your command", "info");
 
-        if (listeningTimeoutRef.current) clearTimeout(run.current);
+        if (listeningTimeoutRef.current) clearTimeout(listeningTimeoutRef.current);
         listeningTimeoutRef.current = setTimeout(() => {
           if (activatedRef.current) { addLog("⏱️ No speech detected — resetting.", "warn"); resumeListeningRef.current(); }
-        }, 5_000);
+        }, 30_000);
 
         // VAD disabled: we do not start the VAD here.
         return;
@@ -546,34 +524,41 @@ export default function App() {
 
     rec.onerror = (e) => {
       if (e.error === "not-allowed" || e.error === "audio-capture") {
-        micErrorRef.current = true;
-        setMicError(true);
-        addLog(`🔴 Mic error: ${e.error} — microphone cannot be accessed.`, "error");
-      } else if (e.error !== "no-speech" && e.error !== "aborted") {
-        addLog(`Mic error: ${e.error}`, "warn");
+        markRecognitionUnavailable(`🔴 Mic error: ${e.error} — microphone cannot be accessed.`);
+        return;
       }
+      if (e.error !== "no-speech" && e.error !== "aborted")
+        addLog(`Mic error: ${e.error}`, "warn");
     };
 
     rec.onstart = () => {
+      recognitionBlockedRef.current = false;
+      recognitionRunningRef.current = true;
+      setWakeWordReady(true);
       // Successful start — reset restart attempts.
       restartAttemptsRef.current = 0;
     };
 
-    // Restart recognition when it ends so the mic stays continuously active
-    // and can detect the "activate" wake-word after each command.
     rec.onend = () => {
-      if (!micErrorRef.current) {
-        try {
-          rec.start();
-        } catch (err) {
-          addLog(`⚠️ Could not restart mic: ${err?.message ?? err}`, "warn");
-        }
+      recognitionRunningRef.current = false;
+      setWakeWordReady(false);
+      if (!disposed) {
+        scheduleRecognitionRestart("ended");
       }
     };
 
-    rec.start();
     recognitionRef.current = rec;
-    return () => { try { rec.abort(); } catch (_) {} };
+    ensureRecognitionRunning();
+
+    return () => {
+      disposed = true;
+      ensureRecognitionRunningRef.current = () => {};
+      clearRecognitionRestart();
+      recognitionRef.current = null;
+      recognitionRunningRef.current = false;
+      setWakeWordReady(false);
+      try { rec.abort(); } catch (_) {}
+    };
   }, [isWebSpeechOnly, isWhisperOnly]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Whisper Web Worker ────────────────────────────────────────────────────
@@ -676,23 +661,11 @@ export default function App() {
     };
   }, []);
 
-  // ── Message fade-out ──────────────────────────────────────────────────────
-  // After the AI response is displayed and the status returns to idle, clear
-  // the transcript and response after a few seconds so only the PDF remains.
-  useEffect(() => {
-    if (status === "idle" && !pendingAction && (aiResponse || transcript)) {
-      const timer = setTimeout(() => {
-        setAiResponse(null);
-        setTranscript(null);
-      }, 3000);
-      return () => clearTimeout(timer);
-    }
-  }, [status, pendingAction, aiResponse, transcript]);
-
   // ── Manual tap button ─────────────────────────────────────────────────────
   const handleMicButton = () => {
     if (status === "idle") {
       activatedRef.current = true;
+      ensureRecognitionRunningRef.current();
       setStatus("listening");
       setTranscript(null);
       setAiResponse(null);
@@ -700,7 +673,7 @@ export default function App() {
       if (listeningTimeoutRef.current) clearTimeout(listeningTimeoutRef.current);
       listeningTimeoutRef.current = setTimeout(() => {
         if (activatedRef.current) { addLog("⏱️ No speech detected — resetting.", "warn"); resumeListening(); }
-      }, 5_000);
+      }, 30_000);
       // VAD disabled: do not start VAD on manual mic button
     } else if (status === "listening") {
       if (listeningTimeoutRef.current) { clearTimeout(listeningTimeoutRef.current); listeningTimeoutRef.current = null; }
@@ -716,24 +689,23 @@ export default function App() {
   const isListening  = status === "listening";
   const isProcessing = status === "processing";
   const isSending    = status === "sending";
-  const btnLabel = micError
-    ? "Error"
-    : isSending
-      ? "🤖 Sending to AI…"
-      : isProcessing
-        ? "⏳ Transcribing…"
-        : isListening
-          ? (vad.userSpeaking ? "🗣️ Speaking…" : "🎤 Listening")
-          : vad.loading
-            ? "⏱️ Loading Silero VAD…"
-            : vad.errored
-              ? "⚠️ VAD error — say Activate to retry"
-              : 'Say "Activate"';
-  const dotColor = micError
-    ? "#e74c3c"
-    : isSending    ? "#3498db"
+  const btnLabel = isSending
+    ? "🤖 Sending to AI…"
+    : isProcessing
+      ? "⏳ Transcribing…"
+      : isListening
+        ? (vad.userSpeaking ? "🗣️ Speaking…" : "🎤 Listening")
+        : !wakeWordReady
+          ? "🎤 Reconnecting wake-word…"
+        : vad.loading
+          ? "⏱️ Loading Silero VAD…"
+          : vad.errored
+            ? "⚠️ VAD error — say Activate to retry"
+            : 'Say "Activate"';
+  const dotColor = isSending    ? "#3498db"
     : isProcessing ? "#9b59b6"
     : isListening  ? "#e67e22"
+    : !wakeWordReady ? "#f1c40f"
     : vad.errored  ? "#e74c3c"
     : "#00b894";
 
@@ -744,8 +716,8 @@ export default function App() {
     <div style={styles.page}>
       <div style={styles.indicator}>
         <span style={dotStyle} />
-        <span style={micError ? styles.indicatorTextError : styles.indicatorText}>{btnLabel}</span>
-        {usedAdvancedModel && !micError && (
+        <span style={styles.indicatorText}>{btnLabel}</span>
+        {usedAdvancedModel && (
           <div title="Advanced model selected" style={{display:'inline-flex', alignItems:'center', gap:6, marginLeft:6}}>
             <span style={{fontSize:14, color:'#7ec8e3'}}>⚡</span>
           </div>
@@ -754,7 +726,7 @@ export default function App() {
 
       <main style={styles.main}>
 
-        {(transcript || isSending || aiResponse || pendingAction) && (
+        {(transcript || isSending) && (
           <section style={styles.conversationArea}>
             {transcript && (
               <div style={styles.transcriptBubble}>
@@ -782,7 +754,7 @@ export default function App() {
             {pendingAction?.type === "SHOW_RECENT_FILES" && (
               <div style={styles.actionCard}>
                 <p style={styles.actionCardTitle}>📂 Recent Uploaded Files</p>
-                <p style={styles.actionCardHint}>Say a number (1–{pendingAction.files.length}) to open a file.</p>
+                <p style={styles.actionCardHint}>Say a number (1–{pendingAction.files.length}) or tap a file to open it.</p>
                 <div style={styles.actionList}>
                   {pendingAction.files.map((file, index) => (
                     <button
@@ -807,23 +779,15 @@ export default function App() {
               <div style={styles.actionCard}>
                 <p style={styles.actionCardTitle}>📄 Last Uploaded Document</p>
                 <p style={styles.actionCardDoc}>{pendingAction.name}</p>
+                <button
+                  style={styles.actionBtnSecondary}
+                  onClick={() => openDocumentPreview({ previewId: pendingAction.id, name: pendingAction.name })}
+                >
+                  Preview Document →
+                </button>
               </div>
             )}
           </section>
-        )}
-
-        {/* ── Inline PDF Viewer — shown below conversation when a document is open ── */}
-        {/* key={openPdf.id} forces a full remount whenever the document changes.
-            This guarantees that switching documents clears all viewer state
-            (highlights, page position, etc.) and the old canvas is discarded. */}
-        {openPdf && (
-          <PdfViewer
-            key={openPdf.id}
-            ref={pdfViewerRef}
-            documentId={openPdf.id}
-            documentName={openPdf.name}
-            onClose={handleClosePdf}
-          />
         )}
       </main>
 
@@ -866,29 +830,14 @@ function formatActionTime(value) {
 
 // Parses a voice/typed command into a 1-based file-list index.
 // Handles bare digits ("2"), "file 2", "number 3", "second", "open the third", etc.
-// Also handles common speech-recognition homophones:
-//   "to" / "too" → 2,  "for" → 4,  "won" → 1,  "ate" → 8
-// Standalone homophones ("to", "too", "for") are only matched when the ENTIRE
-// input is that word to avoid false positives (e.g. "go to page 3" → 2).
 // Returns a number 1–9 when a numeric intent is detected; the caller is
 // responsible for bounds-checking against the actual file-list length.
 function parseFileSelectionNumber(text) {
   if (!text) return null;
   const s = text.trim().toLowerCase();
 
-  // Homophone-only matches: only when the ENTIRE input is that word
-  // (avoids "go to page 3" matching "to" → 2 by mistake).
-  if (/^\s*(to|too)\s*$/.test(s)) return 2;
-  if (/^\s*for\s*$/.test(s)) return 4;
-
-  // Word ordinals / cardinals including common homophones (covers 1–5 list)
-  const words = {
-    one: 1, won: 1, first: 1,
-    two: 2, second: 2,
-    three: 3, third: 3,
-    four: 4, fourth: 4,
-    five: 5, fifth: 5,
-  };
+  // Word ordinals / cardinals (covers the typical 1–5 list size)
+  const words = { one: 1, first: 1, two: 2, second: 2, three: 3, third: 3, four: 4, fourth: 4, five: 5, fifth: 5 };
   for (const [word, num] of Object.entries(words)) {
     if (new RegExp(`\\b${word}\\b`).test(s)) return num;
   }
@@ -910,14 +859,13 @@ function logBg(type) {
 
 const styles = {
   page: {
-    height: "100vh",
+    minHeight: "100vh",
     background: "#000",
     color: "#e0e0e0",
     display: "flex",
     flexDirection: "column",
     fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
     position: "relative",
-    overflow: "hidden",
   },
   indicator: {
     position: "absolute",
@@ -930,14 +878,15 @@ const styles = {
   },
   dot: { width: 12, height: 12, borderRadius: "50%" },
   indicatorText: { fontSize: "0.85rem", color: "#ccc" },
-  indicatorTextError: { fontSize: "0.85rem", color: "#e74c3c", fontWeight: 700 },
   main: {
     flex: 1,
+    maxWidth: 680,
     width: "100%",
+    margin: "48px auto 32px",
+    padding: "0 16px",
     display: "flex",
     flexDirection: "column",
-    paddingTop: 48,
-    overflow: "hidden",
+    gap: 24,
   },
   btnWrap: {
     display: "flex",
@@ -961,11 +910,7 @@ const styles = {
     display: "flex",
     flexDirection: "column",
     gap: 12,
-    padding: "8px 16px",
-    maxWidth: 680,
-    width: "100%",
-    margin: "0 auto",
-    flexShrink: 0,
+    padding: "0 4px",
   },
   transcriptBubble: {
     background: "#1e3a5f",
