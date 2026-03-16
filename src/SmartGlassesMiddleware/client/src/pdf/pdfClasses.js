@@ -5,7 +5,7 @@
  * number, and the list of keyword highlights that have been applied.
  *
  * HighlightColors defines the ordered palette used when cycling through
- * highlight colours – the first highlight gets yellow, the second sky-blue,
+ * highlight colours – the first highlight gets orange, the second sky-blue,
  * and so on.  Once all colours are used the cycle wraps back to the start
  * (replacing the oldest highlight).
  */
