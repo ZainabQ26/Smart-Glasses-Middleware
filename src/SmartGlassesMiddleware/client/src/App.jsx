@@ -44,6 +44,8 @@ export default function App() {
   const listeningTimeoutRef = useRef(null);
   const workerRef           = useRef(null);
   const sendToAIRef         = useRef(null);
+  const commandSegmentsRef  = useRef([]);
+  const commandSubmitTimeoutRef = useRef(null);
   const whisperFallbackNeededRef = useRef(false);
   const webSpeechHandledRef      = useRef(false);
   const lowConfidenceTranscriptRef = useRef(null);
@@ -54,12 +56,13 @@ export default function App() {
 
   const WEB_SPEECH_CONFIDENCE_THRESHOLD = 0.72;
   const isWebSpeechOnly = speechMode === "webspeech-only";
-  const isWhisperOnly = speechMode === "whisper-only";
   const API_TIMEOUT_MS = 20_000;
   const PREVIEW_TIMEOUT_MS = 6_000;
   const DOCUMENTS_TIMEOUT_MS = 10_000;
   const RESTART_BACKOFF_BASE_MS = 1000;
   const RESTART_BACKOFF_MAX_MS = 30_000;
+  const COMMAND_SUBMIT_SILENCE_MS = 1_000;
+  const LISTENING_IDLE_TIMEOUT_MS = 10_000;
   // How long to keep the mic listening after showing the file list so the user
   // can say a number without repeating the "activate" wake-word.
   const FILE_SELECTION_TIMEOUT_MS = 60_000;
@@ -141,6 +144,8 @@ export default function App() {
   const RESUME_DELAY_MS = 300;
   const resumeListening = useCallback(() => {
     if (listeningTimeoutRef.current) { clearTimeout(listeningTimeoutRef.current); listeningTimeoutRef.current = null; }
+    if (commandSubmitTimeoutRef.current) { clearTimeout(commandSubmitTimeoutRef.current); commandSubmitTimeoutRef.current = null; }
+    commandSegmentsRef.current = [];
     activatedRef.current = false;
     whisperFallbackNeededRef.current = false;
     webSpeechHandledRef.current = false;
@@ -288,6 +293,91 @@ export default function App() {
             setPendingAction(capturedPending); // restore list
             keepMicActive = true;
             return;
+          }
+        }
+      }
+
+      // If a PDF is open, execute common viewer commands locally so commands
+      // always apply to the active document without requiring any document ID.
+      const localPdf = pdfViewerRef.current;
+      if (localPdf && openPdf) {
+        const lowered = commandText.toLowerCase().trim();
+
+        if (/\b(?:next page|go to next page|page down)\b/.test(lowered)) {
+          addLog("📄 Command: next page", "voice");
+          setAiResponse(null);
+          setPendingAction(null);
+          localPdf.nextPage();
+          return;
+        }
+
+        if (/\b(?:previous page|prev page|go to previous page|back page)\b/.test(lowered)) {
+          addLog("📄 Command: previous page", "voice");
+          setAiResponse(null);
+          setPendingAction(null);
+          localPdf.prevPage();
+          return;
+        }
+
+        const goToPageMatch = lowered.match(/\b(?:go to|goto|open)?\s*page\s+(\d{1,4})\b/);
+        if (goToPageMatch) {
+          const pageNumber = parseInt(goToPageMatch[1], 10);
+          if (!Number.isNaN(pageNumber)) {
+            addLog(`📄 Command: go to page ${pageNumber}`, "voice");
+            setAiResponse(null);
+            setPendingAction(null);
+            localPdf.goToPage(pageNumber);
+            return;
+          }
+        }
+
+        if (/\b(?:remove|clear)\s+(?:all\s+)?highlights?\b/.test(lowered)) {
+          addLog("🗑️ Command: remove all highlights", "voice");
+          setAiResponse(null);
+          setPendingAction(null);
+          localPdf.removeHighlights();
+          return;
+        }
+
+        if (/\bclose\s+(?:the\s+)?(?:document|pdf)\b/.test(lowered)) {
+          addLog("📄 Command: close document", "voice");
+          setAiResponse(null);
+          setPendingAction(null);
+          setOpenPdf(null);
+          return;
+        }
+
+        const highlightMatch = commandText.match(/\bhighlight\s+(.+)$/i);
+        if (highlightMatch) {
+          const phrase = highlightMatch[1]
+            .replace(/^the\s+/i, "")
+            .replace(/\s+please\.?$/i, "")
+            .trim();
+
+          if (phrase) {
+            const quotedTerms = Array.from(phrase.matchAll(/"([^"]+)"|'([^']+)'/g))
+              .map((m) => (m[1] || m[2] || "").trim())
+              .filter(Boolean);
+
+            let terms = [];
+            if (quotedTerms.length > 0) {
+              terms = quotedTerms;
+            } else if (phrase.includes(",")) {
+              terms = phrase.split(",").map((part) => part.trim()).filter(Boolean);
+            } else if (/\s+and\s+/i.test(phrase)) {
+              terms = phrase.split(/\s+and\s+/i).map((part) => part.trim()).filter(Boolean);
+            } else {
+              terms = [phrase];
+            }
+
+            if (terms.length > 0) {
+              addLog(`🧪 Parsed highlight terms: ${terms.map((t) => `"${t}"`).join(", ")}`, "info");
+              terms.forEach((term) => localPdf.highlightWord(term));
+              addLog(`🖊️ Command: highlight ${terms.map((t) => `"${t}"`).join(", ")}`, "voice");
+              setAiResponse(null);
+              setPendingAction(null);
+              return;
+            }
           }
         }
       }
@@ -443,7 +533,7 @@ export default function App() {
         resumeListeningRef.current();
       }
     }
-  }, [addLog, fetchRecentDocuments, fetchJsonWithTimeout, normalizeCommandText, openDocumentPreview, setPendingAction]);
+  }, [addLog, fetchRecentDocuments, fetchJsonWithTimeout, normalizeCommandText, openDocumentPreview, openPdf, setPendingAction]);
 
   sendToAIRef.current = sendToAI;
   useEffect(() => { sendToAIRef.current = sendToAI; }, [sendToAI]);
@@ -522,6 +612,34 @@ export default function App() {
 
     ensureRecognitionRunningRef.current = ensureRecognitionRunning;
 
+    const scheduleCommandSubmit = () => {
+      if (commandSubmitTimeoutRef.current) {
+        clearTimeout(commandSubmitTimeoutRef.current);
+      }
+
+      commandSubmitTimeoutRef.current = setTimeout(() => {
+        if (!activatedRef.current || webSpeechHandledRef.current) return;
+
+        const combined = normalizeCommandText(commandSegmentsRef.current.join(" "));
+        if (!combined) {
+          addLog("⏱️ No command captured — resetting.", "warn");
+          resumeListeningRef.current();
+          return;
+        }
+
+        webSpeechHandledRef.current = true;
+        whisperFallbackNeededRef.current = false;
+        webSpeechSubmitBlockedRef.current = false;
+        lowConfidenceTranscriptRef.current = null;
+
+        addLog(`🗣️ Web Speech: "${combined}"`, "voice");
+        setTranscript(combined);
+        setAiResponse(null);
+        setStatus("sending");
+        sendToAIRef.current?.(combined);
+      }, COMMAND_SUBMIT_SILENCE_MS);
+    };
+
     rec.onresult = (event) => {
       const transcript = Array.from(event.results)
         .map(r => r[0].transcript)
@@ -529,22 +647,32 @@ export default function App() {
         .toLowerCase();
 
       const lastResult = event.results[event.results.length - 1];
-      const lastAlt = lastResult?.[0];
-      const latestText = (lastAlt?.transcript || "").trim().toLowerCase();
-      const confidence = typeof lastAlt?.confidence === "number" ? lastAlt.confidence : null;
 
       if (transcript.includes("activate") && !activatedRef.current) {
         activatedRef.current = true;
         webSpeechHandledRef.current = false;
         whisperFallbackNeededRef.current = false;
         lowConfidenceTranscriptRef.current = null;
+        commandSegmentsRef.current = [];
+        if (commandSubmitTimeoutRef.current) {
+          clearTimeout(commandSubmitTimeoutRef.current);
+          commandSubmitTimeoutRef.current = null;
+        }
         setStatus("listening");
-        addLog("🎤 Activated — speak your command", "info");
+        addLog("🎤 Activated — speak your command (I will submit after 1s of silence)", "info");
 
         if (listeningTimeoutRef.current) clearTimeout(listeningTimeoutRef.current);
         listeningTimeoutRef.current = setTimeout(() => {
           if (activatedRef.current) { addLog("⏱️ No speech detected — resetting.", "warn"); resumeListeningRef.current(); }
-        }, 30_000);
+        }, LISTENING_IDLE_TIMEOUT_MS);
+
+        // If the wake-word and command arrive in one phrase, keep the part
+        // after "activate" as the first captured segment.
+        const wakeAndCommand = normalizeCommandText((lastResult?.[0]?.transcript || "").toLowerCase());
+        if (wakeAndCommand && !/^activate$/i.test(wakeAndCommand)) {
+          commandSegmentsRef.current.push(wakeAndCommand);
+          scheduleCommandSubmit();
+        }
 
         // VAD disabled: we do not start the VAD here.
         return;
@@ -552,31 +680,37 @@ export default function App() {
 
       if (!activatedRef.current) return;
       if (webSpeechHandledRef.current) return;
-      if (!lastResult?.isFinal) return;
-      if (!latestText) return;
 
       if (listeningTimeoutRef.current) {
         clearTimeout(listeningTimeoutRef.current);
-        listeningTimeoutRef.current = null;
+      }
+      listeningTimeoutRef.current = setTimeout(() => {
+        if (activatedRef.current && !webSpeechHandledRef.current) {
+          addLog("⏱️ Listening timed out — sending what I heard.", "warn");
+          scheduleCommandSubmit();
+        }
+      }, LISTENING_IDLE_TIMEOUT_MS);
+
+      let anyFinalSegment = false;
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        const result = event.results[i];
+        if (!result?.isFinal) continue;
+        const segment = normalizeCommandText((result[0]?.transcript || "").toLowerCase());
+        if (!segment || /^activate$/i.test(segment)) continue;
+        commandSegmentsRef.current.push(segment);
+        anyFinalSegment = true;
       }
 
-      if (isWhisperOnly) {
-        whisperFallbackNeededRef.current = true;
-        lowConfidenceTranscriptRef.current = latestText;
-        setStatus("processing");
-        addLog("⚙️ Whisper-only mode: using Whisper transcript.", "info");
-        webSpeechSubmitBlockedRef.current = true;
+      if (!anyFinalSegment && !lastResult?.isFinal) {
+        // User is still speaking; keep waiting.
         return;
       }
 
-      if (confidence != null && confidence < WEB_SPEECH_CONFIDENCE_THRESHOLD && !isWebSpeechOnly) {
-        whisperFallbackNeededRef.current = true;
-        lowConfidenceTranscriptRef.current = latestText;
-        setStatus("processing");
-        addLog(`⚠️ Web Speech confidence ${confidence.toFixed(2)} is low — using Whisper fallback.`, "warn");
-        webSpeechSubmitBlockedRef.current = true;
-        return;
-      }
+      const combinedSoFar = normalizeCommandText(commandSegmentsRef.current.join(" "));
+      if (!combinedSoFar) return;
+
+      setTranscript(combinedSoFar);
+      setStatus("listening");
 
       whisperFallbackNeededRef.current = false;
       lowConfidenceTranscriptRef.current = null;
@@ -584,14 +718,8 @@ export default function App() {
         addLog("⚠️ Web Speech submit blocked while Whisper fallback active.", "info");
         return;
       }
-      webSpeechHandledRef.current = true;
-      addLog(confidence != null
-        ? `🗣️ Web Speech (${confidence.toFixed(2)}): "${latestText}"`
-        : `🗣️ Web Speech: "${latestText}"`, "voice");
-      setTranscript(latestText);
-      setAiResponse(null);
-      setStatus("sending");
-      sendToAIRef.current?.(latestText);
+
+      scheduleCommandSubmit();
     };
 
     rec.onerror = (e) => {
@@ -624,6 +752,11 @@ export default function App() {
 
     return () => {
       disposed = true;
+      if (commandSubmitTimeoutRef.current) {
+        clearTimeout(commandSubmitTimeoutRef.current);
+        commandSubmitTimeoutRef.current = null;
+      }
+      commandSegmentsRef.current = [];
       ensureRecognitionRunningRef.current = () => {};
       clearRecognitionRestart();
       recognitionRef.current = null;
@@ -631,7 +764,7 @@ export default function App() {
       setWakeWordReady(false);
       try { rec.abort(); } catch (_) {}
     };
-  }, [isWebSpeechOnly, isWhisperOnly]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isWebSpeechOnly]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Whisper Web Worker ────────────────────────────────────────────────────
   useEffect(() => {
@@ -730,6 +863,11 @@ export default function App() {
         clearTimeout(listeningTimeoutRef.current);
         listeningTimeoutRef.current = null;
       }
+      if (commandSubmitTimeoutRef.current) {
+        clearTimeout(commandSubmitTimeoutRef.current);
+        commandSubmitTimeoutRef.current = null;
+      }
+      commandSegmentsRef.current = [];
     };
   }, []);
 
@@ -743,9 +881,14 @@ export default function App() {
       setAiResponse(null);
       addLog("🎤 Listening… speak your command", "info");
       if (listeningTimeoutRef.current) clearTimeout(listeningTimeoutRef.current);
+      commandSegmentsRef.current = [];
+      if (commandSubmitTimeoutRef.current) {
+        clearTimeout(commandSubmitTimeoutRef.current);
+        commandSubmitTimeoutRef.current = null;
+      }
       listeningTimeoutRef.current = setTimeout(() => {
         if (activatedRef.current) { addLog("⏱️ No speech detected — resetting.", "warn"); resumeListening(); }
-      }, 30_000);
+      }, LISTENING_IDLE_TIMEOUT_MS);
       // VAD disabled: do not start VAD on manual mic button
     } else if (status === "listening") {
       if (listeningTimeoutRef.current) { clearTimeout(listeningTimeoutRef.current); listeningTimeoutRef.current = null; }
