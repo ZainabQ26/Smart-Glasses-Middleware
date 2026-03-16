@@ -9,6 +9,11 @@ public class CloseDocumentTaskHandler : ITaskHandler
 {
     public string Name => "close-document";
 
+    public IReadOnlyList<string> Keywords => new[]
+    {
+        "close document", "close pdf", "exit document", "close the document", "close the pdf"
+    };
+
     public Task<string> HandleAsync(string input)
     {
         return Task.FromResult("__ACTION:CLOSE_DOCUMENT__");

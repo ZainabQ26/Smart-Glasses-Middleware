@@ -10,6 +10,11 @@ public interface ITaskDispatcher
     IReadOnlyList<string> KnownTasks { get; }
     Task<(bool handled, string? response)> TryHandleAsync(string taskName, string input);
     IReadOnlyDictionary<string, string> GetHandlerTypeMap();
+    /// <summary>
+    /// Match the user input against each handler's Keywords list.
+    /// Returns the first matching task name, or null if no keyword matched.
+    /// </summary>
+    string? TryMatchByKeyword(string input);
 }
 
 public class TaskDispatcher : ITaskDispatcher
@@ -130,6 +135,55 @@ public class TaskDispatcher : ITaskDispatcher
                 kvp => kvp.Key,
                 kvp => kvp.Value.FullName ?? kvp.Value.Name,
                 StringComparer.OrdinalIgnoreCase);
+    }
+
+    public string? TryMatchByKeyword(string input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return null;
+
+        var normalizedInput = input.ToLowerInvariant();
+        var allowed = new HashSet<string>(
+            (KnownTasks ?? Array.Empty<string>()).Select(t => t.ToLowerInvariant()),
+            StringComparer.OrdinalIgnoreCase);
+
+        // Instantiate handlers briefly to read their keywords.
+        // Use a temporary scope per handler type.
+        using var scope = _serviceProvider.CreateScope();
+        string? bestMatch = null;
+        int bestLength = 0;
+
+        foreach (var (taskName, handlerType) in HandlerTypeMap)
+        {
+            if (allowed.Count > 0 && !allowed.Contains(taskName)) continue;
+
+            ITaskHandler handler;
+            try
+            {
+                handler = (ITaskHandler)ActivatorUtilities.CreateInstance(scope.ServiceProvider, handlerType);
+            }
+            catch
+            {
+                continue;
+            }
+
+            foreach (var keyword in handler.Keywords)
+            {
+                if (string.IsNullOrWhiteSpace(keyword)) continue;
+                var lowerKeyword = keyword.ToLowerInvariant();
+                // Match the keyword as a whole word/phrase within the input.
+                if (normalizedInput.Contains(lowerKeyword, StringComparison.Ordinal))
+                {
+                    // Prefer the longest matching keyword to avoid false positives.
+                    if (lowerKeyword.Length > bestLength)
+                    {
+                        bestLength = lowerKeyword.Length;
+                        bestMatch = taskName;
+                    }
+                }
+            }
+        }
+
+        return bestMatch;
     }
 
     private static string InferTaskNameFromType(Type handlerType)

@@ -1,113 +1,58 @@
-using Microsoft.EntityFrameworkCore;
-using SmartGlassesMiddleware.Data;
 using SmartGlassesMiddleware.Services;
 
 namespace SmartGlassesMiddleware.Services;
 
 /// <summary>
-/// Local task handler for highlighting specific text in documents and returning the highlighted copy.
+/// Handles voice commands to highlight text in the currently open document.
+/// Extracts the word or phrase from the user's input and returns an action
+/// token that the frontend uses to highlight it in the open PDF viewer,
+/// without ever requiring a document ID.
 /// </summary>
 public class DocumentHighlightTaskHandler : ITaskHandler
 {
-    private readonly ApplicationDbContext _context;
-    private readonly IDocumentHighlightService _highlightService;
-    private readonly ILogger<DocumentHighlightTaskHandler> _logger;
-
     public string Name => "document-highlight";
 
-    public DocumentHighlightTaskHandler(
-        ApplicationDbContext context,
-        IDocumentHighlightService highlightService,
-        ILogger<DocumentHighlightTaskHandler> logger)
+    public IReadOnlyList<string> Keywords => new[]
     {
-        _context = context;
-        _highlightService = highlightService;
-        _logger = logger;
+        "highlight in document", "document highlight"
+    };
+
+    public Task<string> HandleAsync(string input)
+    {
+        var highlightText = ExtractHighlightTarget(input);
+
+        if (string.IsNullOrWhiteSpace(highlightText))
+        {
+            return Task.FromResult("Please say what you want to highlight. For example: \"highlight example\".");
+        }
+
+        // Return an action token — the frontend highlights the text in the
+        // currently open PDF without needing a document ID.
+        return Task.FromResult($"__ACTION:HIGHLIGHT_WORD:{highlightText}__");
     }
 
-    public async Task<string> HandleAsync(string input)
+    private static string ExtractHighlightTarget(string input)
     {
-        try
+        if (string.IsNullOrWhiteSpace(input)) return string.Empty;
+
+        var trimmed = input.Trim();
+        string[] prefixes =
+        [
+            "highlight the word ",
+            "highlight word ",
+            "highlight the phrase ",
+            "highlight phrase ",
+            "document highlight ",
+            "highlight the ",
+            "highlight ",
+        ];
+
+        foreach (var prefix in prefixes)
         {
-            // Parse input to extract document ID and text to highlight
-            // Expected format: "highlight [text] in document [id]"
-            // Or: "document [id] highlight [text]"
-
-            Guid documentId = Guid.Empty;
-            string highlightText = input.Trim();
-
-            // Try to extract document ID and highlight text
-            var lowerInput = input.ToLower();
-            if (lowerInput.Contains("document "))
-            {
-                var parts = input.Split(new[] { "document ", "highlight " }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-
-                foreach (var part in parts)
-                {
-                    if (Guid.TryParse(part.Trim(), out var parsedId))
-                    {
-                        documentId = parsedId;
-                    }
-                    else if (!string.IsNullOrWhiteSpace(part) && part.ToLower() != "in")
-                    {
-                        highlightText = part.Trim();
-                    }
-                }
-            }
-
-            if (documentId == Guid.Empty)
-            {
-                return "Please provide a document ID. Format: 'highlight [text] in document [id]' or use the document search task first.";
-            }
-
-            _logger.LogInformation("Highlighting '{Text}' in document {DocumentId}", highlightText, documentId);
-
-            // Get document metadata
-            var document = await _context.DocumentMetadatas
-                .Include(d => d.Chunks)
-                .FirstOrDefaultAsync(d => d.Id == documentId);
-
-            if (document == null)
-            {
-                return $"Document with ID {documentId} not found.";
-            }
-
-            // Find chunks containing the text
-            var matchingChunks = document.Chunks
-                .Where(c => c.ChunkText.Contains(highlightText, StringComparison.OrdinalIgnoreCase))
-                .ToList();
-
-            if (!matchingChunks.Any())
-            {
-                return $"Text '{highlightText}' not found in document '{document.FileName}'.";
-            }
-
-            // Get chunk IDs for highlighting
-            var chunkIds = matchingChunks.Select(c => c.Id).ToList();
-
-            // Generate highlighted document
-            var highlightedStream = await _highlightService.HighlightDocumentAsync(
-                documentId,
-                chunkIds
-            );
-
-            // In a real scenario, we'd save this to storage and return a URL
-            // For now, return information about the highlighted document
-            var distinctPages = matchingChunks.Select(c => c.PageNumber).Distinct().OrderBy(p => p).ToList();
-            var response = $"✅ Document '{document.FileName}' highlighted successfully!\n\n";
-            response += $"📄 Document: {document.FileName}\n";
-            response += $"🔍 Highlighted text: '{highlightText}'\n";
-            response += $"📍 Found on {matchingChunks.Count} chunk(s) across " +
-                       $"{distinctPages.Count} page(s): " +
-                       string.Join(", ", distinctPages);
-            response += $"\n\n💡 Use API endpoint: GET /api/documents/{documentId}/highlight";
-
-            return response;
+            if (trimmed.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                return trimmed[prefix.Length..].Trim();
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error highlighting document");
-            return $"Error highlighting document: {ex.Message}";
-        }
+
+        return trimmed;
     }
 }

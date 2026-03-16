@@ -10,6 +10,11 @@ public class EditReminderTaskHandler : ITaskHandler
 
     public string Name => "edit-reminder";
 
+    public IReadOnlyList<string> Keywords => new[]
+    {
+        "edit reminder", "update reminder", "change reminder", "modify reminder"
+    };
+
     public EditReminderTaskHandler(IHistoryService historyService, ILogger<EditReminderTaskHandler> logger)
     {
         _historyService = historyService;

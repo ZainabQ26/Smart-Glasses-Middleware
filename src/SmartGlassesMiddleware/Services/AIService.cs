@@ -95,6 +95,23 @@ public class AIService : IAIService
 
             _logger.LogInformation("IAIService.ProcessRequestAsync entered; inputLength={L}", input.Length);
 
+            // ── 1. Keyword-based routing (fastest path — no AI call needed) ──────
+            var keywordTask = _dispatcher.TryMatchByKeyword(input);
+            if (!string.IsNullOrWhiteSpace(keywordTask) && _knownTasks.Contains(keywordTask))
+            {
+                _logger.LogInformation("Keyword match: routing to task '{Task}' for input: {Input}", keywordTask, input);
+                try
+                {
+                    var (kwHandled, kwResponse) = await _dispatcher.TryHandleAsync(keywordTask, input);
+                    if (kwHandled) return (keywordTask, kwResponse ?? string.Empty, false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Keyword-matched handler for task {Task} failed — falling through to AI", keywordTask);
+                }
+            }
+
+            // ── 2. AI/rule-based classification ───────────────────────────────────
             // Classify with intent-aware prompt + normalization (reuse ClassifyOnlyAsync)
             string detectedTask;
             try
