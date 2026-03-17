@@ -6,7 +6,7 @@ on:
       action:
         description: "Action to run for dev environment"
         required: true
-        default: "park"
+        default: "wake"
         type: choice
         options:
           - park
