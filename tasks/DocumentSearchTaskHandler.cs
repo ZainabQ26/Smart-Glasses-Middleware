@@ -16,6 +16,17 @@ public class DocumentSearchTaskHandler : ITaskHandler
     private readonly ApplicationDbContext _context;
     private readonly ILogger<DocumentSearchTaskHandler> _logger;
 
+    // Typed result to avoid runtime-typed dynamic collections.
+    private sealed record ChunkMatch(
+        Guid DocumentId,
+        string FileName,
+        int PageNumber,
+        int ChunkIndex,
+        string Context,
+        double? X,
+        double? Y
+    );
+
     public string Name => "document-search";
 
     public IReadOnlyList<string> Keywords => new[]
@@ -122,7 +133,7 @@ public class DocumentSearchTaskHandler : ITaskHandler
             _logger.LogInformation("Searching for '{SearchText}' (terms: {Terms}) in documents (filter: {Filter})",
                 searchText, string.Join(", ", searchTerms), documentFilter);
 
-            var allMatches = new List<dynamic>();
+            var allMatches = new List<ChunkMatch>();
 
             foreach (var term in searchTerms)
             {
@@ -141,19 +152,18 @@ public class DocumentSearchTaskHandler : ITaskHandler
                     .OrderBy(c => c.DocumentMetadata.FileName)
                     .ThenBy(c => c.PageNumber)
                     .Take(10)
-                    .Select(c => new
-                    {
-                        DocumentId = c.DocumentMetadataId,
-                        FileName = c.DocumentMetadata.FileName,
-                        PageNumber = c.PageNumber,
-                        ChunkIndex = c.ChunkIndex,
-                        Context = c.ChunkText.Length > 200 ? c.ChunkText.Substring(0, 200) + "..." : c.ChunkText,
-                        X = c.X,
-                        Y = c.Y,
-                    })
+                    .Select(c => new ChunkMatch(
+                        c.DocumentMetadataId,
+                        c.DocumentMetadata.FileName,
+                        c.PageNumber,
+                        c.ChunkIndex,
+                        c.ChunkText.Length > 200 ? c.ChunkText.Substring(0, 200) + "..." : c.ChunkText,
+                        c.X,
+                        c.Y
+                    ))
                     .ToListAsync();
 
-                allMatches.AddRange(termMatches.Cast<dynamic>());
+                allMatches.AddRange(termMatches);
             }
 
             // De-duplicate by (DocumentId, PageNumber, ChunkIndex)

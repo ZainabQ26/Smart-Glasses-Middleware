@@ -169,9 +169,11 @@ public class TaskDispatcher : ITaskDispatcher
             foreach (var keyword in handler.Keywords)
             {
                 if (string.IsNullOrWhiteSpace(keyword)) continue;
-                var lowerKeyword = keyword.ToLowerInvariant();
-                // Match the keyword as a whole word/phrase within the input.
-                if (normalizedInput.Contains(lowerKeyword, StringComparison.Ordinal))
+                var lowerKeyword = keyword.ToLowerInvariant().Trim();
+                // Use word-boundary matching so "print" doesn't match "fingerprint".
+                // A keyword matches when it appears in the input surrounded by
+                // non-alphanumeric characters (or at the start/end of the string).
+                if (ContainsWholePhrase(normalizedInput, lowerKeyword))
                 {
                     // Prefer the longest matching keyword to avoid false positives.
                     if (lowerKeyword.Length > bestLength)
@@ -184,6 +186,28 @@ public class TaskDispatcher : ITaskDispatcher
         }
 
         return bestMatch;
+    }
+
+    /// <summary>
+    /// Returns true when <paramref name="phrase"/> appears in <paramref name="text"/>
+    /// as a whole word or phrase, i.e. not embedded inside another word.
+    /// Both arguments are expected to be already lowercased.
+    /// </summary>
+    private static bool ContainsWholePhrase(string text, string phrase)
+    {
+        int idx = 0;
+        while (true)
+        {
+            idx = text.IndexOf(phrase, idx, StringComparison.Ordinal);
+            if (idx < 0) return false;
+
+            int end = idx + phrase.Length;
+            bool leftOk  = idx == 0         || !char.IsLetterOrDigit(text[idx - 1]);
+            bool rightOk = end >= text.Length || !char.IsLetterOrDigit(text[end]);
+
+            if (leftOk && rightOk) return true;
+            idx = end; // advance past this occurrence and try again
+        }
     }
 
     private static string InferTaskNameFromType(Type handlerType)

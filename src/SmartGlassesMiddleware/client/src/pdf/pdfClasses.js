@@ -12,7 +12,7 @@
 
 /** Ordered colour palette for highlights.  Each entry is [r, g, b, alpha]. */
 export const HighlightColors = {
-  orange:      [255, 140, 0,   0.55],
+  orange:      [249, 115, 22,  0.55],
   sky_blue:    [0,   191, 255, 0.45],
   soft_green:  [144, 238, 144, 0.45],
   light_coral: [240, 128, 128, 0.45],
