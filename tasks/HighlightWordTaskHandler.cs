@@ -23,7 +23,7 @@ public class HighlightWordTaskHandler : ITaskHandler
     public IReadOnlyList<string> Keywords => new[]
     {
         "highlight the word", "highlight word", "highlight the phrase", "highlight phrase",
-        "highlight the", "highlight ", "search for the word", "search for the phrase",
+        "highlight the", "highlight", "search for the word", "search for the phrase",
         "search for the", "search for", "find the word", "find the phrase", "find the"
     };
 
