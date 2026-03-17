@@ -25,6 +25,14 @@ export default function App() {
   const [showLanding, setShowLanding] = useState(() => {
     try { return !localStorage.getItem("sgm_activated"); } catch (_) { return true; }
   });
+  // Configurable activation word — stored in localStorage and updated live when
+  // the admin panel changes it (via the storage event).
+  const [activationWord, setActivationWord] = useState(() => {
+    try { return localStorage.getItem("sgm_activation_word")?.trim() || "activate"; } catch (_) { return "activate"; }
+  });
+  // Ref copy so the async voice pipeline always reads the current value without
+  // needing to restart the AudioContext effect.
+  const activationWordRef = useRef(activationWord);
   // Wrapper keeps the ref in sync so async callbacks always read the current value.
   const setPendingAction = useCallback((val) => {
     pendingActionRef.current = typeof val === "function" ? val(pendingActionRef.current) : val;
@@ -90,7 +98,9 @@ export default function App() {
   const normalizeCommandText = useCallback((value) => {
     const raw = (value ?? "").trim();
     if (!raw) return "";
-    const withoutWakeWord = raw.replace(/^activate[\s,:-]*/i, "").trim();
+    const word = activationWordRef.current;
+    const wordEsc = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const withoutWakeWord = raw.replace(new RegExp(`^${wordEsc}[\\s,:-]*`, "i"), "").trim();
     return withoutWakeWord || raw;
   }, []);
 
@@ -135,6 +145,37 @@ export default function App() {
       if (transcriptDismissRef.current) clearTimeout(transcriptDismissRef.current);
       if (aiResponseDismissRef.current) clearTimeout(aiResponseDismissRef.current);
     };
+  }, []);
+
+  // Keep activationWordRef in sync with the state value.
+  useEffect(() => { activationWordRef.current = activationWord; }, [activationWord]);
+
+  // Listen for changes made in the admin panel (different tab/window) and apply live.
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.key === "sgm_activation_word") {
+        const w = e.newValue?.trim() || "activate";
+        setActivationWord(w);
+        activationWordRef.current = w;
+      }
+    };
+    window.addEventListener("storage", handler);
+    return () => window.removeEventListener("storage", handler);
+  }, []);
+
+  // Fetch the activation word from the server config (appsettings.json) on startup.
+  // The server value takes precedence; localStorage is only the fallback initial state.
+  useEffect(() => {
+    fetch("/api/process/client-settings")
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        const w = data?.activationWord?.trim() || "";
+        if (w) {
+          setActivationWord(w);
+          activationWordRef.current = w;
+        }
+      })
+      .catch(() => {/* keep the localStorage fallback value */});
   }, []);
 
   // VAD/Whisper removed: keep a harmless placeholder used by the UI so
@@ -673,14 +714,17 @@ export default function App() {
       const cleaned = (text || "").trim();
 
       if (mode === "wake-word") {
-        // Only act on "activate" when not already active and not mid-request
+        // Only act on the configured activation word when not already active and not mid-request.
+        const word    = activationWordRef.current;
+        const wordEsc = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const wakeRx  = new RegExp(`\\b${wordEsc}\\b`, "i");
         if (
-          /\bactivate\b/i.test(cleaned) &&
+          wakeRx.test(cleaned) &&
           !activatedRef.current &&
           statusRef.current !== "sending" &&
           statusRef.current !== "processing"
         ) {
-          const rest = cleaned.replace(/\bactivate\b[\s,:-]*/i, "").trim();
+          const rest = cleaned.replace(new RegExp(`\\b${wordEsc}\\b[\\s,:-]*`, "i"), "").trim();
           activatedRef.current = true;
           commandChunks = [];
           partialTexts  = [];
@@ -802,7 +846,7 @@ export default function App() {
 
         if (!disposed) {
           setWakeWordReady(true);
-          addLog("🎤 Microphone ready — say \"Activate\"", "info");
+          addLog(`🎤 Microphone ready — say "${activationWordRef.current}"`, "info");
           // Warm the model so the first activation is instant
           worker.postMessage({ type: "preload" });
         }
@@ -892,7 +936,7 @@ export default function App() {
         ? "🗣️ Listening…"
         : !wakeWordReady
           ? "⏳ Loading Whisper…"
-          : 'Say "Activate"';
+          : `Say "${activationWord}"`;
   const dotColor = isSending    ? "#3498db"
     : isProcessing ? "#9b59b6"
     : isListening  ? "#e67e22"
@@ -902,6 +946,24 @@ export default function App() {
   const shouldPulse = isProcessing || isSending || !wakeWordReady;
   const dotStyle = { ...styles.dot, background: dotColor, ...(shouldPulse ? { animation: "pulse 1s ease-in-out infinite" } : {}) };
 
+  // Full command list shown as an overlay in the top-left only while listening.
+  const COMMAND_LIST = [
+    [`"open file"`,            "browse recent files"],
+    [`"open last document"`,   "open most recent"],
+    [`"next page"`,            "next page"],
+    [`"previous page"`,        "previous page"],
+    [`"go to page 5"`,         "jump to page"],
+    [`"highlight [word]"`,     "highlight text"],
+    [`"clear highlights"`,     "remove highlights"],
+    [`"search for [text]"`,    "search document"],
+    [`"print document"`,       "save as PDF"],
+    [`"close document"`,       "close PDF"],
+    [`"show my reminders"`,    "list reminders"],
+    [`"remind me to…"`,        "set reminder"],
+    [`"what time is it"`,      "current time"],
+    [`"admin panel"`,          "open settings"],
+  ];
+
   return (
     <div style={styles.page}>
       {/* ── Landing screen — shown until first activation ─────────────────────── */}
@@ -910,15 +972,15 @@ export default function App() {
           <div style={styles.landingCard}>
             <h1 style={styles.landingTitle}>Smart Glasses Assistant</h1>
             <p style={styles.landingSubtitle}>
-              Say <strong style={{color:"#f97316"}}>"Activate"</strong> to start, then speak your command.
+              Say <strong style={{color:"#f97316"}}>"{activationWord}"</strong> to start, then speak your command.
             </p>
             <div style={styles.landingSection}>
               <h2 style={styles.landingH2}>🎤 How It Works</h2>
               <ol style={styles.landingOl}>
-                <li>Say <em>"Activate"</em> to wake the assistant.</li>
+                <li>Say <em>"{activationWord}"</em> to wake the assistant.</li>
                 <li>Speak your command clearly.</li>
                 <li>The assistant will respond or perform the action.</li>
-                <li>Say "Activate" again for the next command.</li>
+                <li>Say "{activationWord}" again for the next command.</li>
               </ol>
             </div>
             <div style={styles.landingSection}>
@@ -955,15 +1017,18 @@ export default function App() {
         </div>
       )}
 
-      {/* ── Command legend (always visible after first activation) ────────────── */}
-      {!showLanding && (
-        <div style={styles.legend}>
-          <span style={styles.legendItem}><span style={styles.legendKbd}>Activate</span> wake</span>
-          <span style={styles.legendItem}><span style={styles.legendKbd}>next / prev page</span> navigate</span>
-          <span style={styles.legendItem}><span style={styles.legendKbd}>highlight [word]</span> mark</span>
-          <span style={styles.legendItem}><span style={styles.legendKbd}>clear highlights</span> reset</span>
-          <span style={styles.legendItem}><span style={styles.legendKbd}>print</span> print</span>
-          <span style={styles.legendItem}><span style={styles.legendKbd}>open file</span> browse</span>
+      {/* ── Command list overlay — shown only while actively listening ─────────── */}
+      {isListening && (
+        <div style={styles.commandList}>
+          <p style={styles.commandListTitle}>📋 Commands</p>
+          <div style={styles.commandListGrid}>
+            {COMMAND_LIST.map(([cmd, desc]) => (
+              <div key={cmd} style={styles.commandListRow}>
+                <span style={styles.commandListCmd}>{cmd}</span>
+                <span style={styles.commandListDesc}>{desc}</span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -1095,7 +1160,7 @@ export default function App() {
         <div style={styles.logPanel}>
           <h2 style={styles.sectionTitle}>Activity Log</h2>
           {logs.length === 0 ? (
-            <p style={styles.emptyLog}>No activity yet. Say "Activate".</p>
+            <p style={styles.emptyLog}>No activity yet. Say "{activationWord}".</p>
           ) : (
             <ul style={styles.logList}>
               {logs.map(entry => (
@@ -1244,32 +1309,48 @@ const styles = {
     textAlign: "center",
     fontStyle: "italic",
   },
-  // Small command legend shown in top-left after first activation
-  legend: {
-    position: "absolute",
+  // Full command list overlay shown at top-left only while the assistant is listening.
+  commandList: {
+    position: "fixed",
     top: 12,
     left: 12,
-    display: "flex",
-    flexWrap: "wrap",
-    gap: "6px 12px",
-    zIndex: 30,
-    maxWidth: 480,
+    background: "rgba(10,10,10,0.93)",
+    border: "1px solid #2a2a2a",
+    borderRadius: 10,
+    padding: "10px 14px",
+    zIndex: 50,
+    maxWidth: 320,
+    maxHeight: "calc(100vh - 60px)",
+    overflowY: "auto",
   },
-  legendItem: {
-    fontSize: "0.7rem",
-    color: "#666",
+  commandListTitle: {
+    margin: "0 0 8px",
+    fontSize: "0.72rem",
+    fontWeight: 700,
+    color: "#f97316",
+    textTransform: "uppercase",
+    letterSpacing: "0.06em",
+  },
+  commandListGrid: {
     display: "flex",
-    alignItems: "center",
+    flexDirection: "column",
     gap: 4,
   },
-  legendKbd: {
-    background: "#1a1a1a",
-    border: "1px solid #333",
-    borderRadius: 4,
-    padding: "1px 5px",
-    fontSize: "0.68rem",
-    color: "#f97316",
+  commandListRow: {
+    display: "flex",
+    gap: 8,
+    alignItems: "baseline",
+  },
+  commandListCmd: {
     fontFamily: "monospace",
+    fontSize: "0.7rem",
+    color: "#f97316",
+    whiteSpace: "nowrap",
+    flexShrink: 0,
+  },
+  commandListDesc: {
+    fontSize: "0.7rem",
+    color: "#777",
   },
   indicator: {
     position: "absolute",
