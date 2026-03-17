@@ -43,8 +43,9 @@ public class DebugController : ControllerBase
             .ToList();
 
         var useAdvancedModel = _configuration.GetValue<bool?>("AI:UseAdvancedModel") ?? false;
-        var advancedEndpoint = _configuration["AI:AdvancedModelEndpoint"];
-        var advancedEndpointConfigured = !string.IsNullOrWhiteSpace(advancedEndpoint);
+        var advancedModelId = _configuration["AWS:Bedrock:AdvancedModelId"];
+        var defaultModelId = _configuration["AWS:Bedrock:ModelId"];
+        var advancedBedrockConfigured = !string.IsNullOrWhiteSpace(advancedModelId) || !string.IsNullOrWhiteSpace(defaultModelId);
 
         return Ok(new
         {
@@ -58,7 +59,9 @@ public class DebugController : ControllerBase
             advanced = new
             {
                 useAdvancedModel,
-                advancedEndpointConfigured,
+                advancedBedrockConfigured,
+                advancedModelId,
+                defaultModelId,
                 advancedTaskRegistered = handlerMap.ContainsKey("advanced")
             }
         });

@@ -151,14 +151,9 @@ public class AIService : IAIService
                     {
                         var (handled, advancedResponse) = await _dispatcher.TryHandleAsync("advanced", input);
 
-                        // If the advanced handler returned a response, respect it (and mark it).
+                        // Always return the advanced handler's message as-is.
                         if (handled && !string.IsNullOrWhiteSpace(advancedResponse))
                         {
-                            if (IsAdvancedUnavailableResponse(advancedResponse))
-                            {
-                                return ("advanced", BuildAdvancedUnavailableResponse(), false);
-                            }
-
                             return ("advanced", advancedResponse, true);
                         }
 
@@ -167,12 +162,12 @@ public class AIService : IAIService
                         // as an unavailable advanced model and return an error message
                         // instead of falling back to the local model.
                         _logger.LogWarning("Advanced model handler did not handle request; returning unavailable response (no fallback)");
-                        return ("advanced", BuildAdvancedUnavailableResponse(), false);
+                        return ("advanced", AdvancedTaskHandler.DispatcherFallbackMessage, false);
                     }
                     catch (Exception ex)
                     {
                         _logger.LogError(ex, "Advanced model call failed; returning unavailable response (no fallback)");
-                        return ("advanced", BuildAdvancedUnavailableResponse(), false);
+                        return ("advanced", AdvancedTaskHandler.DispatcherFallbackMessage, false);
                     }
                 }
                 else
@@ -203,21 +198,16 @@ public class AIService : IAIService
                     var (handledAdv, advancedResponse) = await _dispatcher.TryHandleAsync("advanced", input);
                     if (handledAdv && !string.IsNullOrWhiteSpace(advancedResponse))
                     {
-                        if (IsAdvancedUnavailableResponse(advancedResponse))
-                        {
-                            return ("advanced", BuildAdvancedUnavailableResponse(), false);
-                        }
-
                         return ("advanced", advancedResponse, true);
                     }
 
                     _logger.LogWarning("Advanced model handler did not handle request for task {Task}; returning unavailable response (no fallback)", detectedTask);
-                    return ("advanced", BuildAdvancedUnavailableResponse(), false);
+                    return ("advanced", AdvancedTaskHandler.DispatcherFallbackMessage, false);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Advanced model call failed for unhandled task {Task}; returning unavailable response (no fallback)", detectedTask);
-                    return ("advanced", BuildAdvancedUnavailableResponse(), false);
+                    return ("advanced", AdvancedTaskHandler.DispatcherFallbackMessage, false);
                 }
             }
 
@@ -497,40 +487,4 @@ Task:";
         return partial ?? "unknown";
     }
 
-    private static bool IsAdvancedUnavailableResponse(string response)
-    {
-        if (string.IsNullOrWhiteSpace(response)) return true;
-        var lowered = response.ToLowerInvariant();
-        return lowered.Contains("not configured")
-            || lowered.Contains("error calling advanced model")
-            || lowered.Contains("unavailable")
-            || lowered.Contains("returned 4")
-            || lowered.Contains("returned 5");
-    }
-
-    private string BuildAdvancedUnavailableResponse()
-    {
-        var availableTasks = _knownTasks
-            .Where(t => !string.IsNullOrWhiteSpace(t))
-            .Where(t => !string.Equals(t, "advanced", StringComparison.OrdinalIgnoreCase))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(t => t)
-            .ToList();
-
-        if (availableTasks.Count == 0)
-        {
-            return "Advanced tasks are unavailable right now. No local tasks are currently registered.";
-        }
-
-        var taskLines = availableTasks.Select(task =>
-        {
-            if (TaskSummaryMap.TryGetValue(task, out var summary) && !string.IsNullOrWhiteSpace(summary))
-            {
-                return $"- {task}: {summary}";
-            }
-            return $"- {task}: Available local task handler.";
-        });
-
-        return "Advanced tasks are unavailable right now. Available tasks:\n" + string.Join("\n", taskLines);
-    }
 }
