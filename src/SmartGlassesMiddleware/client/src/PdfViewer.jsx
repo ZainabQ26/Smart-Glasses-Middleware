@@ -38,7 +38,7 @@ import React, {
   memo,
 } from "react";
 
-import { getPdf, renderPdfPage, extractPageText } from "./pdf/pdfRendering.js";
+import { getPdf, renderPdfPage, extractPageText, getAllPdfText } from "./pdf/pdfRendering.js";
 import {
   renderPageWithHighlights,
   addHighlight,
@@ -57,6 +57,7 @@ import { ViewerState, HighlightColors } from "./pdf/pdfClasses.js";
  * @property {(code: string) => void} goToLoincCode   - Navigate to and highlight a LOINC code.
  * @property {() => void} removeHighlights            - Clear all highlights.
  * @property {() => Promise<{pageNumber: number, text: string} | null>} getCurrentPageText - Return normalized text for the visible page.
+ * @property {() => Promise<object | null>} getDocumentContext - Return full document text and active highlight metadata.
  * @property {() => Promise<void>} printDocument      - Print the whole document with all highlights.
  */
 
@@ -305,6 +306,25 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
     };
   }, []);
 
+  const getDocumentContext = useCallback(async () => {
+    const state = viewerStateRef.current;
+    if (!state) return null;
+
+    const pages = await getAllPdfText(state.pdf);
+    return {
+      currentPage: state.pageNumber,
+      totalPages: state.pdf.numPages,
+      pages: pages.map((page, index) => ({
+        pageNumber: index + 1,
+        text: page.normalized.trim(),
+      })),
+      highlights: state.highlights.map((highlight) => ({
+        keyword: highlight.keyWord,
+        pages: [...new Set(highlight.rectangleArrays.map((rect) => rect.pageNumber))].sort((a, b) => a - b),
+      })),
+    };
+  }, []);
+
   /**
    * Print the whole document with all active highlights applied.
    * Each page is rendered onto an off-screen canvas at 2× scale (for crisp
@@ -385,8 +405,9 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
     goToLoincCode,
     removeHighlights,
     getCurrentPageText,
+    getDocumentContext,
     printDocument,
-  }), [nextPage, prevPage, goToPage, highlightWord, goToLoincCode, removeHighlights, getCurrentPageText, printDocument]);
+  }), [nextPage, prevPage, goToPage, highlightWord, goToLoincCode, removeHighlights, getCurrentPageText, getDocumentContext, printDocument]);
 
   // ── Render ───────────────────────────────────────────────────────────────────
   return (

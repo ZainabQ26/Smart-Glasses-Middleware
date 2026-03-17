@@ -14,6 +14,7 @@ public class DocumentProcessingBackgroundService : BackgroundService
     private readonly ILogger<DocumentProcessingBackgroundService> _logger;
     private readonly IServiceProvider _serviceProvider;
     private readonly int _checkIntervalMinutes;
+    private readonly bool _ragEnabled;
 
     public DocumentProcessingBackgroundService(
         ILogger<DocumentProcessingBackgroundService> logger,
@@ -23,10 +24,17 @@ public class DocumentProcessingBackgroundService : BackgroundService
         _logger = logger;
         _serviceProvider = serviceProvider;
         _checkIntervalMinutes = configuration.GetValue<int?>("RAG:BackgroundProcessingIntervalMinutes") ?? 15;
+        _ragEnabled = configuration.GetValue<bool?>("RAG:Enabled") ?? true;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        if (!_ragEnabled)
+        {
+            _logger.LogInformation("Document Processing Background Service is disabled because RAG:Enabled=false");
+            return;
+        }
+
         _logger.LogInformation("Document Processing Background Service starting (check interval: {Minutes} minutes)", _checkIntervalMinutes);
 
         // Wait a bit for the application to fully start
