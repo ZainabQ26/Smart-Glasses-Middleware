@@ -225,6 +225,20 @@ export default function App() {
     };
   }, []);
 
+  // Track whether we've already shown the landing on first backend ready so
+  // the effect only fires once even if backendReady were to re-toggle.
+  const hasRestoredLandingRef = useRef(false);
+
+  // When the backend becomes ready (server finishes loading), restore the
+  // initial Smart Glasses Assistant landing screen so the user is always
+  // greeted by it after server wake-up.
+  useEffect(() => {
+    if (backendReady && !hasRestoredLandingRef.current) {
+      hasRestoredLandingRef.current = true;
+      setShowLanding(true);
+    }
+  }, [backendReady]);
+
   // VAD/Whisper removed: keep a harmless placeholder used by the UI so
   // existing button/label logic doesn't need widespread changes.
   const vad = { loading: false, errored: null, userSpeaking: false };
