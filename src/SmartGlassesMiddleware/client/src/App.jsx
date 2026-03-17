@@ -1014,15 +1014,16 @@ export default function App() {
 
   // Full command list shown as an overlay in the top-left only while listening.
   const COMMAND_LIST = [
-    [`"open file"`,            "browse recent files"],
-    [`"open last document"`,   "open most recent"],
+    [`"search recent files"`,  "browse recent uploaded files"],
+    [`"number "#"`,            "goes to file number in recent files list"],
+    [`"select document"`,      "open last uploaded document"],
     [`"next page"`,            "next page"],
     [`"previous page"`,        "previous page"],
     [`"go to page 5"`,         "jump to page"],
     [`"highlight [word]"`,     "highlight text"],
-    [`"clear highlights"`,     "remove highlights"],
+    [`"clear highlights"`,     "delete all highlights"],
     [`"search for [text]"`,    "search document"],
-    [`"print document"`,       "save as PDF"],
+    [`"print document"`,       "save document as PDF with highlights"],
     [`"close document"`,       "close PDF"],
     [`"show my reminders"`,    "list reminders"],
     [`"remind me to…"`,        "set reminder"],
@@ -1047,6 +1048,7 @@ export default function App() {
                 <li>Speak your command clearly.</li>
                 <li>The assistant will respond or perform the action.</li>
                 <li>Say "{activationWord}" again for the next command.</li>
+                <li>After "search recent files", you can specify file number without reactivating.</li>
               </ol>
             </div>
             <div style={styles.landingSection}>
@@ -1054,8 +1056,9 @@ export default function App() {
               <table style={styles.landingTable}>
                 <tbody>
                   {[
-                    ["open file", "Show list of recent uploaded files"],
-                    ["open last document", "Open the most recently uploaded document"],
+                    ["search recent files", "browse recent uploaded files"],
+                    ["number #", "go to file number in recent files list"],
+                    ["select document", "Open the last uploaded document"],
                     ["next page", "Go to the next page"],
                     ["previous page", "Go to the previous page"],
                     ["go to page 5", "Jump to a specific page"],
