@@ -91,7 +91,16 @@ export default function App() {
     setAiResponse(text);
     if (aiResponseDismissRef.current) clearTimeout(aiResponseDismissRef.current);
     if (text) {
-      aiResponseDismissRef.current = setTimeout(() => setAiResponse(null), BUBBLE_DISMISS_MS);
+      // Keep the input bubble visible while the response bubble is visible,
+      // then clear both together when the response auto-dismisses.
+      if (transcriptDismissRef.current) {
+        clearTimeout(transcriptDismissRef.current);
+        transcriptDismissRef.current = null;
+      }
+      aiResponseDismissRef.current = setTimeout(() => {
+        setAiResponse(null);
+        setTranscript(null);
+      }, BUBBLE_DISMISS_MS);
     }
   }, []);
 
