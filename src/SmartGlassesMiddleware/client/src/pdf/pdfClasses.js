@@ -5,14 +5,14 @@
  * number, and the list of keyword highlights that have been applied.
  *
  * HighlightColors defines the ordered palette used when cycling through
- * highlight colours – the first highlight gets yellow, the second sky-blue,
+ * highlight colours – the first highlight gets orange, the second sky-blue,
  * and so on.  Once all colours are used the cycle wraps back to the start
  * (replacing the oldest highlight).
  */
 
 /** Ordered colour palette for highlights.  Each entry is [r, g, b, alpha]. */
 export const HighlightColors = {
-  yellow:      [255, 220, 0,   0.45],
+  orange:      [249, 115, 22,  0.55],
   sky_blue:    [0,   191, 255, 0.45],
   soft_green:  [144, 238, 144, 0.45],
   light_coral: [240, 128, 128, 0.45],

@@ -22,6 +22,10 @@ export default function App() {
   const [wakeWordReady, setWakeWordReady] = useState(false);
   const [speechMode, setSpeechMode] = useState("auto"); // auto | webspeech-only | whisper-only
   const [pendingAction, _setPendingActionState] = useState(null); // { type: "SHOW_RECENT_FILES", files } | { type: "SELECT_DOCUMENT", id, name } | null
+  // Show landing screen until the user says "activate" for the first time.
+  const [showLanding, setShowLanding] = useState(() => {
+    try { return !localStorage.getItem("sgm_activated"); } catch (_) { return true; }
+  });
   // Wrapper keeps the ref in sync so async callbacks always read the current value.
   const setPendingAction = useCallback((val) => {
     pendingActionRef.current = typeof val === "function" ? val(pendingActionRef.current) : val;
@@ -56,16 +60,42 @@ export default function App() {
 
   const WEB_SPEECH_CONFIDENCE_THRESHOLD = 0.72;
   const isWebSpeechOnly = speechMode === "webspeech-only";
-  const API_TIMEOUT_MS = 20_000;
+  // Allow up to 60 s for AI responses — matches the backend AIServiceTimeoutSeconds setting.
+  const API_TIMEOUT_MS = 60_000;
   const PREVIEW_TIMEOUT_MS = 6_000;
   const DOCUMENTS_TIMEOUT_MS = 10_000;
   const RESTART_BACKOFF_BASE_MS = 1000;
   const RESTART_BACKOFF_MAX_MS = 30_000;
-  const COMMAND_SUBMIT_SILENCE_MS = 1_000;
+  // Wait 2 s of silence before submitting — gives users time to finish a full sentence.
+  const COMMAND_SUBMIT_SILENCE_MS = 2_000;
   const LISTENING_IDLE_TIMEOUT_MS = 10_000;
+  // Bubbles auto-dismiss after this delay (transcript bubble and AI response bubble).
+  const BUBBLE_DISMISS_MS = 10_000;
   // How long to keep the mic listening after showing the file list so the user
   // can say a number without repeating the "activate" wake-word.
   const FILE_SELECTION_TIMEOUT_MS = 60_000;
+
+  // Auto-dismiss timers for toast-style bubbles.
+  const transcriptDismissRef = useRef(null);
+  const aiResponseDismissRef = useRef(null);
+
+  // Helper: show a transcript and schedule auto-dismiss.
+  const showTranscript = useCallback((text) => {
+    setTranscript(text);
+    if (transcriptDismissRef.current) clearTimeout(transcriptDismissRef.current);
+    if (text) {
+      transcriptDismissRef.current = setTimeout(() => setTranscript(null), BUBBLE_DISMISS_MS);
+    }
+  }, []);
+
+  // Helper: show an AI response and schedule auto-dismiss.
+  const showAiResponse = useCallback((text) => {
+    setAiResponse(text);
+    if (aiResponseDismissRef.current) clearTimeout(aiResponseDismissRef.current);
+    if (text) {
+      aiResponseDismissRef.current = setTimeout(() => setAiResponse(null), BUBBLE_DISMISS_MS);
+    }
+  }, []);
 
   const normalizeCommandText = useCallback((value) => {
     const raw = (value ?? "").trim();
@@ -178,7 +208,7 @@ export default function App() {
     if (!previewId) {
       addLog("❌ Could not open the selected document.", "error");
       setPendingAction(null);
-      setAiResponse("Could not open that document.");
+      showAiResponse("Could not open that document.");
       return;
     }
 
@@ -245,7 +275,7 @@ export default function App() {
 
       if (recentFiles.length === 0) {
         setPendingAction(null);
-        setAiResponse("No uploaded files were found. Please upload a file first.");
+        showAiResponse("No uploaded files were found. Please upload a file first.");
         return;
       }
 
@@ -254,7 +284,7 @@ export default function App() {
     } catch (err) {
       addLog(`❌ Recent files error: ${err.message}`, "error");
       setPendingAction(null);
-      setAiResponse("I couldn't load the recent files list.");
+      showAiResponse("I couldn't load the recent files list.");
     }
   }, [addLog, fetchJsonWithTimeout]);
 
@@ -269,7 +299,7 @@ export default function App() {
       if (!commandText) {
         addLog("⚠️ Command was empty after wake-word cleanup.", "warn");
         setPendingAction(null);
-        setAiResponse("I didn't catch that command. Please try again.");
+        showAiResponse("I didn't catch that command. Please try again.");
         return;
       }
 
@@ -281,15 +311,15 @@ export default function App() {
           const files = capturedPending.files ?? [];
           if (num >= 1 && num <= files.length) {
             addLog(`📂 Opening file ${num}: "${files[num - 1].name}"`, "voice");
-            setTranscript(commandText);
+            showTranscript(commandText);
             setPendingAction(null);
             openDocumentPreview(files[num - 1]);
             return; // mic will reset via finally (keepMicActive = false)
           } else {
             // Number out of range — keep the list visible and stay listening.
             addLog(`⚠️ File number ${num} is not in the list (1–${files.length}).`, "warn");
-            setTranscript(commandText);
-            setAiResponse(`There are only ${files.length} files. Say a number between 1 and ${files.length}.`);
+            showTranscript(commandText);
+            showAiResponse(`There are only ${files.length} files. Say a number between 1 and ${files.length}.`);
             setPendingAction(capturedPending); // restore list
             keepMicActive = true;
             return;
@@ -407,7 +437,7 @@ export default function App() {
       if (!answer) {
         addLog("⚠️ AI returned an empty response.", "warn");
         setPendingAction(null);
-        setAiResponse("I didn't get a response for that command. Please try again.");
+        showAiResponse("I didn't get a response for that command. Please try again.");
         setUsedAdvancedModel(usedAdvanced);
         return;
       }
@@ -434,7 +464,7 @@ export default function App() {
         if (pdfViewerRef.current) {
           pdfViewerRef.current.nextPage();
         } else {
-          setAiResponse("No document is open. Open a document first.");
+          showAiResponse("No document is open. Open a document first.");
         }
       } else if (answer === "__ACTION:PREVIOUS_PDF_PAGE__") {
         addLog("📄 Command: previous page", "voice");
@@ -443,7 +473,7 @@ export default function App() {
         if (pdfViewerRef.current) {
           pdfViewerRef.current.prevPage();
         } else {
-          setAiResponse("No document is open. Open a document first.");
+          showAiResponse("No document is open. Open a document first.");
         }
       } else if (answer.startsWith("__ACTION:HIGHLIGHT_WORD:")) {
         const word = answer.replace("__ACTION:HIGHLIGHT_WORD:", "").replace(/__$/, "").trim();
@@ -453,7 +483,7 @@ export default function App() {
         if (pdfViewerRef.current && word) {
           pdfViewerRef.current.highlightWord(word);
         } else if (!pdfViewerRef.current) {
-          setAiResponse("No document is open. Open a document first.");
+          showAiResponse("No document is open. Open a document first.");
         }
       } else if (answer === "__ACTION:REMOVE_HIGHLIGHTS__") {
         addLog("🗑️ Command: remove all highlights", "voice");
@@ -462,7 +492,7 @@ export default function App() {
         if (pdfViewerRef.current) {
           pdfViewerRef.current.removeHighlights();
         } else {
-          setAiResponse("No document is open.");
+          showAiResponse("No document is open.");
         }
       } else if (answer.startsWith("__ACTION:GO_TO_PAGE:")) {
         const rawPage = answer.replace("__ACTION:GO_TO_PAGE:", "").replace(/__$/, "").trim();
@@ -473,9 +503,9 @@ export default function App() {
         if (pdfViewerRef.current && !Number.isNaN(pageNumber)) {
           pdfViewerRef.current.goToPage(pageNumber);
         } else if (!pdfViewerRef.current) {
-          setAiResponse("No document is open. Open a document first.");
+          showAiResponse("No document is open. Open a document first.");
         } else {
-          setAiResponse("Sorry, I couldn't understand the page number.");
+          showAiResponse("Sorry, I couldn't understand the page number.");
         }
       } else if (answer.startsWith("__ACTION:GO_TO_LOINC:")) {
         const loincCode = answer.replace("__ACTION:GO_TO_LOINC:", "").replace(/__$/, "").trim();
@@ -485,7 +515,7 @@ export default function App() {
         if (pdfViewerRef.current && loincCode) {
           pdfViewerRef.current.goToLoincCode(loincCode);
         } else if (!pdfViewerRef.current) {
-          setAiResponse("No document is open. Open a document first.");
+          showAiResponse("No document is open. Open a document first.");
         }
       } else if (answer === "__ACTION:CLOSE_DOCUMENT__") {
         addLog("📄 Command: close document", "voice");
@@ -497,10 +527,15 @@ export default function App() {
         setAiResponse(null);
         setPendingAction(null);
         window.location.href = "/admin.html";
+      } else if (answer === "__ACTION:PRINT_DOCUMENT__") {
+        addLog("🖨️ Command: print document", "voice");
+        setAiResponse(null);
+        setPendingAction(null);
+        window.print();
       } else {
         addLog(`💡 AI: "${answer}"`, "voice");
         setPendingAction(null);
-        setAiResponse(answer);
+        showAiResponse(answer);
         setUsedAdvancedModel(usedAdvanced);
       }
     } catch (err) {
@@ -508,7 +543,7 @@ export default function App() {
       addLog(`❌ AI error: ${errorMessage}`, "error");
       setUsedAdvancedModel(false);
       setPendingAction(null);
-      setAiResponse(/timed out/i.test(errorMessage)
+      showAiResponse(/timed out/i.test(errorMessage)
         ? "The request timed out. Please try again."
         : "I couldn't process that command right now. Please try again.");
     } finally {
@@ -533,7 +568,7 @@ export default function App() {
         resumeListeningRef.current();
       }
     }
-  }, [addLog, fetchRecentDocuments, fetchJsonWithTimeout, normalizeCommandText, openDocumentPreview, openPdf, setPendingAction]);
+  }, [addLog, fetchRecentDocuments, fetchJsonWithTimeout, normalizeCommandText, openDocumentPreview, openPdf, setPendingAction, showAiResponse, showTranscript]);
 
   sendToAIRef.current = sendToAI;
   useEffect(() => { sendToAIRef.current = sendToAI; }, [sendToAI]);
@@ -633,7 +668,7 @@ export default function App() {
         lowConfidenceTranscriptRef.current = null;
 
         addLog(`🗣️ Web Speech: "${combined}"`, "voice");
-        setTranscript(combined);
+        showTranscript(combined);
         setAiResponse(null);
         setStatus("sending");
         sendToAIRef.current?.(combined);
@@ -649,6 +684,9 @@ export default function App() {
       const lastResult = event.results[event.results.length - 1];
 
       if (transcript.includes("activate") && !activatedRef.current) {
+        // Do not re-activate while a request is already being processed.
+        if (statusRef.current === "sending" || statusRef.current === "processing") return;
+
         activatedRef.current = true;
         webSpeechHandledRef.current = false;
         whisperFallbackNeededRef.current = false;
@@ -659,7 +697,11 @@ export default function App() {
           commandSubmitTimeoutRef.current = null;
         }
         setStatus("listening");
-        addLog("🎤 Activated — speak your command (I will submit after 1s of silence)", "info");
+        addLog("🎤 Activated — speak your command (I will submit after 2s of silence)", "info");
+
+        // Dismiss landing screen on first activation.
+        setShowLanding(false);
+        try { localStorage.setItem("sgm_activated", "1"); } catch (_) {}
 
         if (listeningTimeoutRef.current) clearTimeout(listeningTimeoutRef.current);
         listeningTimeoutRef.current = setTimeout(() => {
@@ -677,6 +719,9 @@ export default function App() {
         // VAD disabled: we do not start the VAD here.
         return;
       }
+
+      // Block all new command input while sending or processing.
+      if (statusRef.current === "sending" || statusRef.current === "processing") return;
 
       if (!activatedRef.current) return;
       if (webSpeechHandledRef.current) return;
@@ -787,7 +832,7 @@ export default function App() {
           whisperFallbackNeededRef.current = false;
           lowConfidenceTranscriptRef.current = null;
           addLog(`🗣️ Whisper: "${cleaned}"`, "voice");
-          setTranscript(cleaned);
+          showTranscript(cleaned);
           setAiResponse(null);
           setStatus("sending");
           sendToAIRef.current?.(cleaned);
@@ -800,7 +845,7 @@ export default function App() {
             lowConfidenceTranscriptRef.current = null;
             addLog("⚠️ Whisper returned no speech — using low-confidence Web Speech transcript.", "warn");
             addLog(`🗣️ Web Speech fallback: "${fallbackText}"`, "voice");
-            setTranscript(fallbackText);
+            showTranscript(fallbackText);
             setAiResponse(null);
             setStatus("sending");
             sendToAIRef.current?.(fallbackText);
@@ -822,7 +867,7 @@ export default function App() {
           lowConfidenceTranscriptRef.current = null;
           addLog("⚠️ Whisper error — using low-confidence Web Speech transcript.", "warn");
           addLog(`🗣️ Web Speech fallback: "${fallbackText}"`, "voice");
-          setTranscript(fallbackText);
+          showTranscript(fallbackText);
           setAiResponse(null);
           setStatus("sending");
           sendToAIRef.current?.(fallbackText);
@@ -843,7 +888,7 @@ export default function App() {
         lowConfidenceTranscriptRef.current = null;
         addLog("⚠️ Whisper worker crashed — using low-confidence Web Speech transcript.", "warn");
         addLog(`🗣️ Web Speech fallback: "${fallbackText}"`, "voice");
-        setTranscript(fallbackText);
+        showTranscript(fallbackText);
         setAiResponse(null);
         setStatus("sending");
         sendToAIRef.current?.(fallbackText);
@@ -920,7 +965,7 @@ export default function App() {
   const dotColor = isSending    ? "#3498db"
     : isProcessing ? "#9b59b6"
     : isListening  ? "#e67e22"
-    : !wakeWordReady ? "#f1c40f"
+    : !wakeWordReady ? "#f97316"
     : vad.errored  ? "#e74c3c"
     : "#00b894";
 
@@ -929,6 +974,68 @@ export default function App() {
 
   return (
     <div style={styles.page}>
+      {/* ── Landing screen — shown until first activation ─────────────────────── */}
+      {showLanding && (
+        <div style={styles.landing}>
+          <div style={styles.landingCard}>
+            <h1 style={styles.landingTitle}>Smart Glasses Assistant</h1>
+            <p style={styles.landingSubtitle}>
+              Say <strong style={{color:"#f97316"}}>"Activate"</strong> to start, then speak your command.
+            </p>
+            <div style={styles.landingSection}>
+              <h2 style={styles.landingH2}>🎤 How It Works</h2>
+              <ol style={styles.landingOl}>
+                <li>Say <em>"Activate"</em> to wake the assistant.</li>
+                <li>Speak your command clearly.</li>
+                <li>The assistant will respond or perform the action.</li>
+                <li>Say "Activate" again for the next command.</li>
+              </ol>
+            </div>
+            <div style={styles.landingSection}>
+              <h2 style={styles.landingH2}>📋 Common Commands</h2>
+              <table style={styles.landingTable}>
+                <tbody>
+                  {[
+                    ["open file", "Show list of recent uploaded files"],
+                    ["open last document", "Open the most recently uploaded document"],
+                    ["next page", "Go to the next page"],
+                    ["previous page", "Go to the previous page"],
+                    ["go to page 5", "Jump to a specific page"],
+                    ["highlight aspirin", "Highlight a word in the open document"],
+                    ["clear highlights", "Remove all highlights"],
+                    ["search for blood pressure", "Search for text in documents"],
+                    ["search for BP", "Search using FDA SPL abbreviations"],
+                    ["remind me to…", "Set a reminder"],
+                    ["what time is it", "Get the current date and time"],
+                    ["print document", "Print the open document"],
+                    ["close document", "Close the open PDF"],
+                    ["admin panel", "Open the admin panel"],
+                  ].map(([cmd, desc]) => (
+                    <tr key={cmd}>
+                      <td style={styles.landingCmd}>"{cmd}"</td>
+                      <td style={styles.landingDesc}>{desc}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p style={styles.landingDismiss}>This screen will disappear after your first activation.</p>
+          </div>
+        </div>
+      )}
+
+      {/* ── Command legend (always visible after first activation) ────────────── */}
+      {!showLanding && (
+        <div style={styles.legend}>
+          <span style={styles.legendItem}><span style={styles.legendKbd}>Activate</span> wake</span>
+          <span style={styles.legendItem}><span style={styles.legendKbd}>next / prev page</span> navigate</span>
+          <span style={styles.legendItem}><span style={styles.legendKbd}>highlight [word]</span> mark</span>
+          <span style={styles.legendItem}><span style={styles.legendKbd}>clear highlights</span> reset</span>
+          <span style={styles.legendItem}><span style={styles.legendKbd}>print</span> print</span>
+          <span style={styles.legendItem}><span style={styles.legendKbd}>open file</span> browse</span>
+        </div>
+      )}
+
       <div style={styles.indicator}>
         <span style={dotStyle} />
         <span style={styles.indicatorText}>{btnLabel}</span>
@@ -1091,6 +1198,117 @@ const styles = {
     flexDirection: "column",
     fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
     position: "relative",
+  },
+  // Landing screen overlay
+  landing: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(0,0,0,0.92)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 100,
+    padding: 16,
+    overflowY: "auto",
+  },
+  landingCard: {
+    background: "#111",
+    border: "1px solid #333",
+    borderRadius: 16,
+    padding: "32px 28px",
+    maxWidth: 620,
+    width: "100%",
+    display: "flex",
+    flexDirection: "column",
+    gap: 20,
+  },
+  landingTitle: {
+    margin: 0,
+    fontSize: "1.7rem",
+    fontWeight: 700,
+    color: "#fff",
+    textAlign: "center",
+  },
+  landingSubtitle: {
+    margin: 0,
+    fontSize: "1rem",
+    color: "#ccc",
+    textAlign: "center",
+  },
+  landingSection: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+  },
+  landingH2: {
+    margin: 0,
+    fontSize: "0.95rem",
+    fontWeight: 600,
+    color: "#f97316",
+    textTransform: "uppercase",
+    letterSpacing: "0.06em",
+  },
+  landingOl: {
+    margin: 0,
+    paddingLeft: 22,
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+    color: "#ddd",
+    fontSize: "0.95rem",
+    lineHeight: 1.6,
+  },
+  landingTable: {
+    width: "100%",
+    borderCollapse: "collapse",
+    fontSize: "0.875rem",
+  },
+  landingCmd: {
+    padding: "5px 10px 5px 0",
+    color: "#f97316",
+    fontFamily: "monospace",
+    whiteSpace: "nowrap",
+    verticalAlign: "top",
+    width: "40%",
+  },
+  landingDesc: {
+    padding: "5px 0",
+    color: "#bbb",
+    verticalAlign: "top",
+  },
+  landingDismiss: {
+    margin: 0,
+    fontSize: "0.8rem",
+    color: "#555",
+    textAlign: "center",
+    fontStyle: "italic",
+  },
+  // Small command legend shown in top-left after first activation
+  legend: {
+    position: "absolute",
+    top: 12,
+    left: 12,
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "6px 12px",
+    zIndex: 30,
+    maxWidth: 480,
+  },
+  legendItem: {
+    fontSize: "0.7rem",
+    color: "#666",
+    display: "flex",
+    alignItems: "center",
+    gap: 4,
+  },
+  legendKbd: {
+    background: "#1a1a1a",
+    border: "1px solid #333",
+    borderRadius: 4,
+    padding: "1px 5px",
+    fontSize: "0.68rem",
+    color: "#f97316",
+    fontFamily: "monospace",
   },
   indicator: {
     position: "absolute",

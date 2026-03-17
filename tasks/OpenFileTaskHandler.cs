@@ -8,6 +8,11 @@ public class OpenFileTaskHandler : ITaskHandler
 
     public string Name => "open-file";
 
+    public IReadOnlyList<string> Keywords => new[]
+    {
+        "open file", "show files", "recent files", "list files", "open a file", "show recent files"
+    };
+
     public OpenFileTaskHandler(ApplicationDbContext context)
     {
         _context = context;

@@ -10,6 +10,11 @@ public class OCRRetryTaskHandler : ITaskHandler
 
     public string Name => "ocr-retry";
 
+    public IReadOnlyList<string> Keywords => new[]
+    {
+        "retry ocr", "rerun ocr", "retry scan", "rescan document", "redo ocr"
+    };
+
     public OCRRetryTaskHandler(ILogger<OCRRetryTaskHandler> logger, IDocumentProcessingService processingService, IRAGService ragService)
     {
         _logger = logger;

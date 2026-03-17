@@ -10,6 +10,11 @@ public interface ITaskDispatcher
     IReadOnlyList<string> KnownTasks { get; }
     Task<(bool handled, string? response)> TryHandleAsync(string taskName, string input);
     IReadOnlyDictionary<string, string> GetHandlerTypeMap();
+    /// <summary>
+    /// Match the user input against each handler's Keywords list.
+    /// Returns the first matching task name, or null if no keyword matched.
+    /// </summary>
+    string? TryMatchByKeyword(string input);
 }
 
 public class TaskDispatcher : ITaskDispatcher
@@ -130,6 +135,79 @@ public class TaskDispatcher : ITaskDispatcher
                 kvp => kvp.Key,
                 kvp => kvp.Value.FullName ?? kvp.Value.Name,
                 StringComparer.OrdinalIgnoreCase);
+    }
+
+    public string? TryMatchByKeyword(string input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return null;
+
+        var normalizedInput = input.ToLowerInvariant();
+        var allowed = new HashSet<string>(
+            (KnownTasks ?? Array.Empty<string>()).Select(t => t.ToLowerInvariant()),
+            StringComparer.OrdinalIgnoreCase);
+
+        // Instantiate handlers briefly to read their keywords.
+        // Use a temporary scope per handler type.
+        using var scope = _serviceProvider.CreateScope();
+        string? bestMatch = null;
+        int bestLength = 0;
+
+        foreach (var (taskName, handlerType) in HandlerTypeMap)
+        {
+            if (allowed.Count > 0 && !allowed.Contains(taskName)) continue;
+
+            ITaskHandler handler;
+            try
+            {
+                handler = (ITaskHandler)ActivatorUtilities.CreateInstance(scope.ServiceProvider, handlerType);
+            }
+            catch
+            {
+                continue;
+            }
+
+            foreach (var keyword in handler.Keywords)
+            {
+                if (string.IsNullOrWhiteSpace(keyword)) continue;
+                var lowerKeyword = keyword.ToLowerInvariant().Trim();
+                // Use word-boundary matching so "print" doesn't match "fingerprint".
+                // A keyword matches when it appears in the input surrounded by
+                // non-alphanumeric characters (or at the start/end of the string).
+                if (ContainsWholePhrase(normalizedInput, lowerKeyword))
+                {
+                    // Prefer the longest matching keyword to avoid false positives.
+                    if (lowerKeyword.Length > bestLength)
+                    {
+                        bestLength = lowerKeyword.Length;
+                        bestMatch = taskName;
+                    }
+                }
+            }
+        }
+
+        return bestMatch;
+    }
+
+    /// <summary>
+    /// Returns true when <paramref name="phrase"/> appears in <paramref name="text"/>
+    /// as a whole word or phrase, i.e. not embedded inside another word.
+    /// Both arguments are expected to be already lowercased.
+    /// </summary>
+    private static bool ContainsWholePhrase(string text, string phrase)
+    {
+        int idx = 0;
+        while (true)
+        {
+            idx = text.IndexOf(phrase, idx, StringComparison.Ordinal);
+            if (idx < 0) return false;
+
+            int end = idx + phrase.Length;
+            bool leftOk  = idx == 0         || !char.IsLetterOrDigit(text[idx - 1]);
+            bool rightOk = end >= text.Length || !char.IsLetterOrDigit(text[end]);
+
+            if (leftOk && rightOk) return true;
+            idx = end; // advance past this occurrence and try again
+        }
     }
 
     private static string InferTaskNameFromType(Type handlerType)
