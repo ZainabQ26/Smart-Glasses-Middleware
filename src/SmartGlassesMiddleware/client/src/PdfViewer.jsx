@@ -336,6 +336,7 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
       .map((src, i) => `<div class="page"><img src="${src}" alt="Page ${i + 1}"/></div>`)
       .join("");
 
+    const safeTitle = (documentName || "Document").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     const printWin = window.open("", "_blank", "width=900,height=700");
     if (!printWin) {
       showToast("Pop-up blocked — allow pop-ups and try again.", 4000);
@@ -344,13 +345,15 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
 
     printWin.document.write(`<!DOCTYPE html>
 <html><head>
-  <title>Print</title>
+  <title>${safeTitle}</title>
   <style>
+    @page { size: auto; margin: 0mm; }
     * { margin:0; padding:0; box-sizing:border-box; }
     body { background:#fff; }
-    .page { page-break-after:always; text-align:center; }
-    .page:last-child { page-break-after:avoid; }
-    .page img { max-width:100%; height:auto; display:block; margin:0 auto; }
+    .page { page-break-after: always; text-align:center; }
+    .page:last-child { page-break-after: avoid; }
+    .page img { width:100%; height:auto; display:block; }
+    @media print { body { margin:0; } }
   </style>
 </head>
 <body>${imgsHtml}</body></html>`);
@@ -358,7 +361,7 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
     printWin.onload = () => { printWin.focus(); printWin.print(); };
 
     showToast("Print dialog opened.", 3000);
-  }, [showToast]);
+  }, [showToast, documentName]);
 
   // ── Expose imperative handle to parent ──────────────────────────────────────
   useImperativeHandle(ref, () => ({
