@@ -17,6 +17,8 @@ export default function App() {
   const [transcript, setTranscript] = useState(null);
   const [aiResponse, setAiResponse] = useState(null);
   const [usedAdvancedModel, setUsedAdvancedModel] = useState(false);
+  const [backendReady, setBackendReady] = useState(false);
+  const [backendStatusText, setBackendStatusText] = useState("Checking server status…");
   const [wakeWordReady, setWakeWordReady] = useState(false);
   const [pendingAction, _setPendingActionState] = useState(null); // { type: "SHOW_RECENT_FILES", files } | { type: "SELECT_DOCUMENT", id, name } | null
   // Reminders toast: null | { reminders: [], phase: 'visible'|'fading' }
@@ -172,19 +174,54 @@ export default function App() {
     return () => window.removeEventListener("storage", handler);
   }, []);
 
-  // Fetch the activation word from the server config (appsettings.json) on startup.
-  // The server value takes precedence; localStorage is only the fallback initial state.
+  // Probe backend on load and keep retrying while the service scales up from idle.
+  // This endpoint is lightweight and also provides the activation word.
   useEffect(() => {
-    fetch("/api/process/client-settings")
-      .then((r) => r.ok ? r.json() : null)
-      .then((data) => {
-        const w = data?.activationWord?.trim() || "";
-        if (w) {
-          setActivationWord(w);
-          activationWordRef.current = w;
+    let cancelled = false;
+
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    const probeBackend = async () => {
+      let attempts = 0;
+
+      while (!cancelled) {
+        setBackendStatusText(attempts === 0 ? "Checking server status…" : "Waking backend server…");
+
+        try {
+          const response = await fetch("/api/process/client-settings", {
+            method: "GET",
+            cache: "no-store",
+          });
+
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+
+          const data = await response.json();
+          const w = data?.activationWord?.trim() || "";
+          if (w) {
+            setActivationWord(w);
+            activationWordRef.current = w;
+          }
+
+          if (!cancelled) {
+            setBackendReady(true);
+            setBackendStatusText("Backend is ready");
+            addLog("✅ Backend server is ready.", "info");
+          }
+          return;
+        } catch (_) {
+          attempts += 1;
+          await sleep(Math.min(2000 + attempts * 1000, 10000));
         }
-      })
-      .catch(() => {/* keep the localStorage fallback value */});
+      }
+    };
+
+    probeBackend();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // VAD/Whisper removed: keep a harmless placeholder used by the UI so
@@ -975,6 +1012,10 @@ export default function App() {
   // ── Manual tap button ─────────────────────────────────────────────────────
   const handleMicButton = () => {
     if (status === "idle") {
+      if (!backendReady) {
+        addLog("⚠️ Backend is still waking up. Please wait.", "warn");
+        return;
+      }
       if (!wakeWordReady) {
         addLog("⚠️ Microphone not ready yet.", "warn");
         return;
@@ -1007,6 +1048,8 @@ export default function App() {
     ? "🤖 Sending to AI…"
     : isProcessing
       ? "⏳ Transcribing…"
+      : !backendReady
+        ? "⏳ Waking server…"
       : isListening
         ? "🗣️ Listening…"
         : !wakeWordReady
@@ -1014,11 +1057,12 @@ export default function App() {
           : `Say "${activationWord}"`;
   const dotColor = isSending    ? "#3498db"
     : isProcessing ? "#9b59b6"
+    : !backendReady ? "#f59e0b"
     : isListening  ? "#e67e22"
     : !wakeWordReady ? "#f97316"
     : "#00b894";
 
-  const shouldPulse = isProcessing || isSending || !wakeWordReady;
+  const shouldPulse = isProcessing || isSending || !wakeWordReady || !backendReady;
   const dotStyle = { ...styles.dot, background: dotColor, ...(shouldPulse ? { animation: "pulse 1s ease-in-out infinite" } : {}) };
 
   // Full command list shown as an overlay in the top-left only while listening.
@@ -1042,6 +1086,16 @@ export default function App() {
 
   return (
     <div style={styles.page}>
+      {!backendReady && (
+        <div style={styles.serverWakeOverlay}>
+          <div style={styles.serverWakeCard}>
+            <h2 style={styles.serverWakeTitle}>Starting Server</h2>
+            <p style={styles.serverWakeText}>{backendStatusText}</p>
+            <p style={styles.serverWakeSubtext}>The backend appears to be offline. This page will continue automatically once it wakes up.</p>
+          </div>
+        </div>
+      )}
+
       {/* ── Landing screen — shown until first activation ─────────────────────── */}
       {showLanding && (
         <div style={styles.landing}>
@@ -1302,6 +1356,41 @@ const styles = {
     flexDirection: "column",
     fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
     position: "relative",
+  },
+  serverWakeOverlay: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(0,0,0,0.86)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 120,
+    padding: 16,
+  },
+  serverWakeCard: {
+    width: "min(520px, 100%)",
+    background: "#121212",
+    border: "1px solid #2d2d2d",
+    borderRadius: 14,
+    padding: "20px 22px",
+    boxShadow: "0 20px 60px rgba(0,0,0,0.45)",
+  },
+  serverWakeTitle: {
+    margin: 0,
+    fontSize: 22,
+    color: "#f6f6f6",
+  },
+  serverWakeText: {
+    margin: "10px 0 0 0",
+    fontSize: 16,
+    color: "#f59e0b",
+    fontWeight: 600,
+  },
+  serverWakeSubtext: {
+    margin: "8px 0 0 0",
+    fontSize: 14,
+    color: "#b9b9b9",
+    lineHeight: 1.45,
   },
   // Landing screen overlay
   landing: {
