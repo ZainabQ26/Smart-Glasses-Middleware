@@ -11,6 +11,7 @@ public class OCRTaskHandler : ITaskHandler
     private readonly ILogger<OCRTaskHandler> _logger;
     private readonly IDocumentProcessingService _processingService;
     private readonly IRAGService _ragService;
+    private readonly bool _ragEnabled;
 
     public string Name => "ocr";
 
@@ -19,11 +20,12 @@ public class OCRTaskHandler : ITaskHandler
         "run ocr", "scan document", "ocr document", "read the text", "extract text"
     };
 
-    public OCRTaskHandler(ILogger<OCRTaskHandler> logger, IDocumentProcessingService processingService, IRAGService ragService)
+    public OCRTaskHandler(ILogger<OCRTaskHandler> logger, IDocumentProcessingService processingService, IRAGService ragService, IConfiguration configuration)
     {
         _logger = logger;
         _processingService = processingService;
         _ragService = ragService;
+        _ragEnabled = configuration.GetValue<bool?>("RAG:Enabled") ?? true;
     }
 
     public async Task<string> HandleAsync(string input)
@@ -42,11 +44,15 @@ public class OCRTaskHandler : ITaskHandler
             if (Guid.TryParse(input.Trim(), out var documentId))
             {
                 var metadata = await _processingService.ReprocessDocumentAsync(documentId);
-                await _ragService.GenerateEmbeddingsAsync(documentId);
+                if (_ragEnabled)
+                {
+                    await _ragService.GenerateEmbeddingsAsync(documentId);
+                }
 
                 return $"Manual OCR retry complete for document {documentId}. " +
                     $"Chunks: {metadata.Chunks.Count}. " +
                     $"ProcessedAt: {metadata.ProcessedAt:O}. " +
+                    (_ragEnabled ? string.Empty : "RAG indexing is disabled, so embeddings were skipped. ") +
                     "If OCR is not configured, pages without text may still be empty. " +
                     "Configure Tesseract and retry to enable full OCR.";
             }

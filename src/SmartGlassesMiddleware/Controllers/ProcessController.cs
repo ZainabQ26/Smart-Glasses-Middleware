@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using SmartGlassesMiddleware.Models;
 using SmartGlassesMiddleware.Services;
 
 namespace SmartGlassesMiddleware.Controllers;
@@ -70,7 +71,7 @@ public class ProcessController : ControllerBase
         try
         {
             // usedAdvancedModel is not relevant for the UI — discard it
-            var (task, response, usedAdvanced) = await _aiService.ProcessRequestAsync(request.Input, cancellationToken);
+            var (task, response, usedAdvanced) = await _aiService.ProcessRequestAsync(request.Input, cancellationToken, request.DocumentContext);
             return Ok(new { task, response, usedAdvancedModel = usedAdvanced });
         }
         catch (OperationCanceledException)
@@ -125,6 +126,7 @@ public class ProcessController : ControllerBase
 public class ProcessRequest
 {
     public string Input { get; set; } = string.Empty;
+    public ProcessDocumentContext? DocumentContext { get; set; }
 }
 
 public class PageSummaryRequest

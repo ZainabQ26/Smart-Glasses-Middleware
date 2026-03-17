@@ -27,6 +27,7 @@ public class DocumentsController : ControllerBase
     private readonly ICacheService _cacheService;
     private readonly IHubContext<ResourceHub>? _resourceHub;
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly bool _ragEnabled;
     private const int DefaultPageSize = 20;
     private const int MaxPageSize = 100;
     private static readonly TimeSpan QueryMonitoringTimeout = TimeSpan.FromSeconds(2);
@@ -61,6 +62,7 @@ public class DocumentsController : ControllerBase
         _mediaStorageService = mediaStorageService;
         _conversationService = conversationService;
         _scopeFactory = scopeFactory;
+        _ragEnabled = configuration.GetValue<bool?>("RAG:Enabled") ?? true;
         _groupConversationMappingService = groupConversationMappingService;
         _cacheService = cacheService ?? new InMemoryCacheService(LoggerFactory.Create(b => b.AddConsole()).CreateLogger<InMemoryCacheService>());
         _resourceHub = resourceHub;
@@ -217,8 +219,9 @@ public class DocumentsController : ControllerBase
                 metadata.StorageKey = uploadKey;
                 metadata.FileSize = pdfStream.Length;
                 metadata.DocumentType = "pdf";
-                metadata.IsProcessed = false;
-                metadata.ProcessingError = null;
+                metadata.IsProcessed = !_ragEnabled;
+                metadata.ProcessedAt = _ragEnabled ? null : DateTime.UtcNow;
+                metadata.ProcessingError = _ragEnabled ? null : "RAG disabled: indexing skipped.";
                 metadata.ManagedFileId = documentId;
             }
 
@@ -243,17 +246,25 @@ public class DocumentsController : ControllerBase
                 _logger.LogWarning(notifyEx, "Failed to notify file list refresh after queued upload {DocumentId}", documentId);
             }
 
-            if (monitoringService != null)
+            if (_ragEnabled && monitoringService != null)
             {
                 await monitoringService.UpdateRequestStatus(requestId, "Processing", "Extracting text and generating embeddings...", 75);
             }
 
-            await processingService.ReprocessDocumentAsync(documentId);
-            await ragService.GenerateEmbeddingsAsync(documentId);
+            if (_ragEnabled)
+            {
+                await processingService.ReprocessDocumentAsync(documentId);
+                await ragService.GenerateEmbeddingsAsync(documentId);
+            }
 
             if (monitoringService != null)
             {
-                await monitoringService.CompleteRequest(requestId, true, $"Document {pdfFileName} uploaded and indexed");
+                await monitoringService.CompleteRequest(
+                    requestId,
+                    true,
+                    _ragEnabled
+                        ? $"Document {pdfFileName} uploaded and indexed"
+                        : $"Document {pdfFileName} uploaded. RAG indexing skipped.");
             }
         }
         catch (Exception ex)

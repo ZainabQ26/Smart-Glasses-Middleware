@@ -10,6 +10,7 @@ namespace SmartGlassesMiddleware.Services;
 public class DocumentQueryTaskHandler : ITaskHandler
 {
     private readonly IRAGService _ragService;
+    private readonly bool _ragEnabled;
     private readonly ILogger<DocumentQueryTaskHandler> _logger;
 
     public string Name => "document-query";
@@ -20,9 +21,10 @@ public class DocumentQueryTaskHandler : ITaskHandler
         "explain in the document", "according to the document", "based on the document"
     };
 
-    public DocumentQueryTaskHandler(IRAGService ragService, ILogger<DocumentQueryTaskHandler> _logger)
+    public DocumentQueryTaskHandler(IRAGService ragService, IConfiguration configuration, ILogger<DocumentQueryTaskHandler> _logger)
     {
         _ragService = ragService;
+        _ragEnabled = configuration.GetValue<bool?>("RAG:Enabled") ?? true;
         this._logger = _logger;
     }
 
@@ -30,6 +32,11 @@ public class DocumentQueryTaskHandler : ITaskHandler
     {
         try
         {
+            if (!_ragEnabled)
+            {
+                return "Document query is currently unavailable because RAG indexing is disabled.";
+            }
+
             _logger.LogInformation("Processing document query: {Query}", input);
 
             // Use RAG service to query documents

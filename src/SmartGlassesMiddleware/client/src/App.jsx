@@ -345,6 +345,32 @@ export default function App() {
     showAiResponse(summary);
   }, [API_TIMEOUT_MS, addLog, fetchJsonWithTimeout, openPdf, showAiResponse, setPendingAction]);
 
+  const buildProcessRequestBody = useCallback(async (commandText) => {
+    const payload = { input: commandText };
+    const localPdf = pdfViewerRef.current;
+
+    if (!localPdf || !openPdf || !localPdf.getDocumentContext) {
+      return payload;
+    }
+
+    try {
+      const documentContext = await localPdf.getDocumentContext();
+      if (documentContext) {
+        payload.documentContext = {
+          documentName: openPdf.name,
+          currentPage: documentContext.currentPage,
+          totalPages: documentContext.totalPages,
+          pages: documentContext.pages,
+          highlights: documentContext.highlights,
+        };
+      }
+    } catch (err) {
+      addLog(`⚠️ Failed to collect document context: ${err?.message || "Unknown error"}`, "warn");
+    }
+
+    return payload;
+  }, [addLog, openPdf]);
+
   // ── Send transcript to AI ─────────────────────────────────────────────────
   const sendToAI = useCallback(async (text) => {
     // When keepMicActive is true the finally block keeps the mic in listening
@@ -483,10 +509,11 @@ export default function App() {
         setUsedAdvancedModel(false);
       }
       addLog(`🤖 Sending to AI: \"${commandText}\"`, "info");
+      const processRequestBody = await buildProcessRequestBody(commandText);
       const data = await fetchJsonWithTimeout("/api/process", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ input: commandText }),
+        body: JSON.stringify(processRequestBody),
       }, API_TIMEOUT_MS);
       const answer = (data.response || "").trim();
       const usedAdvanced = data?.usedAdvancedModel ?? data?.UsedAdvancedModel ?? data?.usedAdvanced ?? false;
@@ -637,7 +664,7 @@ export default function App() {
         resumeListeningRef.current();
       }
     }
-  }, [addLog, fetchRecentDocuments, fetchJsonWithTimeout, normalizeCommandText, openDocumentPreview, openPdf, setPendingAction, showAiResponse, showRemindersToast, showTranscript]);
+  }, [addLog, buildProcessRequestBody, fetchRecentDocuments, fetchJsonWithTimeout, normalizeCommandText, openDocumentPreview, openPdf, setPendingAction, showAiResponse, showRemindersToast, showTranscript]);
 
   sendToAIRef.current = sendToAI;
   useEffect(() => { sendToAIRef.current = sendToAI; }, [sendToAI]);

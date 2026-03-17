@@ -5,12 +5,14 @@ using System.Text.Json;
 using System.Linq;
 using System.Diagnostics;
 using System.Text.RegularExpressions;
+using System.Text;
+using SmartGlassesMiddleware.Models;
 
 namespace SmartGlassesMiddleware.Services;
 
 public interface IAIService
 {
-    Task<(string task, string response, bool usedAdvancedModel)> ProcessRequestAsync(string input, CancellationToken cancellationToken = default);
+    Task<(string task, string response, bool usedAdvancedModel)> ProcessRequestAsync(string input, CancellationToken cancellationToken = default, ProcessDocumentContext? documentContext = null);
     /// <summary>Classify only — returns the task name or "unknown". No response generated.</summary>
     Task<string> ClassifyOnlyAsync(string input, CancellationToken cancellationToken = default);
     /// <summary>Quick check whether the advanced model will be used for this input.</summary>
@@ -84,7 +86,7 @@ public class AIService : IAIService
         _knownTasks = new List<string>();
     }
 
-    public async Task<(string task, string response, bool usedAdvancedModel)> ProcessRequestAsync(string input, CancellationToken cancellationToken = default)
+    public async Task<(string task, string response, bool usedAdvancedModel)> ProcessRequestAsync(string input, CancellationToken cancellationToken = default, ProcessDocumentContext? documentContext = null)
     {
         try
         {
@@ -150,7 +152,8 @@ public class AIService : IAIService
                     _logger.LogInformation("Task is not in known tasks, forwarding to advanced task handler");
                     try
                     {
-                        var (handled, advancedResponse) = await _dispatcher.TryHandleAsync("advanced", input);
+                        var advancedInput = BuildAdvancedInput(input, documentContext);
+                        var (handled, advancedResponse) = await _dispatcher.TryHandleAsync("advanced", advancedInput);
 
                         // Always return the advanced handler's message as-is.
                         if (handled && !string.IsNullOrWhiteSpace(advancedResponse))
@@ -163,12 +166,12 @@ public class AIService : IAIService
                         // as an unavailable advanced model and return an error message
                         // instead of falling back to the local model.
                         _logger.LogWarning("Advanced model handler did not handle request; returning unavailable response (no fallback)");
-                        return ("advanced", AdvancedTaskHandler.DispatcherFallbackMessage, false);
+                        return ("advanced", AdvancedTaskHandler.DispatcherFallbackMessage, true);
                     }
                     catch (Exception ex)
                     {
                         _logger.LogError(ex, "Advanced model call failed; returning unavailable response (no fallback)");
-                        return ("advanced", AdvancedTaskHandler.DispatcherFallbackMessage, false);
+                        return ("advanced", AdvancedTaskHandler.DispatcherFallbackMessage, true);
                     }
                 }
                 else
@@ -196,19 +199,20 @@ public class AIService : IAIService
                 _logger.LogInformation("Delegating unhandled task to advanced model handler (detectedTask={Task})", detectedTask);
                 try
                 {
-                    var (handledAdv, advancedResponse) = await _dispatcher.TryHandleAsync("advanced", input);
+                    var advancedInput = BuildAdvancedInput(input, documentContext);
+                    var (handledAdv, advancedResponse) = await _dispatcher.TryHandleAsync("advanced", advancedInput);
                     if (handledAdv && !string.IsNullOrWhiteSpace(advancedResponse))
                     {
                         return ("advanced", advancedResponse, true);
                     }
 
                     _logger.LogWarning("Advanced model handler did not handle request for task {Task}; returning unavailable response (no fallback)", detectedTask);
-                    return ("advanced", AdvancedTaskHandler.DispatcherFallbackMessage, false);
+                    return ("advanced", AdvancedTaskHandler.DispatcherFallbackMessage, true);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Advanced model call failed for unhandled task {Task}; returning unavailable response (no fallback)", detectedTask);
-                    return ("advanced", AdvancedTaskHandler.DispatcherFallbackMessage, false);
+                    return ("advanced", AdvancedTaskHandler.DispatcherFallbackMessage, true);
                 }
             }
 
@@ -478,6 +482,52 @@ Task:";
         {
             _logger.LogDebug(ex, "Failed to load known tasks lazily");
         }
+    }
+
+    private static string BuildAdvancedInput(string input, ProcessDocumentContext? documentContext)
+    {
+        if (documentContext == null || documentContext.Pages.Count == 0)
+        {
+            return input;
+        }
+
+        var builder = new StringBuilder();
+        builder.AppendLine("User request:");
+        builder.AppendLine(input);
+        builder.AppendLine();
+        builder.AppendLine("Open document context:");
+        builder.AppendLine($"- Document: {documentContext.DocumentName ?? "Unknown document"}");
+
+        if (documentContext.CurrentPage.HasValue)
+        {
+            builder.AppendLine($"- Current page: {documentContext.CurrentPage.Value}");
+        }
+
+        if (documentContext.TotalPages.HasValue)
+        {
+            builder.AppendLine($"- Total pages: {documentContext.TotalPages.Value}");
+        }
+
+        if (documentContext.Highlights.Count > 0)
+        {
+            builder.AppendLine("- Active highlights:");
+            foreach (var highlight in documentContext.Highlights.Where(h => !string.IsNullOrWhiteSpace(h.Keyword)))
+            {
+                var pageList = highlight.Pages.Count > 0 ? string.Join(", ", highlight.Pages) : "none";
+                builder.AppendLine($"  - {highlight.Keyword} (pages: {pageList})");
+            }
+        }
+
+        builder.AppendLine();
+        builder.AppendLine("Full document text:");
+        foreach (var page in documentContext.Pages.Where(p => !string.IsNullOrWhiteSpace(p.Text)).OrderBy(p => p.PageNumber))
+        {
+            builder.AppendLine();
+            builder.AppendLine($"[Page {page.PageNumber}]");
+            builder.AppendLine(page.Text);
+        }
+
+        return builder.ToString();
     }
 
     private string NormalizeDetectedTask(string rawTask)
