@@ -1,8 +1,10 @@
-using System.Net.Http.Json;
 using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.IO.Compression;
+using System.Xml.Linq;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using SmartGlassesMiddleware.Data;
 using SmartGlassesMiddleware.Models;
 
@@ -13,9 +15,11 @@ namespace SmartGlassesMiddleware.Services;
 /// </summary>
 public class AbbreviationService : IAbbreviationService
 {
+    private const string DefaultOpenFdaUrl = "https://api.fda.gov/drug/label.json";
     private readonly ApplicationDbContext _context;
     private readonly ILogger<AbbreviationService> _logger;
     private readonly HttpClient _httpClient;
+    private readonly IConfiguration _configuration;
 
     // In-memory cache: {shortForm.ToLower() -> [abbreviations]}
     private ConcurrentDictionary<string, List<Abbreviation>> _shortFormCache = 
@@ -28,11 +32,13 @@ public class AbbreviationService : IAbbreviationService
     public AbbreviationService(
         ApplicationDbContext context,
         ILogger<AbbreviationService> logger,
-        HttpClient httpClient)
+        HttpClient httpClient,
+        IConfiguration configuration)
     {
         _context = context;
         _logger = logger;
         _httpClient = httpClient;
+        _configuration = configuration;
     }
 
     public async Task<List<Abbreviation>?> LookupByShortFormAsync(string shortForm)
@@ -138,25 +144,49 @@ public class AbbreviationService : IAbbreviationService
     {
         try
         {
-            _logger.LogInformation("Starting openFDA and built-in abbreviation sync...");
+            _logger.LogInformation("Starting abbreviation sync (openFDA + DailyMed + built-in)...");
 
-            var allAbbreviations = new Dictionary<(string, string), Abbreviation>(StringComparer.OrdinalIgnoreCase);
+            var allAbbreviations = new Dictionary<(string shortForm, string expandedForm), Abbreviation>();
 
-            // First, fetch from openFDA API
-            _logger.LogInformation("Fetching drug label data from openFDA...");
-            var fda = await FetchFromOpenFdaAsync(ct);
-            foreach (var abbr in fda)
+            // First, fetch from openFDA API (configurable)
+            if (_configuration.GetValue<bool?>("AbbreviationSync:OpenFda:Enabled") ?? true)
             {
-                var key = (abbr.ShortForm.ToLower(), abbr.ExpandedForm.ToLower());
-                if (!allAbbreviations.ContainsKey(key))
-                    allAbbreviations[key] = abbr;
+                _logger.LogInformation("Fetching drug label data from openFDA...");
+                var fda = await FetchFromOpenFdaAsync(ct);
+                foreach (var abbr in fda)
+                {
+                    var key = (abbr.ShortForm.ToLowerInvariant(), abbr.ExpandedForm.ToLowerInvariant());
+                    if (!allAbbreviations.ContainsKey(key))
+                        allAbbreviations[key] = abbr;
+                }
+            }
+            else
+            {
+                _logger.LogInformation("openFDA sync disabled by configuration.");
+            }
+
+            // Then fetch from DailyMed bulk (configurable)
+            if (_configuration.GetValue<bool?>("AbbreviationSync:DailyMed:Enabled") ?? false)
+            {
+                _logger.LogInformation("Fetching drug label data from DailyMed (bulk)...");
+                var daily = await FetchFromDailyMedAsync(ct);
+                foreach (var abbr in daily)
+                {
+                    var key = (abbr.ShortForm.ToLowerInvariant(), abbr.ExpandedForm.ToLowerInvariant());
+                    if (!allAbbreviations.ContainsKey(key))
+                        allAbbreviations[key] = abbr;
+                }
+            }
+            else
+            {
+                _logger.LogInformation("DailyMed sync disabled by configuration.");
             }
 
             // Add built-in abbreviations (foundational set that won't change)
             var builtIn = GetBuiltInAbbreviations();
             foreach (var abbr in builtIn)
             {
-                var key = (abbr.ShortForm.ToLower(), abbr.ExpandedForm.ToLower());
+                var key = (abbr.ShortForm.ToLowerInvariant(), abbr.ExpandedForm.ToLowerInvariant());
                 if (!allAbbreviations.ContainsKey(key))
                     allAbbreviations[key] = abbr;
             }
@@ -206,8 +236,16 @@ public class AbbreviationService : IAbbreviationService
 
         try
         {
-            // Query openFDA for recent drug labels (limit to 100 to avoid timeout)
-            var apiUrl = "https://api.fda.gov/drug/label.json?limit=100&sort=effective_time:desc";
+            var baseUrl = _configuration["AbbreviationSync:OpenFda:BaseUrl"];
+            if (string.IsNullOrWhiteSpace(baseUrl))
+                baseUrl = DefaultOpenFdaUrl;
+
+            var limit = _configuration.GetValue<int?>("AbbreviationSync:OpenFda:Limit") ?? 100;
+            if (limit < 1) limit = 1;
+            if (limit > 1000) limit = 1000;
+
+            // Query openFDA for recent drug labels with configurable limit
+            var apiUrl = $"{baseUrl}?limit={limit}&sort=effective_time:desc";
             _logger.LogInformation("Fetching drug labels from openFDA: {Url}", apiUrl);
 
             using var response = await _httpClient.GetAsync(apiUrl, ct);
@@ -248,6 +286,159 @@ public class AbbreviationService : IAbbreviationService
         }
 
         return abbreviations;
+    }
+
+    private async Task<List<Abbreviation>> FetchFromDailyMedAsync(CancellationToken ct)
+    {
+        var abbreviations = new List<Abbreviation>();
+
+        try
+        {
+            var url = _configuration["AbbreviationSync:DailyMed:BulkUrl"];
+            if (string.IsNullOrWhiteSpace(url))
+            {
+                _logger.LogInformation("No DailyMed bulk URL configured (AbbreviationSync:DailyMed:BulkUrl); skipping DailyMed fetch.");
+                return abbreviations;
+            }
+
+            var maxXmlFiles = _configuration.GetValue<int?>("AbbreviationSync:DailyMed:MaxXmlFilesPerSync") ?? 200;
+            if (maxXmlFiles < 1) maxXmlFiles = 1;
+
+            var xmlProcessed = 0;
+
+            _logger.LogInformation("Downloading DailyMed bulk from {Url}", url);
+
+            using var response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("DailyMed bulk download failed {Status}: {Content}", response.StatusCode, await response.Content.ReadAsStringAsync(ct));
+                return abbreviations;
+            }
+
+            await using var stream = await response.Content.ReadAsStreamAsync(ct);
+
+            // Expect a ZIP archive containing SPL XML files. If not a zip, attempt to parse single XML stream.
+            try
+            {
+                using var zip = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: false);
+                foreach (var entry in zip.Entries)
+                {
+                    if (ct.IsCancellationRequested) break;
+                    if (xmlProcessed >= maxXmlFiles) break;
+
+                    if (!entry.FullName.EndsWith(".xml", StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    try
+                    {
+                        using var es = entry.Open();
+                        var doc = XDocument.Load(es);
+                        var text = string.Join(" ", doc.Descendants().Where(e => !e.HasElements).Select(e => e.Value));
+                        var found = ExtractAbbreviationsFromText(text, "DailyMed");
+                        abbreviations.AddRange(found);
+                        xmlProcessed++;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Failed to parse DailyMed entry {Entry}", entry.FullName);
+                    }
+                }
+            }
+            catch (InvalidDataException)
+            {
+                // Not a zip — attempt to parse as a single XML document
+                try
+                {
+                    stream.Seek(0, SeekOrigin.Begin);
+                    var doc = XDocument.Load(stream);
+                    var text = string.Join(" ", doc.Descendants().Where(e => !e.HasElements).Select(e => e.Value));
+                    var found = ExtractAbbreviationsFromText(text, "DailyMed");
+                    abbreviations.AddRange(found);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to parse DailyMed bulk as XML");
+                }
+            }
+
+            _logger.LogInformation("Extracted {Count} abbreviations from DailyMed bulk", abbreviations.Count);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, "Failed to reach DailyMed bulk URL (network issue)");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to parse DailyMed bulk response");
+        }
+
+        return abbreviations;
+    }
+
+    private List<Abbreviation> ExtractAbbreviationsFromText(string text, string source)
+    {
+        var abbreviations = new List<Abbreviation>();
+
+        if (string.IsNullOrWhiteSpace(text)) return abbreviations;
+
+        var abbrThenExpanded = new Regex(@"\b(?<abbr>[A-Z0-9\-]{2,10})\s*\((?<expanded>[^)]{3,200})\)", RegexOptions.IgnoreCase);
+        var expandedThenAbbr = new Regex(@"(?<expanded>[A-Za-z][A-Za-z\s,\-]{3,200})\s*\((?<abbr>[A-Z0-9\-]{2,10})\)", RegexOptions.IgnoreCase);
+
+        foreach (var match in abbrThenExpanded.Matches(text).Cast<Match>())
+        {
+            TryAddExtractedPair(abbreviations, match.Groups["abbr"].Value, match.Groups["expanded"].Value, source);
+        }
+
+        foreach (var match in expandedThenAbbr.Matches(text).Cast<Match>())
+        {
+            TryAddExtractedPair(abbreviations, match.Groups["abbr"].Value, match.Groups["expanded"].Value, source);
+        }
+
+        return abbreviations;
+    }
+
+    private static void TryAddExtractedPair(List<Abbreviation> abbreviations, string shortFormRaw, string expandedFormRaw, string source)
+    {
+        try
+        {
+            var shortForm = shortFormRaw.Trim();
+            var expandedForm = expandedFormRaw.Trim();
+
+            if (shortForm.Length < 2 || shortForm.Length > 40) return;
+            if (expandedForm.Length < 3 || expandedForm.Length > 500) return;
+
+            if (!IsLikelyUsefulAbbreviation(shortForm, expandedForm)) return;
+
+            if (!IsDuplicate(abbreviations, shortForm, expandedForm))
+            {
+                abbreviations.Add(new Abbreviation
+                {
+                    Id = Guid.NewGuid(),
+                    ShortForm = shortForm,
+                    ExpandedForm = expandedForm,
+                    Category = null,
+                    Source = source,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                });
+            }
+        }
+        catch
+        {
+            // Ignore individual extraction errors.
+        }
+    }
+
+    private static bool IsLikelyUsefulAbbreviation(string shortForm, string expandedForm)
+    {
+        if (shortForm.Contains(' ')) return false;
+        if (expandedForm.IndexOf(shortForm, StringComparison.OrdinalIgnoreCase) >= 0) return false;
+
+        // Ignore obvious section numbering and noise tokens
+        if (Regex.IsMatch(shortForm, @"^\d+[A-Z]?$")) return false;
+        if (Regex.IsMatch(shortForm, @"^(AND|THE|FOR|WITH|FROM)$", RegexOptions.IgnoreCase)) return false;
+
+        return true;
     }
 
     private List<Abbreviation> ExtractAbbreviationsFromSpl(System.Text.Json.JsonElement spl)
@@ -316,7 +507,7 @@ public class AbbreviationService : IAbbreviationService
         return abbreviations;
     }
 
-    private bool IsDuplicate(List<Abbreviation> list, string shortForm, string expandedForm)
+    private static bool IsDuplicate(List<Abbreviation> list, string shortForm, string expandedForm)
     {
         return list.Any(a =>
             a.ShortForm.Equals(shortForm, StringComparison.OrdinalIgnoreCase) &&
