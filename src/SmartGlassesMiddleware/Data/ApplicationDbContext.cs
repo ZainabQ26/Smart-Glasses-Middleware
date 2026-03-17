@@ -34,6 +34,7 @@ public class ApplicationDbContext : DbContext
     public DbSet<ChatMessageAttachment> ChatMessageAttachments { get; set; }
     public DbSet<AIInteractionLog> AIInteractionLogs { get; set; }
     public DbSet<GroupConversationMapping> GroupConversationMappings { get; set; }
+    public DbSet<Abbreviation> Abbreviations { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -284,5 +285,23 @@ public class ApplicationDbContext : DbContext
             entity.Property(e => e.CreatedAt).IsRequired();
             entity.HasIndex(e => e.JobId).IsUnique();
         });
+
+        modelBuilder.Entity<Abbreviation>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.ShortForm).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.ExpandedForm).IsRequired().HasMaxLength(500);
+            entity.Property(e => e.Category).HasMaxLength(100);
+            entity.Property(e => e.Source).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.UpdatedAt).IsRequired();
+            entity.Property(e => e.CreatedAt).IsRequired();
+
+            // Indexes for efficient lookups
+            entity.HasIndex(e => e.ShortForm);
+            entity.HasIndex(e => e.ExpandedForm);
+            entity.HasIndex(e => e.Category);
+            entity.HasIndex(e => e.Source);
+        });
     }
 }
+

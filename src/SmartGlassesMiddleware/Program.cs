@@ -306,6 +306,14 @@ builder.Services.AddHttpClient<IAIService, AIService>((sp, client) =>
 .AddPolicyHandler(GetRetryPolicy())
 .AddPolicyHandler(GetCircuitBreakerPolicy());
 
+// Configure HttpClient for abbreviation/FDA service with timeout and retry
+builder.Services.AddHttpClient<IAbbreviationService, AbbreviationService>((sp, client) =>
+{
+    client.Timeout = TimeSpan.FromSeconds(30); // openFDA requests should be fast
+})
+.AddPolicyHandler(GetRetryPolicy())
+.AddPolicyHandler(GetCircuitBreakerPolicy());
+
 // Register application services
 builder.Services.AddScoped<IHistoryService, HistoryService>();
 // Use native AWS S3 storage service on ECS; MinIO for local dev
@@ -518,6 +526,9 @@ if (!builder.Environment.IsEnvironment("Testing") && !string.IsNullOrWhiteSpace(
 }
 
 builder.Services.AddHostedService<DocumentProcessingBackgroundService>();
+
+// Weekly FDA abbreviation sync background service
+builder.Services.AddHostedService<AbbreviationSyncBackgroundService>();
 
 // Add SignalR for real-time notifications with WebSocket optimizations
 builder.Services.AddSignalR(options =>
@@ -752,6 +763,20 @@ using (var scope = app.Services.CreateScope())
         catch (Exception ex)
         {
             logger?.LogWarning(ex, "Failed to reset stale pending uploads at startup; continuing");
+        }
+
+        try
+        {
+            _startupLogger.LogInformation("Initializing FDA abbreviation mappings...");
+            using var abbrScope = app.Services.CreateScope();
+            var abbrService = abbrScope.ServiceProvider.GetRequiredService<IAbbreviationService>();
+            await abbrService.SyncFromDailyMedAsync();
+            await abbrService.RefreshCacheAsync();
+            _startupLogger.LogInformation("FDA abbreviation mappings initialized successfully.");
+        }
+        catch (Exception ex)
+        {
+            _startupLogger.LogWarning(ex, "Failed to initialize abbreviation mappings at startup; continuing (highlighting may be less intelligent)");
         }
 
         // When MIGRATE_ONLY is set the container is a one-shot CI task — exit cleanly

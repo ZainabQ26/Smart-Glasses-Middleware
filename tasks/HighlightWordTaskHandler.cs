@@ -8,6 +8,9 @@ using SmartGlassesMiddleware.Services;
 /// "Search" and "highlight" are treated as aliases — both highlight the term in
 /// the currently open document using the client-side PDF rendering engine.
 ///
+/// When FDA abbreviations are available, also highlights any related terms (e.g., if the user
+/// highlights "ACE", the handler also highlights "angiotensin converting enzyme" in the same color).
+///
 /// Expected input examples:
 ///   "highlight the word example"
 ///   "highlight security"
@@ -15,9 +18,12 @@ using SmartGlassesMiddleware.Services;
 ///   "search for patient"
 ///   "find the word security"
 ///   "search patient information"
+///   "highlight ACE" (also highlights "angiotensin converting enzyme")
 /// </summary>
 public class HighlightWordTaskHandler : ITaskHandler
 {
+    private readonly IAbbreviationService _abbreviationService;
+
     public string Name => "highlight-word";
 
     public IReadOnlyList<string> Keywords => new[]
@@ -27,17 +33,32 @@ public class HighlightWordTaskHandler : ITaskHandler
         "search for the", "search for", "find the word", "find the phrase", "find the"
     };
 
-    public Task<string> HandleAsync(string input)
+    public HighlightWordTaskHandler(IAbbreviationService abbreviationService)
+    {
+        _abbreviationService = abbreviationService;
+    }
+
+    public async Task<string> HandleAsync(string input)
     {
         var word = ExtractHighlightTarget(input);
 
         if (string.IsNullOrWhiteSpace(word))
         {
-            return Task.FromResult("Please say what you want to highlight. For example: \"highlight example\".");
+            return "Please say what you want to highlight. For example: \"highlight example\".";
+        }
+
+        // Look up related abbreviation pairs
+        var (relatedTerms, _) = await _abbreviationService.GetRelatedTermsAsync(word);
+
+        // If abbreviations found, include all related terms separated by pipe (|)
+        if (relatedTerms.Count > 1)
+        {
+            var termsStr = string.Join("|", relatedTerms.Distinct().Select(t => t.Trim()));
+            return $"__ACTION:HIGHLIGHT_WORD:{termsStr}__";
         }
 
         // Return an action token the frontend intercepts and handles directly.
-        return Task.FromResult($"__ACTION:HIGHLIGHT_WORD:{word}__");
+        return $"__ACTION:HIGHLIGHT_WORD:{word}__";
     }
 
     /// <summary>
