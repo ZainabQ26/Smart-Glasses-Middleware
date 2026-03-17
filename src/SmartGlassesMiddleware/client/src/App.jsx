@@ -20,6 +20,8 @@ export default function App() {
   const [backendReady, setBackendReady] = useState(false);
   const [backendStatusText, setBackendStatusText] = useState("Checking server status…");
   const [wakeWordReady, setWakeWordReady] = useState(false);
+  // Loading message received from the Whisper worker while it downloads / initialises.
+  const [whisperLoadingMsg, setWhisperLoadingMsg] = useState("Initializing…");
   const [pendingAction, _setPendingActionState] = useState(null); // { type: "SHOW_RECENT_FILES", files } | { type: "SELECT_DOCUMENT", id, name } | null
   // Reminders toast: null | { reminders: [], phase: 'visible'|'fading' }
   const [remindersToast, setRemindersToast] = useState(null);
@@ -812,6 +814,7 @@ export default function App() {
 
       if (type === "loading") {
         addLog(`⏳ ${message}`, "info");
+        setWhisperLoadingMsg(message);
         return;
       }
 
@@ -1104,6 +1107,23 @@ export default function App() {
             <p style={styles.landingSubtitle}>
               Say <strong style={{color:"#f97316"}}>"{activationWord}"</strong> to start, then speak your command.
             </p>
+
+            {/* ── Initialization status ─────────────────────────────────── */}
+            <div style={styles.landingStatus}>
+              {!wakeWordReady ? (
+                <div style={styles.landingLoadingRow}>
+                  <div style={styles.landingSpinner} />
+                  <span style={styles.landingLoadingText}>{whisperLoadingMsg}</span>
+                </div>
+              ) : (
+                <div style={styles.landingReadyRow}>
+                  <span style={styles.landingReadyBadge}>✓</span>
+                  <span style={styles.landingReadyText}>
+                    Ready — say <strong style={{color:"#f97316"}}>"{activationWord}"</strong> to begin
+                  </span>
+                </div>
+              )}
+            </div>
             <div style={styles.landingSection}>
               <h2 style={styles.landingH2}>🎤 How It Works</h2>
               <ol style={styles.landingOl}>
@@ -1476,6 +1496,53 @@ const styles = {
     textAlign: "center",
     fontStyle: "italic",
   },
+  // Initialisation status block on the landing screen
+  landingStatus: {
+    padding: "12px 16px",
+    borderRadius: 10,
+    background: "rgba(255,255,255,0.04)",
+    border: "1px solid #222",
+  },
+  landingLoadingRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+  },
+  landingSpinner: {
+    width: 18,
+    height: 18,
+    border: "2px solid #333",
+    borderTop: "2px solid #f97316",
+    borderRadius: "50%",
+    flexShrink: 0,
+    animation: "spin 0.9s linear infinite",
+  },
+  landingLoadingText: {
+    fontSize: "0.875rem",
+    color: "#aaa",
+  },
+  landingReadyRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+  },
+  landingReadyBadge: {
+    width: 22,
+    height: 22,
+    borderRadius: "50%",
+    background: "#00b894",
+    color: "#000",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontWeight: 700,
+    fontSize: "0.85rem",
+    flexShrink: 0,
+  },
+  landingReadyText: {
+    fontSize: "0.9rem",
+    color: "#ccc",
+  },
   // Full command list overlay shown at top-left only while the assistant is listening.
   commandList: {
     position: "fixed",
@@ -1839,5 +1906,13 @@ if (typeof document !== "undefined" && !document.getElementById("app-pulse-style
   const style = document.createElement("style");
   style.id = "app-pulse-style";
   style.textContent = "@keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.35); } 100% { transform: scale(1); } }";
+  document.head.appendChild(style);
+}
+
+// Inject spin keyframe once (used by the landing-screen loading spinner)
+if (typeof document !== "undefined" && !document.getElementById("app-spin-style")) {
+  const style = document.createElement("style");
+  style.id = "app-spin-style";
+  style.textContent = "@keyframes spin { to { transform: rotate(360deg); } }";
   document.head.appendChild(style);
 }
