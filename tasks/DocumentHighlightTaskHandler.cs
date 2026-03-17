@@ -7,9 +7,15 @@ namespace SmartGlassesMiddleware.Services;
 /// Extracts the word or phrase from the user's input and returns an action
 /// token that the frontend uses to highlight it in the open PDF viewer,
 /// without ever requiring a document ID.
+///
+/// When FDA abbreviations are available, also highlights related terms in the same color
+/// (e.g., if the user asks "highlight ACE", both "ACE" and "angiotensin converting enzyme"
+/// are highlighted).
 /// </summary>
 public class DocumentHighlightTaskHandler : ITaskHandler
 {
+    private readonly IAbbreviationService _abbreviationService;
+
     public string Name => "document-highlight";
 
     public IReadOnlyList<string> Keywords => new[]
@@ -17,18 +23,33 @@ public class DocumentHighlightTaskHandler : ITaskHandler
         "highlight in document", "document highlight"
     };
 
-    public Task<string> HandleAsync(string input)
+    public DocumentHighlightTaskHandler(IAbbreviationService abbreviationService)
+    {
+        _abbreviationService = abbreviationService;
+    }
+
+    public async Task<string> HandleAsync(string input)
     {
         var highlightText = ExtractHighlightTarget(input);
 
         if (string.IsNullOrWhiteSpace(highlightText))
         {
-            return Task.FromResult("Please say what you want to highlight. For example: \"highlight example\".");
+            return "Please say what you want to highlight. For example: \"highlight example\".";
+        }
+
+        // Look up related abbreviation pairs
+        var (relatedTerms, _) = await _abbreviationService.GetRelatedTermsAsync(highlightText);
+
+        // If abbreviations found, include all related terms separated by pipe (|)
+        if (relatedTerms.Count > 1)
+        {
+            var termsStr = string.Join("|", relatedTerms.Distinct().Select(t => t.Trim()));
+            return $"__ACTION:HIGHLIGHT_WORD:{termsStr}__";
         }
 
         // Return an action token — the frontend highlights the text in the
         // currently open PDF without needing a document ID.
-        return Task.FromResult($"__ACTION:HIGHLIGHT_WORD:{highlightText}__");
+        return $"__ACTION:HIGHLIGHT_WORD:{highlightText}__";
     }
 
     private static string ExtractHighlightTarget(string input)
