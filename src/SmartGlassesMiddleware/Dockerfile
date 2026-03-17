@@ -31,8 +31,7 @@ COPY . .
 COPY --from=frontend-build /app/wwwroot/ src/SmartGlassesMiddleware/wwwroot/
 
 RUN dotnet publish "src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj" \
-    -c Release -o /app/publish \
-    /p:PublishReadyToRun=true
+    -c Release -o /app/publish
 
 # ── Stage 3: Runtime image ────────────────────────────────────────────────────
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
