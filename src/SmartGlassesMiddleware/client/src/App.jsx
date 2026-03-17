@@ -308,6 +308,43 @@ export default function App() {
     }
   }, [addLog, fetchJsonWithTimeout]);
 
+  const summarizeCurrentPage = useCallback(async () => {
+    const localPdf = pdfViewerRef.current;
+    if (!localPdf || !openPdf) {
+      showAiResponse("No document is open. Open a document first.");
+      return;
+    }
+
+    const pageData = await localPdf.getCurrentPageText?.();
+    if (!pageData?.text) {
+      showAiResponse("I couldn't read the current page.");
+      return;
+    }
+
+    addLog(`📝 Summarizing page ${pageData.pageNumber} from "${openPdf.name}"`, "voice");
+    setPendingAction(null);
+    setAiResponse(null);
+
+    const payload = await fetchJsonWithTimeout("/api/process/summarize-page", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        pageText: pageData.text,
+        pageNumber: pageData.pageNumber,
+        documentName: openPdf.name,
+      }),
+    }, API_TIMEOUT_MS);
+
+    const summary = (payload?.summary || "").trim();
+    if (!summary) {
+      showAiResponse("I couldn't summarize the current page.");
+      return;
+    }
+
+    setUsedAdvancedModel(!!payload?.usedAdvancedModel);
+    showAiResponse(summary);
+  }, [API_TIMEOUT_MS, addLog, fetchJsonWithTimeout, openPdf, showAiResponse, setPendingAction]);
+
   // ── Send transcript to AI ─────────────────────────────────────────────────
   const sendToAI = useCallback(async (text) => {
     // When keepMicActive is true the finally block keeps the mic in listening
@@ -556,6 +593,8 @@ export default function App() {
         } else {
           showAiResponse("No document is open. Open a document first.");
         }
+      } else if (answer === "__ACTION:SUMMARIZE_CURRENT_PAGE__") {
+        await summarizeCurrentPage();
       } else if (answer.startsWith("__ACTION:SHOW_REMINDERS:")) {
         addLog("📝 Command: show reminders", "voice");
         setAiResponse(null);

@@ -1,64 +1,77 @@
-using System.Text.Json;
+using Amazon.BedrockRuntime;
+using Amazon.BedrockRuntime.Model;
 
 namespace SmartGlassesMiddleware.Services;
 
 public class AdvancedTaskHandler : ITaskHandler
 {
-    private readonly IHttpClientFactory _httpFactory;
-    private readonly IConfiguration _configuration;
+    // Centralized fallback used when advanced handling cannot run at all.
+    public const string DispatcherFallbackMessage = "Advanced tasks are unavailable: failed to route request to advanced handler.";
+    public const string ModelNotConfiguredMessage = "Advanced tasks are unavailable: AWS Bedrock model is not configured.";
+    public const string EmptyResponseMessage = "Advanced tasks are unavailable: model returned an empty response.";
+    public const string InvocationFailedMessage = "Advanced tasks are unavailable: failed to call Amazon Bedrock.";
+
+    private readonly IAmazonBedrockRuntime _bedrockRuntime;
+    private readonly string _modelId;
+
     private readonly ILogger<AdvancedTaskHandler> _logger;
 
-    public AdvancedTaskHandler(IHttpClientFactory httpFactory, IConfiguration configuration, ILogger<AdvancedTaskHandler> logger)
+    public AdvancedTaskHandler(IAmazonBedrockRuntime bedrockRuntime, IConfiguration configuration, ILogger<AdvancedTaskHandler> logger)
     {
-        _httpFactory = httpFactory;
-        _configuration = configuration;
+        _bedrockRuntime = bedrockRuntime;
+        _modelId = configuration["AWS:Bedrock:AdvancedModelId"]
+            ?? configuration["AWS:Bedrock:ModelId"]
+            ?? string.Empty;
         _logger = logger;
     }
 
     public string Name => "advanced";
 
-    public IReadOnlyList<string> Keywords => Array.Empty<string>(); // AI fallback — no direct keywords
+    public IReadOnlyList<string> Keywords => Array.Empty<string>(); // AI fallback; no direct keywords
+
 
     public async Task<string> HandleAsync(string input)
     {
-        var endpoint = _configuration["AI:AdvancedModelEndpoint"];
-
-        if (string.IsNullOrWhiteSpace(endpoint))
+        if (string.IsNullOrWhiteSpace(_modelId))
         {
-            _logger.LogWarning("Advanced model endpoint not configured (AI:AdvancedModelEndpoint)");
-            return "Advanced tasks are unavailable: endpoint is not configured.";
+            _logger.LogWarning("Advanced Bedrock model not configured (AWS:Bedrock:AdvancedModelId or AWS:Bedrock:ModelId)");
+            return ModelNotConfiguredMessage;
         }
 
         try
         {
-            var client = _httpFactory.CreateClient();
-            var requestBody = new { message = input };
-            var content = new StringContent(JsonSerializer.Serialize(requestBody), System.Text.Encoding.UTF8, "application/json");
-
-            var response = await client.PostAsync(endpoint, content);
-            if (!response.IsSuccessStatusCode)
+            var request = new ConverseRequest
             {
-                _logger.LogWarning("Advanced model returned {Status} for endpoint {Endpoint}", response.StatusCode, endpoint);
-                return $"Advanced tasks are unavailable: endpoint returned {(int)response.StatusCode} ({response.ReasonPhrase}).";
+                ModelId = _modelId,
+                Messages =
+                [
+                    new Message
+                    {
+                        Role = ConversationRole.User,
+                        Content = [new ContentBlock { Text = input }]
+                    }
+                ]
+            };
+
+            var response = await _bedrockRuntime.ConverseAsync(request);
+            var text = string.Join("\n",
+                response.Output?.Message?.Content?
+                    .Select(c => c.Text)
+                    .Where(t => !string.IsNullOrWhiteSpace(t))
+                ?? Array.Empty<string>());
+
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                _logger.LogWarning("Bedrock advanced model returned empty output for model {ModelId}", _modelId);
+                return EmptyResponseMessage;
             }
 
-            var body = await response.Content.ReadAsStringAsync();
-            try
-            {
-                var json = JsonSerializer.Deserialize<JsonElement>(body);
-                if (json.ValueKind == JsonValueKind.Object && json.TryGetProperty("response", out var r))
-                {
-                    return r.GetString() ?? body;
-                }
-            }
-            catch { /* ignore parse errors */ }
-
-            return body;
+            return text;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error calling advanced model endpoint");
-            return "Advanced tasks are unavailable: failed to reach the endpoint.";
+            _logger.LogError(ex, "Error calling Amazon Bedrock advanced model {ModelId}", _modelId);
+            return InvocationFailedMessage;
         }
     }
 }

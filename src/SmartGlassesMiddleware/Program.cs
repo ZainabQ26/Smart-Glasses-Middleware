@@ -333,6 +333,7 @@ builder.Services.AddScoped<IDocumentProcessingService, DocumentProcessingService
 builder.Services.AddScoped<IRAGService, RAGService>();
 builder.Services.AddScoped<IDocumentHighlightService, DocumentHighlightService>();
 builder.Services.AddScoped<IConversationService, ConversationService>();
+builder.Services.AddScoped<IPageSummaryService, BedrockPageSummaryService>();
 // Global mapping service for ResourceGroup -> Conversation
 builder.Services.AddScoped<IGroupConversationMappingService, GroupConversationMappingService>();
 
@@ -652,11 +653,12 @@ try
         logger.LogWarning("MinIO credentials not properly configured. Using default credentials.");
     }
 
-    // Validate advanced model endpoint
-    var advancedEndpoint = config["AI:AdvancedModelEndpoint"];
-    if (string.IsNullOrWhiteSpace(advancedEndpoint))
+    // Validate advanced Bedrock model configuration
+    var advancedModelId = config["AWS:Bedrock:AdvancedModelId"];
+    var defaultModelId = config["AWS:Bedrock:ModelId"];
+    if (string.IsNullOrWhiteSpace(advancedModelId) && string.IsNullOrWhiteSpace(defaultModelId))
     {
-        logger.LogWarning("Advanced model endpoint not configured (AI:AdvancedModelEndpoint). Advanced tasks will be unavailable.");
+        logger.LogWarning("Advanced Bedrock model is not configured (AWS:Bedrock:AdvancedModelId or AWS:Bedrock:ModelId). Advanced tasks will be unavailable.");
     }
 
     logger.LogInformation("Configuration validation completed.");

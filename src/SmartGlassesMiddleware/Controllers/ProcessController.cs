@@ -8,12 +8,14 @@ namespace SmartGlassesMiddleware.Controllers;
 public class ProcessController : ControllerBase
 {
     private readonly IAIService _aiService;
+    private readonly IPageSummaryService _pageSummaryService;
     private readonly ILogger<ProcessController> _logger;
     private readonly IConfiguration _configuration;
 
-    public ProcessController(IAIService aiService, ILogger<ProcessController> logger, IConfiguration configuration)
+    public ProcessController(IAIService aiService, IPageSummaryService pageSummaryService, ILogger<ProcessController> logger, IConfiguration configuration)
     {
         _aiService = aiService;
+        _pageSummaryService = pageSummaryService;
         _logger = logger;
         _configuration = configuration;
     }
@@ -81,9 +83,53 @@ public class ProcessController : ControllerBase
             return StatusCode(500, new { error = "Failed to process request" });
         }
     }
+
+    [HttpPost]
+    [Route("summarize-page")]
+    public async Task<IActionResult> SummarizePage([FromBody] PageSummaryRequest request, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request?.PageText))
+            return BadRequest(new { error = "Page text is required" });
+
+        try
+        {
+            var summary = await _pageSummaryService.SummarizePageAsync(
+                request.PageText,
+                request.DocumentName,
+                request.PageNumber,
+                cancellationToken);
+
+            return Ok(new { summary, usedAdvancedModel = true });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(ex, "Page summary request could not be completed");
+            return StatusCode(503, new { error = ex.Message });
+        }
+        catch (OperationCanceledException)
+        {
+            return StatusCode(408, new { error = "Request timed out or was cancelled" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error summarizing current page");
+            return StatusCode(500, new { error = "Failed to summarize page" });
+        }
+    }
 }
 
 public class ProcessRequest
 {
     public string Input { get; set; } = string.Empty;
+}
+
+public class PageSummaryRequest
+{
+    public string PageText { get; set; } = string.Empty;
+    public int? PageNumber { get; set; }
+    public string? DocumentName { get; set; }
 }
