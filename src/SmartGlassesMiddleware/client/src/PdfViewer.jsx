@@ -44,6 +44,7 @@ import {
   addHighlight,
   removeAllHighlights,
   searchForKeyword,
+  drawSingleHighlights,
 } from "./pdf/pdfHighlighting.js";
 import { ViewerState, HighlightColors } from "./pdf/pdfClasses.js";
 
@@ -55,6 +56,7 @@ import { ViewerState, HighlightColors } from "./pdf/pdfClasses.js";
  * @property {(word: string) => void} highlightWord   - Highlight a word (cycles color on repeat).
  * @property {(code: string) => void} goToLoincCode   - Navigate to and highlight a LOINC code.
  * @property {() => void} removeHighlights            - Clear all highlights.
+ * @property {() => Promise<void>} printDocument      - Print the whole document with all highlights.
  */
 
 // Color names in the same order as the HighlightColors palette, used for the legend.
@@ -290,6 +292,74 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
     showToast("All highlights removed", 2000);
   }, [showToast]);
 
+  /**
+   * Print the whole document with all active highlights applied.
+   * Each page is rendered onto an off-screen canvas at 2× scale (for crisp
+   * print output), converted to a PNG data URL, and written into a temporary
+   * print window.  The browser's native print dialog is then triggered.
+   */
+  const printDocument = useCallback(async () => {
+    const state = viewerStateRef.current;
+    if (!state) {
+      window.print();
+      return;
+    }
+
+    showToast("Preparing print…", 15_000);
+
+    const PRINT_SCALE = 2.0;
+    const offscreen = document.createElement("canvas");
+    const pageImages = [];
+
+    for (let p = 1; p <= state.pdf.numPages; p++) {
+      await renderPdfPage(state.pdf, p, offscreen, PRINT_SCALE);
+      if (state.highlights.length > 0) {
+        const ctx = offscreen.getContext("2d");
+        if (ctx) {
+          state.highlights.forEach((h, colorIndex) => {
+            // Draw at 2× — scale the stored 1× rectangles up to match the canvas.
+            const scaled = h.rectangleArrays.map(r => ({
+              ...r,
+              canvasX:      r.canvasX      * PRINT_SCALE,
+              canvasY:      r.canvasY      * PRINT_SCALE,
+              canvasWidth:  r.canvasWidth  * PRINT_SCALE,
+              canvasHeight: r.canvasHeight * PRINT_SCALE,
+            }));
+            drawSingleHighlights(scaled, colorIndex, p, ctx);
+          });
+        }
+      }
+      pageImages.push(offscreen.toDataURL("image/png"));
+    }
+
+    const imgsHtml = pageImages
+      .map((src, i) => `<div class="page"><img src="${src}" alt="Page ${i + 1}"/></div>`)
+      .join("");
+
+    const printWin = window.open("", "_blank", "width=900,height=700");
+    if (!printWin) {
+      showToast("Pop-up blocked — allow pop-ups and try again.", 4000);
+      return;
+    }
+
+    printWin.document.write(`<!DOCTYPE html>
+<html><head>
+  <title>Print</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { background:#fff; }
+    .page { page-break-after:always; text-align:center; }
+    .page:last-child { page-break-after:avoid; }
+    .page img { max-width:100%; height:auto; display:block; margin:0 auto; }
+  </style>
+</head>
+<body>${imgsHtml}</body></html>`);
+    printWin.document.close();
+    printWin.onload = () => { printWin.focus(); printWin.print(); };
+
+    showToast("Print dialog opened.", 3000);
+  }, [showToast]);
+
   // ── Expose imperative handle to parent ──────────────────────────────────────
   useImperativeHandle(ref, () => ({
     nextPage,
@@ -298,7 +368,8 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
     highlightWord,
     goToLoincCode,
     removeHighlights,
-  }), [nextPage, prevPage, goToPage, highlightWord, goToLoincCode, removeHighlights]);
+    printDocument,
+  }), [nextPage, prevPage, goToPage, highlightWord, goToLoincCode, removeHighlights, printDocument]);
 
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
