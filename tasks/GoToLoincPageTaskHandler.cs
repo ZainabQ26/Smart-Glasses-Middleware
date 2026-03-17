@@ -19,6 +19,11 @@ public class GoToLoincPageTaskHandler : ITaskHandler
 {
     public string Name => "go-to-loinc";
 
+    public IReadOnlyList<string> Keywords => new[]
+    {
+        "loinc", "go to loinc", "find loinc", "navigate to loinc", "loinc code"
+    };
+
     // Standard LOINC code pattern: one or more digits, a hyphen, one or more digits.
     // While the check-digit in most LOINC codes is a single digit, using \d+
     // is more resilient to any future variations in the standard.

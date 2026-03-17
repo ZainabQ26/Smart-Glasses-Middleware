@@ -3,15 +3,19 @@ import React, { useState, useEffect, useRef } from "react";
 const POLL_INTERVAL_MS   = 4_000;   // how often to probe /health while sleeping
 const WAKE_TIMEOUT_MS    = 600_000; // allow up to 10 min when ECS + RDS are cold
 const WAKE_RETRY_MS      = 15_000;  // retry /wake if initial request is dropped
+// Use a longer timeout for the health check so a slow cold-start response
+// is not mistaken for a network failure.
+const HEALTH_CHECK_TIMEOUT_MS = 10_000;
 
 /**
  * WakeupGate — polls /health before mounting the main App.
  *
  * On first access the ECS service may have 0 running tasks (scaled to zero
- * when idle).  On the first non-200 /health response this component fires a
- * POST to /wake which invokes the ECS idle-scaler Lambda directly — no
- * CloudWatch metric pipeline delay.  The task takes ~60-90 s to pass its
- * health check.
+ * when idle).  On mount this component immediately fires a POST to /wake which
+ * invokes the ECS idle-scaler Lambda directly — no CloudWatch metric pipeline
+ * delay.  It then polls /health every few seconds and renders children once
+ * the service responds with 2xx.  The task takes ~60-90 s to pass its health
+ * check.
  *
  * States
  *   checking  – first probe, transitions quickly to "ready" if already up
@@ -53,6 +57,11 @@ export default function WakeupGate({ children }) {
       fetch("/wake", { method: "POST" }).catch(() => {});
     }
 
+    // ── Immediately attempt to wake on page load ─────────────────────────
+    // This fires the wake signal before the first health check completes so
+    // the ECS Lambda is invoked as early as possible.
+    triggerWake();
+
     async function poll() {
       if (cancelledRef.current) return;
 
@@ -64,7 +73,7 @@ export default function WakeupGate({ children }) {
 
       try {
         const controller = new AbortController();
-        const t = setTimeout(() => controller.abort(), 5_000);
+        const t = setTimeout(() => controller.abort(), HEALTH_CHECK_TIMEOUT_MS);
         const res = await fetch("/health", { signal: controller.signal });
         clearTimeout(t);
 
@@ -115,11 +124,6 @@ export default function WakeupGate({ children }) {
               The server didn't respond after {Math.floor(WAKE_TIMEOUT_MS / 1000)} seconds.
             </p>
             <button style={s.btn} onClick={() => {
-              cancelledRef.current = false;
-              startRef.current = Date.now();
-              setElapsed(0);
-              setPhase("checking");
-              // remount effect via key trick — easier to just reload
               window.location.reload();
             }}>
               Try again
