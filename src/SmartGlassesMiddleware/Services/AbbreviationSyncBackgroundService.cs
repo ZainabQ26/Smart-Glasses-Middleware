@@ -1,3 +1,6 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+
 namespace SmartGlassesMiddleware.Services;
 
 /// <summary>
@@ -10,15 +13,19 @@ public class AbbreviationSyncBackgroundService : BackgroundService
 {
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<AbbreviationSyncBackgroundService> _logger;
-    private readonly TimeSpan _syncInterval = TimeSpan.FromDays(7); // Weekly
+    private readonly TimeSpan _syncInterval;
     private DateTime _nextSyncTime;
 
     public AbbreviationSyncBackgroundService(
         IServiceProvider serviceProvider,
-        ILogger<AbbreviationSyncBackgroundService> logger)
+        ILogger<AbbreviationSyncBackgroundService> logger,
+        IConfiguration configuration)
     {
         _serviceProvider = serviceProvider;
         _logger = logger;
+        var intervalDays = configuration.GetValue<int?>("AbbreviationSync:IntervalDays") ?? 7;
+        if (intervalDays < 1) intervalDays = 1;
+        _syncInterval = TimeSpan.FromDays(intervalDays);
         _nextSyncTime = DateTime.UtcNow; // Will be calculated in StartAsync
     }
 
@@ -63,12 +70,13 @@ public class AbbreviationSyncBackgroundService : BackgroundService
                 await SyncAbbreviationsAsync(stoppingToken);
                 _nextSyncTime = DateTime.UtcNow.Add(_syncInterval);
                 _logger.LogInformation("Sync complete. Next sync scheduled for {Time} UTC", _nextSyncTime);
+                timeUntilSync = _nextSyncTime - DateTime.UtcNow;
             }
 
             // Wait for the next sync or cancellation (check every minute)
-            var delayTime = timeUntilSync > TimeSpan.FromMinutes(1) 
-                ? TimeSpan.FromMinutes(1) 
-                : timeUntilSync;
+            var delayTime = timeUntilSync > TimeSpan.FromMinutes(1)
+                ? TimeSpan.FromMinutes(1)
+                : (timeUntilSync < TimeSpan.Zero ? TimeSpan.Zero : timeUntilSync);
 
             try
             {

@@ -767,16 +767,15 @@ using (var scope = app.Services.CreateScope())
 
         try
         {
-            _startupLogger.LogInformation("Initializing FDA abbreviation mappings...");
+            _startupLogger.LogInformation("Warming abbreviation cache from database...");
             using var abbrScope = app.Services.CreateScope();
             var abbrService = abbrScope.ServiceProvider.GetRequiredService<IAbbreviationService>();
-            await abbrService.SyncFromDailyMedAsync();
             await abbrService.RefreshCacheAsync();
-            _startupLogger.LogInformation("FDA abbreviation mappings initialized successfully.");
+            _startupLogger.LogInformation("Abbreviation cache warmed. Scheduled sync service will decide whether a fetch is needed.");
         }
         catch (Exception ex)
         {
-            _startupLogger.LogWarning(ex, "Failed to initialize abbreviation mappings at startup; continuing (highlighting may be less intelligent)");
+            _startupLogger.LogWarning(ex, "Failed to warm abbreviation cache at startup; continuing (scheduled sync can repopulate cache)");
         }
 
         // When MIGRATE_ONLY is set the container is a one-shot CI task — exit cleanly
