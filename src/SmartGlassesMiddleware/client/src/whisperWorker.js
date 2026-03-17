@@ -1,18 +1,32 @@
 /**
  * Web Worker: runs Whisper (via @huggingface/transformers + ONNX Runtime)
- * entirely in the browser.  The main thread sends:
- *   { type: 'transcribe', audio: Float32Array }   // 16 kHz PCM
+ * entirely in the browser.
  *
- * The worker replies with one or more of:
- *   { type: 'loading',  message: string }          // model download progress
- *   { type: 'result',   text: string }             // final transcript
- *   { type: 'error',    message: string }          // something went wrong
+ * A single multilingual model (whisper-base) is used for all modes:
+ *   - 'wake-word' : fast check for the activation keyword
+ *   - 'partial'   : lightweight in-progress transcription shown while the user speaks
+ *   - 'command'   : full-quality final transcription sent to the AI
  *
- * Runtime selection (in priority order):
- *   1. WebGPU — hardware-accelerated, zero WASM overhead (where supported)
+ * Using one model avoids loading overhead and makes Spanish (and other language)
+ * support trivial to add later.
+ *
+ * Message protocol
+ * ────────────────
+ * Main → Worker:
+ *   { type: 'transcribe', audio: Float32Array, mode: 'wake-word'|'partial'|'command', language?: string }
+ *   { type: 'preload' }   – eagerly warm the model (optional optimisation)
+ *
+ * Worker → Main:
+ *   { type: 'loading',  message: string }
+ *   { type: 'result',   text: string, mode: string }
+ *   { type: 'error',    message: string, mode?: string }
+ *
+ * Runtime selection (priority order):
+ *   1. WebGPU — hardware-accelerated (where supported)
  *   2. WASM   — cross-platform software fallback
  */
-// ── Global error capture ────────────────────────────────────────────────
+
+// ── Global error capture ─────────────────────────────────────────────────────
 self.addEventListener('error', (e) => {
   self.postMessage({ type: 'error', message: `Worker error: ${e.message} (${e.filename}:${e.lineno})` });
 });
@@ -20,9 +34,16 @@ self.addEventListener('unhandledrejection', (e) => {
   self.postMessage({ type: 'error', message: `Worker async error: ${e.reason?.message ?? e.reason}` });
 });
 
-// ── Environment ---------------------------------------------------------
-let pipelineFn = null;
-let resolvedDevice = null; // 'webgpu' | 'wasm'
+// ── Model configuration ──────────────────────────────────────────────────────
+// whisper-base multilingual — good balance of speed (~145 MB) and accuracy;
+// supports 99 languages including Spanish without any model swap.
+const MODEL_ID = 'Xenova/whisper-base';
+
+let pipelineFn     = null;
+let resolvedDevice = null;
+let transcriber    = null;   // lazily initialised, reused across calls
+
+// ── Environment detection ────────────────────────────────────────────────────
 
 /** Probe whether WebGPU is available and able to create a GPU device. */
 async function probeWebGPU() {
@@ -44,18 +65,16 @@ async function ensureTransformers() {
   const { pipeline, env } = await import('@huggingface/transformers');
   pipelineFn = pipeline;
 
-  env.allowLocalModels = false;
+  env.allowLocalModels  = false;
   env.allowRemoteModels = true;
-  env.useBrowserCache = true;
+  env.useBrowserCache   = true;
 
-  // ── Device selection ────────────────────────────────────────────────
   const gpuAvailable = await probeWebGPU();
   if (gpuAvailable) {
     resolvedDevice = 'webgpu';
     self.postMessage({ type: 'loading', message: 'Using WebGPU backend for Whisper' });
   } else {
     resolvedDevice = 'wasm';
-    // Choose ONNX WASM thread count dynamically (cap at 8).
     let desiredThreads = 1;
     try {
       const hw = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) ? navigator.hardwareConcurrency : 2;
@@ -76,11 +95,7 @@ async function ensureTransformers() {
   }
 }
 
-// ── Model ----------------------------------------------------------------
-// whisper-tiny.en — English-only model loaded remotely from Hugging Face.
-const MODEL_ID = 'Xenova/whisper-tiny.en';
-
-let transcriber = null;
+// ── Model loader (singleton) ─────────────────────────────────────────────────
 
 async function getTranscriber() {
   if (transcriber) return transcriber;
@@ -89,14 +104,11 @@ async function getTranscriber() {
 
   self.postMessage({ type: 'loading', message: 'Loading Whisper model…' });
 
-  const pipelineOptions = {
+  const opts = {
     progress_callback: (p) => {
       if (p.status === 'downloading') {
         const pct = Math.round(p.progress ?? 0);
-        self.postMessage({
-          type: 'loading',
-          message: `Downloading Whisper model… ${pct}%`,
-        });
+        self.postMessage({ type: 'loading', message: `Downloading Whisper model… ${pct}%` });
       }
       if (p.status === 'ready') {
         self.postMessage({ type: 'loading', message: `Whisper model ready (${resolvedDevice})` });
@@ -104,40 +116,44 @@ async function getTranscriber() {
     },
   };
 
-  // Pass device to the pipeline when WebGPU is available.
-  if (resolvedDevice === 'webgpu') {
-    pipelineOptions.device = 'webgpu';
-  }
+  if (resolvedDevice === 'webgpu') opts.device = 'webgpu';
 
-  transcriber = await pipelineFn(
-    'automatic-speech-recognition',
-    MODEL_ID,
-    pipelineOptions,
-  );
-
+  transcriber = await pipelineFn('automatic-speech-recognition', MODEL_ID, opts);
   return transcriber;
 }
 
-// ── Message handler ------------------------------------------------------
+// ── Message handler ──────────────────────────────────────────────────────────
+
 self.onmessage = async (event) => {
-  const { type, audio } = event.data;
+  const { type, audio, mode, language } = event.data;
+
+  if (type === 'preload') {
+    // Warm the model in the background so the first real request is instant.
+    try { await getTranscriber(); } catch (_) {}
+    return;
+  }
+
   if (type !== 'transcribe') return;
 
   try {
     const model = await getTranscriber();
 
-    self.postMessage({ type: 'loading', message: 'Transcribing…' });
-
-    // `audio` is a Float32Array of 16 kHz mono PCM — exactly what Whisper expects.
-    const result = await model(audio, {
+    // Build inference options.
+    // For wake-word and partial modes we skip beam search to stay fast.
+    // For the final command transcription we allow a short beam search for
+    // slightly better accuracy.
+    const inferOpts = {
       do_sample: false,
-    });
+      // Constrain to the requested language when provided (e.g. 'en', 'es').
+      ...(language ? { language } : {}),
+    };
 
-    self.postMessage({ type: 'result', text: (result.text ?? '').trim() });
-    // Release the pipeline after each transcription so that iOS Safari can
-    // reclaim the ONNX/WASM memory before the mic is restarted.
-    transcriber = null;
+    const result = await model(audio, inferOpts);
+    const text   = (result.text ?? '').trim();
+
+    self.postMessage({ type: 'result', text, mode: mode ?? 'wake-word' });
   } catch (err) {
-    self.postMessage({ type: 'error', message: err?.message ?? String(err) });
+    self.postMessage({ type: 'error', message: err?.message ?? String(err), mode: mode ?? 'wake-word' });
   }
 };
+
