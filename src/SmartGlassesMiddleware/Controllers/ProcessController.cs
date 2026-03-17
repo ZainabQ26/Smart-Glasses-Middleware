@@ -52,7 +52,11 @@ public class ProcessController : ControllerBase
             _ => "auto"
         };
 
-        return Ok(new { speechTranscriptionMode = mode });
+        var activationWord = _configuration["AI:ActivationWord"]?.Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(activationWord))
+            activationWord = "activate";
+
+        return Ok(new { speechTranscriptionMode = mode, activationWord });
     }
 
     [HttpPost]

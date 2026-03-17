@@ -4,14 +4,12 @@ import PdfViewer from "./PdfViewer.jsx";
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 //
-// VAD: Silero VAD v5 — the same neural model used by whisper.cpp internally.
-//      Shipped by @ricky0123/vad-web; ONNX files are copied to wwwroot at build
-//      time (see vite.config.js).  Runs entirely in the browser.
-//
-// Flow:
-//   [always] SpeechRecognition listening for "activate"
-//   "activate" heard → SpeechRecognition captures command (primary path)
-//   If Web Speech confidence is low → fallback to Whisper worker result
+// Voice pipeline: Whisper WebGPU (single multilingual whisper-base model)
+//   - AudioContext + ScriptProcessorNode captures mic at 16 kHz
+//   - Amplitude VAD detects speech vs silence
+//   - Wake-word mode: each speech chunk sent to Whisper; "activate" triggers command mode
+//   - Command mode: chunks sent as partial results; sentence-end pattern or 2.5 s
+//     silence submits the full accumulated audio for final transcription
 //
 export default function App() {
   const [status, setStatus]       = useState("idle"); // idle | listening | processing | sending
@@ -20,12 +18,21 @@ export default function App() {
   const [aiResponse, setAiResponse] = useState(null);
   const [usedAdvancedModel, setUsedAdvancedModel] = useState(false);
   const [wakeWordReady, setWakeWordReady] = useState(false);
-  const [speechMode, setSpeechMode] = useState("auto"); // auto | webspeech-only | whisper-only
   const [pendingAction, _setPendingActionState] = useState(null); // { type: "SHOW_RECENT_FILES", files } | { type: "SELECT_DOCUMENT", id, name } | null
+  // Reminders toast: null | { reminders: [], phase: 'visible'|'fading' }
+  const [remindersToast, setRemindersToast] = useState(null);
   // Show landing screen until the user says "activate" for the first time.
   const [showLanding, setShowLanding] = useState(() => {
     try { return !localStorage.getItem("sgm_activated"); } catch (_) { return true; }
   });
+  // Configurable activation word — stored in localStorage and updated live when
+  // the admin panel changes it (via the storage event).
+  const [activationWord, setActivationWord] = useState(() => {
+    try { return localStorage.getItem("sgm_activation_word")?.trim() || "activate"; } catch (_) { return "activate"; }
+  });
+  // Ref copy so the async voice pipeline always reads the current value without
+  // needing to restart the AudioContext effect.
+  const activationWordRef = useRef(activationWord);
   // Wrapper keeps the ref in sync so async callbacks always read the current value.
   const setPendingAction = useCallback((val) => {
     pendingActionRef.current = typeof val === "function" ? val(pendingActionRef.current) : val;
@@ -39,35 +46,26 @@ export default function App() {
   const handleClosePdf = useCallback(() => setOpenPdf(null), []);
 
   const activatedRef        = useRef(false);
-  const recognitionRef      = useRef(null);
-  const recognitionRunningRef = useRef(false);
-  const recognitionRestartTimeoutRef = useRef(null);
-  const recognitionBlockedRef = useRef(false);
-  const ensureRecognitionRunningRef = useRef(() => {});
   const vadRef              = useRef(null);   // VAD removed; kept so optional calls are no-ops
   const listeningTimeoutRef = useRef(null);
   const workerRef           = useRef(null);
   const sendToAIRef         = useRef(null);
-  const commandSegmentsRef  = useRef([]);
-  const commandSubmitTimeoutRef = useRef(null);
-  const whisperFallbackNeededRef = useRef(false);
-  const webSpeechHandledRef      = useRef(false);
-  const lowConfidenceTranscriptRef = useRef(null);
-  const webSpeechSubmitBlockedRef = useRef(false); // block Web Speech submits while Whisper fallback is active
+  const commandSubmitTimeoutRef = useRef(null); // sentence-end short timer
+  // Audio pipeline refs
+  const audioCtxRef   = useRef(null);
+  const streamRef     = useRef(null);
+  const processorRef  = useRef(null);
+  // Reminders toast dismiss timers
+  const remindersTimerRef     = useRef(null);
+  const remindersFadeTimerRef = useRef(null);
   // Tracks the latest pendingAction value without closure-staleness issues.
   // Updated synchronously inside the setPendingAction wrapper defined above.
   const pendingActionRef = useRef(null);
 
-  const WEB_SPEECH_CONFIDENCE_THRESHOLD = 0.72;
-  const isWebSpeechOnly = speechMode === "webspeech-only";
   // Allow up to 60 s for AI responses — matches the backend AIServiceTimeoutSeconds setting.
   const API_TIMEOUT_MS = 60_000;
   const PREVIEW_TIMEOUT_MS = 6_000;
   const DOCUMENTS_TIMEOUT_MS = 10_000;
-  const RESTART_BACKOFF_BASE_MS = 1000;
-  const RESTART_BACKOFF_MAX_MS = 30_000;
-  // Wait 2 s of silence before submitting — gives users time to finish a full sentence.
-  const COMMAND_SUBMIT_SILENCE_MS = 2_000;
   const LISTENING_IDLE_TIMEOUT_MS = 10_000;
   // Bubbles auto-dismiss after this delay (transcript bubble and AI response bubble).
   const BUBBLE_DISMISS_MS = 10_000;
@@ -100,7 +98,9 @@ export default function App() {
   const normalizeCommandText = useCallback((value) => {
     const raw = (value ?? "").trim();
     if (!raw) return "";
-    const withoutWakeWord = raw.replace(/^activate[\s,:-]*/i, "").trim();
+    const word = activationWordRef.current;
+    const wordEsc = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const withoutWakeWord = raw.replace(new RegExp(`^${wordEsc}[\\s,:-]*`, "i"), "").trim();
     return withoutWakeWord || raw;
   }, []);
 
@@ -141,63 +141,83 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    const loadClientSettings = async () => {
-      try {
-        const res = await fetch("/api/process/client-settings");
-        if (!res.ok) return;
-        const data = await res.json();
-        const mode = (data?.speechTranscriptionMode || "").toLowerCase();
-        const normalized = mode === "webspeech-only" || mode === "whisper-only" ? mode : "auto";
-        if (!cancelled) {
-          setSpeechMode(normalized);
-          addLog(`⚙️ Speech mode: ${normalized}`, "info");
-        }
-      } catch (_) {
+    return () => {
+      if (transcriptDismissRef.current) clearTimeout(transcriptDismissRef.current);
+      if (aiResponseDismissRef.current) clearTimeout(aiResponseDismissRef.current);
+    };
+  }, []);
+
+  // Keep activationWordRef in sync with the state value.
+  useEffect(() => { activationWordRef.current = activationWord; }, [activationWord]);
+
+  // Listen for changes made in the admin panel (different tab/window) and apply live.
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.key === "sgm_activation_word") {
+        const w = e.newValue?.trim() || "activate";
+        setActivationWord(w);
+        activationWordRef.current = w;
       }
     };
+    window.addEventListener("storage", handler);
+    return () => window.removeEventListener("storage", handler);
+  }, []);
 
-    loadClientSettings();
-    return () => { cancelled = true; };
-  }, [addLog]);
+  // Fetch the activation word from the server config (appsettings.json) on startup.
+  // The server value takes precedence; localStorage is only the fallback initial state.
+  useEffect(() => {
+    fetch("/api/process/client-settings")
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        const w = data?.activationWord?.trim() || "";
+        if (w) {
+          setActivationWord(w);
+          activationWordRef.current = w;
+        }
+      })
+      .catch(() => {/* keep the localStorage fallback value */});
+  }, []);
 
   // VAD/Whisper removed: keep a harmless placeholder used by the UI so
   // existing button/label logic doesn't need widespread changes.
   const vad = { loading: false, errored: null, userSpeaking: false };
 
-  // ── Resume SR keyword listening ───────────────────────────────────────────
-  // Delay before restarting the mic on iOS Safari: gives the browser GC time
-  // to reclaim the ONNX/WASM memory freed by the Whisper worker before a new
-  // audio session is opened, preventing the "content process terminated" /
-  // page-refresh crash that iOS triggers under memory pressure.
-  // 300 ms is enough for one GC cycle while being imperceptible to the user.
+  // ── Reminders toast helper ─────────────────────────────────────────────────
+  // Displays a fading toast with the user's saved reminders.
+  const REMINDERS_DISPLAY_MS = 9_000;
+  const REMINDERS_FADE_MS    = 900;
+
+  const showRemindersToast = useCallback((reminders) => {
+    if (remindersTimerRef.current)     clearTimeout(remindersTimerRef.current);
+    if (remindersFadeTimerRef.current) clearTimeout(remindersFadeTimerRef.current);
+
+    setRemindersToast({ reminders, phase: "visible" });
+
+    remindersTimerRef.current = setTimeout(() => {
+      setRemindersToast(prev => prev ? { ...prev, phase: "fading" } : null);
+      remindersFadeTimerRef.current = setTimeout(() => {
+        setRemindersToast(null);
+      }, REMINDERS_FADE_MS);
+    }, REMINDERS_DISPLAY_MS);
+  }, []);
+
+  // ── Resume to idle / wake-word mode ───────────────────────────────────────
+  // Called after every command (success or error) to return to the listening state.
   const RESUME_DELAY_MS = 300;
   const resumeListening = useCallback(() => {
-    if (listeningTimeoutRef.current) { clearTimeout(listeningTimeoutRef.current); listeningTimeoutRef.current = null; }
-    if (commandSubmitTimeoutRef.current) { clearTimeout(commandSubmitTimeoutRef.current); commandSubmitTimeoutRef.current = null; }
-    commandSegmentsRef.current = [];
+    if (listeningTimeoutRef.current)      { clearTimeout(listeningTimeoutRef.current);      listeningTimeoutRef.current = null; }
+    if (commandSubmitTimeoutRef.current)  { clearTimeout(commandSubmitTimeoutRef.current);  commandSubmitTimeoutRef.current = null; }
     activatedRef.current = false;
-    whisperFallbackNeededRef.current = false;
-    webSpeechHandledRef.current = false;
-    webSpeechSubmitBlockedRef.current = false;
-    lowConfidenceTranscriptRef.current = null;
     setStatus("idle");
     try { vadRef.current?.pause(); } catch (_) {}
-    // Keep SpeechRecognition running continuously; do not restart here.
-    // (Previously we restarted the mic after a short delay to avoid
-    // iOS Safari ONNX/WASM memory issues when recreating audio sessions.)
-    // Leaving recognition running prevents the mic from being turned off/on.
   }, [RESUME_DELAY_MS]);
 
   const resumeListeningRef = useRef(resumeListening);
   useEffect(() => { resumeListeningRef.current = resumeListening; }, [resumeListening]);
 
-  // Keep a ref copy of `status` for the recognition watchdog to avoid
-  // stale closure values inside the `onend` handler.
+  // Keep a ref copy of `status` so async closures always read the current value.
   const statusRef = useRef(status);
   useEffect(() => { statusRef.current = status; }, [status]);
-
-  const restartAttemptsRef = useRef(0);
 
   const openDocumentPreview = useCallback((document) => {
     if (!document) return;
@@ -531,7 +551,22 @@ export default function App() {
         addLog("🖨️ Command: print document", "voice");
         setAiResponse(null);
         setPendingAction(null);
-        window.print();
+        if (pdfViewerRef.current) {
+          await pdfViewerRef.current.printDocument();
+        } else {
+          showAiResponse("No document is open. Open a document first.");
+        }
+      } else if (answer.startsWith("__ACTION:SHOW_REMINDERS:")) {
+        addLog("📝 Command: show reminders", "voice");
+        setAiResponse(null);
+        setPendingAction(null);
+        const jsonStr = answer.replace("__ACTION:SHOW_REMINDERS:", "").replace(/__$/, "").trim();
+        try {
+          const reminders = JSON.parse(jsonStr);
+          showRemindersToast(Array.isArray(reminders) ? reminders : []);
+        } catch (_) {
+          showAiResponse("Couldn't parse reminders. Please try again.");
+        }
       } else {
         addLog(`💡 AI: "${answer}"`, "voice");
         setPendingAction(null);
@@ -549,12 +584,7 @@ export default function App() {
     } finally {
       if (keepMicActive) {
         // Stay in listening state so the user can say a file number directly.
-        // Reset speech-recognition state so the next utterance is processed.
         activatedRef.current = true;
-        webSpeechHandledRef.current = false;
-        whisperFallbackNeededRef.current = false;
-        webSpeechSubmitBlockedRef.current = false;
-        lowConfidenceTranscriptRef.current = null;
         setStatus("listening");
         if (listeningTimeoutRef.current) clearTimeout(listeningTimeoutRef.current);
         listeningTimeoutRef.current = setTimeout(() => {
@@ -568,380 +598,329 @@ export default function App() {
         resumeListeningRef.current();
       }
     }
-  }, [addLog, fetchRecentDocuments, fetchJsonWithTimeout, normalizeCommandText, openDocumentPreview, openPdf, setPendingAction, showAiResponse, showTranscript]);
+  }, [addLog, fetchRecentDocuments, fetchJsonWithTimeout, normalizeCommandText, openDocumentPreview, openPdf, setPendingAction, showAiResponse, showRemindersToast, showTranscript]);
 
   sendToAIRef.current = sendToAI;
   useEffect(() => { sendToAIRef.current = sendToAI; }, [sendToAI]);
 
-  // ── SpeechRecognition — "activate" keyword only ───────────────────────────
+  // ── Voice pipeline: Whisper WebGPU + AudioContext mic capture ────────────
+  //
+  // One multilingual whisper-base model handles all modes:
+  //   'wake-word' — short bursts checked for the keyword "activate"
+  //   'partial'   — each speech burst during a command; result streams to UI
+  //   'command'   — full accumulated audio; final high-quality transcription
+  //
+  // Sentence-end detection: Whisper naturally adds `.` `?` `!` when it hears
+  // a complete thought.  We detect these patterns and submit the command after
+  // a short pause (SENTENCE_END_SILENCE_MS) rather than waiting for the full
+  // force-submit timeout — this gives a much more natural end-of-utterance feel.
   useEffect(() => {
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) {
-      setWakeWordReady(false);
-      addLog("⚠️ Wake-word not available — use the mic button below.", "warn");
-      return;
-    }
+    const SAMPLE_RATE          = 16_000;
+    const BUFFER_SIZE          = 2048;       // 128 ms per ScriptProcessor callback
+    const RMS_THRESHOLD        = 0.012;      // RMS below this → silence
+    const SILENCE_CHUNK_MS     = 550;        // consecutive silence before processing a speech burst
+    const SENTENCE_END_MS      = 350;        // pause after sentence-end pattern → submit
+    const FORCE_SUBMIT_MS      = 2_500;      // max silence during command → force submit
+    const MIN_COMMAND_SEC      = 0.3;        // minimum audio duration (s) to bother submitting
+    const MIN_CHUNK_SEC        = 0.15;       // minimum audio chunk (s) to send to Whisper
 
     let disposed = false;
-    const rec = new SR();
-    rec.continuous     = true;
-    rec.interimResults = true;
-    rec.lang           = "en-US";
 
-    const clearRecognitionRestart = () => {
-      if (recognitionRestartTimeoutRef.current) {
-        window.clearTimeout(recognitionRestartTimeoutRef.current);
-        recognitionRestartTimeoutRef.current = null;
-      }
-    };
+    // Per-effect mutable state (local vars, no re-render on change)
+    let speechChunks  = [];   // Float32Array chunks of the current speech burst
+    let commandChunks = [];   // all audio accumulated since activation
+    let partialTexts  = [];   // Whisper partial transcriptions so far
+    let isSpeaking    = false;
+    let silenceSince  = 0;
 
-    const markRecognitionUnavailable = (message) => {
-      recognitionBlockedRef.current = true;
-      recognitionRunningRef.current = false;
-      clearRecognitionRestart();
-      setWakeWordReady(false);
-      addLog(message, "error");
-    };
+    let forceSubmitTimer    = null;
+    let sentenceEndTimer    = null;
 
-    const scheduleRecognitionRestart = (reason = "") => {
-      if (disposed || recognitionBlockedRef.current) return;
+    function concatF32(chunks) {
+      const total = chunks.reduce((s, c) => s + c.length, 0);
+      const out = new Float32Array(total);
+      let off = 0;
+      for (const c of chunks) { out.set(c, off); off += c.length; }
+      return out;
+    }
 
-      clearRecognitionRestart();
-      setWakeWordReady(false);
+    // Detect whether Whisper thinks the utterance is a complete sentence.
+    // Whisper adds punctuation naturally; we also match common short commands
+    // that may not get punctuation but are clearly self-contained.
+    function isSentenceComplete(text) {
+      if (!text) return false;
+      const t = text.trim();
+      if (/[.?!]\s*$/.test(t)) return true;
+      if (/^(next|previous|prev)\s+(page|slide)$/i.test(t)) return true;
+      if (/^(close|open)\s+(document|file|pdf|admin)$/i.test(t)) return true;
+      if (/^(clear|remove)\s+(all\s+)?highlights?$/i.test(t)) return true;
+      if (/^print(\s+(document|pdf))?$/i.test(t)) return true;
+      if (/^what('s|\s+is)\s+the\s+time\??$/i.test(t)) return true;
+      if (/^show(\s+my|\s+all)?\s+reminders?$/i.test(t)) return true;
+      if (/^(open\s+)?admin(\s+panel)?$/i.test(t)) return true;
+      return false;
+    }
 
-      const attempt = restartAttemptsRef.current;
-      const delay = Math.min(RESTART_BACKOFF_BASE_MS * (2 ** attempt), RESTART_BACKOFF_MAX_MS);
-      restartAttemptsRef.current = attempt + 1;
-
-      if (attempt === 0 || reason) {
-        addLog(`⚠️ Wake-word listener stopped${reason ? ` (${reason})` : ""} — retrying.`, "warn");
-      }
-
-      recognitionRestartTimeoutRef.current = window.setTimeout(() => {
-        if (disposed) return;
-        ensureRecognitionRunningRef.current();
-      }, delay);
-    };
-
-    const ensureRecognitionRunning = () => {
-      if (disposed || recognitionBlockedRef.current || recognitionRunningRef.current) return;
-
-      clearRecognitionRestart();
-
-      try {
-        rec.start();
-      } catch (err) {
-        const message = `${err?.message || err || ""}`;
-        if (/already started/i.test(message)) {
-          recognitionRunningRef.current = true;
-          setWakeWordReady(true);
-          return;
-        }
-        if (/not-allowed|permission|denied|audio-capture/i.test(message)) {
-          markRecognitionUnavailable(`🔴 Mic error: ${message || "microphone unavailable"}`);
-          return;
-        }
-        scheduleRecognitionRestart("start failed");
-      }
-    };
-
-    ensureRecognitionRunningRef.current = ensureRecognitionRunning;
-
-    const scheduleCommandSubmit = () => {
-      if (commandSubmitTimeoutRef.current) {
-        clearTimeout(commandSubmitTimeoutRef.current);
-      }
-
-      commandSubmitTimeoutRef.current = setTimeout(() => {
-        if (!activatedRef.current || webSpeechHandledRef.current) return;
-
-        const combined = normalizeCommandText(commandSegmentsRef.current.join(" "));
-        if (!combined) {
-          addLog("⏱️ No command captured — resetting.", "warn");
-          resumeListeningRef.current();
-          return;
-        }
-
-        webSpeechHandledRef.current = true;
-        whisperFallbackNeededRef.current = false;
-        webSpeechSubmitBlockedRef.current = false;
-        lowConfidenceTranscriptRef.current = null;
-
-        addLog(`🗣️ Web Speech: "${combined}"`, "voice");
-        showTranscript(combined);
-        setAiResponse(null);
-        setStatus("sending");
-        sendToAIRef.current?.(combined);
-      }, COMMAND_SUBMIT_SILENCE_MS);
-    };
-
-    rec.onresult = (event) => {
-      const transcript = Array.from(event.results)
-        .map(r => r[0].transcript)
-        .join("")
-        .toLowerCase();
-
-      const lastResult = event.results[event.results.length - 1];
-
-      if (transcript.includes("activate") && !activatedRef.current) {
-        // Do not re-activate while a request is already being processed.
-        if (statusRef.current === "sending" || statusRef.current === "processing") return;
-
-        activatedRef.current = true;
-        webSpeechHandledRef.current = false;
-        whisperFallbackNeededRef.current = false;
-        lowConfidenceTranscriptRef.current = null;
-        commandSegmentsRef.current = [];
-        if (commandSubmitTimeoutRef.current) {
-          clearTimeout(commandSubmitTimeoutRef.current);
-          commandSubmitTimeoutRef.current = null;
-        }
-        setStatus("listening");
-        addLog("🎤 Activated — speak your command (I will submit after 2s of silence)", "info");
-
-        // Dismiss landing screen on first activation.
-        setShowLanding(false);
-        try { localStorage.setItem("sgm_activated", "1"); } catch (_) {}
-
-        if (listeningTimeoutRef.current) clearTimeout(listeningTimeoutRef.current);
-        listeningTimeoutRef.current = setTimeout(() => {
-          if (activatedRef.current) { addLog("⏱️ No speech detected — resetting.", "warn"); resumeListeningRef.current(); }
-        }, LISTENING_IDLE_TIMEOUT_MS);
-
-        // If the wake-word and command arrive in one phrase, keep the part
-        // after "activate" as the first captured segment.
-        const wakeAndCommand = normalizeCommandText((lastResult?.[0]?.transcript || "").toLowerCase());
-        if (wakeAndCommand && !/^activate$/i.test(wakeAndCommand)) {
-          commandSegmentsRef.current.push(wakeAndCommand);
-          scheduleCommandSubmit();
-        }
-
-        // VAD disabled: we do not start the VAD here.
-        return;
-      }
-
-      // Block all new command input while sending or processing.
-      if (statusRef.current === "sending" || statusRef.current === "processing") return;
-
-      if (!activatedRef.current) return;
-      if (webSpeechHandledRef.current) return;
-
-      if (listeningTimeoutRef.current) {
-        clearTimeout(listeningTimeoutRef.current);
-      }
-      listeningTimeoutRef.current = setTimeout(() => {
-        if (activatedRef.current && !webSpeechHandledRef.current) {
-          addLog("⏱️ Listening timed out — sending what I heard.", "warn");
-          scheduleCommandSubmit();
-        }
-      }, LISTENING_IDLE_TIMEOUT_MS);
-
-      let anyFinalSegment = false;
-      for (let i = event.resultIndex; i < event.results.length; i += 1) {
-        const result = event.results[i];
-        if (!result?.isFinal) continue;
-        const segment = normalizeCommandText((result[0]?.transcript || "").toLowerCase());
-        if (!segment || /^activate$/i.test(segment)) continue;
-        commandSegmentsRef.current.push(segment);
-        anyFinalSegment = true;
-      }
-
-      if (!anyFinalSegment && !lastResult?.isFinal) {
-        // User is still speaking; keep waiting.
-        return;
-      }
-
-      const combinedSoFar = normalizeCommandText(commandSegmentsRef.current.join(" "));
-      if (!combinedSoFar) return;
-
-      setTranscript(combinedSoFar);
-      setStatus("listening");
-
-      whisperFallbackNeededRef.current = false;
-      lowConfidenceTranscriptRef.current = null;
-      if (webSpeechSubmitBlockedRef.current) {
-        addLog("⚠️ Web Speech submit blocked while Whisper fallback active.", "info");
-        return;
-      }
-
-      scheduleCommandSubmit();
-    };
-
-    rec.onerror = (e) => {
-      if (e.error === "not-allowed" || e.error === "audio-capture") {
-        markRecognitionUnavailable(`🔴 Mic error: ${e.error} — microphone cannot be accessed.`);
-        return;
-      }
-      if (e.error !== "no-speech" && e.error !== "aborted")
-        addLog(`Mic error: ${e.error}`, "warn");
-    };
-
-    rec.onstart = () => {
-      recognitionBlockedRef.current = false;
-      recognitionRunningRef.current = true;
-      setWakeWordReady(true);
-      // Successful start — reset restart attempts.
-      restartAttemptsRef.current = 0;
-    };
-
-    rec.onend = () => {
-      recognitionRunningRef.current = false;
-      setWakeWordReady(false);
-      if (!disposed) {
-        scheduleRecognitionRestart("ended");
-      }
-    };
-
-    recognitionRef.current = rec;
-    ensureRecognitionRunning();
-
-    return () => {
-      disposed = true;
+    function clearTimers() {
+      if (forceSubmitTimer)   { clearTimeout(forceSubmitTimer);   forceSubmitTimer   = null; }
+      if (sentenceEndTimer)   { clearTimeout(sentenceEndTimer);   sentenceEndTimer   = null; }
       if (commandSubmitTimeoutRef.current) {
         clearTimeout(commandSubmitTimeoutRef.current);
         commandSubmitTimeoutRef.current = null;
       }
-      commandSegmentsRef.current = [];
-      ensureRecognitionRunningRef.current = () => {};
-      clearRecognitionRestart();
-      recognitionRef.current = null;
-      recognitionRunningRef.current = false;
-      setWakeWordReady(false);
-      try { rec.abort(); } catch (_) {}
-    };
-  }, [isWebSpeechOnly]); // eslint-disable-line react-hooks/exhaustive-deps
+    }
 
-  // ── Whisper Web Worker ────────────────────────────────────────────────────
-  useEffect(() => {
+    function submitCommand() {
+      if (disposed || !activatedRef.current) return;
+      clearTimers();
+      const audio   = concatF32(commandChunks);
+      commandChunks = [];
+      const partial = partialTexts.join(" ").trim();
+      partialTexts  = [];
+
+      if (audio.length < SAMPLE_RATE * MIN_COMMAND_SEC) {
+        // Too short — almost certainly noise or misfire
+        resumeListeningRef.current();
+        return;
+      }
+
+      activatedRef.current = false;
+      if (partial) showTranscript(partial); // preview while final runs
+      setStatus("processing");
+      workerRef.current?.postMessage({ type: "transcribe", audio, mode: "command" });
+    }
+
+    // Worker message handler (set synchronously so it is ready before startMic)
     const worker = new WhisperWorker();
     workerRef.current = worker;
 
     worker.onmessage = (e) => {
-      const { type, text, message } = e.data;
+      if (disposed) return;
+      const { type, text, message, mode } = e.data;
+
       if (type === "loading") {
         addLog(`⏳ ${message}`, "info");
-      } else if (type === "result") {
-        const cleaned = (text || "").trim();
+        return;
+      }
+
+      if (type === "error") {
+        addLog(`❌ Whisper: ${message}`, "error");
+        if (mode === "command") resumeListeningRef.current();
+        return;
+      }
+
+      if (type !== "result") return;
+
+      const cleaned = (text || "").trim();
+
+      if (mode === "wake-word") {
+        // Only act on the configured activation word when not already active and not mid-request.
+        const word    = activationWordRef.current;
+        const wordEsc = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const wakeRx  = new RegExp(`\\b${wordEsc}\\b`, "i");
+        if (
+          wakeRx.test(cleaned) &&
+          !activatedRef.current &&
+          statusRef.current !== "sending" &&
+          statusRef.current !== "processing"
+        ) {
+          const rest = cleaned.replace(new RegExp(`\\b${wordEsc}\\b[\\s,:-]*`, "i"), "").trim();
+          activatedRef.current = true;
+          commandChunks = [];
+          partialTexts  = [];
+          clearTimers();
+          setStatus("listening");
+          setShowLanding(false);
+          try { localStorage.setItem("sgm_activated", "1"); } catch (_) {}
+          addLog("🎤 Activated — speak your command", "info");
+
+          if (rest.length >= 2) {
+            // Wake word + command in the same utterance
+            partialTexts.push(rest);
+            setTranscript(rest);
+            if (isSentenceComplete(rest)) {
+              sentenceEndTimer = setTimeout(submitCommand, SENTENCE_END_MS);
+            } else {
+              forceSubmitTimer = setTimeout(submitCommand, FORCE_SUBMIT_MS);
+            }
+          } else {
+            // Start idle timeout (no command heard yet)
+            if (listeningTimeoutRef.current) clearTimeout(listeningTimeoutRef.current);
+            listeningTimeoutRef.current = setTimeout(() => {
+              if (activatedRef.current && commandChunks.length === 0) {
+                addLog("⏱️ No command heard — resetting.", "warn");
+                resumeListeningRef.current();
+              }
+            }, LISTENING_IDLE_TIMEOUT_MS);
+          }
+        }
+        return;
+      }
+
+      if (mode === "partial" && activatedRef.current) {
+        if (cleaned.length >= 2) {
+          partialTexts.push(cleaned);
+          setTranscript(partialTexts.join(" ")); // stream to UI
+
+          if (isSentenceComplete(cleaned)) {
+            // Sentence complete — schedule a short-pause submit
+            clearTimers();
+            sentenceEndTimer = setTimeout(submitCommand, SENTENCE_END_MS);
+          } else {
+            // Reset force-submit (user is still mid-sentence)
+            if (forceSubmitTimer) clearTimeout(forceSubmitTimer);
+            forceSubmitTimer = setTimeout(submitCommand, FORCE_SUBMIT_MS);
+          }
+        }
+        return;
+      }
+
+      if (mode === "command") {
         const meaningful = cleaned.length >= 2 && /[A-Za-z0-9]/.test(cleaned);
         if (meaningful) {
-          if (isWebSpeechOnly) return;
-          const shouldUseWhisper = whisperFallbackNeededRef.current || !webSpeechHandledRef.current;
-          if (!shouldUseWhisper) return;
-
-          webSpeechHandledRef.current = true;
-          whisperFallbackNeededRef.current = false;
-          lowConfidenceTranscriptRef.current = null;
           addLog(`🗣️ Whisper: "${cleaned}"`, "voice");
           showTranscript(cleaned);
           setAiResponse(null);
           setStatus("sending");
           sendToAIRef.current?.(cleaned);
-          webSpeechSubmitBlockedRef.current = false;
         } else {
-          if (whisperFallbackNeededRef.current && lowConfidenceTranscriptRef.current && !webSpeechHandledRef.current) {
-            const fallbackText = lowConfidenceTranscriptRef.current;
-            webSpeechHandledRef.current = true;
-            whisperFallbackNeededRef.current = false;
-            lowConfidenceTranscriptRef.current = null;
-            addLog("⚠️ Whisper returned no speech — using low-confidence Web Speech transcript.", "warn");
-            addLog(`🗣️ Web Speech fallback: "${fallbackText}"`, "voice");
-            showTranscript(fallbackText);
-            setAiResponse(null);
-            setStatus("sending");
-            sendToAIRef.current?.(fallbackText);
-            webSpeechSubmitBlockedRef.current = false;
-            return;
-          }
-          addLog("(No speech detected)", "warn");
+          addLog("(No speech detected in command)", "warn");
           resumeListeningRef.current();
         }
-      } else if (type === "error") {
-        if (isWebSpeechOnly) {
-          addLog("❌ Whisper error (ignored in webspeech-only mode)", "warn");
-          return;
-        }
-        if (whisperFallbackNeededRef.current && lowConfidenceTranscriptRef.current && !webSpeechHandledRef.current) {
-          const fallbackText = lowConfidenceTranscriptRef.current;
-          webSpeechHandledRef.current = true;
-          whisperFallbackNeededRef.current = false;
-          lowConfidenceTranscriptRef.current = null;
-          addLog("⚠️ Whisper error — using low-confidence Web Speech transcript.", "warn");
-          addLog(`🗣️ Web Speech fallback: "${fallbackText}"`, "voice");
-          showTranscript(fallbackText);
-          setAiResponse(null);
-          setStatus("sending");
-          sendToAIRef.current?.(fallbackText);
-          webSpeechSubmitBlockedRef.current = false;
-          return;
-        }
-        addLog(`❌ Whisper: ${message}`, "error");
-        resumeListeningRef.current();
       }
     };
 
     worker.onerror = (err) => {
-      const msg = err.message || (err.filename ? `${err.filename}:${err.lineno}` : err.type) || "unknown error";
-      if (whisperFallbackNeededRef.current && lowConfidenceTranscriptRef.current && !webSpeechHandledRef.current) {
-        const fallbackText = lowConfidenceTranscriptRef.current;
-        webSpeechHandledRef.current = true;
-        whisperFallbackNeededRef.current = false;
-        lowConfidenceTranscriptRef.current = null;
-        addLog("⚠️ Whisper worker crashed — using low-confidence Web Speech transcript.", "warn");
-        addLog(`🗣️ Web Speech fallback: "${fallbackText}"`, "voice");
-        showTranscript(fallbackText);
-        setAiResponse(null);
-        setStatus("sending");
-        sendToAIRef.current?.(fallbackText);
-        webSpeechSubmitBlockedRef.current = false;
-        return;
-      }
+      if (disposed) return;
+      const msg = err.message || String(err.type) || "unknown";
       addLog(`❌ Whisper worker crashed: ${msg}`, "error");
       resumeListeningRef.current();
     };
 
-    return () => worker.terminate();
-  }, [isWebSpeechOnly]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Start the mic capture loop
+    async function startMic() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        if (disposed) { stream.getTracks().forEach(t => t.stop()); return; }
+
+        streamRef.current = stream;
+        const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
+        audioCtxRef.current = ctx;
+        const source    = ctx.createMediaStreamSource(stream);
+        // NOTE: ScriptProcessorNode is deprecated; migrating to AudioWorklet requires
+        // a dedicated worker module file which adds Vite build complexity.
+        // TODO: replace with AudioWorkletNode once the project has a processor module.
+        const processor = ctx.createScriptProcessor(BUFFER_SIZE, 1, 1);
+        processorRef.current = processor;
+        source.connect(processor);
+        processor.connect(ctx.destination);
+
+        processor.onaudioprocess = (ev) => {
+          if (disposed) return;
+          // Float32Array copy — the underlying buffer is reused after this callback
+          const samples = new Float32Array(ev.inputBuffer.getChannelData(0));
+          const rms = Math.sqrt(samples.reduce((s, v) => s + v * v, 0) / samples.length);
+          const now = Date.now();
+
+          if (rms >= RMS_THRESHOLD) {
+            isSpeaking  = true;
+            silenceSince = 0;
+            speechChunks.push(samples);
+            if (activatedRef.current) commandChunks.push(samples);
+          } else if (isSpeaking) {
+            if (!silenceSince) silenceSince = now;
+            if ((now - silenceSince) >= SILENCE_CHUNK_MS) {
+              isSpeaking = false;
+              if (speechChunks.length > 0) {
+                const audio = concatF32(speechChunks);
+                speechChunks = [];
+                silenceSince = 0;
+                if (audio.length >= SAMPLE_RATE * MIN_CHUNK_SEC) {
+                  const mode = activatedRef.current ? "partial" : "wake-word";
+                  workerRef.current?.postMessage({ type: "transcribe", audio, mode });
+                }
+              }
+            }
+          }
+        };
+
+        if (!disposed) {
+          setWakeWordReady(true);
+          addLog(`🎤 Microphone ready — say "${activationWordRef.current}"`, "info");
+          // Warm the model so the first activation is instant
+          worker.postMessage({ type: "preload" });
+        }
+      } catch (err) {
+        if (!disposed) {
+          addLog(`❌ Mic error: ${err.message || err}`, "error");
+          setWakeWordReady(false);
+        }
+      }
+    }
+
+    startMic();
+
+    return () => {
+      disposed = true;
+      clearTimers();
+      try { processorRef.current?.disconnect(); } catch (_) {}
+      try { audioCtxRef.current?.close(); } catch (_) {}
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(t => t.stop());
+        streamRef.current = null;
+      }
+      audioCtxRef.current  = null;
+      processorRef.current = null;
+      worker.terminate();
+      workerRef.current = null;
+      setWakeWordReady(false);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Keepalive ping ────────────────────────────────────────────────────────
+  // Ping the API every 2.5 minutes so the server (configured to scale-to-zero
+  // after 30 min of inactivity) does not shut down while the tab is open.
+  useEffect(() => {
+    const PING_INTERVAL_MS = 2.5 * 60 * 1_000;
+    const id = setInterval(async () => {
+      try { await fetch("/api/process/client-settings", { method: "GET" }); } catch (_) {}
+    }, PING_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     return () => {
-      if (listeningTimeoutRef.current) {
-        clearTimeout(listeningTimeoutRef.current);
-        listeningTimeoutRef.current = null;
-      }
-      if (commandSubmitTimeoutRef.current) {
-        clearTimeout(commandSubmitTimeoutRef.current);
-        commandSubmitTimeoutRef.current = null;
-      }
-      commandSegmentsRef.current = [];
+      if (listeningTimeoutRef.current)     clearTimeout(listeningTimeoutRef.current);
+      if (commandSubmitTimeoutRef.current) clearTimeout(commandSubmitTimeoutRef.current);
+      if (remindersTimerRef.current)       clearTimeout(remindersTimerRef.current);
+      if (remindersFadeTimerRef.current)   clearTimeout(remindersFadeTimerRef.current);
     };
   }, []);
 
   // ── Manual tap button ─────────────────────────────────────────────────────
   const handleMicButton = () => {
     if (status === "idle") {
+      if (!wakeWordReady) {
+        addLog("⚠️ Microphone not ready yet.", "warn");
+        return;
+      }
       activatedRef.current = true;
-      ensureRecognitionRunningRef.current();
       setStatus("listening");
       setTranscript(null);
       setAiResponse(null);
       addLog("🎤 Listening… speak your command", "info");
       if (listeningTimeoutRef.current) clearTimeout(listeningTimeoutRef.current);
-      commandSegmentsRef.current = [];
-      if (commandSubmitTimeoutRef.current) {
-        clearTimeout(commandSubmitTimeoutRef.current);
-        commandSubmitTimeoutRef.current = null;
-      }
       listeningTimeoutRef.current = setTimeout(() => {
-        if (activatedRef.current) { addLog("⏱️ No speech detected — resetting.", "warn"); resumeListening(); }
+        if (activatedRef.current) {
+          addLog("⏱️ No speech detected — resetting.", "warn");
+          resumeListening();
+        }
       }, LISTENING_IDLE_TIMEOUT_MS);
-      // VAD disabled: do not start VAD on manual mic button
     } else if (status === "listening") {
       if (listeningTimeoutRef.current) { clearTimeout(listeningTimeoutRef.current); listeningTimeoutRef.current = null; }
       activatedRef.current = false;
-      try { vadRef.current?.pause(); } catch (_) {}
       setStatus("idle");
       addLog("Cancelled.", "info");
-        // Do not restart the recognition here — keep the mic running continuously.
     }
   };
 
@@ -954,23 +933,36 @@ export default function App() {
     : isProcessing
       ? "⏳ Transcribing…"
       : isListening
-        ? (vad.userSpeaking ? "🗣️ Speaking…" : "🎤 Listening")
+        ? "🗣️ Listening…"
         : !wakeWordReady
-          ? "🎤 Reconnecting wake-word…"
-        : vad.loading
-          ? "⏱️ Loading Silero VAD…"
-          : vad.errored
-            ? "⚠️ VAD error — say Activate to retry"
-            : 'Say "Activate"';
+          ? "⏳ Loading Whisper…"
+          : `Say "${activationWord}"`;
   const dotColor = isSending    ? "#3498db"
     : isProcessing ? "#9b59b6"
     : isListening  ? "#e67e22"
     : !wakeWordReady ? "#f97316"
-    : vad.errored  ? "#e74c3c"
     : "#00b894";
 
-  const shouldPulse = vad.loading || isProcessing || isSending;
+  const shouldPulse = isProcessing || isSending || !wakeWordReady;
   const dotStyle = { ...styles.dot, background: dotColor, ...(shouldPulse ? { animation: "pulse 1s ease-in-out infinite" } : {}) };
+
+  // Full command list shown as an overlay in the top-left only while listening.
+  const COMMAND_LIST = [
+    [`"open file"`,            "browse recent files"],
+    [`"open last document"`,   "open most recent"],
+    [`"next page"`,            "next page"],
+    [`"previous page"`,        "previous page"],
+    [`"go to page 5"`,         "jump to page"],
+    [`"highlight [word]"`,     "highlight text"],
+    [`"clear highlights"`,     "remove highlights"],
+    [`"search for [text]"`,    "search document"],
+    [`"print document"`,       "save as PDF"],
+    [`"close document"`,       "close PDF"],
+    [`"show my reminders"`,    "list reminders"],
+    [`"remind me to…"`,        "set reminder"],
+    [`"what time is it"`,      "current time"],
+    [`"admin panel"`,          "open settings"],
+  ];
 
   return (
     <div style={styles.page}>
@@ -980,15 +972,15 @@ export default function App() {
           <div style={styles.landingCard}>
             <h1 style={styles.landingTitle}>Smart Glasses Assistant</h1>
             <p style={styles.landingSubtitle}>
-              Say <strong style={{color:"#f97316"}}>"Activate"</strong> to start, then speak your command.
+              Say <strong style={{color:"#f97316"}}>"{activationWord}"</strong> to start, then speak your command.
             </p>
             <div style={styles.landingSection}>
               <h2 style={styles.landingH2}>🎤 How It Works</h2>
               <ol style={styles.landingOl}>
-                <li>Say <em>"Activate"</em> to wake the assistant.</li>
+                <li>Say <em>"{activationWord}"</em> to wake the assistant.</li>
                 <li>Speak your command clearly.</li>
                 <li>The assistant will respond or perform the action.</li>
-                <li>Say "Activate" again for the next command.</li>
+                <li>Say "{activationWord}" again for the next command.</li>
               </ol>
             </div>
             <div style={styles.landingSection}>
@@ -1006,8 +998,9 @@ export default function App() {
                     ["search for blood pressure", "Search for text in documents"],
                     ["search for BP", "Search using FDA SPL abbreviations"],
                     ["remind me to…", "Set a reminder"],
+                    ["show my reminders", "List all your reminders"],
                     ["what time is it", "Get the current date and time"],
-                    ["print document", "Print the open document"],
+                    ["print document", "Print the open document with highlights"],
                     ["close document", "Close the open PDF"],
                     ["admin panel", "Open the admin panel"],
                   ].map(([cmd, desc]) => (
@@ -1024,15 +1017,18 @@ export default function App() {
         </div>
       )}
 
-      {/* ── Command legend (always visible after first activation) ────────────── */}
-      {!showLanding && (
-        <div style={styles.legend}>
-          <span style={styles.legendItem}><span style={styles.legendKbd}>Activate</span> wake</span>
-          <span style={styles.legendItem}><span style={styles.legendKbd}>next / prev page</span> navigate</span>
-          <span style={styles.legendItem}><span style={styles.legendKbd}>highlight [word]</span> mark</span>
-          <span style={styles.legendItem}><span style={styles.legendKbd}>clear highlights</span> reset</span>
-          <span style={styles.legendItem}><span style={styles.legendKbd}>print</span> print</span>
-          <span style={styles.legendItem}><span style={styles.legendKbd}>open file</span> browse</span>
+      {/* ── Command list overlay — shown only while actively listening ─────────── */}
+      {isListening && (
+        <div style={styles.commandList}>
+          <p style={styles.commandListTitle}>📋 Commands</p>
+          <div style={styles.commandListGrid}>
+            {COMMAND_LIST.map(([cmd, desc]) => (
+              <div key={cmd} style={styles.commandListRow}>
+                <span style={styles.commandListCmd}>{cmd}</span>
+                <span style={styles.commandListDesc}>{desc}</span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -1112,6 +1108,36 @@ export default function App() {
           </section>
         )}
 
+        {/* ── Reminders toast — fades out like a notification ───────────── */}
+        {remindersToast && (
+          <div style={{
+            ...styles.remindersToast,
+            opacity:    remindersToast.phase === "fading" ? 0 : 1,
+            transition: remindersToast.phase === "fading"
+              ? "opacity 0.9s ease-out"
+              : "opacity 0.25s ease-in",
+          }}>
+            <p style={styles.remindersToastTitle}>📝 Your Reminders</p>
+            {remindersToast.reminders.length === 0 ? (
+              <p style={styles.remindersToastEmpty}>No reminders yet.</p>
+            ) : (
+              <ul style={styles.remindersToastList}>
+                {remindersToast.reminders.map((r, i) => (
+                  <li key={r.id ?? i} style={styles.remindersToastItem}>
+                    <span style={styles.remindersToastBullet}>{i + 1}.</span>
+                    <span>{r.text}</span>
+                    {r.createdAt && (
+                      <span style={styles.remindersToastMeta}>
+                        {formatActionTime(r.createdAt)}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+
         {openPdf && (
           <PdfViewer
             key={openPdf.id}
@@ -1134,7 +1160,7 @@ export default function App() {
         <div style={styles.logPanel}>
           <h2 style={styles.sectionTitle}>Activity Log</h2>
           {logs.length === 0 ? (
-            <p style={styles.emptyLog}>No activity yet. Say "Activate".</p>
+            <p style={styles.emptyLog}>No activity yet. Say "{activationWord}".</p>
           ) : (
             <ul style={styles.logList}>
               {logs.map(entry => (
@@ -1283,32 +1309,48 @@ const styles = {
     textAlign: "center",
     fontStyle: "italic",
   },
-  // Small command legend shown in top-left after first activation
-  legend: {
-    position: "absolute",
+  // Full command list overlay shown at top-left only while the assistant is listening.
+  commandList: {
+    position: "fixed",
     top: 12,
     left: 12,
-    display: "flex",
-    flexWrap: "wrap",
-    gap: "6px 12px",
-    zIndex: 30,
-    maxWidth: 480,
+    background: "rgba(10,10,10,0.93)",
+    border: "1px solid #2a2a2a",
+    borderRadius: 10,
+    padding: "10px 14px",
+    zIndex: 50,
+    maxWidth: 320,
+    maxHeight: "calc(100vh - 60px)",
+    overflowY: "auto",
   },
-  legendItem: {
-    fontSize: "0.7rem",
-    color: "#666",
+  commandListTitle: {
+    margin: "0 0 8px",
+    fontSize: "0.72rem",
+    fontWeight: 700,
+    color: "#f97316",
+    textTransform: "uppercase",
+    letterSpacing: "0.06em",
+  },
+  commandListGrid: {
     display: "flex",
-    alignItems: "center",
+    flexDirection: "column",
     gap: 4,
   },
-  legendKbd: {
-    background: "#1a1a1a",
-    border: "1px solid #333",
-    borderRadius: 4,
-    padding: "1px 5px",
-    fontSize: "0.68rem",
-    color: "#f97316",
+  commandListRow: {
+    display: "flex",
+    gap: 8,
+    alignItems: "baseline",
+  },
+  commandListCmd: {
     fontFamily: "monospace",
+    fontSize: "0.7rem",
+    color: "#f97316",
+    whiteSpace: "nowrap",
+    flexShrink: 0,
+  },
+  commandListDesc: {
+    fontSize: "0.7rem",
+    color: "#777",
   },
   indicator: {
     position: "absolute",
@@ -1560,6 +1602,68 @@ const styles = {
     whiteSpace: "nowrap",
     paddingTop: 2,
     minWidth: 60,
+  },
+  // Reminders fade-out toast
+  remindersToast: {
+    position: "fixed",
+    top: 72,
+    left: "50%",
+    transform: "translateX(-50%)",
+    background: "#1a2a3a",
+    border: "1px solid #2a5a7a",
+    borderRadius: 14,
+    padding: "18px 24px",
+    minWidth: 260,
+    maxWidth: 420,
+    width: "calc(100% - 48px)",
+    boxShadow: "0 8px 32px rgba(0,0,0,0.7)",
+    zIndex: 100,
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+    pointerEvents: "none",   // does not block taps
+  },
+  remindersToastTitle: {
+    margin: 0,
+    fontSize: "0.95rem",
+    fontWeight: 700,
+    color: "#7ec8e3",
+    letterSpacing: "0.02em",
+  },
+  remindersToastEmpty: {
+    margin: 0,
+    fontSize: "0.9rem",
+    color: "#888",
+    fontStyle: "italic",
+  },
+  remindersToastList: {
+    listStyle: "none",
+    margin: 0,
+    padding: 0,
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+  },
+  remindersToastItem: {
+    display: "flex",
+    alignItems: "baseline",
+    gap: 8,
+    fontSize: "0.9rem",
+    color: "#dde",
+    lineHeight: 1.5,
+  },
+  remindersToastBullet: {
+    color: "#7ec8e3",
+    fontWeight: 700,
+    minWidth: 20,
+    flexShrink: 0,
+  },
+  remindersToastMeta: {
+    marginLeft: "auto",
+    fontSize: "0.72rem",
+    color: "#5a7a8a",
+    whiteSpace: "nowrap",
+    flexShrink: 0,
   },
 };
 
