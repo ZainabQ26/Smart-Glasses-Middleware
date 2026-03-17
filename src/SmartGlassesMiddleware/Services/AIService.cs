@@ -32,6 +32,7 @@ public class AIService : IAIService
         ["ocr"] = "Runs OCR for a document or image.",
         ["ocr-retry"] = "Retries OCR and embedding generation for a document.",
         ["document-query"] = "Answers semantic questions over documents (RAG).",
+        ["summarize-page"] = "Summarizes the currently open PDF page.",
         ["advanced"] = "Routes complex requests to an external advanced model endpoint."
     };
 
@@ -261,6 +262,7 @@ Please provide a helpful and concise response:";
         ["delete-reminder"]    = "user wants to remove, cancel, or delete a reminder",
         ["show-reminders"]     = "user wants to see, list, view, or show their reminders",
         ["document-query"]     = "user wants to ask a question about the contents of a document",
+        ["summarize-page"]     = "user wants a summary of the currently open or visible page in a document",
         ["highlight-word"]     = "user wants to highlight, search for, or find a word or phrase in the currently open document. Use when the user says 'highlight X', 'search for X', 'find X', or any variant of highlighting or searching text.",
         ["ocr"]                = "user wants to scan text, read text from an image, or perform OCR",
         ["ocr-retry"]          = "user wants to retry or redo an OCR scan",
@@ -405,6 +407,17 @@ Task:";
         if (ContainsAnyPhrase(normalized, "previous page", "prev page", "back page", "page up"))
         {
             return "previous-page";
+        }
+
+        if (ContainsAnyPhrase(normalized,
+            "summarize this page",
+            "summarize current page",
+            "summarize page",
+            "summary of this page",
+            "summary of the page",
+            "what is on this page"))
+        {
+            return "summarize-page";
         }
 
         // "highlight" / "search" / "find" commands → highlight word in the open PDF (client-side)
