@@ -38,7 +38,7 @@ import React, {
   memo,
 } from "react";
 
-import { getPdf, renderPdfPage } from "./pdf/pdfRendering.js";
+import { getPdf, renderPdfPage, extractPageText } from "./pdf/pdfRendering.js";
 import {
   renderPageWithHighlights,
   addHighlight,
@@ -56,6 +56,7 @@ import { ViewerState, HighlightColors } from "./pdf/pdfClasses.js";
  * @property {(word: string) => void} highlightWord   - Highlight a word (cycles color on repeat).
  * @property {(code: string) => void} goToLoincCode   - Navigate to and highlight a LOINC code.
  * @property {() => void} removeHighlights            - Clear all highlights.
+ * @property {() => Promise<{pageNumber: number, text: string} | null>} getCurrentPageText - Return normalized text for the visible page.
  * @property {() => Promise<void>} printDocument      - Print the whole document with all highlights.
  */
 
@@ -292,6 +293,18 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
     showToast("All highlights removed", 2000);
   }, [showToast]);
 
+  const getCurrentPageText = useCallback(async () => {
+    const state = viewerStateRef.current;
+    if (!state) return null;
+
+    const page = await state.pdf.getPage(state.pageNumber);
+    const { normalized } = await extractPageText(page);
+    return {
+      pageNumber: state.pageNumber,
+      text: normalized.trim(),
+    };
+  }, []);
+
   /**
    * Print the whole document with all active highlights applied.
    * Each page is rendered onto an off-screen canvas at 2× scale (for crisp
@@ -371,8 +384,9 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
     highlightWord,
     goToLoincCode,
     removeHighlights,
+    getCurrentPageText,
     printDocument,
-  }), [nextPage, prevPage, goToPage, highlightWord, goToLoincCode, removeHighlights, printDocument]);
+  }), [nextPage, prevPage, goToPage, highlightWord, goToLoincCode, removeHighlights, getCurrentPageText, printDocument]);
 
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
