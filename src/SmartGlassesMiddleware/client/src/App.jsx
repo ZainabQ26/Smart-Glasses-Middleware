@@ -68,7 +68,6 @@ export default function App() {
 
   // Allow up to 60 s for AI responses — matches the backend AIServiceTimeoutSeconds setting.
   const API_TIMEOUT_MS = 60_000;
-  const PREVIEW_TIMEOUT_MS = 6_000;
   const DOCUMENTS_TIMEOUT_MS = 10_000;
   const LISTENING_IDLE_TIMEOUT_MS = 10_000;
   // Bubbles auto-dismiss after this delay (transcript bubble and AI response bubble).
@@ -543,19 +542,8 @@ export default function App() {
         }
       }
 
-      // Preview whether the backend will delegate this request to the advanced model
-      // Clear previous state first to avoid stale badge persisting on preview error
+      // Reset the advanced-model badge; it will be updated once the actual response arrives.
       setUsedAdvancedModel(false);
-      try {
-        const previewJson = await fetchJsonWithTimeout('/api/process/preview', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input: commandText })
-        }, PREVIEW_TIMEOUT_MS);
-        const willUse = !!previewJson?.willUseAdvanced;
-        setUsedAdvancedModel(willUse);
-      } catch (previewErr) {
-        addLog(`⚠️ Preview check failed: ${previewErr?.message || 'Unknown error'}`, "warn");
-        setUsedAdvancedModel(false);
-      }
       addLog(`🤖 Sending to AI: \"${commandText}\"`, "info");
       const processRequestBody = await buildProcessRequestBody(commandText);
       const data = await fetchJsonWithTimeout("/api/process", {
@@ -793,8 +781,18 @@ export default function App() {
       partialTexts  = [];
 
       if (audio.length < SAMPLE_RATE * MIN_COMMAND_SEC) {
-        // Too short — almost certainly noise or misfire
-        resumeListeningRef.current();
+        if (partial) {
+          // Wake-word + inline command detected; audio window was too short but the
+          // text from the wake-word utterance is reliable — send it directly to AI.
+          activatedRef.current = false;
+          showTranscript(partial);
+          setAiResponse(null);
+          setStatus("sending");
+          sendToAIRef.current?.(partial);
+        } else {
+          // Too short — almost certainly noise or misfire
+          resumeListeningRef.current();
+        }
         return;
       }
 
@@ -852,7 +850,7 @@ export default function App() {
           if (rest.length >= 2) {
             // Wake word + command in the same utterance
             partialTexts.push(rest);
-            setTranscript(rest);
+            showTranscript(rest);
             if (isSentenceComplete(rest)) {
               sentenceEndTimer = setTimeout(submitCommand, SENTENCE_END_MS);
             } else {
