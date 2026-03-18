@@ -434,6 +434,53 @@ export default function App() {
     return payload;
   }, [addLog, openPdf]);
 
+  // ── Detect blank audio or background noise ────────────────────────────────
+  // Returns true if the transcribed text appears to be blank audio, chatter, or background noise.
+  const isBlankAudioOrNoise = useCallback((text) => {
+    if (!text || text.length === 0) return true;
+
+    const trimmed = text.trim().toLowerCase();
+    
+    // Very short fragments are likely noise
+    if (trimmed.length <= 2) return true;
+
+    // Common background noise interjections and filler words
+    // (patterns that appear repeatedly or alone with no meaningful content)
+    const noisePatterns = [
+      /^(?:uh|um|ah|oh|hmm|er|erm|uhh|umm|ahh|ohhh)+\s*$/,  // just filler words
+      /^(?:um|uh)(\s+(?:um|uh))+\s*$/,                        // repeated filler words
+      /^(?:yeah|yep|yup|nope|nah|mmm|huh|eh|shh)+\s*$/,       // common interjections alone
+      /^[aeiou]{3,}$/,                                         // long vowel sounds (aaaa, uuuu)
+      /^([a-z])\1{2,}\s*$/,                                    // repeated character (aaa, bbb)
+      /^(?:[a-z]\s*){2,}$/,                                    // just single letters separated
+      /^(?:ggs|pfft|tsk|shhh|brr|shh)+\s*$/,                  // exclamations/sound effects
+    ];
+
+    if (noisePatterns.some(pattern => pattern.test(trimmed))) {
+      return true;
+    }
+
+    // Check for predominantly filler words (more than 50% filler)
+    const fillerWords = ['um', 'uh', 'ah', 'oh', 'hmm', 'er', 'erm', 'like', 'uh', 'uhh', 'umm'];
+    const words = trimmed.split(/\s+/);
+    const fillerCount = words.filter(w => fillerWords.includes(w)).length;
+    if (words.length > 0 && fillerCount / words.length > 0.5) {
+      return true;
+    }
+
+    // Check for gibberish-like text (very low consonant-to-vowel ratio or unusual patterns)
+    const vowels = (trimmed.match(/[aeiou]/gi) || []).length;
+    const consonants = (trimmed.match(/[bcdfghjklmnprstvwxyz]/gi) || []).length;
+    const totalLetters = vowels + consonants;
+    
+    // If mostly vowels or mostly consonants, likely noise
+    if (totalLetters > 3 && (vowels / totalLetters > 0.8 || consonants / totalLetters > 0.8)) {
+      return true;
+    }
+
+    return false;
+  }, []);
+
   // ── Send transcript to AI ─────────────────────────────────────────────────
   const sendToAI = useCallback(async (text) => {
     // When keepMicActive is true the finally block keeps the mic in listening
@@ -446,6 +493,16 @@ export default function App() {
         addLog("⚠️ Command was empty after wake-word cleanup.", "warn");
         setPendingAction(null);
         showAiResponse("I didn't catch that command. Please try again.");
+        return;
+      }
+
+      // ── Check for blank audio or background noise ──────────────────────
+      if (isBlankAudioOrNoise(commandText)) {
+        addLog("🔊 Detected blank audio or background noise — requiring reactivation.", "warn");
+        setPendingAction(null);
+        showAiResponse("I didn't hear a clear command. Please say \"activate\" again.");
+        // Return to idle/wake-word mode — requires reactivation
+        resumeListeningRef.current?.();
         return;
       }
 
@@ -545,6 +602,11 @@ export default function App() {
             } else {
               terms = [phrase];
             }
+
+            // Strip leading/trailing punctuation from each term (e.g., "patient." → "patient")
+            terms = terms
+              .map((term) => term.replace(/^[^\w]+|[^\w]+$/g, "").trim())
+              .filter(Boolean);
 
             if (terms.length > 0) {
               addLog(`🧪 Parsed highlight terms: ${terms.map((t) => `"${t}"`).join(", ")}`, "info");
@@ -716,7 +778,7 @@ export default function App() {
         resumeListeningRef.current();
       }
     }
-  }, [addLog, buildProcessRequestBody, fetchRecentDocuments, fetchJsonWithTimeout, normalizeCommandText, openDocumentPreview, openPdf, setPendingAction, showAiResponse, showRemindersToast, showTranscript]);
+  }, [addLog, buildProcessRequestBody, fetchRecentDocuments, fetchJsonWithTimeout, isBlankAudioOrNoise, normalizeCommandText, openDocumentPreview, openPdf, setPendingAction, showAiResponse, showRemindersToast, showTranscript]);
 
   sendToAIRef.current = sendToAI;
   useEffect(() => { sendToAIRef.current = sendToAI; }, [sendToAI]);
