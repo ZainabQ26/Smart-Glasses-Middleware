@@ -245,10 +245,14 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
     if (!trimmed) return;
 
     showToast(`Searching for "${trimmed}"…`);
-    await addHighlight(state, trimmed, viewportsRef.current, canvas);
-    setCurrentPage(state.pageNumber); // sync indicator if addHighlight jumped pages
-    refreshHighlightSummary();
-    showToast(`Highlighted "${trimmed}"`);
+    const found = await addHighlight(state, trimmed, viewportsRef.current, canvas);
+    if (found) {
+      setCurrentPage(state.pageNumber); // sync indicator if addHighlight jumped pages
+      refreshHighlightSummary();
+      showToast(`Highlighted "${trimmed}"`);
+    } else {
+      showToast(`"${trimmed}" not found in document`);
+    }
   }, [showToast, refreshHighlightSummary]);
 
   /**
