@@ -72,26 +72,16 @@ export async function searchForKeyword(keyword, pdf, viewports) {
     const { normalized: pageText, itemRanges } = allText[pageIndex];
     const lowerPageText = pageText.toLowerCase();
     const viewport = viewports[pageIndex];
-    const page = await pdf.getPage(pageIndex + 1);
 
-    // Pre-load operator list so font objects are populated (needed for metrics).
-    await page.getOperatorList();
-    const fontMetricsCache = new Map();
-
-    /** @param {string} fontName @returns {Promise<{ascent: number, descent: number}>} */
-    const getFontMetrics = async (fontName) => {
-      if (fontMetricsCache.has(fontName)) return fontMetricsCache.get(fontName);
-
-      const fontObj = await new Promise(resolve => {
-        page.commonObjs.get(fontName, resolve);
-      });
-
-      const ascent  = typeof fontObj?.ascent  === "number" ? fontObj.ascent  : 0.8;
-      const descent = typeof fontObj?.descent === "number" ? fontObj.descent : -0.2;
-      const metrics = { ascent, descent };
-      fontMetricsCache.set(fontName, metrics);
-      return metrics;
-    };
+    // Default font metrics used for all pages.
+    // Fetching real metrics via page.commonObjs.get() requires the page to have
+    // been fully rendered first (fonts are only loaded into commonObjs after
+    // page.render() completes).  Using getOperatorList() alone is not sufficient
+    // for non-current pages, causing the promise to hang indefinitely.
+    // These constants are the same fallback values the previous code used and
+    // produce well-positioned highlights for typical Latin fonts.
+    const ASCENT  = 0.8;
+    const DESCENT = -0.2;
 
     let searchIndex = 0;
     while ((searchIndex = lowerPageText.indexOf(lowercasedKeyword, searchIndex)) !== -1) {
@@ -122,12 +112,10 @@ export async function searchForKeyword(keyword, pdf, viewports) {
         // Scale measured canvas width back to PDF item.width.
         const scale = fullWidth > 0 ? item.width / fullWidth : 1;
 
-        const canvasX = item.transform[4] + prefixWidth * scale;
-        const canvasWidth = matchWidth * scale;
-
-        const { ascent, descent } = await getFontMetrics(item.fontName);
-        const canvasY      = viewport.height - item.transform[5] - ascent * fontSize;
-        const canvasHeight = (ascent - descent) * fontSize;
+        const canvasX      = item.transform[4] + prefixWidth * scale;
+        const canvasWidth  = matchWidth * scale;
+        const canvasY      = viewport.height - item.transform[5] - ASCENT * fontSize;
+        const canvasHeight = (ASCENT - DESCENT) * fontSize;
 
         locations.push({
           pageNumber: pageIndex + 1,
@@ -196,18 +184,18 @@ export function drawAllHighlights(viewerState, context) {
  * @param {string} keyword
  * @param {import('pdfjs-dist').PageViewport[]} viewports
  * @param {HTMLCanvasElement} canvas
- * @returns {Promise<void>}
+ * @returns {Promise<boolean>} `true` if the keyword was found and highlighted, `false` otherwise.
  */
 export async function addHighlight(viewerState, keyword, viewports, canvas) {
   const context = canvas.getContext("2d");
-  if (!context) return;
+  if (!context) return false;
 
   const lowerKeyword = keyword.toLowerCase().trim();
-  if (!lowerKeyword) return;
+  if (!lowerKeyword) return false;
 
   // Search for the keyword across all pages.
   const rectangles = await searchForKeyword(lowerKeyword, viewerState.pdf, viewports);
-  if (rectangles.length === 0) return; // keyword not found in document
+  if (rectangles.length === 0) return false; // keyword not found in document
 
   // If keyword already highlighted, remove it so we can re-add with next colour.
   // (This implements the "say again to cycle colour" behaviour.)
@@ -233,6 +221,7 @@ export async function addHighlight(viewerState, keyword, viewports, canvas) {
 
   // Draw all highlights (including the new one) on the current page.
   drawAllHighlights(viewerState, context);
+  return true;
 }
 
 /**
