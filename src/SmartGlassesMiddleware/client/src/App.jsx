@@ -734,13 +734,15 @@ export default function App() {
   // force-submit timeout — this gives a much more natural end-of-utterance feel.
   useEffect(() => {
     const SAMPLE_RATE          = 16_000;
-    const BUFFER_SIZE          = 2048;       // 128 ms per ScriptProcessor callback
+    const BUFFER_SIZE          = 1024;       // 64 ms per ScriptProcessor callback
     const RMS_THRESHOLD        = 0.012;      // RMS below this → silence
-    const SILENCE_CHUNK_MS     = 550;        // consecutive silence before processing a speech burst
+    const WAKE_SILENCE_MS      = 220;        // wake-word path: short silence for snappier activation
+    const COMMAND_SILENCE_MS   = 650;        // command path: larger chunks for better transcription context
     const SENTENCE_END_MS      = 350;        // pause after sentence-end pattern → submit
     const FORCE_SUBMIT_MS      = 2_500;      // max silence during command → force submit
     const MIN_COMMAND_SEC      = 0.3;        // minimum audio duration (s) to bother submitting
-    const MIN_CHUNK_SEC        = 0.15;       // minimum audio chunk (s) to send to Whisper
+    const WAKE_MIN_CHUNK_SEC   = 0.08;       // wake-word path: allow smaller chunks to reduce delay
+    const COMMAND_MIN_CHUNK_SEC = 0.35;      // command path: larger chunks improve recognition stability
 
     let disposed = false;
 
@@ -971,13 +973,15 @@ export default function App() {
             if (activatedRef.current) commandChunks.push(samples);
           } else if (isSpeaking) {
             if (!silenceSince) silenceSince = now;
-            if ((now - silenceSince) >= SILENCE_CHUNK_MS) {
+            const silenceTargetMs = activatedRef.current ? COMMAND_SILENCE_MS : WAKE_SILENCE_MS;
+            if ((now - silenceSince) >= silenceTargetMs) {
               isSpeaking = false;
               if (speechChunks.length > 0) {
                 const audio = concatF32(speechChunks);
                 speechChunks = [];
                 silenceSince = 0;
-                if (audio.length >= SAMPLE_RATE * MIN_CHUNK_SEC) {
+                const minChunkSec = activatedRef.current ? COMMAND_MIN_CHUNK_SEC : WAKE_MIN_CHUNK_SEC;
+                if (audio.length >= SAMPLE_RATE * minChunkSec) {
                   const mode = activatedRef.current ? "partial" : "wake-word";
                   workerRef.current?.postMessage({ type: "transcribe", audio, mode });
                 }
