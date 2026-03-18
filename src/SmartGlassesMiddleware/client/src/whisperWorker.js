@@ -140,15 +140,23 @@ self.onmessage = async (event) => {
   try {
     const model = await getTranscriber();
 
-    // Build inference options.
-    // For wake-word and partial modes we skip beam search to stay fast.
-    // For the final command transcription we allow a short beam search for
-    // slightly better accuracy.
-    const inferOpts = {
-      do_sample: false,
-      // Constrain to the requested language when provided (e.g. 'en', 'es').
-      ...(language ? { language } : {}),
-    };
+    // Build inference options by mode.
+    // - wake-word/partial: prioritize low latency.
+    // - command: prioritize accuracy for the final request to the AI.
+    const inferOpts =
+      mode === 'command'
+        ? {
+            do_sample: false,
+            num_beams: 4,
+            // Constrain to the requested language when provided (e.g. 'en', 'es').
+            ...(language ? { language } : {}),
+          }
+        : {
+            do_sample: false,
+            num_beams: 1,
+            // Constrain to the requested language when provided (e.g. 'en', 'es').
+            ...(language ? { language } : {}),
+          };
 
     const result = await model(audio, inferOpts);
     const text   = (result.text ?? '').trim();
