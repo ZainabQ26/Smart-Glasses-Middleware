@@ -111,7 +111,9 @@ async function getTranscriber() {
         self.postMessage({ type: 'loading', message: `Downloading Whisper model… ${pct}%` });
       }
       if (p.status === 'ready') {
-        self.postMessage({ type: 'loading', message: `Whisper model ready (${resolvedDevice})` });
+        // Signal to the main thread that the model is ready.
+        // Send only the explicit 'ready' message (avoid duplicate 'loading').
+        self.postMessage({ type: 'ready', message: `Whisper model ready (${resolvedDevice})` });
       }
     },
   };

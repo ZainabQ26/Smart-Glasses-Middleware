@@ -22,6 +22,8 @@ export default function App() {
   const [wakeWordReady, setWakeWordReady] = useState(false);
   // Loading message received from the Whisper worker while it downloads / initialises.
   const [whisperLoadingMsg, setWhisperLoadingMsg] = useState("Initializing…");
+  // Whisper model readiness flag (shows loading UI until model is ready)
+  const [whisperReady, setWhisperReady] = useState(false);
   const [pendingAction, _setPendingActionState] = useState(null); // { type: "SHOW_RECENT_FILES", files } | { type: "SELECT_DOCUMENT", id, name } | null
   // Reminders toast: null | { reminders: [], phase: 'visible'|'fading' }
   const [remindersToast, setRemindersToast] = useState(null);
@@ -830,6 +832,18 @@ export default function App() {
         return;
       }
 
+      if (type === "ready") {
+        // Explicit readiness signal from the worker
+        addLog(`✅ ${message}`, "info");
+        setWhisperLoadingMsg(message);
+        // Debug hook: helpful for manual dev verification and tests
+        try { console.debug("Whisper worker ready:", message); } catch (_) {}
+        // Expose a small test hook so automated tests can detect readiness.
+        try { window.__whisper_ready_received = true; } catch (_) {}
+        setWhisperReady(true);
+        return;
+      }
+
       if (type === "error") {
         addLog(`❌ Whisper: ${message}`, "error");
         if (mode === "command") resumeListeningRef.current();
@@ -921,6 +935,7 @@ export default function App() {
       if (disposed) return;
       const msg = err.message || String(err.type) || "unknown";
       addLog(`❌ Whisper worker crashed: ${msg}`, "error");
+      setWhisperReady(false);
       resumeListeningRef.current();
     };
 
@@ -1001,6 +1016,7 @@ export default function App() {
       worker.terminate();
       workerRef.current = null;
       setWakeWordReady(false);
+      setWhisperReady(false);
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1122,7 +1138,7 @@ export default function App() {
 
             {/* ── Initialization status ─────────────────────────────────── */}
             <div style={styles.landingStatus}>
-              {!wakeWordReady ? (
+              {(!wakeWordReady || !whisperReady) ? (
                 <div style={styles.landingLoadingRow}>
                   <div style={styles.landingSpinner} />
                   <span style={styles.landingLoadingText}>{whisperLoadingMsg}</span>
