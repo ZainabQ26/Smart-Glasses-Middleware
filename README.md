@@ -336,19 +336,22 @@ The ✕ **Close** button in the viewer header also closes it.
 
 ## API Endpoints
 
-Run the application and visit `/swagger` for the full interactive spec.
+Run the application and visit `/swagger` for the full interactive spec (powered by [Scalar](https://scalar.com)).
+The raw OpenAPI JSON is available at `/openapi/v1.json`.
 
 | Group | Endpoints |
 |-------|-----------|
 | AI interaction | `POST /api/ask` — text/task dispatch |
+| Process | `POST /api/process` — voice transcript → AI task dispatch; `GET /api/process/client-settings` |
 | Documents | `POST /api/documents/upload`, `POST /api/documents/query`, `GET/DELETE /api/documents/{id}` |
-| Media | `POST /api/media/upload`, `GET /api/media/{id}` |
-| Conversations | `GET/POST/DELETE /api/conversations` |
-| History | `GET /api/history` |
+| Conversations | `GET/POST/PUT/DELETE /api/conversations` |
+| History | `GET /api/history`, `GET/PUT/DELETE /api/history/reminders/{id}` |
 | Tasks | `GET /api/tasks/{id}` — background task status |
 | Admin | `GET/POST/PUT/DELETE /api/admin/files`, `/api/admin/prompts`, `/api/admin/groups` |
 | Monitoring | `GET /api/monitoring/requests` |
+| AI Interactions | `GET /api/ai-interactions` — model usage logs and stats |
 | Health | `GET /health` — Postgres + Redis liveness |
+| Debug | `GET /api/debug/tasks/status` — handler registration diagnostics |
 
 ## CI/CD Pipeline
 
