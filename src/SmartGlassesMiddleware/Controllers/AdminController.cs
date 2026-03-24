@@ -24,6 +24,7 @@ public class AdminController : ControllerBase
     private readonly IRAGService _documentRagService;
     private readonly ILogger<AdminController> _logger;
     private readonly IRequestMonitoringService _monitoringService;
+    private readonly IServerSettingsService _serverSettingsService;
     private readonly IHubContext<ResourceHub>? _resourceHub;
     private readonly IServiceScopeFactory _scopeFactory;
     private static readonly TimeSpan InitEndpointTimeout = TimeSpan.FromSeconds(8);
@@ -139,6 +140,7 @@ public class AdminController : ControllerBase
         IRAGService documentRagService,
         ILogger<AdminController> logger,
         IRequestMonitoringService monitoringService,
+        IServerSettingsService serverSettingsService,
         IServiceScopeFactory scopeFactory,
         IHubContext<ResourceHub>? resourceHub = null)
     {
@@ -149,6 +151,7 @@ public class AdminController : ControllerBase
         _documentRagService = documentRagService;
         _logger = logger;
         _monitoringService = monitoringService;
+        _serverSettingsService = serverSettingsService;
         _resourceHub = resourceHub;
         _scopeFactory = scopeFactory;
     }
@@ -2590,6 +2593,64 @@ public class AdminController : ControllerBase
         {
             _logger.LogError(ex, "Error fetching batch data");
             return StatusCode(500, new { error = "Failed to fetch batch data", details = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Get server-side prevent-sleep setting for admin keepalive behavior.
+    /// </summary>
+    [HttpGet("settings/prevent-sleep")]
+    public async Task<ActionResult<object>> GetPreventSleepSetting(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var state = await _serverSettingsService.GetPreventSleepStateAsync(cancellationToken);
+            return Ok(new
+            {
+                enabled = state.Enabled,
+                autoDisabledAt2AmEt = state.AutoDisabledAt2AmEt,
+                evaluatedAtUtc = state.RetrievedAtUtc
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to read prevent-sleep setting");
+            return StatusCode(500, new ProblemDetails
+            {
+                Title = "Internal Server Error",
+                Detail = "Failed to read prevent-sleep setting",
+                Status = StatusCodes.Status500InternalServerError
+            });
+        }
+    }
+
+    /// <summary>
+    /// Update server-side prevent-sleep setting for admin keepalive behavior.
+    /// </summary>
+    [HttpPut("settings/prevent-sleep")]
+    public async Task<ActionResult<object>> SetPreventSleepSetting(
+        [FromBody] PreventSleepSettingRequest request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var state = await _serverSettingsService.SetPreventSleepEnabledAsync(request.Enabled, cancellationToken);
+            return Ok(new
+            {
+                enabled = state.Enabled,
+                autoDisabledAt2AmEt = state.AutoDisabledAt2AmEt,
+                evaluatedAtUtc = state.RetrievedAtUtc
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to update prevent-sleep setting to {Enabled}", request.Enabled);
+            return StatusCode(500, new ProblemDetails
+            {
+                Title = "Internal Server Error",
+                Detail = "Failed to update prevent-sleep setting",
+                Status = StatusCodes.Status500InternalServerError
+            });
         }
     }
 

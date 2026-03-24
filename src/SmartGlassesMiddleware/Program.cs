@@ -391,6 +391,7 @@ builder.Services.AddScoped<IConversationService, ConversationService>();
 builder.Services.AddScoped<IPageSummaryService, BedrockPageSummaryService>();
 // Global mapping service for ResourceGroup -> Conversation
 builder.Services.AddScoped<IGroupConversationMappingService, GroupConversationMappingService>();
+builder.Services.AddScoped<IServerSettingsService, ServerSettingsService>();
 
 // Audio transcription service removed: transcription now handled entirely in-browser via Whisper worker
 
@@ -576,6 +577,7 @@ builder.Services.AddHostedService<DocumentProcessingBackgroundService>();
 
 // Monthly FDA abbreviation sync background service
 builder.Services.AddHostedService<AbbreviationSyncBackgroundService>();
+builder.Services.AddHostedService<PreventSleepResetBackgroundService>();
 
 // Add SignalR for real-time notifications with WebSocket optimizations
 builder.Services.AddSignalR(options =>
