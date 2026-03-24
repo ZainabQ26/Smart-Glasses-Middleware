@@ -264,8 +264,11 @@ builder.Services.AddHttpLogging(options =>
 });
 
 // Configure PostgreSQL
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
-    ?? "Host=localhost;Database=smartglasses;Username=postgres;Password=postgres";
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+if (string.IsNullOrWhiteSpace(connectionString))
+{
+    throw new InvalidOperationException("Database connection string 'DefaultConnection' is not configured.");
+}
 
 // db.t3.micro has ~112 max_connections. Npgsql's default pool is 100 per process,
 // which would monopolise the entire DB budget and cause connection starvation.
