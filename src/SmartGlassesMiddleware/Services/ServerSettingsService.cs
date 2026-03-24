@@ -18,20 +18,22 @@ public class ServerSettingsService : IServerSettingsService
 
     private readonly ICacheService _cache;
     private readonly ILogger<ServerSettingsService> _logger;
+    private readonly TimeProvider _timeProvider;
     private readonly TimeZoneInfo _easternTimeZone;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
-    public ServerSettingsService(ICacheService cache, ILogger<ServerSettingsService> logger)
+    public ServerSettingsService(ICacheService cache, ILogger<ServerSettingsService> logger, TimeProvider? timeProvider = null)
     {
         _cache = cache;
         _logger = logger;
+        _timeProvider = timeProvider ?? TimeProvider.System;
         _easternTimeZone = ResolveEasternTimeZone();
     }
 
     public async Task<PreventSleepSettingState> GetPreventSleepStateAsync(CancellationToken cancellationToken = default)
     {
         var (enabled, autoDisabled) = await EvaluatePreventSleepStateAsync(cancellationToken: cancellationToken);
-        return new PreventSleepSettingState(enabled, autoDisabled, DateTime.UtcNow);
+        return new PreventSleepSettingState(enabled, autoDisabled, _timeProvider.GetUtcNow().UtcDateTime);
     }
 
     public async Task<PreventSleepSettingState> SetPreventSleepEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
@@ -41,7 +43,7 @@ public class ServerSettingsService : IServerSettingsService
             persistDesiredValue: true,
             cancellationToken: cancellationToken);
 
-        return new PreventSleepSettingState(finalEnabled, autoDisabled, DateTime.UtcNow);
+        return new PreventSleepSettingState(finalEnabled, autoDisabled, _timeProvider.GetUtcNow().UtcDateTime);
     }
 
     public async Task EnsureDailyResetAppliedAsync(CancellationToken cancellationToken = default)
@@ -57,7 +59,7 @@ public class ServerSettingsService : IServerSettingsService
         await _gate.WaitAsync(cancellationToken);
         try
         {
-            var nowUtc = DateTime.UtcNow;
+            var nowUtc = _timeProvider.GetUtcNow().UtcDateTime;
             var nowEastern = TimeZoneInfo.ConvertTimeFromUtc(nowUtc, _easternTimeZone);
             var todayEastern = nowEastern.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
@@ -120,13 +122,16 @@ public class PreventSleepResetBackgroundService : BackgroundService
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<PreventSleepResetBackgroundService> _logger;
+    private readonly TimeProvider _timeProvider;
 
     public PreventSleepResetBackgroundService(
         IServiceScopeFactory scopeFactory,
-        ILogger<PreventSleepResetBackgroundService> logger)
+        ILogger<PreventSleepResetBackgroundService> logger,
+        TimeProvider? timeProvider = null)
     {
         _scopeFactory = scopeFactory;
         _logger = logger;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -138,7 +143,7 @@ public class PreventSleepResetBackgroundService : BackgroundService
                 using var scope = _scopeFactory.CreateScope();
                 var settingsService = scope.ServiceProvider.GetRequiredService<IServerSettingsService>();
                 await settingsService.EnsureDailyResetAppliedAsync(stoppingToken);
-                await Task.Delay(PollInterval, stoppingToken);
+                await Task.Delay(PollInterval, _timeProvider, stoppingToken);
             }
             catch (OperationCanceledException)
             {
@@ -149,7 +154,7 @@ public class PreventSleepResetBackgroundService : BackgroundService
                 _logger.LogWarning(ex, "Prevent-sleep reset loop failed; retrying shortly");
                 try
                 {
-                    await Task.Delay(TimeSpan.FromSeconds(15), stoppingToken);
+                    await Task.Delay(TimeSpan.FromSeconds(15), _timeProvider, stoppingToken);
                 }
                 catch (OperationCanceledException)
                 {
