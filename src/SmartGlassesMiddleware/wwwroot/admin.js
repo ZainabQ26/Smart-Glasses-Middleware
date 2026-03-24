@@ -6682,6 +6682,16 @@ async function init() {
         // No need to auto-save to ManagedPrompts on unload/hidden
 
         // --- Clear All History button (header) ---
+        const btnDownloadAbbreviationsHeader = document.getElementById('btn-download-abbreviations-header');
+        if (btnDownloadAbbreviationsHeader) {
+            btnDownloadAbbreviationsHeader.addEventListener('click', () => {
+                const now = Date.now();
+                const downloadUrl = `${API_BASE}/abbreviations/download?_=${now}`;
+                window.location.href = downloadUrl;
+            });
+        }
+
+        // --- Clear All History button (header) ---
         const btnClearAllHeader = document.getElementById('btn-clear-all-header');
         if (btnClearAllHeader) {
             btnClearAllHeader.addEventListener('click', async () => {
