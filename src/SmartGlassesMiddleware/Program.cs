@@ -110,6 +110,44 @@ static async Task EnsureAdminListPerformanceIndexesAsync(IServiceProvider servic
     logger?.LogInformation("Ensured admin list performance indexes");
 }
 
+static async Task EnsureAbbreviationsTableAsync(IServiceProvider services, ILogger? logger)
+{
+    using var scope = services.CreateScope();
+    var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+    var provider = db.Database.ProviderName ?? string.Empty;
+    if (!provider.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+    {
+        return;
+    }
+
+    // Some environments run with migrations disabled; ensure the abbreviation sync
+    // storage exists so startup sync does not fail on missing relation errors.
+    var sqlStatements = new[]
+    {
+        @"CREATE TABLE IF NOT EXISTS ""Abbreviations"" (
+            ""Id"" uuid NOT NULL,
+            ""ShortForm"" character varying(255) NOT NULL,
+            ""ExpandedForm"" character varying(500) NOT NULL,
+            ""Category"" character varying(100),
+            ""Source"" character varying(50) NOT NULL,
+            ""UpdatedAt"" timestamp with time zone NOT NULL,
+            ""CreatedAt"" timestamp with time zone NOT NULL,
+            CONSTRAINT ""PK_Abbreviations"" PRIMARY KEY (""Id"")
+        )",
+        "CREATE INDEX IF NOT EXISTS \"IX_Abbreviations_ShortForm\" ON \"Abbreviations\" (\"ShortForm\")",
+        "CREATE INDEX IF NOT EXISTS \"IX_Abbreviations_ExpandedForm\" ON \"Abbreviations\" (\"ExpandedForm\")",
+        "CREATE INDEX IF NOT EXISTS \"IX_Abbreviations_Category\" ON \"Abbreviations\" (\"Category\")",
+        "CREATE INDEX IF NOT EXISTS \"IX_Abbreviations_Source\" ON \"Abbreviations\" (\"Source\")"
+    };
+
+    foreach (var sql in sqlStatements)
+    {
+        await db.Database.ExecuteSqlRawAsync(sql);
+    }
+
+    logger?.LogInformation("Ensured Abbreviations table and indexes");
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Configure QuestPDF license for community usage to avoid runtime license validation errors
@@ -767,6 +805,15 @@ using (var scope = app.Services.CreateScope())
 
         try
         {
+            await EnsureAbbreviationsTableAsync(app.Services, logger);
+        }
+        catch (Exception ex)
+        {
+            logger?.LogWarning(ex, "Failed to ensure abbreviations table at startup; continuing");
+        }
+
+        try
+        {
             _startupLogger.LogInformation("Warming abbreviation cache from database...");
             using var abbrScope = app.Services.CreateScope();
             var abbrService = abbrScope.ServiceProvider.GetRequiredService<IAbbreviationService>();
@@ -786,7 +833,7 @@ using (var scope = app.Services.CreateScope())
             return;
         }
     }
-    catch (InvalidOperationException ex)
+    catch (InvalidOperationException ex) when (app.Environment.IsEnvironment("Testing"))
     {
         var logger = scope.ServiceProvider.GetService<ILogger<Program>>();
         logger?.LogWarning(ex, "Skipping Database.Migrate during startup (likely test environment with multiple EF providers)");
