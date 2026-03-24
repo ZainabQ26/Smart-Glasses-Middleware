@@ -4,7 +4,7 @@ using Microsoft.Extensions.Configuration;
 namespace SmartGlassesMiddleware.Services;
 
 /// <summary>
-/// Background service that syncs FDA abbreviations from openFDA weekly.
+/// Background service that syncs FDA abbreviations from openFDA monthly.
 /// On startup, checks if a sync is needed (based on last update age).
 /// Since ECS containers spin up and down, this ensures syncs happen on schedule
 /// regardless of restarts.
@@ -23,7 +23,7 @@ public class AbbreviationSyncBackgroundService : BackgroundService
     {
         _serviceProvider = serviceProvider;
         _logger = logger;
-        var intervalDays = configuration.GetValue<int?>("AbbreviationSync:IntervalDays") ?? 7;
+        var intervalDays = configuration.GetValue<int?>("AbbreviationSync:IntervalDays") ?? 30;
         if (intervalDays < 1) intervalDays = 1;
         _syncInterval = TimeSpan.FromDays(intervalDays);
         _nextSyncTime = DateTime.UtcNow; // Will be calculated in StartAsync
@@ -66,7 +66,7 @@ public class AbbreviationSyncBackgroundService : BackgroundService
             // If it's time to sync, do it now; otherwise wait until then
             if (timeUntilSync <= TimeSpan.Zero)
             {
-                _logger.LogInformation("Starting weekly FDA abbreviation sync...");
+                _logger.LogInformation("Starting monthly FDA abbreviation sync...");
                 await SyncAbbreviationsAsync(stoppingToken);
                 _nextSyncTime = DateTime.UtcNow.Add(_syncInterval);
                 _logger.LogInformation("Sync complete. Next sync scheduled for {Time} UTC", _nextSyncTime);
@@ -136,7 +136,7 @@ public class AbbreviationSyncBackgroundService : BackgroundService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "FDA abbreviation sync failed (will retry in 7 days)");
+            _logger.LogError(ex, "FDA abbreviation sync failed (will retry in 30 days)");
         }
     }
 }

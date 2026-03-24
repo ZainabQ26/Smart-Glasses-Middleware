@@ -565,7 +565,7 @@ if (!builder.Environment.IsEnvironment("Testing") && !string.IsNullOrWhiteSpace(
 
 builder.Services.AddHostedService<DocumentProcessingBackgroundService>();
 
-// Weekly FDA abbreviation sync background service
+// Monthly FDA abbreviation sync background service
 builder.Services.AddHostedService<AbbreviationSyncBackgroundService>();
 
 // Add SignalR for real-time notifications with WebSocket optimizations
