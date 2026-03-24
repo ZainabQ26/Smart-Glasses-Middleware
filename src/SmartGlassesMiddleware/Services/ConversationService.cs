@@ -566,13 +566,14 @@ Format: YES|topic label OR NO";
         var newConversation = await CreateConversationAsync(newTopic);
 
         // Move messages to new conversation
-        foreach (var message in messagesToMove)
+        var messageIds = messagesToMove.Select(m => m.Id).ToList();
+        var existingMessages = await _context.ChatMessages
+            .Where(m => messageIds.Contains(m.Id))
+            .ToListAsync();
+
+        foreach (var existingMessage in existingMessages)
         {
-            var existingMessage = await _context.ChatMessages.FindAsync(message.Id);
-            if (existingMessage != null)
-            {
-                existingMessage.ConversationId = newConversation.Id;
-            }
+            existingMessage.ConversationId = newConversation.Id;
         }
 
         // Update original conversation timestamp
