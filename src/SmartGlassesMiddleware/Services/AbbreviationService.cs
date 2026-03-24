@@ -16,6 +16,9 @@ namespace SmartGlassesMiddleware.Services;
 public class AbbreviationService : IAbbreviationService
 {
     private const string DefaultOpenFdaUrl = "https://api.fda.gov/drug/label.json";
+    private const string DefaultRxNavAllConceptsUrl = "https://rxnav.nlm.nih.gov/REST/allconcepts.json";
+    private const string DefaultRxTermsSearchUrl = "https://clinicaltables.nlm.nih.gov/api/rxterms/v3/search";
+    private const string DefaultRxTermsSeedTerms = "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,0,1,2,3,4,5,6,7,8,9";
     private readonly ApplicationDbContext _context;
     private readonly ILogger<AbbreviationService> _logger;
     private readonly HttpClient _httpClient;
@@ -144,7 +147,7 @@ public class AbbreviationService : IAbbreviationService
     {
         try
         {
-            _logger.LogInformation("Starting abbreviation sync (openFDA + DailyMed + built-in)...");
+            _logger.LogInformation("Starting abbreviation sync (openFDA + DailyMed + RxNav + RxTerms + built-in)...");
 
             var allAbbreviations = new Dictionary<(string shortForm, string expandedForm), Abbreviation>();
 
@@ -180,6 +183,40 @@ public class AbbreviationService : IAbbreviationService
             else
             {
                 _logger.LogInformation("DailyMed sync disabled by configuration.");
+            }
+
+            // Then fetch from RxNav all-concepts feed (free, no license)
+            if (_configuration.GetValue<bool?>("AbbreviationSync:RxNav:Enabled") ?? true)
+            {
+                _logger.LogInformation("Fetching drug concept data from RxNav...");
+                var rxnav = await FetchFromRxNavAsync(ct);
+                foreach (var abbr in rxnav)
+                {
+                    var key = (abbr.ShortForm.ToLowerInvariant(), abbr.ExpandedForm.ToLowerInvariant());
+                    if (!allAbbreviations.ContainsKey(key))
+                        allAbbreviations[key] = abbr;
+                }
+            }
+            else
+            {
+                _logger.LogInformation("RxNav sync disabled by configuration.");
+            }
+
+            // Then fetch from NLM Clinical Tables RxTerms search API (free, no license)
+            if (_configuration.GetValue<bool?>("AbbreviationSync:RxTerms:Enabled") ?? true)
+            {
+                _logger.LogInformation("Fetching medication terminology data from RxTerms...");
+                var rxTerms = await FetchFromRxTermsAsync(ct);
+                foreach (var abbr in rxTerms)
+                {
+                    var key = (abbr.ShortForm.ToLowerInvariant(), abbr.ExpandedForm.ToLowerInvariant());
+                    if (!allAbbreviations.ContainsKey(key))
+                        allAbbreviations[key] = abbr;
+                }
+            }
+            else
+            {
+                _logger.LogInformation("RxTerms sync disabled by configuration.");
             }
 
             // Add built-in abbreviations (foundational set that won't change)
@@ -245,15 +282,16 @@ public class AbbreviationService : IAbbreviationService
             if (limit > 1000) limit = 1000;
 
             // Pull in pages so a single sync can process much more than one response page.
-            var maxRecords = _configuration.GetValue<int?>("AbbreviationSync:OpenFda:MaxRecords") ?? 5000;
-            if (maxRecords < 1) maxRecords = limit;
+            var maxRecords = _configuration.GetValue<int?>("AbbreviationSync:OpenFda:MaxRecords") ?? 0;
+            var unlimited = maxRecords <= 0;
+            if (!unlimited && maxRecords < limit) maxRecords = limit;
 
             var skip = 0;
             var processedRecords = 0;
 
-            while (processedRecords < maxRecords)
+            while (unlimited || processedRecords < maxRecords)
             {
-                var pageSize = Math.Min(limit, maxRecords - processedRecords);
+                var pageSize = unlimited ? limit : Math.Min(limit, maxRecords - processedRecords);
                 var apiUrl = $"{baseUrl}?limit={pageSize}&skip={skip}&sort=effective_time:desc";
                 _logger.LogInformation("Fetching drug labels from openFDA: {Url}", apiUrl);
 
@@ -330,18 +368,30 @@ public class AbbreviationService : IAbbreviationService
                 return abbreviations;
             }
 
-            var maxXmlFiles = _configuration.GetValue<int?>("AbbreviationSync:DailyMed:MaxXmlFilesPerSync") ?? 200;
-            if (maxXmlFiles < 1) maxXmlFiles = 1;
+            var maxXmlFiles = _configuration.GetValue<int?>("AbbreviationSync:DailyMed:MaxXmlFilesPerSync") ?? 0;
 
             var xmlProcessed = 0;
 
             _logger.LogInformation("Downloading DailyMed bulk from {Url}", url);
+
+            if (url.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+            {
+                return await FetchFromDailyMedJsonIndexAsync(url, maxXmlFiles, ct);
+            }
 
             using var response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning("DailyMed bulk download failed {Status}: {Content}", response.StatusCode, await response.Content.ReadAsStringAsync(ct));
                 return abbreviations;
+            }
+
+            var contentType = response.Content.Headers.ContentType?.MediaType ?? string.Empty;
+            if (contentType.Contains("json", StringComparison.OrdinalIgnoreCase))
+            {
+                var body = await response.Content.ReadAsStringAsync(ct);
+                var tmpUrl = response.RequestMessage?.RequestUri?.ToString() ?? url;
+                return await FetchFromDailyMedJsonIndexAsync(tmpUrl, maxXmlFiles, ct, preloadedJson: body);
             }
 
             await using var stream = await response.Content.ReadAsStreamAsync(ct);
@@ -353,7 +403,7 @@ public class AbbreviationService : IAbbreviationService
                 foreach (var entry in zip.Entries)
                 {
                     if (ct.IsCancellationRequested) break;
-                    if (xmlProcessed >= maxXmlFiles) break;
+                    if (maxXmlFiles > 0 && xmlProcessed >= maxXmlFiles) break;
 
                     if (!entry.FullName.EndsWith(".xml", StringComparison.OrdinalIgnoreCase))
                         continue;
@@ -375,18 +425,27 @@ public class AbbreviationService : IAbbreviationService
             }
             catch (InvalidDataException)
             {
-                // Not a zip — attempt to parse as a single XML document
-                try
+                // Not a zip; newer DailyMed endpoints provide JSON index data.
+                if (url.Contains("spls.zip", StringComparison.OrdinalIgnoreCase))
                 {
-                    stream.Seek(0, SeekOrigin.Begin);
-                    var doc = XDocument.Load(stream);
-                    var text = string.Join(" ", doc.Descendants().Where(e => !e.HasElements).Select(e => e.Value));
-                    var found = ExtractAbbreviationsFromText(text, "DailyMed");
-                    abbreviations.AddRange(found);
+                    var jsonIndexUrl = url.Replace("spls.zip", "spls.json", StringComparison.OrdinalIgnoreCase);
+                    return await FetchFromDailyMedJsonIndexAsync(jsonIndexUrl, maxXmlFiles, ct);
                 }
-                catch (Exception ex)
+
+                // Attempt parse as single XML stream only when URL points directly to an XML SPL.
+                if (url.EndsWith(".xml", StringComparison.OrdinalIgnoreCase))
                 {
-                    _logger.LogWarning(ex, "Failed to parse DailyMed bulk as XML");
+                    try
+                    {
+                        var doc = XDocument.Load(stream);
+                        var text = string.Join(" ", doc.Descendants().Where(e => !e.HasElements).Select(e => e.Value));
+                        var found = ExtractAbbreviationsFromText(text, "DailyMed");
+                        abbreviations.AddRange(found);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to parse DailyMed XML stream");
+                    }
                 }
             }
 
@@ -399,6 +458,281 @@ public class AbbreviationService : IAbbreviationService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to parse DailyMed bulk response");
+        }
+
+        return abbreviations;
+    }
+
+    private async Task<List<Abbreviation>> FetchFromDailyMedJsonIndexAsync(string indexUrl, int maxXmlFiles, CancellationToken ct, string? preloadedJson = null)
+    {
+        var abbreviations = new List<Abbreviation>();
+        var xmlProcessed = 0;
+        string? nextUrl = indexUrl;
+        var firstPageJson = preloadedJson;
+
+        while (!string.IsNullOrWhiteSpace(nextUrl) && (maxXmlFiles <= 0 || xmlProcessed < maxXmlFiles))
+        {
+            string json;
+            if (firstPageJson != null)
+            {
+                json = firstPageJson;
+                firstPageJson = null;
+            }
+            else
+            {
+                using var response = await _httpClient.GetAsync(nextUrl, ct);
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("DailyMed index request failed {Status}: {Url}", response.StatusCode, nextUrl);
+                    break;
+                }
+
+                json = await response.Content.ReadAsStringAsync(ct);
+            }
+
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array)
+                break;
+
+            foreach (var item in data.EnumerateArray())
+            {
+                if (maxXmlFiles > 0 && xmlProcessed >= maxXmlFiles)
+                    break;
+
+                if (!item.TryGetProperty("setid", out var setidElement) || setidElement.ValueKind != JsonValueKind.String)
+                    continue;
+
+                var setid = setidElement.GetString();
+                if (string.IsNullOrWhiteSpace(setid))
+                    continue;
+
+                var xmlUrl = $"https://dailymed.nlm.nih.gov/dailymed/services/v2/spls/{setid}.xml";
+                try
+                {
+                    using var xmlResponse = await _httpClient.GetAsync(xmlUrl, HttpCompletionOption.ResponseHeadersRead, ct);
+                    if (!xmlResponse.IsSuccessStatusCode)
+                    {
+                        continue;
+                    }
+
+                    await using var xmlStream = await xmlResponse.Content.ReadAsStreamAsync(ct);
+                    var xdoc = XDocument.Load(xmlStream);
+                    var text = string.Join(" ", xdoc.Descendants().Where(e => !e.HasElements).Select(e => e.Value));
+                    abbreviations.AddRange(ExtractAbbreviationsFromText(text, "DailyMed"));
+                    xmlProcessed++;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Failed to parse DailyMed SPL xml for setid {SetId}", setid);
+                }
+            }
+
+            nextUrl = null;
+            if (doc.RootElement.TryGetProperty("metadata", out var metadata) &&
+                metadata.TryGetProperty("next_page_url", out var nextPageUrl) &&
+                nextPageUrl.ValueKind == JsonValueKind.String)
+            {
+                var candidate = nextPageUrl.GetString();
+                if (!string.IsNullOrWhiteSpace(candidate) &&
+                    !candidate.Equals("null", StringComparison.OrdinalIgnoreCase))
+                {
+                    nextUrl = candidate;
+                }
+            }
+        }
+
+        _logger.LogInformation("Extracted {Count} abbreviations from DailyMed JSON/XML flow across {Processed} SPL XML files", abbreviations.Count, xmlProcessed);
+        return abbreviations;
+    }
+
+    private async Task<List<Abbreviation>> FetchFromRxNavAsync(CancellationToken ct)
+    {
+        var abbreviations = new List<Abbreviation>();
+
+        try
+        {
+            var baseUrl = _configuration["AbbreviationSync:RxNav:BaseUrl"];
+            if (string.IsNullOrWhiteSpace(baseUrl))
+                baseUrl = DefaultRxNavAllConceptsUrl;
+
+            var conceptTypes = _configuration["AbbreviationSync:RxNav:ConceptTypes"] ?? "IN+BN+PIN+SCD+SBD+GPCK+BPCK";
+            var maxConcepts = _configuration.GetValue<int?>("AbbreviationSync:RxNav:MaxConcepts") ?? 0;
+            var unlimited = maxConcepts <= 0;
+
+            var escapedConceptTypes = Uri.EscapeDataString(conceptTypes).Replace("%2B", "+", StringComparison.OrdinalIgnoreCase);
+            var apiUrl = $"{baseUrl}?tty={escapedConceptTypes}";
+            using var response = await _httpClient.GetAsync(apiUrl, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("RxNav API returned {StatusCode}: {Content}", response.StatusCode, await response.Content.ReadAsStringAsync(ct));
+                return abbreviations;
+            }
+
+            var json = await response.Content.ReadAsStringAsync(ct);
+            using var doc = JsonDocument.Parse(json);
+
+            var processed = 0;
+            if (doc.RootElement.TryGetProperty("minConceptGroup", out var minConceptGroup))
+            {
+                // allconcepts may return either:
+                // 1) minConceptGroup.minConcept[]
+                // 2) minConceptGroup.conceptGroup[].conceptProperties[]
+                if (minConceptGroup.TryGetProperty("minConcept", out var minConcepts) && minConcepts.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var concept in minConcepts.EnumerateArray())
+                    {
+                        if (!unlimited && processed >= maxConcepts)
+                            break;
+
+                        if (concept.TryGetProperty("name", out var name) && name.ValueKind == JsonValueKind.String)
+                        {
+                            abbreviations.AddRange(ExtractAbbreviationsFromText(name.GetString() ?? string.Empty, "RxNav"));
+                        }
+
+                        if (concept.TryGetProperty("synonym", out var synonym) && synonym.ValueKind == JsonValueKind.String)
+                        {
+                            abbreviations.AddRange(ExtractAbbreviationsFromText(synonym.GetString() ?? string.Empty, "RxNav"));
+                        }
+
+                        processed++;
+                    }
+                }
+
+                if ((unlimited || processed < maxConcepts) &&
+                    minConceptGroup.TryGetProperty("conceptGroup", out var groups) &&
+                    groups.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var group in groups.EnumerateArray())
+                    {
+                        if (!unlimited && processed >= maxConcepts)
+                            break;
+
+                        if (!group.TryGetProperty("conceptProperties", out var concepts) || concepts.ValueKind != JsonValueKind.Array)
+                            continue;
+
+                        foreach (var concept in concepts.EnumerateArray())
+                        {
+                            if (!unlimited && processed >= maxConcepts)
+                                break;
+
+                            if (concept.TryGetProperty("name", out var name) && name.ValueKind == JsonValueKind.String)
+                            {
+                                abbreviations.AddRange(ExtractAbbreviationsFromText(name.GetString() ?? string.Empty, "RxNav"));
+                            }
+
+                            if (concept.TryGetProperty("synonym", out var synonym) && synonym.ValueKind == JsonValueKind.String)
+                            {
+                                abbreviations.AddRange(ExtractAbbreviationsFromText(synonym.GetString() ?? string.Empty, "RxNav"));
+                            }
+
+                            processed++;
+                        }
+                    }
+                }
+            }
+
+            _logger.LogInformation("Extracted {Count} abbreviations from RxNav across {Processed} concepts", abbreviations.Count, processed);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, "Failed to reach RxNav API (network issue)");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to parse RxNav response");
+        }
+
+        return abbreviations;
+    }
+
+    private async Task<List<Abbreviation>> FetchFromRxTermsAsync(CancellationToken ct)
+    {
+        var abbreviations = new List<Abbreviation>();
+
+        try
+        {
+            var baseUrl = _configuration["AbbreviationSync:RxTerms:BaseUrl"];
+            if (string.IsNullOrWhiteSpace(baseUrl))
+                baseUrl = DefaultRxTermsSearchUrl;
+
+            var queryTermsConfig = _configuration["AbbreviationSync:RxTerms:SeedTerms"] ?? DefaultRxTermsSeedTerms;
+            var queryTerms = queryTermsConfig
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (queryTerms.Count == 0)
+            {
+                queryTerms.Add("a");
+            }
+
+            var count = _configuration.GetValue<int?>("AbbreviationSync:RxTerms:PageSize") ?? 500;
+            var maxRecords = _configuration.GetValue<int?>("AbbreviationSync:RxTerms:MaxRecords") ?? 0;
+            var unlimited = maxRecords <= 0;
+
+            if (count < 1) count = 1;
+            if (count > 500) count = 500;
+
+            foreach (var queryTerm in queryTerms)
+            {
+                var offset = 0;
+                while (unlimited || offset < maxRecords)
+                {
+                    var pageSize = unlimited ? count : Math.Min(count, maxRecords - offset);
+                    var apiUrl = $"{baseUrl}?terms={Uri.EscapeDataString(queryTerm)}&offset={offset}&count={pageSize}";
+
+                    using var response = await _httpClient.GetAsync(apiUrl, ct);
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        _logger.LogWarning("RxTerms API returned {StatusCode}: {Content}", response.StatusCode, await response.Content.ReadAsStringAsync(ct));
+                        break;
+                    }
+
+                    var json = await response.Content.ReadAsStringAsync(ct);
+                    using var doc = JsonDocument.Parse(json);
+                    if (doc.RootElement.ValueKind != JsonValueKind.Array || doc.RootElement.GetArrayLength() < 4)
+                    {
+                        break;
+                    }
+
+                    // Response shape: [total, [codes], {extra?}, [display names]]
+                    var displayArray = doc.RootElement[3];
+                    if (displayArray.ValueKind != JsonValueKind.Array)
+                    {
+                        break;
+                    }
+
+                    var pageCount = 0;
+                    foreach (var display in displayArray.EnumerateArray())
+                    {
+                        if (display.ValueKind != JsonValueKind.String)
+                            continue;
+
+                        abbreviations.AddRange(ExtractAbbreviationsFromText(display.GetString() ?? string.Empty, "RxTerms"));
+                        pageCount++;
+                    }
+
+                    if (pageCount == 0)
+                    {
+                        break;
+                    }
+
+                    offset += pageCount;
+                    if (pageCount < pageSize)
+                    {
+                        break;
+                    }
+                }
+            }
+
+            _logger.LogInformation("Extracted {Count} abbreviations from RxTerms", abbreviations.Count);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, "Failed to reach RxTerms API (network issue)");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to parse RxTerms response");
         }
 
         return abbreviations;
@@ -585,21 +919,12 @@ public class AbbreviationService : IAbbreviationService
     {
         var abbreviations = new List<Abbreviation>();
 
-        // Common sections in SPL that contain abbreviations
-        var sections = new[] 
-        { 
-            "indications_and_usage", 
-            "dosage_and_administration",
-            "contraindications",
-            "warnings",
-            "precautions",
-            "adverse_reactions",
-            "interactions"
-        };
-
-        foreach (var section in sections)
+        foreach (var sectionProperty in spl.EnumerateObject())
         {
-            if (spl.TryGetProperty(section, out var sectionText))
+            var section = sectionProperty.Name;
+            var sectionText = sectionProperty.Value;
+
+            if (sectionText.ValueKind is JsonValueKind.String or JsonValueKind.Array or JsonValueKind.Object)
             {
                 foreach (var text in ExtractSectionTexts(sectionText))
                 {

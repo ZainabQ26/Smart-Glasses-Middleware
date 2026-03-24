@@ -22,6 +22,14 @@ The app combines 3 sources:
 - Source: local list in code
 - Purpose: keep common abbreviations available even if external services are unavailable
 
+4. RxNav all-concepts API
+- Source: NLM RxNav REST API (free, no license)
+- Purpose: scan concept names/synonyms and extract abbreviation pairs
+
+5. RxTerms (Clinical Tables) search API
+- Source: NLM Clinical Tables RxTerms API (free, no license)
+- Purpose: scan medication display names and extract abbreviation pairs
+
 ## When does syncing happen?
 1. On app startup
 - The app loads the existing abbreviation dictionary from the database into memory (fast lookup cache).
@@ -71,6 +79,15 @@ These settings are in `appsettings*.json` under `AbbreviationSync`:
 - `DailyMed.Enabled`: turn DailyMed sync on/off
 - `DailyMed.BulkUrl`: DailyMed bulk ZIP/XML URL
 - `DailyMed.MaxXmlFilesPerSync`: cap for how much DailyMed data to parse per run
+- `RxNav.Enabled`: turn RxNav sync on/off
+- `RxNav.BaseUrl`: RxNav all-concepts URL
+- `RxNav.ConceptTypes`: concept TTY filters (for example `IN+BN+PIN+SCD+SBD+GPCK+BPCK`)
+- `RxNav.MaxConcepts`: cap for concepts scanned per sync
+- `RxTerms.Enabled`: turn RxTerms sync on/off
+- `RxTerms.BaseUrl`: Clinical Tables RxTerms search URL
+- `RxTerms.SeedTerms`: search seed term used for paging (default `a`)
+- `RxTerms.PageSize`: records requested per page
+- `RxTerms.MaxRecords`: cap for records scanned per sync
 
 ## Where this is implemented
 - Sync + parsing: `src/SmartGlassesMiddleware/Services/AbbreviationService.cs`
