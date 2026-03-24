@@ -1096,16 +1096,7 @@ export default function App() {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Keepalive ping ────────────────────────────────────────────────────────
-  // Ping the API every 2.5 minutes so the server (configured to scale-to-zero
-  // after 30 min of inactivity) does not shut down while the tab is open.
-  useEffect(() => {
-    const PING_INTERVAL_MS = 2.5 * 60 * 1_000;
-    const id = setInterval(async () => {
-      try { await fetch("/api/process/client-settings", { method: "GET" }); } catch (_) {}
-    }, PING_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, []);
+  // Keepalive control is server-side and managed from the admin panel toggle.
 
   useEffect(() => {
     return () => {

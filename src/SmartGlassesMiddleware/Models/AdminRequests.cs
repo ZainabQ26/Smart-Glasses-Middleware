@@ -41,3 +41,11 @@ public class GroupRequest
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
 }
+
+/// <summary>
+/// Request model for updating server-side prevent-sleep behavior.
+/// </summary>
+public class PreventSleepSettingRequest
+{
+    public bool Enabled { get; set; }
+}

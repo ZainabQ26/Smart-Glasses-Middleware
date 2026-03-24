@@ -1,11 +1,161 @@
 const API_BASE = '/api/admin';
 const ADMIN_DEBUG = !!window.__ADMIN_DEBUG__;
 const themeStorageKey = 'uiTheme';
+const ADMIN_SESSION_KEEPALIVE_INTERVAL_MS = 2.5 * 60 * 1000;
+const ADMIN_KEEPALIVE_INTERVAL_MS = 60 * 1000;
 const MAX_UPLOAD_STATUS_TRANSIENTS_BEFORE_DEFER = 5;
 const MIN_UPLOAD_STATUS_DEFER_RETRY_MS = 60000;
 const MAX_UPLOAD_STATUS_DEFER_RETRY_MS = 300000;
 // After this many deferred retries the upload is presumed permanently stuck; the user is told to re-upload.
 const MAX_POLL_DEFERRED_BEFORE_ABANDON = 8;
+let adminKeepAliveTimer = null;
+let adminSessionKeepAliveTimer = null;
+
+async function sendAdminSessionKeepAlivePing() {
+    try {
+        await fetch('/health', {
+            method: 'GET',
+            cache: 'no-store'
+        });
+    } catch (_) {
+        // Best-effort ping; retry on next interval.
+    }
+}
+
+function stopAdminSessionKeepAlive() {
+    if (adminSessionKeepAliveTimer) {
+        clearInterval(adminSessionKeepAliveTimer);
+        adminSessionKeepAliveTimer = null;
+    }
+}
+
+function startAdminSessionKeepAlive() {
+    if (adminSessionKeepAliveTimer) {
+        return;
+    }
+
+    sendAdminSessionKeepAlivePing();
+    adminSessionKeepAliveTimer = setInterval(sendAdminSessionKeepAlivePing, ADMIN_SESSION_KEEPALIVE_INTERVAL_MS);
+}
+
+async function fetchPreventSleepState() {
+    const response = await fetch(`${API_BASE}/settings/prevent-sleep`, {
+        method: 'GET',
+        cache: 'no-store'
+    });
+
+    if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+    }
+
+    return await response.json();
+}
+
+async function sendAdminKeepAlivePing() {
+    try {
+        const state = await fetchPreventSleepState();
+        if (!state?.enabled) {
+            const wasEnabled = !!document.getElementById('keepawake-toggle')?.checked;
+            applyKeepAwakeToggle(false, false, false);
+
+            if (wasEnabled && state?.autoDisabledAt2AmEt && typeof showMessage === 'function') {
+                showMessage('Sleep prevention was turned off at 2:00 AM Eastern.', 'info');
+            }
+            return;
+        }
+
+        await fetch('/health', { method: 'GET', cache: 'no-store' });
+    } catch (_) {
+        // Keepalive is best-effort; wait for next interval.
+    }
+}
+
+function stopAdminKeepAlive() {
+    if (adminKeepAliveTimer) {
+        clearInterval(adminKeepAliveTimer);
+        adminKeepAliveTimer = null;
+    }
+}
+
+function startAdminKeepAlive() {
+    if (adminKeepAliveTimer) {
+        return;
+    }
+
+    sendAdminKeepAlivePing();
+    adminKeepAliveTimer = setInterval(sendAdminKeepAlivePing, ADMIN_KEEPALIVE_INTERVAL_MS);
+}
+
+function applyKeepAwakeToggle(enabled, showToast = false, persist = false) {
+    const normalized = !!enabled;
+
+    const toggle = document.getElementById('keepawake-toggle');
+    const label = document.getElementById('keepawake-label');
+    if (toggle) toggle.checked = normalized;
+    if (label) label.textContent = normalized ? 'Prevent sleep: On' : 'Prevent sleep';
+
+    if (normalized) {
+        startAdminKeepAlive();
+    } else {
+        stopAdminKeepAlive();
+    }
+
+    if (showToast && typeof showMessage === 'function') {
+        showMessage(
+            normalized
+                ? 'Sleep prevention enabled. This admin tab will ping the server every minute.'
+                : 'Sleep prevention disabled.',
+            'info'
+        );
+    }
+
+    if (persist) {
+        fetch(`${API_BASE}/settings/prevent-sleep`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: normalized })
+        })
+            .then(async (res) => {
+                if (!res.ok) {
+                    throw new Error(`HTTP ${res.status}`);
+                }
+
+                const payload = await res.json().catch(() => null);
+                const serverEnabled = payload?.enabled;
+                if (typeof serverEnabled === 'boolean' && serverEnabled !== normalized) {
+                    applyKeepAwakeToggle(serverEnabled, false, false);
+                }
+            })
+            .catch((err) => {
+                console.warn('[KEEPAWAKE] Failed to persist server setting:', err);
+                if (typeof showMessage === 'function') {
+                    showMessage('Failed to update prevent-sleep setting on server.', 'error');
+                }
+            });
+    }
+}
+
+async function initializeKeepAwakeToggle() {
+    const toggle = document.getElementById('keepawake-toggle');
+    if (!toggle) {
+        return;
+    }
+
+    try {
+        const state = await fetchPreventSleepState();
+        applyKeepAwakeToggle(!!state?.enabled, false, false);
+        if (state?.autoDisabledAt2AmEt && typeof showMessage === 'function') {
+            showMessage('Sleep prevention defaults to off at 2:00 AM Eastern.', 'info');
+        }
+    } catch (err) {
+        console.warn('[KEEPAWAKE] Failed to fetch initial server setting:', err);
+        applyKeepAwakeToggle(false, false, false);
+    }
+
+    toggle.addEventListener('change', () => {
+        applyKeepAwakeToggle(toggle.checked, true, true);
+    });
+}
 
 // In-memory cache for API responses (no browser storage)
 const apiCache = {
@@ -5006,6 +5156,9 @@ async function init() {
     console.log('[INIT] Starting admin panel initialization...');
     console.log('[INIT] Current time:', new Date().toISOString());
     console.log('[INIT] API Base:', API_BASE);
+
+    // Keep the backend warm while the admin page is open, independent of the toggle.
+    startAdminSessionKeepAlive();
     
     // Apply theme early so UI controls are available even if API health checks are slow
     try {
@@ -5015,6 +5168,7 @@ async function init() {
             const nextTheme = document.body.classList.contains('dark') ? 'light' : 'dark';
             applyTheme(nextTheme);
         });
+        initializeKeepAwakeToggle();
     } catch (e) {
         console.warn('[INIT] Failed to attach theme toggle early:', e);
     }
@@ -6783,3 +6937,8 @@ if (document.readyState === 'loading') {
 } else {
     init();
 }
+
+window.addEventListener('beforeunload', () => {
+    stopAdminKeepAlive();
+    stopAdminSessionKeepAlive();
+});

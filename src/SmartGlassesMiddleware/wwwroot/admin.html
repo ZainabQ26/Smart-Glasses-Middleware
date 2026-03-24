@@ -127,7 +127,7 @@
         }
 
         .theme-toggle {
-            margin-left: auto;
+            margin-left: 0;
             background: #ecf0f1;
             border: 1px solid #dcdcdc;
             color: #2c3e50;
@@ -140,6 +140,32 @@
         }
 
         .theme-toggle:hover {
+            background: #dfe6e9;
+        }
+
+        .keepawake-toggle {
+            margin-left: auto;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            border: 1px solid #dcdcdc;
+            border-radius: 8px;
+            background: #ecf0f1;
+            color: #2c3e50;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .keepawake-toggle input {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+        }
+
+        .keepawake-toggle:hover {
             background: #dfe6e9;
         }
 
@@ -325,6 +351,17 @@
         }
 
         body.dark #theme-toggle:hover {
+            background: #36425b !important;
+            color: #e8eef5 !important;
+        }
+
+        body.dark .keepawake-toggle {
+            background: #2d3750 !important;
+            color: #d7e6f6 !important;
+            border: 1px solid rgba(255,255,255,0.04) !important;
+        }
+
+        body.dark .keepawake-toggle:hover {
             background: #36425b !important;
             color: #e8eef5 !important;
         }
@@ -1341,6 +1378,10 @@
             <button class="tab" data-tab="prompts" data-testid="tab-prompts" aria-controls="prompts">Conversations</button>
             <button class="tab" data-tab="reminders" data-testid="tab-reminders" aria-controls="reminders">Reminders</button>
             <button class="tab" data-tab="groups" data-testid="tab-groups" aria-controls="groups">Groups</button>
+            <label id="keepawake-toggle-wrap" class="keepawake-toggle" title="Send periodic health checks from this admin tab to prevent idle scale-down" data-testid="keepawake-wrap">
+                <input type="checkbox" id="keepawake-toggle" data-testid="keepawake-toggle" aria-label="Prevent server sleep from admin tab">
+                <span id="keepawake-label">Prevent sleep</span>
+            </label>
             <button id="theme-toggle" class="theme-toggle" type="button" title="Toggle dark mode" aria-label="Toggle dark mode" data-testid="theme-toggle">🌙</button>
         </div>
 
