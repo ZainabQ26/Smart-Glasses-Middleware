@@ -57,7 +57,7 @@ public class ProcessController : ControllerBase
 
         var activationWord = _configuration["AI:ActivationWord"]?.Trim().ToLowerInvariant();
         if (string.IsNullOrWhiteSpace(activationWord))
-            activationWord = "Open Iris";
+            activationWord = "Iris";
 
         return Ok(new { speechTranscriptionMode = mode, activationWord });
     }
