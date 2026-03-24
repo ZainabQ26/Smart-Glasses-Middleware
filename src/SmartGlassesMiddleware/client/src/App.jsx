@@ -500,7 +500,7 @@ export default function App() {
       if (isBlankAudioOrNoise(commandText)) {
         addLog("🔊 Detected blank audio or background noise — requiring reactivation.", "warn");
         setPendingAction(null);
-        showAiResponse("I didn't hear a clear command. Please say \"activate\" again.");
+        showAiResponse("I didn't hear a clear command. Please say \"Iris\" again.");
         // Return to idle/wake-word mode — requires reactivation
         resumeListeningRef.current?.();
         return;
