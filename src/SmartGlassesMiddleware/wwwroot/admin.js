@@ -5146,7 +5146,15 @@ async function waitForAPI(maxRetries = 60, delayMs = 3000) {
         try {
             const elapsed = Math.round((i * delayMs) / 1000);
             console.log(`[API Health] Checking API health (attempt ${i + 1}/${maxRetries}, ${elapsed}s elapsed)...`);
-            const response = await fetch('/ready');
+            // Poll /health instead of /ready: /health has a dedicated CloudFront behaviour
+            // that routes to the ALB and returns 503 when ECS is at 0 tasks (no healthy
+            // targets).  /ready has no such behaviour and falls through to the S3 default
+            // origin, which returns a 403 that CloudFront converts to a 200 with index.html
+            // — causing waitForAPI to return true immediately even when the server is still
+            // sleeping.  /health always returns 200 as soon as the ECS process is running,
+            // which is all we need to unblock the admin panel (individual API calls handle
+            // their own DB-readiness retries).
+            const response = await fetch('/health', { cache: 'no-store' });
             if (response.ok) {
                 console.log('[API Health] API is ready!');
                 return true;
