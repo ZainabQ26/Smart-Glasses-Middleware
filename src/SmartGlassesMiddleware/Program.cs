@@ -695,19 +695,23 @@ builder.Services.AddCors(options =>
         var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
             ?? new[] { "http://localhost:3000", "http://localhost:5000" };
 
-        if (builder.Environment.IsDevelopment() || allowedOrigins.Contains("*"))
+        if (builder.Environment.IsDevelopment())
         {
-            // In development or when wildcard is configured, allow any origin
+            // In development, allow any origin
             policy.AllowAnyOrigin()
                   .AllowAnyMethod()
                   .AllowAnyHeader();
         }
         else
         {
-            // In production, restrict to specific origins
-            policy.WithOrigins(allowedOrigins)
-                  .AllowAnyMethod()
-                  .AllowAnyHeader();
+            // In production, restrict to specific origins and explicitly ignore wildcards
+            var validOrigins = allowedOrigins.Where(o => o != "*").ToArray();
+            if (validOrigins.Length > 0)
+            {
+                policy.WithOrigins(validOrigins)
+                      .AllowAnyMethod()
+                      .AllowAnyHeader();
+            }
         }
     });
 });
