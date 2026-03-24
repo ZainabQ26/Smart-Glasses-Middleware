@@ -1,102 +1,180 @@
-# Abbreviation Sync (Plain-Language Guide)
+# Abbreviation Sync Guide
 
-This feature helps the app understand medical abbreviations in documents.
+This document explains how abbreviation ingestion works end-to-end in SmartGlassesMiddleware.
+
+## Goal
+
+The system builds a searchable abbreviation dictionary so commands and highlighting can match both forms of the same concept.
 
 Example:
-- If a document says `ACE` in one place and `angiotensin converting enzyme` in another place,
-- the app can treat them as related,
-- and highlight both in the same color.
+- ACE
+- Angiotensin Converting Enzyme
 
-## What data sources are used?
-The app combines 3 sources:
+Both can be treated as related terms during search/highlight operations.
 
-1. openFDA label data
-- Source: FDA open data API
-- Purpose: pull recent drug-label text and find abbreviation pairs
+## Data Sources
 
-2. DailyMed SPL bulk data
-- Source: DailyMed bulk ZIP/XML feed
-- Purpose: scan official label text at scale and find abbreviation pairs
+The sync pipeline merges data from these sources:
 
-3. Built-in safety list
-- Source: local list in code
-- Purpose: keep common abbreviations available even if external services are unavailable
+1. openFDA
+- Endpoint: https://api.fda.gov/drug/label.json
+- Used for SPL/label text extraction.
 
-4. RxNav all-concepts API
-- Source: NLM RxNav REST API (free, no license)
-- Purpose: scan concept names/synonyms and extract abbreviation pairs
+2. DailyMed
+- Index endpoint: https://dailymed.nlm.nih.gov/dailymed/services/v2/spls.json
+- Detail endpoint per setid: https://dailymed.nlm.nih.gov/dailymed/services/v2/spls/{setid}.xml
+- Used for SPL XML text extraction.
 
-5. RxTerms (Clinical Tables) search API
-- Source: NLM Clinical Tables RxTerms API (free, no license)
-- Purpose: scan medication display names and extract abbreviation pairs
+3. RxNav (free)
+- Endpoint: https://rxnav.nlm.nih.gov/REST/allconcepts.json
+- Used for concept names and synonyms.
 
-## When does syncing happen?
-1. On app startup
-- The app loads the existing abbreviation dictionary from the database into memory (fast lookup cache).
-- It does **not** force a full external fetch every restart.
+4. RxTerms (free)
+- Endpoint: https://clinicaltables.nlm.nih.gov/api/rxterms/v3/search
+- Used for medication display strings.
 
-2. Weekly scheduler
-- A background service checks the last successful update time.
-- If data is older than the configured interval (default 7 days), it syncs now.
-- If data is still fresh, it waits until the next due time.
+5. Built-in list
+- Hardcoded baseline set in AbbreviationService.
+- Always included for resilience.
 
-This is designed for ECS environments where containers can spin up/down.
+## Sync Lifecycle
 
-## How duplicates are prevented
-Duplicates are prevented in two places:
+1. App startup
+- Cache is loaded from DB.
+- Background service checks staleness.
 
-1. During collection
-- While combining data from openFDA, DailyMed, and built-in list,
-- entries are keyed by `(short form + expanded form)` in lowercase.
-- If the same pair appears twice, only one is kept.
+2. Background schedule
+- Controlled by AbbreviationSync:IntervalDays.
+- If newest abbreviation UpdatedAt is older than interval, sync runs immediately.
 
-2. Before database insert
-- The app checks if that pair already exists in the database (case-insensitive).
-- If it exists, it updates timestamps/source metadata instead of inserting a new row.
+3. Merge and upsert
+- Pairs are deduplicated in memory by lowercase (shortForm, expandedForm).
+- Existing DB pairs are updated; missing pairs are inserted.
 
-Result: the dictionary stays clean and does not grow with repeated duplicate rows.
+## Extraction Strategy
 
-## How text becomes a usable dictionary
-The app looks for patterns in label text such as:
-- `ABBR (expanded form)`
-- `expanded form (ABBR)`
+### Generic text extraction
 
-Then it stores each valid pair as:
-- Short form (example: `ACE`)
-- Expanded form (example: `angiotensin converting enzyme`)
-- Source (`openFDA`, `DailyMed`, or `built-in`)
-- Updated time
+Pattern-based extraction is used broadly:
 
-At runtime, this becomes a searchable dictionary used by highlight commands.
+1. ABBR (expanded form)
+2. expanded form (ABBR)
 
-## Configuration knobs
-These settings are in `appsettings*.json` under `AbbreviationSync`:
+This is applied to openFDA text and DailyMed XML text, and also to Rx source text payloads.
 
-- `IntervalDays`: how often to refresh (default 7)
-- `OpenFda.Enabled`: turn openFDA sync on/off
-- `OpenFda.BaseUrl`: API base URL
-- `OpenFda.Limit`: number of labels to fetch per run
-- `DailyMed.Enabled`: turn DailyMed sync on/off
-- `DailyMed.BulkUrl`: DailyMed bulk ZIP/XML URL
-- `DailyMed.MaxXmlFilesPerSync`: cap for how much DailyMed data to parse per run
-- `RxNav.Enabled`: turn RxNav sync on/off
-- `RxNav.BaseUrl`: RxNav all-concepts URL
-- `RxNav.ConceptTypes`: concept TTY filters (for example `IN+BN+PIN+SCD+SBD+GPCK+BPCK`)
-- `RxNav.MaxConcepts`: cap for concepts scanned per sync
-- `RxTerms.Enabled`: turn RxTerms sync on/off
-- `RxTerms.BaseUrl`: Clinical Tables RxTerms search URL
-- `RxTerms.SeedTerms`: search seed term used for paging (default `a`)
-- `RxTerms.PageSize`: records requested per page
-- `RxTerms.MaxRecords`: cap for records scanned per sync
+### Source-specific extraction
 
-## Where this is implemented
-- Sync + parsing: `src/SmartGlassesMiddleware/Services/AbbreviationService.cs`
-- Weekly scheduler: `src/SmartGlassesMiddleware/Services/AbbreviationSyncBackgroundService.cs`
-- Startup wiring: `src/SmartGlassesMiddleware/Program.cs`
-- Database model: `src/SmartGlassesMiddleware/Models/Abbreviation.cs`
-- Database mapping: `src/SmartGlassesMiddleware/Data/ApplicationDbContext.cs`
+Additional source-specific logic exists for medication strings:
 
-## If something goes wrong
-- The app continues running.
-- It keeps using the last saved dictionary from the database.
-- Built-in abbreviations still provide a baseline.
+1. RxNav medication-name parser
+- Scans tokens in concept names/synonyms.
+- Maps known pharma shorthand to canonical expansions.
+
+2. RxTerms medication-name parser
+- Scans raw display strings.
+- Includes structured token parser for dosage/form shorthand.
+- Maps trusted forms such as ER, XR, ODT, HCl, MG, ML, TAB, CAP, SOLN, SUSP, INJ, OINT, CRM, GEL, PKT.
+
+### Normalization and quality filters
+
+Before insert:
+
+1. Expanded text normalization
+- Whitespace cleanup.
+- Known typo/variant normalization.
+
+2. Quality gates
+- Reject obvious prose/noise captures.
+- Reject numeric-only/phone-like short forms.
+- Enforce acronym-shape and acronym-expansion alignment for non built-in sources.
+
+3. Trusted pharma pair bypass
+- Known medication shorthand pairs are explicitly accepted.
+
+## Exhaustive Mode
+
+Exhaustive behavior is controlled by caps in appsettings under AbbreviationSync.
+
+Current convention:
+- Value <= 0 means unlimited scan for that source.
+
+Keys:
+
+1. OpenFda.MaxRecords
+- 0 means page until source is exhausted.
+
+2. DailyMed.MaxXmlFilesPerSync
+- 0 means walk all available SPLs from index paging.
+
+3. RxNav.MaxConcepts
+- 0 means scan all returned concepts.
+
+4. RxTerms.MaxRecords
+- 0 means continue paging until each seed term is exhausted.
+
+5. RxTerms.SeedTerms
+- Comma-separated seeds.
+- Supports broad crawling (for example a-z and 0-9).
+
+## Configuration Reference
+
+All under AbbreviationSync in appsettings files:
+
+1. IntervalDays
+2. OpenFda.Enabled
+3. OpenFda.BaseUrl
+4. OpenFda.Limit
+5. OpenFda.MaxRecords
+6. DailyMed.Enabled
+7. DailyMed.BulkUrl
+8. DailyMed.MaxXmlFilesPerSync
+9. RxNav.Enabled
+10. RxNav.BaseUrl
+11. RxNav.ConceptTypes
+12. RxNav.MaxConcepts
+13. RxTerms.Enabled
+14. RxTerms.BaseUrl
+15. RxTerms.SeedTerms
+16. RxTerms.PageSize
+17. RxTerms.MaxRecords
+
+## Main Files
+
+1. Sync and parsing logic
+- src/SmartGlassesMiddleware/Services/AbbreviationService.cs
+
+2. Scheduler
+- src/SmartGlassesMiddleware/Services/AbbreviationSyncBackgroundService.cs
+
+3. Startup wiring and table/index ensure
+- src/SmartGlassesMiddleware/Program.cs
+
+4. Entity and DbContext
+- src/SmartGlassesMiddleware/Models/Abbreviation.cs
+- src/SmartGlassesMiddleware/Data/ApplicationDbContext.cs
+
+## Operational Notes
+
+1. High-cost runs
+- Exhaustive mode can take a long time and generate heavy network/database load.
+
+2. Safety behavior
+- If an external source fails, app keeps running.
+- Existing DB abbreviations and built-in rows remain available.
+
+3. Deterministic smoke testing
+- For fast validation, temporarily set bounded caps with environment overrides.
+
+## Quick Test Recipe
+
+1. Force stale timestamps in DB.
+2. Run container with desired source toggles and temporary caps.
+3. Inspect logs for extracted counts per source.
+4. Check DB counts grouped by Source.
+
+Example SQL check:
+
+SELECT "Source", COUNT(*)
+FROM "Abbreviations"
+GROUP BY "Source"
+ORDER BY 1;
