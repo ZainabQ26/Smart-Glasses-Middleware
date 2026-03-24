@@ -2,21 +2,30 @@
 
 ## Deploy Via GitHub Actions (Tag + Manual Run)
 
-The deploy workflow is `deploy-main.yml`.
+There are two deploy workflows:
+
+- **`deploy-main.yml`** — full deploy (Terraform + migrations + frontend), triggers on `v*` tags or `workflow_dispatch`
+- **`deploy-fast.yml`** — fast deploy (no Terraform), triggers on `deploy-*` tags or `workflow_dispatch`
 
 1. Tag-based deploy (push a tag to trigger Actions):
 
 ```bash
 # From repo root, on the commit you want to deploy
 git pull
+
+# Full deploy (Terraform + migrations):
+git tag v$(date +%Y%m%d-%H%M)
+git push origin --tags
+
+# Fast deploy (skips Terraform, just builds and deploys the new image):
 git tag deploy-$(date +%Y%m%d-%H%M)
 git push origin --tags
 ```
 
 The workflow triggers on tags matching:
 
-- `deploy-*`
-- `v*`
+- `v*` — full deploy via `deploy-main.yml`
+- `deploy-*` — fast deploy via `deploy-fast.yml`
 
 2. Manual deploy (`workflow_dispatch`) with required inputs:
 
@@ -49,7 +58,7 @@ Backend middleware and frontend for a smart glasses application. Provides a mult
 | Layer | Technology |
 |-------|-----------|
 | API | ASP.NET Core (.NET 10), C# |
-| Frontend | React 18 + Vite, served from S3 via CloudFront |
+| Frontend | React 19 + Vite, served from S3 via CloudFront |
 | AI | AWS Bedrock (Nova / Titan Embed) — always |
 | Advanced model | External REST API (`AI:AdvancedModelEndpoint`) — request/response |
 | Audio transcription | Whisper Lambda (containerised, invoked via SQS) |
@@ -147,6 +156,7 @@ docker build -f src/SmartGlassesMiddleware/Dockerfile -t smart-glasses-api:local
 | `MinIO:Endpoint` | `localhost:9000` | MinIO endpoint (local storage) |
 | `AI:AdvancedModelEndpoint` | `` | External REST API for unknown tasks |
 | `AI:UseAdvancedModel` | `false` | Enable advanced model routing |
+| `AI:ActivationWord` | `Iris` | Wake word that triggers command mode |
 | `AWS:Bedrock:ModelId` | `us.amazon.nova-2-lite-v1:0` | Bedrock chat model |
 | `AWS:Bedrock:EmbeddingModelId` | `amazon.titan-embed-text-v2:0` | Bedrock embedding model |
 | `MigrateOnStartup` | `true` (dev) / `false` (AWS) | Run EF migrations on boot |
@@ -155,15 +165,15 @@ docker build -f src/SmartGlassesMiddleware/Dockerfile -t smart-glasses-api:local
 
 The client-side transcription behavior is configurable via the `AI:SpeechTranscriptionMode` setting. Add this under the `AI` section in your `appsettings.*.json` files or provide it as an environment variable (`AI__SpeechTranscriptionMode`). Valid values:
 
-- `auto`: Use the browser Web Speech API as the primary fast-path; if the Web Speech final result has low confidence, the client falls back to the local Whisper worker for higher-accuracy transcription (default).
+- `whisper-only`: Ignore Web Speech results and always use the on-device Whisper WebGPU worker for transcription (default).
+- `auto`: Use the browser Web Speech API as the primary fast-path; fall back to the Whisper worker when needed.
 - `webspeech-only`: Use only the browser Web Speech API. The Whisper worker is ignored.
-- `whisper-only`: Ignore Web Speech results and always use the Whisper worker for final transcripts.
 
-The server exposes a convenience endpoint that the SPA calls on load to read this value:
+The current client implementation uses only the local Whisper WebGPU worker (single multilingual `whisper-base` model running in a Web Worker with WebGPU acceleration). The `SpeechTranscriptionMode` setting is read by the server and exposed via `GET /api/process/client-settings`.
 
-- `GET /api/process/client-settings` — returns `{ "speechTranscriptionMode": "auto|webspeech-only|whisper-only" }`.
+The server exposes a convenience endpoint that the SPA calls on load:
 
-Client note: the confidence threshold used to decide when to fall back to Whisper is defined in the SPA (`src/SmartGlassesMiddleware/client/src/App.jsx`) as `WEB_SPEECH_CONFIDENCE_THRESHOLD`. Change that constant in the client if you want a different threshold.
+- `GET /api/process/client-settings` — returns `{ "speechTranscriptionMode": "whisper-only|auto|webspeech-only", "activationWord": "Iris" }`.
 
 ### AWS (`appsettings.AWS.json`)
 
@@ -217,6 +227,9 @@ The middleware dispatches AI-classified requests to typed task handlers. Handler
 | `ReminderTaskHandler` | `reminder` | Saves a reminder to the DB |
 | `DeleteReminderTaskHandler` | `delete-reminder` | Deletes a reminder by matching text |
 | `EditReminderTaskHandler` | `edit-reminder` | Edits an existing reminder |
+| `ShowRemindersTaskHandler` | `show-reminders` | Lists all saved reminders |
+| `SelectDocumentTaskHandler` | `select-document` | Opens the most recently uploaded document in the inline viewer |
+| `OpenFileTaskHandler` | `open-file` | Lists the last 5 uploaded files so the user can choose one to open |
 | `DocumentSearchTaskHandler` | `document-search` | Finds text in documents, returns page/position |
 | `DocumentHighlightTaskHandler` | `document-highlight` | Highlights text in a document |
 | `DocumentQueryTaskHandler` | `document-query` | Semantic RAG query over uploaded documents |
@@ -231,6 +244,10 @@ The middleware dispatches AI-classified requests to typed task handlers. Handler
 | `CloseDocumentTaskHandler` | `close-document` | Closes the inline PDF viewer and returns to the home screen |
 | `GoToPageTaskHandler` | `go-to-page` | Navigates the inline PDF viewer to a specific page number |
 | `GoToLoincPageTaskHandler` | `go-to-loinc` | Searches for a LOINC code in the open PDF, navigates to its page, and highlights it |
+| `SummarizePageTaskHandler` | `summarize-page` | Summarises the text on the currently visible PDF page via Bedrock |
+| `PrintTaskHandler` | `print` | Triggers the browser print dialog for the open PDF |
+| `PrintHighlightedPagesTaskHandler` | `print-highlighted-pages` | Prints only the pages that contain at least one active highlight |
+| `AdminPanelTaskHandler` | `open-admin-panel` | Navigates the frontend to the admin panel |
 
 ### Adding a custom handler
 
@@ -242,9 +259,11 @@ The middleware dispatches AI-classified requests to typed task handlers. Handler
 
 The home screen includes a built-in PDF viewer powered by [PDF.js](https://mozilla.github.io/pdf.js/).  The viewer is **hidden by default** and appears as a full-screen overlay only when a document is opened.  Opening a different document while one is already open automatically closes the old document and starts fresh — highlights do **not** carry over between documents.
 
+The **activation word** (default: `Iris`, configurable via `AI:ActivationWord`) wakes the assistant for each command. All voice commands below assume the activation word has just been spoken.
+
 ### Opening a document
 
-Say **"activate"** and then one of:
+Say the **activation word** and then one of:
 
 | Voice command | What happens |
 |--------------|--------------|
@@ -289,25 +308,54 @@ A **Highlights legend** is displayed below the PDF canvas.  It shows each highli
 
 The ✕ **Close** button in the viewer header also closes it.
 
+### Summarising the current page
+
+| Voice command | Action |
+|--------------|--------|
+| `"summarize page"` / `"summarize this page"` | Sends the current page text to Bedrock and displays a summary |
+| `"what is on this page"` | Same |
+
+### Printing
+
+| Voice command | Action |
+|--------------|--------|
+| `"print document"` / `"print pdf"` | Opens the browser print dialog for the full document |
+| `"print highlighted pages"` / `"print pages with highlights"` | Prints only pages that contain at least one active highlight |
+
+### Reminders
+
+| Voice command | Action |
+|--------------|--------|
+| `"show reminders"` / `"my reminders"` | Displays a list of all saved reminders |
+
+### Admin panel
+
+| Voice command | Action |
+|--------------|--------|
+| `"open admin panel"` / `"go to admin"` | Navigates the frontend to the admin panel |
+
 ## API Endpoints
 
-Run the application and visit `/swagger` for the full interactive spec.
+Run the application and visit `/swagger` for the full interactive spec (powered by [Scalar](https://scalar.com)).
+The raw OpenAPI JSON is available at `/openapi/v1.json`.
 
 | Group | Endpoints |
 |-------|-----------|
 | AI interaction | `POST /api/ask` — text/task dispatch |
+| Process | `POST /api/process` — voice transcript → AI task dispatch; `GET /api/process/client-settings` |
 | Documents | `POST /api/documents/upload`, `POST /api/documents/query`, `GET/DELETE /api/documents/{id}` |
-| Media | `POST /api/media/upload`, `GET /api/media/{id}` |
-| Conversations | `GET/POST/DELETE /api/conversations` |
-| History | `GET /api/history` |
+| Conversations | `GET/POST/PUT/DELETE /api/conversations` |
+| History | `GET /api/history`, `GET/PUT/DELETE /api/history/reminders/{id}` |
 | Tasks | `GET /api/tasks/{id}` — background task status |
 | Admin | `GET/POST/PUT/DELETE /api/admin/files`, `/api/admin/prompts`, `/api/admin/groups` |
 | Monitoring | `GET /api/monitoring/requests` |
+| AI Interactions | `GET /api/ai-interactions` — model usage logs and stats |
 | Health | `GET /health` — Postgres + Redis liveness |
+| Debug | `GET /api/debug/tasks/status` — handler registration diagnostics |
 
 ## CI/CD Pipeline
 
-Every push to `main` triggers:
+Deployments are tag-driven (see [Deploy Via GitHub Actions](#deploy-via-github-actions-tag--manual-run) above). Pushing a `v*` tag (full deploy) or a `deploy-*` tag (fast deploy, no Terraform) triggers the pipeline:
 
 ```
 build-api ──────────┐

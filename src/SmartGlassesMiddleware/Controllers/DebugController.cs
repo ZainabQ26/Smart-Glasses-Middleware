@@ -3,6 +3,10 @@ using SmartGlassesMiddleware.Services;
 
 namespace SmartGlassesMiddleware.Controllers;
 
+/// <summary>
+/// Internal diagnostic and debugging utilities.
+/// These endpoints are intended for development and operations use only.
+/// </summary>
 [ApiController]
 [Route("api/debug")]
 public class DebugController : ControllerBase
@@ -16,7 +20,13 @@ public class DebugController : ControllerBase
         _configuration = configuration;
     }
 
+    /// <summary>
+    /// Returns a snapshot of all registered task handlers and known task names,
+    /// highlighting any mismatches between the <c>AI:KnownTasks</c> configuration list
+    /// and the handlers that are actually loaded.
+    /// </summary>
     [HttpGet("tasks/status")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
     public IActionResult TaskStatus()
     {
         var knownTasks = _taskDispatcher.KnownTasks
@@ -67,7 +77,14 @@ public class DebugController : ControllerBase
         });
     }
 
+    /// <summary>
+    /// Echoes back all form fields and file metadata from a multipart/form-data request.
+    /// Useful for verifying that the client is sending form data correctly.
+    /// </summary>
     [HttpPost("echo-form")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> EchoForm()
     {
         try
@@ -88,7 +105,13 @@ public class DebugController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Reads and discards the raw request body, returning only the byte count.
+    /// Useful for verifying that large bodies reach the server intact.
+    /// </summary>
     [HttpPost("echo-raw")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> EchoRaw()
     {
         try

@@ -31,7 +31,21 @@ db_connection = None
 
 
 def get_db_connection():
-    """Get database connection with credentials from Secrets Manager"""
+    """Return a live psycopg2 connection, reusing a cached one when still healthy.
+
+    Credentials are fetched from AWS Secrets Manager on the first call and cached
+    for the lifetime of the Lambda execution environment.  A lightweight ``SELECT 1``
+    probe is run to detect stale connections caused by a Lambda container restart or
+    a database failover; if the probe fails the connection is discarded and a fresh
+    one is opened.
+
+    Returns:
+        psycopg2.connection: An open, ready-to-use database connection.
+
+    Raises:
+        psycopg2.OperationalError: If the database is unreachable.
+        botocore.exceptions.ClientError: If the Secrets Manager call fails.
+    """
     global db_connection
     
     if db_connection is not None:
@@ -63,11 +77,22 @@ def get_db_connection():
 
 
 def extract_text_from_pdf(bucket: str, key: str) -> str:
-    """Extract text from a searchable PDF using PyMuPDF (no OCR, no Textract cost).
+    """Extract all text from a searchable PDF stored in S3 using PyMuPDF.
 
-    The file uploaded by the ECS container is already a searchable (text-based) PDF
-    produced by iText/LibreOffice, so all text is in the PDF's text layer and can
-    be read directly without any AWS API calls.
+    The uploaded file is a text-based PDF produced by iText/LibreOffice, so the
+    text layer is read directly — no OCR or Textract calls are made.
+
+    Args:
+        bucket: S3 bucket name containing the PDF.
+        key: S3 object key for the PDF file.
+
+    Returns:
+        The full extracted text with pages separated by newlines.
+        Returns an empty string if no text layer is found (image-only PDFs).
+
+    Raises:
+        botocore.exceptions.ClientError: If the S3 GetObject call fails.
+        fitz.FitzError: If the file cannot be parsed as a PDF.
     """
     obj = s3_client.get_object(Bucket=bucket, Key=key)
     pdf_bytes = obj['Body'].read()
@@ -86,7 +111,23 @@ def extract_text_from_pdf(bucket: str, key: str) -> str:
 
 
 def chunk_text(text: str, max_chunk_size: int = MAX_CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> List[Dict[str, Any]]:
-    """Split text into overlapping chunks"""
+    """Split text into overlapping word-based chunks for embedding generation.
+
+    Overlapping windows ensure that context spanning chunk boundaries is
+    captured in at least one chunk, improving RAG retrieval accuracy.
+
+    Args:
+        text: The full document text to split.
+        max_chunk_size: Maximum number of words per chunk (default: ``MAX_CHUNK_SIZE``).
+        overlap: Number of words shared between consecutive chunks (default: ``CHUNK_OVERLAP``).
+
+    Returns:
+        A list of chunk dicts, each with keys:
+        - ``text`` (str): The chunk content.
+        - ``index`` (int): Zero-based position in the document.
+        - ``start_position`` (int): Word index where this chunk starts.
+        - ``end_position`` (int): Word index where this chunk ends (exclusive).
+    """
     chunks = []
     words = text.split()
     
@@ -111,7 +152,19 @@ def chunk_text(text: str, max_chunk_size: int = MAX_CHUNK_SIZE, overlap: int = C
 
 
 def get_embedding(text: str) -> List[float]:
-    """Generate embedding using Amazon Bedrock Titan Embeddings"""
+    """Generate a 1024-dimensional embedding vector using Amazon Bedrock Titan Embeddings V2.
+
+    Truncates input to 25 000 characters (≈ 6 250 tokens) to stay within the
+    model's 8 192-token context window.  Falls back to a zero vector on error so
+    a single bad chunk does not abort the entire document ingestion.
+
+    Args:
+        text: The text to embed.
+
+    Returns:
+        A list of 1024 floats representing the embedding.  A zero vector
+        ``[0.0] * 1024`` is returned if the Bedrock call fails.
+    """
     try:
         # Prepare request for Titan Embeddings V2
         # Titan V2 supports up to 8192 tokens (~32768 characters for English)
@@ -136,11 +189,27 @@ def get_embedding(text: str) -> List[float]:
 
 
 def store_chunks_in_db(document_id: str, chunks: List[Dict[str, Any]], file_name: str):
-    """Store document chunks with embeddings in PostgreSQL.
+    """Upsert document metadata and all embedding chunks into PostgreSQL.
 
-    Table/column names must match the EF Core migrations:
-      - DocumentMetadatas  (PK: Id uuid)
-      - DocumentChunks     (PK: Id uuid, FK: DocumentMetadataId)
+    Uses an INSERT … ON CONFLICT DO UPDATE strategy so re-processing a document
+    is idempotent.  The function writes to two EF Core-managed tables:
+
+    - ``DocumentMetadatas`` — one row per document (upsert by primary key).
+    - ``DocumentChunks`` — one row per chunk, with the ``EmbeddingVector`` stored
+      as a pgvector ``vector(1024)`` literal.
+
+    After inserting all chunks the document's ``IsProcessed`` flag is set to
+    ``True`` and ``ProcessedAt`` is recorded.
+
+    Args:
+        document_id: UUID string identifying the document (must match the
+            ``DocumentMetadatas.Id`` column).
+        chunks: List of chunk dicts produced by :func:`chunk_text`.
+        file_name: Original file name stored in ``DocumentMetadatas.FileName``.
+
+    Raises:
+        psycopg2.Error: On any database error; the transaction is rolled back
+            before re-raising so the caller can decide on retry logic.
     """
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -207,7 +276,26 @@ def store_chunks_in_db(document_id: str, chunks: List[Dict[str, Any]], file_name
 
 
 def handler(event, context):
-    """Lambda handler for document processing"""
+    """Lambda entry point — process one or more S3 document events.
+
+    Triggered by an S3 ``ObjectCreated`` event.  For each record the function:
+
+    1. Fetches the PDF from S3 via :func:`extract_text_from_pdf`.
+    2. Splits it into overlapping word chunks via :func:`chunk_text`.
+    3. Generates Bedrock embeddings and persists everything via :func:`store_chunks_in_db`.
+
+    Args:
+        event (dict): Standard Lambda event payload.  Expected to contain an
+            ``event['Records']`` list of S3 event records as documented at
+            https://docs.aws.amazon.com/lambda/latest/dg/with-s3.html.
+        context (LambdaContext): Runtime context object provided by Lambda
+            (used for logging; not accessed directly here).
+
+    Returns:
+        dict: A response body with ``statusCode`` 200 and a ``body`` JSON string
+        containing ``{ "message": "...", "chunks": <int> }`` on success, or
+        ``statusCode`` 500 with an ``error`` string on failure.
+    """
     logger.info(f"Received event: {json.dumps(event)}")
     
     try:
