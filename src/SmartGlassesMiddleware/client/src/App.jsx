@@ -1530,7 +1530,7 @@ const styles = {
     inset: 0,
     background: "rgba(0,0,0,0.92)",
     display: "flex",
-    alignItems: "center",
+    alignItems: "flex-start",
     justifyContent: "center",
     zIndex: 100,
     padding: 16,
@@ -1547,6 +1547,7 @@ const styles = {
     display: "flex",
     flexDirection: "column",
     gap: 20,
+    margin: "auto",
   },
   landingTitle: {
     margin: 0,
