@@ -8,8 +8,22 @@ const MIN_UPLOAD_STATUS_DEFER_RETRY_MS = 60000;
 const MAX_UPLOAD_STATUS_DEFER_RETRY_MS = 300000;
 // After this many deferred retries the upload is presumed permanently stuck; the user is told to re-upload.
 const MAX_POLL_DEFERRED_BEFORE_ABANDON = 8;
+const ADMIN_WAKE_RETRY_MS = 15000;
 let adminKeepAliveTimer = null;
 let adminSessionKeepAliveTimer = null;
+let lastAdminWakeAttempt = 0;
+
+function triggerAdminWake() {
+    const now = Date.now();
+    if (now - lastAdminWakeAttempt < ADMIN_WAKE_RETRY_MS) {
+        return;
+    }
+
+    lastAdminWakeAttempt = now;
+    fetch('/wake', { method: 'POST' }).catch(() => {
+        // Wake signal is best-effort; readiness polling continues.
+    });
+}
 
 async function sendAdminSessionKeepAlivePing() {
     try {
@@ -5125,6 +5139,9 @@ function setupInfiniteScroll() {
 
 // Wait for API to be ready (up to 3 minutes to survive ECS cold-start)
 async function waitForAPI(maxRetries = 60, delayMs = 3000) {
+    // Match the home-page WakeupGate behavior by signaling wake immediately.
+    triggerAdminWake();
+
     for (let i = 0; i < maxRetries; i++) {
         try {
             const elapsed = Math.round((i * delayMs) / 1000);
@@ -5134,8 +5151,12 @@ async function waitForAPI(maxRetries = 60, delayMs = 3000) {
                 console.log('[API Health] API is ready!');
                 return true;
             }
+
+            // If not ready yet, keep retrying wake in case the initial wake call was dropped.
+            triggerAdminWake();
             console.warn(`[API Health] API returned ${response.status}, retrying...`);
         } catch (error) {
+            triggerAdminWake();
             console.warn(`[API Health] API not ready yet:`, error.message);
         }
 
