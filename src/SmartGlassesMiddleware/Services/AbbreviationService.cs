@@ -46,7 +46,7 @@ public class AbbreviationService : IAbbreviationService
         if (string.IsNullOrWhiteSpace(shortForm))
             return null;
 
-        var normalized = shortForm.Trim();
+        var normalized = shortForm.Trim(); // Normalizing short form
 
         // Check cache first
         if (_shortFormCache.TryGetValue(normalized, out var cached))
@@ -65,7 +65,7 @@ public class AbbreviationService : IAbbreviationService
         if (string.IsNullOrWhiteSpace(expandedForm))
             return null;
 
-        var normalized = expandedForm.Trim();
+        var normalized = expandedForm.Trim(); // Normalizing expanded form
 
         // Check cache first
         if (_expandedFormCache.TryGetValue(normalized, out var cached))
@@ -244,37 +244,66 @@ public class AbbreviationService : IAbbreviationService
             if (limit < 1) limit = 1;
             if (limit > 1000) limit = 1000;
 
-            // Query openFDA for recent drug labels with configurable limit
-            var apiUrl = $"{baseUrl}?limit={limit}&sort=effective_time:desc";
-            _logger.LogInformation("Fetching drug labels from openFDA: {Url}", apiUrl);
+            // Pull in pages so a single sync can process much more than one response page.
+            var maxRecords = _configuration.GetValue<int?>("AbbreviationSync:OpenFda:MaxRecords") ?? 5000;
+            if (maxRecords < 1) maxRecords = limit;
 
-            using var response = await _httpClient.GetAsync(apiUrl, ct);
-            if (!response.IsSuccessStatusCode)
+            var skip = 0;
+            var processedRecords = 0;
+
+            while (processedRecords < maxRecords)
             {
-                _logger.LogWarning("openFDA API returned {StatusCode}: {Content}", response.StatusCode, await response.Content.ReadAsStringAsync(ct));
-                return abbreviations;
+                var pageSize = Math.Min(limit, maxRecords - processedRecords);
+                var apiUrl = $"{baseUrl}?limit={pageSize}&skip={skip}&sort=effective_time:desc";
+                _logger.LogInformation("Fetching drug labels from openFDA: {Url}", apiUrl);
+
+                using var response = await _httpClient.GetAsync(apiUrl, ct);
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("openFDA API returned {StatusCode}: {Content}", response.StatusCode, await response.Content.ReadAsStringAsync(ct));
+                    return abbreviations;
+                }
+
+                var json = await response.Content.ReadAsStringAsync(ct);
+                using var doc = System.Text.Json.JsonDocument.Parse(json);
+
+                if (!doc.RootElement.TryGetProperty("results", out var results) || results.ValueKind != JsonValueKind.Array)
+                {
+                    break;
+                }
+
+                var pageCount = 0;
+                foreach (var result in results.EnumerateArray())
+                {
+                    pageCount++;
+                    try
+                    {
+                        // Extract abbreviations from various SPL sections
+                        var abbrsFromSpl = ExtractAbbreviationsFromSpl(result);
+                        abbreviations.AddRange(abbrsFromSpl);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Failed to parse abbreviations from single SPL entry");
+                    }
+                }
+
+                if (pageCount == 0)
+                {
+                    break;
+                }
+
+                processedRecords += pageCount;
+                skip += pageCount;
+
+                // Last page reached.
+                if (pageCount < pageSize)
+                {
+                    break;
+                }
             }
 
-            var json = await response.Content.ReadAsStringAsync(ct);
-            using var doc = System.Text.Json.JsonDocument.Parse(json);
-
-            var results = doc.RootElement.GetProperty("results");
-            foreach (var result in results.EnumerateArray())
-            {
-                try
-                {
-                    // Extract abbreviations from various SPL sections
-                    var abbrsFromSpl = ExtractAbbreviationsFromSpl(result);
-                    abbreviations.AddRange(abbrsFromSpl);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug(ex, "Failed to parse abbreviations from single SPL entry");
-                    continue;
-                }
-            }
-
-            _logger.LogInformation("Extracted {Count} abbreviations from openFDA", abbreviations.Count);
+            _logger.LogInformation("Extracted {Count} abbreviations from openFDA across {ProcessedRecords} records", abbreviations.Count, processedRecords);
         }
         catch (HttpRequestException ex)
         {
@@ -381,8 +410,8 @@ public class AbbreviationService : IAbbreviationService
 
         if (string.IsNullOrWhiteSpace(text)) return abbreviations;
 
-        var abbrThenExpanded = new Regex(@"\b(?<abbr>[A-Z0-9\-]{2,10})\s*\((?<expanded>[^)]{3,200})\)", RegexOptions.IgnoreCase);
-        var expandedThenAbbr = new Regex(@"(?<expanded>[A-Za-z][A-Za-z\s,\-]{3,200})\s*\((?<abbr>[A-Z0-9\-]{2,10})\)", RegexOptions.IgnoreCase);
+        var abbrThenExpanded = new Regex(@"\b(?<abbr>[A-Z][A-Z0-9\-]{1,11})\s*\((?<expanded>[^)]{3,200})\)");
+        var expandedThenAbbr = new Regex(@"(?<expanded>[A-Za-z][A-Za-z\s,\-]{3,200})\s*\((?<abbr>[A-Z][A-Z0-9\-]{1,11})\)");
 
         foreach (var match in abbrThenExpanded.Matches(text).Cast<Match>())
         {
@@ -397,17 +426,17 @@ public class AbbreviationService : IAbbreviationService
         return abbreviations;
     }
 
-    private static void TryAddExtractedPair(List<Abbreviation> abbreviations, string shortFormRaw, string expandedFormRaw, string source)
+    private static void TryAddExtractedPair(List<Abbreviation> abbreviations, string shortFormRaw, string expandedFormRaw, string source, string? category = null)
     {
         try
         {
             var shortForm = shortFormRaw.Trim();
-            var expandedForm = expandedFormRaw.Trim();
+            var expandedForm = NormalizeExpandedForm(expandedFormRaw.Trim(), source);
 
             if (shortForm.Length < 2 || shortForm.Length > 40) return;
             if (expandedForm.Length < 3 || expandedForm.Length > 500) return;
 
-            if (!IsLikelyUsefulAbbreviation(shortForm, expandedForm)) return;
+            if (!IsLikelyUsefulAbbreviation(shortForm, expandedForm, source)) return;
 
             if (!IsDuplicate(abbreviations, shortForm, expandedForm))
             {
@@ -416,7 +445,7 @@ public class AbbreviationService : IAbbreviationService
                     Id = Guid.NewGuid(),
                     ShortForm = shortForm,
                     ExpandedForm = expandedForm,
-                    Category = null,
+                    Category = category,
                     Source = source,
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow
@@ -429,16 +458,127 @@ public class AbbreviationService : IAbbreviationService
         }
     }
 
-    private static bool IsLikelyUsefulAbbreviation(string shortForm, string expandedForm)
+    private static string NormalizeExpandedForm(string expandedForm, string source)
+    {
+        if (string.IsNullOrWhiteSpace(expandedForm))
+            return expandedForm;
+
+        // Normalize whitespace and common punctuation spacing first.
+        var normalized = Regex.Replace(expandedForm, @"\s+", " ").Trim();
+        normalized = Regex.Replace(normalized, @"\s+-\s*(?=[A-Za-z])", " ");
+
+        if (!source.Equals("built-in", StringComparison.OrdinalIgnoreCase))
+        {
+            // Canonical typo/variant cleanup for externally extracted labels.
+            normalized = Regex.Replace(normalized, @"\bHypothalmic\b", "Hypothalamic", RegexOptions.IgnoreCase);
+            normalized = Regex.Replace(normalized, @"\bClostridium\s+difficile\b", "Clostridioides difficile", RegexOptions.IgnoreCase);
+            normalized = Regex.Replace(normalized, @"\bdrug\s+rash\s+with\s+eosinophilia\s+and\s+systemic\s+symptoms\b", "drug reaction with eosinophilia and systemic symptoms", RegexOptions.IgnoreCase);
+            normalized = Regex.Replace(normalized, @"\bOpioid-Induced Hyperalgesia and Allodynia\s+Opioid-Induced Hyperalgesia\b", "Opioid-Induced Hyperalgesia and Allodynia", RegexOptions.IgnoreCase);
+        }
+
+        return normalized;
+    }
+
+    private static bool IsLikelyUsefulAbbreviation(string shortForm, string expandedForm, string source)
     {
         if (shortForm.Contains(' ')) return false;
+        if (shortForm.Length < 2 || shortForm.Length > 12) return false;
         if (expandedForm.IndexOf(shortForm, StringComparison.OrdinalIgnoreCase) >= 0) return false;
+
+        // Abbreviations should contain letters and avoid pure numeric/phone fragments.
+        var letterCount = shortForm.Count(char.IsLetter);
+        var digitCount = shortForm.Count(char.IsDigit);
+        if (letterCount < 2) return false;
+        if (digitCount > 0 && letterCount <= 1) return false;
+        if (Regex.IsMatch(shortForm, @"^\d+$")) return false;
+        if (Regex.IsMatch(shortForm, @"^\d{1,4}([\-/]\d{1,4})+$")) return false;
+        if (Regex.IsMatch(shortForm, @"^\d{1,3}-\d{3}-\d{4}$")) return false;
+
+        // Ignore lowercase prose words accidentally captured as abbreviations.
+        if (shortForm.Length >= 5 && shortForm.All(char.IsLetter) && shortForm.ToLowerInvariant() == shortForm)
+            return false;
+
+        // External sources should look like acronym tokens, not prose nouns.
+        if (!source.Equals("built-in", StringComparison.OrdinalIgnoreCase))
+        {
+            if (shortForm.Any(char.IsLower)) return false;
+            if (!Regex.IsMatch(shortForm, @"^[A-Z][A-Z0-9\-]{1,11}$")) return false;
+
+            var wordCount = Regex.Matches(expandedForm, @"[A-Za-z0-9]+").Count;
+            if (wordCount < 2 || wordCount > 8) return false;
+            if (expandedForm.Length > 90) return false;
+            if (Regex.IsMatch(expandedForm, @"[;:]")) return false;
+            if (Regex.IsMatch(expandedForm, @"\b(is|are|was|were|indicated|including|treated|contains|offered|recommended|patients?)\b", RegexOptions.IgnoreCase))
+                return false;
+        }
 
         // Ignore obvious section numbering and noise tokens
         if (Regex.IsMatch(shortForm, @"^\d+[A-Z]?$")) return false;
-        if (Regex.IsMatch(shortForm, @"^(AND|THE|FOR|WITH|FROM)$", RegexOptions.IgnoreCase)) return false;
+        if (Regex.IsMatch(shortForm, @"^(AND|THE|FOR|WITH|FROM|OF|SEE|THAN|THEN|THUS|WHEN)$", RegexOptions.IgnoreCase)) return false;
+
+        // Reject noisy expanded forms that look like prose/stat lines instead of definitions.
+        if (Regex.IsMatch(expandedForm, @"^(a|an|and|in|or|with|for|from|of|the|see)\b", RegexOptions.IgnoreCase)) return false;
+        if (expandedForm.Contains("95%") || expandedForm.Contains("95 percent", StringComparison.OrdinalIgnoreCase)) return false;
+        if (expandedForm.Contains("confidence interval", StringComparison.OrdinalIgnoreCase)) return false;
+        if (expandedForm.Contains("Poison Control Center", StringComparison.OrdinalIgnoreCase)) return false;
+
+        var expandedLetters = expandedForm.Count(char.IsLetter);
+        var expandedDigits = expandedForm.Count(char.IsDigit);
+        if (expandedLetters < 3) return false;
+        if (expandedDigits > expandedLetters / 2) return false;
+        if (expandedForm.Length > 220) return false;
+
+        // For externally extracted rows, require abbreviation and expansion to align.
+        if (!source.Equals("built-in", StringComparison.OrdinalIgnoreCase) &&
+            !LooksLikeAcronymExpansion(shortForm, expandedForm))
+            return false;
 
         return true;
+    }
+
+    private static bool LooksLikeAcronymExpansion(string shortForm, string expandedForm)
+    {
+        var normalizedShort = new string(shortForm.Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
+        if (normalizedShort.Length < 2) return false;
+
+        var tokens = Regex.Split(expandedForm, @"[^A-Za-z0-9]+")
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .ToList();
+        if (tokens.Count < 2 || tokens.Count > 14) return false;
+
+        var stopWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "a", "an", "and", "or", "the", "of", "for", "to", "with", "in", "on", "at", "by"
+        };
+
+        var initials = new string(tokens
+            .Where(t => !stopWords.Contains(t))
+            .Select(t => char.ToUpperInvariant(t[0]))
+            .ToArray());
+
+        if (initials.Length < 2) return false;
+
+        // Strong prefix check to reject loose letter matches in long prose.
+        if (normalizedShort.Length >= 2)
+        {
+            if (normalizedShort[0] != initials[0] || normalizedShort[1] != initials[1])
+                return false;
+        }
+
+        // Ordered subsequence match: requires at least 3 matched chars (or full short form when shorter).
+        var requiredMatches = Math.Min(normalizedShort.Length, 3);
+        var shortIndex = 0;
+        foreach (var ch in initials)
+        {
+            if (shortIndex < normalizedShort.Length && normalizedShort[shortIndex] == ch)
+            {
+                shortIndex++;
+                if (shortIndex >= requiredMatches)
+                    return true;
+            }
+        }
+
+        return false;
     }
 
     private List<Abbreviation> ExtractAbbreviationsFromSpl(System.Text.Json.JsonElement spl)
@@ -461,42 +601,38 @@ public class AbbreviationService : IAbbreviationService
         {
             if (spl.TryGetProperty(section, out var sectionText))
             {
-                var text = sectionText.GetString() ?? string.Empty;
-                
-                // Look for common patterns: "XX (Expanded Form)" or "Expanded Form (XX)"
-                var patterns = new[]
+                foreach (var text in ExtractSectionTexts(sectionText))
                 {
-                    // Pattern: "ABBR (Expanded Form)"
-                    new System.Text.RegularExpressions.Regex(@"\b([A-Z]+)\s*\(([^)]{10,100})\)", System.Text.RegularExpressions.RegexOptions.IgnoreCase),
-                    // Pattern: "Expanded Form (ABBR)" 
-                    new System.Text.RegularExpressions.Regex(@"\(([A-Z]+)\)\s+([A-Za-z\s]+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase)
-                };
-
-                foreach (var pattern in patterns)
-                {
-                    var matches = pattern.Matches(text);
-                    foreach (System.Text.RegularExpressions.Match match in matches)
+                    if (string.IsNullOrWhiteSpace(text))
                     {
-                        if (match.Groups.Count >= 3)
-                        {
-                            var shortForm = match.Groups[1].Value.Trim();
-                            var expandedForm = match.Groups[2].Value.Trim();
+                        continue;
+                    }
 
-                            // Filter: abbreviations should be 2-10 chars, expanded should be 5-200 chars
-                            if (shortForm.Length >= 2 && shortForm.Length <= 10 &&
-                                expandedForm.Length >= 5 && expandedForm.Length <= 200 &&
-                                !IsDuplicate(abbreviations, shortForm, expandedForm))
+                    // Look for common patterns: "XX (Expanded Form)" or "Expanded Form (XX)"
+                    var patterns = new[]
+                    {
+                        // Pattern: "ABBR (Expanded Form)"
+                        new System.Text.RegularExpressions.Regex(@"\b([A-Z][A-Z0-9\-]{1,11})\s*\(([^)]{5,200})\)"),
+                        // Pattern: "Expanded Form (ABBR)"
+                        new System.Text.RegularExpressions.Regex(@"([A-Za-z][A-Za-z\s,\-]{5,200})\s*\(([A-Z][A-Z0-9\-]{1,11})\)")
+                    };
+
+                    foreach (var pattern in patterns)
+                    {
+                        var matches = pattern.Matches(text);
+                        foreach (System.Text.RegularExpressions.Match match in matches)
+                        {
+                            if (match.Groups.Count >= 3)
                             {
-                                abbreviations.Add(new Abbreviation
-                                {
-                                    Id = Guid.NewGuid(),
-                                    ShortForm = shortForm,
-                                    ExpandedForm = expandedForm,
-                                    Category = section.Replace("_", " "),
-                                    Source = "openFDA",
-                                    CreatedAt = DateTime.UtcNow,
-                                    UpdatedAt = DateTime.UtcNow
-                                });
+                                var shortForm = pattern == patterns[0]
+                                    ? match.Groups[1].Value.Trim()
+                                    : match.Groups[2].Value.Trim();
+                                var expandedForm = pattern == patterns[0]
+                                    ? match.Groups[2].Value.Trim()
+                                    : match.Groups[1].Value.Trim();
+
+                                if (expandedForm.Length >= 5 && expandedForm.Length <= 200)
+                                    TryAddExtractedPair(abbreviations, shortForm, expandedForm, "openFDA", section.Replace("_", " "));
                             }
                         }
                     }
@@ -505,6 +641,40 @@ public class AbbreviationService : IAbbreviationService
         }
 
         return abbreviations;
+    }
+
+    private static IEnumerable<string> ExtractSectionTexts(JsonElement value)
+    {
+        switch (value.ValueKind)
+        {
+            case JsonValueKind.String:
+                var text = value.GetString();
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    yield return text;
+                }
+                break;
+
+            case JsonValueKind.Array:
+                foreach (var item in value.EnumerateArray())
+                {
+                    foreach (var nested in ExtractSectionTexts(item))
+                    {
+                        yield return nested;
+                    }
+                }
+                break;
+
+            case JsonValueKind.Object:
+                foreach (var property in value.EnumerateObject())
+                {
+                    foreach (var nested in ExtractSectionTexts(property.Value))
+                    {
+                        yield return nested;
+                    }
+                }
+                break;
+        }
     }
 
     private static bool IsDuplicate(List<Abbreviation> list, string shortForm, string expandedForm)
