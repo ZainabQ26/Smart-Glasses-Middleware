@@ -373,7 +373,27 @@ build-lambda ───────┼──► terraform-apply ──► run-mig
 - **`deploy-frontend`** — syncs built assets to S3, invalidates CloudFront cache
 - **`verify-deployment`** — waits for ECS service stability, fetches container logs, smoke-tests `/health`
 
-Infrastructure is defined in `aws/infrastructure/` (Terraform). Local testing uses `aws/LOCALSTACK.md`.
+Infrastructure is defined in `aws/infrastructure/` (Terraform). Local testing uses `docs/LOCALSTACK.md`.
+
+## Unit Testing
+
+A comprehensive automated test suite has been added under the `tests/` directory.
+
+### Running tests
+```bash
+dotnet test tests/SmartGlassesMiddleware.Tests/SmartGlassesMiddleware.Tests.csproj
+```
+
+### Coverage report
+```bash
+dotnet test tests/SmartGlassesMiddleware.Tests/SmartGlassesMiddleware.Tests.csproj --collect:"XPlat Code Coverage"
+```
+
+The `tests/` directory contains tests utilizing `NUnit` and `Moq`. These tests evaluate various backend components including services, task handlers, and controllers, with tests that span end-to-end component flows utilizing mock data to isolate logic successfully without external dependencies like the Database. For more info, please see `tests/README.md`.
+
+## Old Readmes
+
+Additional documentation (like AWS details, abbreviations sync instructions, advanced API calls, and localstack specifics) are kept in the `docs/` folder for reference.
 
 ## Infrastructure Notes
 
