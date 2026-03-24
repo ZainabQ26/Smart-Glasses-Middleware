@@ -59,6 +59,7 @@ import { ViewerState, HighlightColors } from "./pdf/pdfClasses.js";
  * @property {() => Promise<{pageNumber: number, text: string} | null>} getCurrentPageText - Return normalized text for the visible page.
  * @property {() => Promise<object | null>} getDocumentContext - Return full document text and active highlight metadata.
  * @property {() => Promise<void>} printDocument      - Print the whole document with all highlights.
+ * @property {() => Promise<void>} printHighlightedPages - Print only pages that contain highlights.
  */
 
 // Color names in the same order as the HighlightColors palette, used for the legend.
@@ -400,6 +401,90 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
     showToast("Print dialog opened.", 3000);
   }, [showToast, documentName]);
 
+  /**
+   * Print only pages that contain at least one active highlight.
+   * Highlighted pages are stitched into a temporary print document in page order.
+   */
+  const printHighlightedPages = useCallback(async () => {
+    const state = viewerStateRef.current;
+    if (!state) {
+      window.print();
+      return;
+    }
+
+    const highlightedPages = [...new Set(
+      state.highlights.flatMap((highlight) =>
+        highlight.rectangleArrays.map((rect) => rect.pageNumber)
+      )
+    )].sort((a, b) => a - b);
+
+    if (highlightedPages.length === 0) {
+      showToast("No highlighted pages to print.", 3000);
+      return;
+    }
+
+    showToast(`Preparing ${highlightedPages.length} highlighted page${highlightedPages.length === 1 ? "" : "s"} for print…`, 15_000);
+
+    const PRINT_SCALE = 2.0;
+    const offscreen = document.createElement("canvas");
+    const pageImages = [];
+
+    for (const pageNumber of highlightedPages) {
+      await renderPdfPage(state.pdf, pageNumber, offscreen, PRINT_SCALE);
+
+      const ctx = offscreen.getContext("2d");
+      if (ctx) {
+        state.highlights.forEach((highlight, colorIndex) => {
+          const scaledForPage = highlight.rectangleArrays
+            .filter((rect) => rect.pageNumber === pageNumber)
+            .map((rect) => ({
+              ...rect,
+              canvasX: rect.canvasX * PRINT_SCALE,
+              canvasY: rect.canvasY * PRINT_SCALE,
+              canvasWidth: rect.canvasWidth * PRINT_SCALE,
+              canvasHeight: rect.canvasHeight * PRINT_SCALE,
+            }));
+
+          if (scaledForPage.length > 0) {
+            drawSingleHighlights(scaledForPage, colorIndex, pageNumber, ctx);
+          }
+        });
+      }
+
+      pageImages.push({ pageNumber, src: offscreen.toDataURL("image/png") });
+    }
+
+    const imgsHtml = pageImages
+      .map(({ pageNumber, src }) => `<div class="page"><img src="${src}" alt="Page ${pageNumber}"/></div>`)
+      .join("");
+
+    const safeTitle = (documentName || "Document").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const printWin = window.open("", "_blank", "width=900,height=700");
+    if (!printWin) {
+      showToast("Pop-up blocked — allow pop-ups and try again.", 4000);
+      return;
+    }
+
+    printWin.document.write(`<!DOCTYPE html>
+<html><head>
+  <title>${safeTitle} - Highlighted Pages</title>
+  <style>
+    @page { size: auto; margin: 0mm; }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { background:#fff; }
+    .page { page-break-after: always; text-align:center; }
+    .page:last-child { page-break-after: avoid; }
+    .page img { width:100%; height:auto; display:block; }
+    @media print { body { margin:0; } }
+  </style>
+</head>
+<body>${imgsHtml}</body></html>`);
+    printWin.document.close();
+    printWin.onload = () => { printWin.focus(); printWin.print(); };
+
+    showToast("Print dialog opened for highlighted pages.", 3000);
+  }, [showToast, documentName]);
+
   // ── Expose imperative handle to parent ──────────────────────────────────────
   useImperativeHandle(ref, () => ({
     nextPage,
@@ -411,7 +496,8 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
     getCurrentPageText,
     getDocumentContext,
     printDocument,
-  }), [nextPage, prevPage, goToPage, highlightWord, goToLoincCode, removeHighlights, getCurrentPageText, getDocumentContext, printDocument]);
+    printHighlightedPages,
+  }), [nextPage, prevPage, goToPage, highlightWord, goToLoincCode, removeHighlights, getCurrentPageText, getDocumentContext, printDocument, printHighlightedPages]);
 
   // ── Render ───────────────────────────────────────────────────────────────────
   return (

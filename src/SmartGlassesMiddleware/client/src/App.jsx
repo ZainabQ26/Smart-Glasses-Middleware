@@ -734,6 +734,15 @@ export default function App() {
         } else {
           showAiResponse("No document is open. Open a document first.");
         }
+      } else if (answer === "__ACTION:PRINT_HIGHLIGHTED_PAGES__") {
+        addLog("🖨️ Command: print highlighted pages", "voice");
+        setAiResponse(null);
+        setPendingAction(null);
+        if (pdfViewerRef.current) {
+          await pdfViewerRef.current.printHighlightedPages();
+        } else {
+          showAiResponse("No document is open. Open a document first.");
+        }
       } else if (answer === "__ACTION:SUMMARIZE_CURRENT_PAGE__") {
         await summarizeCurrentPage();
       } else if (answer.startsWith("__ACTION:SHOW_REMINDERS:")) {
@@ -837,6 +846,7 @@ export default function App() {
       if (/^(close|open)\s+(document|file|pdf|admin)$/i.test(t)) return true;
       if (/^(clear|remove)\s+(all\s+)?highlights?$/i.test(t)) return true;
       if (/^print(\s+(document|pdf))?$/i.test(t)) return true;
+      if (/^print\s+((only|just)\s+)?(highlighted\s+pages?|pages\s+with\s+highlights?|highlights\s+only)$/i.test(t)) return true;
       if (/^what('s|\s+is)\s+the\s+time\??$/i.test(t)) return true;
       if (/^show(\s+my|\s+all)?\s+reminders?$/i.test(t)) return true;
       if (/^(open\s+)?admin(\s+panel)?$/i.test(t)) return true;
@@ -1174,6 +1184,7 @@ export default function App() {
     [`"clear highlights"`,     "delete all highlights"],
     [`"search for [text]"`,    "search document"],
     [`"print document"`,       "save document as PDF with highlights"],
+    [`"print highlighted pages"`, "print only pages that contain highlights"],
     [`"close document"`,       "close PDF"],
     [`"show my reminders"`,    "list reminders"],
     [`"remind me to…"`,        "set reminder"],
@@ -1247,6 +1258,7 @@ export default function App() {
                     ["show my reminders", "List all your reminders"],
                     ["what time is it", "Get the current date and time"],
                     ["print document", "Print the open document with highlights"],
+                    ["print highlighted pages", "Print only pages with highlights"],
                     ["close document", "Close the open PDF"],
                     ["admin panel", "Open the admin panel"],
                   ].map(([cmd, desc]) => (
