@@ -340,9 +340,9 @@ if (!useAwsStorage)
 {
     builder.Services.AddSingleton<IMinioClient>(sp =>
     {
-        var endpoint = builder.Configuration["MinIO:Endpoint"] ?? "localhost:9000";
-        var accessKey = builder.Configuration["MinIO:AccessKey"] ?? "minioadmin";
-        var secretKey = builder.Configuration["MinIO:SecretKey"] ?? "minioadmin";
+        var endpoint = builder.Configuration["MinIO:Endpoint"];
+        var accessKey = builder.Configuration["MinIO:AccessKey"];
+        var secretKey = builder.Configuration["MinIO:SecretKey"];
 
         return new MinioClient()
             .WithEndpoint(endpoint)
@@ -736,7 +736,7 @@ try
     var minioSecretKey = config["MinIO:SecretKey"];
     if (string.IsNullOrWhiteSpace(minioAccessKey) || string.IsNullOrWhiteSpace(minioSecretKey))
     {
-        logger.LogWarning("MinIO credentials not properly configured. Using default credentials.");
+        logger.LogWarning("MinIO credentials not properly configured. MinIO storage may be unavailable.");
     }
 
     // Validate advanced Bedrock model configuration
