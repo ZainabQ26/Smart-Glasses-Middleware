@@ -165,3 +165,5 @@ aws/lambda-*/package/
 
 # Allow repo-level global.json used to pin the .NET SDK
 !/global.json
+
+TestResults/
