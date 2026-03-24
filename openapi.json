@@ -1,5 +1,5 @@
 {
-  "openapi": "3.1.1",
+  "openapi": "3.0.1",
   "info": {
     "title": "Smart Glasses Middleware API",
     "description": "A comprehensive middleware API for smart glasses that processes audio, images, videos, and text with AI-powered task detection and intelligent routing. Features include RAG (Retrieval-Augmented Generation) indexing for all uploaded files, making them easily searchable and referenceable by AI.",
@@ -8,216 +8,228 @@
       "name": "Smart Glasses Middleware Support"
     }
   },
-  "servers": [
+  "tags": [
     {
-      "url": "http://localhost:5000/"
+      "name": "Admin",
+      "description": "Administrative endpoints for managing files, prompts, and resource groups"
+    },
+    {
+      "name": "AIInteraction",
+      "description": "AI interaction logs and statistics"
+    },
+    {
+      "name": "Conversations",
+      "description": "Conversation thread management and querying"
+    },
+    {
+      "name": "Debug",
+      "description": "Debugging and diagnostic utilities"
+    },
+    {
+      "name": "Documents",
+      "description": "Document upload, querying, and RAG operations"
+    },
+    {
+      "name": "GroupConversationMappings",
+      "description": "Resource group to conversation mappings"
+    },
+    {
+      "name": "History",
+      "description": "Request history and reminders"
+    },
+    {
+      "name": "Media",
+      "description": "Media (audio/image/video) processing via AI"
+    },
+    {
+      "name": "Monitoring",
+      "description": "Request monitoring and status"
+    },
+    {
+      "name": "Process",
+      "description": "Process text/voice inputs via the AI pipeline"
+    },
+    {
+      "name": "Tasks",
+      "description": "Background task status polling"
     }
   ],
   "paths": {
     "/health": {
       "get": {
-        "summary": "Health check endpoint",
-        "description": "Checks the health status of all dependent services including PostgreSQL and Redis. Returns a comprehensive health report with individual service statuses.",
-        "tags": ["System"],
-        "operationId": "getHealth",
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Health check",
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "Service is healthy"
           }
         }
       }
     },
-    "/api/admin/batch": {
+    "/metrics": {
       "get": {
-        "summary": "Get files, prompts, and groups in a single batch request (optimized)",
-        "description": "Efficiently fetches multiple resource types in one API call. This endpoint reduces network overhead by consolidating what would normally require 3 separate API calls into a single request. Supports selective inclusion and configurable item limits. Responses are cached for 30 seconds to improve performance.",
-        "tags": ["Admin"],
-        "operationId": "getBatch",
+        "tags": [
+          "Monitoring"
+        ],
+        "summary": "Prometheus metrics endpoint",
+        "responses": {
+          "200": {
+            "description": "Prometheus metrics text"
+          }
+        }
+      }
+    },
+    "/api/admin/files": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "List all managed files",
         "parameters": [
           {
-            "name": "includeFiles",
+            "name": "page",
             "in": "query",
-            "description": "Include files in the response",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "default": true
-            }
-          },
-          {
-            "name": "includePrompts",
-            "in": "query",
-            "description": "Include prompts/conversations in the response",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "default": true
-            }
-          },
-          {
-            "name": "includeGroups",
-            "in": "query",
-            "description": "Include resource groups in the response",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "default": true
-            }
-          },
-          {
-            "name": "maxItems",
-            "in": "query",
-            "description": "Maximum number of items to return per resource type",
-            "required": false,
             "schema": {
               "type": "integer",
-              "default": 1000,
-              "minimum": 1,
-              "maximum": 1000
+              "default": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          },
+          {
+            "name": "groupId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
         "responses": {
           "200": {
-            "description": "Batch data retrieved successfully",
+            "description": "List of managed files",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "files": {
-                      "type": "object",
-                      "properties": {
-                        "data": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "id": { "type": "string", "format": "uuid" },
-                              "fileName": { "type": "string" },
-                              "label": { "type": "string" },
-                              "contentType": { "type": "string" },
-                              "fileSize": { "type": "integer" },
-                              "uploadedAt": { "type": "string", "format": "date-time" },
-                              "groups": {
-                                "type": "array",
-                                "items": {
-                                  "type": "object",
-                                  "properties": {
-                                    "id": { "type": "string", "format": "uuid" },
-                                    "name": { "type": "string" }
-                                  }
-                                }
-                              }
-                            }
-                          }
-                        },
-                        "count": { "type": "integer" }
-                      }
-                    },
-                    "prompts": {
-                      "type": "object",
-                      "properties": {
-                        "data": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "id": { "type": "string", "format": "uuid" },
-                              "title": { "type": "string" },
-                              "resourceGroupId": { "type": "string", "format": "uuid" },
-                              "createdAt": { "type": "string", "format": "date-time" },
-                              "messageCount": { "type": "integer" }
-                            }
-                          }
-                        },
-                        "count": { "type": "integer" }
-                      }
-                    },
-                    "groups": {
-                      "type": "object",
-                      "properties": {
-                        "data": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "id": { "type": "string", "format": "uuid" },
-                              "name": { "type": "string" },
-                              "description": { "type": "string" },
-                              "createdAt": { "type": "string", "format": "date-time" },
-                              "fileCount": { "type": "integer" },
-                              "conversationCount": { "type": "integer" }
-                            }
-                          }
-                        },
-                        "count": { "type": "integer" }
-                      }
-                    }
-                  }
-                },
-                "examples": {
-                  "allResources": {
-                    "summary": "All resources included",
-                    "value": {
-                      "files": {
-                        "data": [
-                          {
-                            "id": "550e8400-e29b-41d4-a716-446655440000",
-                            "fileName": "document.pdf",
-                            "label": "Important Document",
-                            "contentType": "application/pdf",
-                            "fileSize": 1024000,
-                            "uploadedAt": "2024-01-15T10:30:00Z",
-                            "groups": []
-                          }
-                        ],
-                        "count": 1
-                      },
-                      "prompts": {
-                        "data": [
-                          {
-                            "id": "660e8400-e29b-41d4-a716-446655440000",
-                            "title": "My Conversation",
-                            "resourceGroupId": "770e8400-e29b-41d4-a716-446655440000",
-                            "createdAt": "2024-01-15T10:35:00Z",
-                            "messageCount": 5
-                          }
-                        ],
-                        "count": 1
-                      },
-                      "groups": {
-                        "data": [
-                          {
-                            "id": "770e8400-e29b-41d4-a716-446655440000",
-                            "name": "Project Files",
-                            "description": "Files for the current project",
-                            "createdAt": "2024-01-15T10:00:00Z",
-                            "fileCount": 3,
-                            "conversationCount": 2
-                          }
-                        ],
-                        "count": 1
-                      }
-                    }
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ManagedFile"
                   }
                 }
               }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Upload a new file (multipart form)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/FileUploadRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "File upload accepted and queued for processing"
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/files/upload-url": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Get a presigned S3 upload URL for direct browser upload",
+        "parameters": [
+          {
+            "name": "filename",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
             }
           },
-          "500": {
-            "description": "Internal server error",
+          {
+            "name": "contentType",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "application/octet-stream"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Presigned upload URL",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "error": { "type": "string" },
-                    "details": { "type": "string" }
+                    "url": {
+                      "type": "string"
+                    },
+                    "key": {
+                      "type": "string"
+                    }
                   }
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/admin/files/complete": {
+      "post": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Notify the server that a presigned S3 upload has completed",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteUploadRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Upload registered and processing queued"
+          },
+          "400": {
+            "description": "Invalid request"
           }
         }
       }
@@ -227,7 +239,7 @@
         "tags": [
           "Admin"
         ],
-        "summary": "Delete a managed file",
+        "summary": "Delete a managed file by ID",
         "parameters": [
           {
             "name": "id",
@@ -240,8 +252,11 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "OK"
+          "204": {
+            "description": "File deleted"
+          },
+          "404": {
+            "description": "File not found"
           }
         }
       }
@@ -251,7 +266,7 @@
         "tags": [
           "Admin"
         ],
-        "summary": "Preview a managed file (inline display)",
+        "summary": "Preview a managed file",
         "parameters": [
           {
             "name": "id",
@@ -265,54 +280,10 @@
         ],
         "responses": {
           "200": {
-            "description": "OK",
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/FileStreamResult"
-                }
-              },
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FileStreamResult"
-                },
-                "examples": {
-                  "imagePreview": {
-                    "summary": "Inline image preview metadata",
-                    "value": {
-                      "contentType": "image/jpeg",
-                      "fileDownloadName": null,
-                      "enableRangeProcessing": false
-                    }
-                  }
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FileStreamResult"
-                }
-              }
-            }
+            "description": "File content (streamed)"
           },
           "404": {
-            "description": "Not Found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal Server Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
+            "description": "File not found"
           }
         }
       }
@@ -322,7 +293,7 @@
         "tags": [
           "Admin"
         ],
-        "summary": "Download a managed file (force download)",
+        "summary": "Download a managed file",
         "parameters": [
           {
             "name": "id",
@@ -336,54 +307,137 @@
         ],
         "responses": {
           "200": {
-            "description": "OK",
+            "description": "File content (streamed as attachment)"
+          },
+          "404": {
+            "description": "File not found"
+          }
+        }
+      }
+    },
+    "/api/admin/files/{id}/status": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Get the processing status of a managed file",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "File processing status",
             "content": {
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/FileStreamResult"
-                }
-              },
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FileStreamResult"
-                },
-                "examples": {
-                  "fileDownload": {
-                    "summary": "File download metadata",
-                    "value": {
-                      "contentType": "application/pdf",
-                      "fileDownloadName": "report.pdf",
-                      "enableRangeProcessing": false
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "fileName": {
+                      "type": "string"
+                    },
+                    "isProcessed": {
+                      "type": "boolean"
+                    },
+                    "processingError": {
+                      "type": "string",
+                      "nullable": true
                     }
                   }
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FileStreamResult"
                 }
               }
             }
           },
           "404": {
-            "description": "Not Found",
+            "description": "File not found"
+          }
+        }
+      }
+    },
+    "/api/admin/files/{id}/info": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Get detailed info about a managed file",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Detailed file information",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
+                  "$ref": "#/components/schemas/ManagedFile"
                 }
               }
             }
           },
-          "500": {
-            "description": "Internal Server Error",
+          "404": {
+            "description": "File not found"
+          }
+        }
+      }
+    },
+    "/api/admin/fix-processed-managedfiles": {
+      "post": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Fix processed ManagedFile records that are missing DocumentMetadata entries",
+        "responses": {
+          "200": {
+            "description": "Fix operation result",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
+                  "type": "object"
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/admin/reindex": {
+      "post": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Reindex all documents for RAG",
+        "parameters": [
+          {
+            "name": "force",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Reindex operation started or completed"
           }
         }
       }
@@ -393,38 +447,20 @@
         "tags": [
           "Admin"
         ],
-        "summary": "Get managed prompts with pagination and caching",
-        "parameters": [
-          {
-            "name": "page",
-            "in": "query",
-            "schema": {
-              "pattern": "^-?(?:0|[1-9]\\d*)$",
-              "type": [
-                "integer",
-                "string"
-              ],
-              "format": "int32",
-              "default": 1
-            }
-          },
-          {
-            "name": "pageSize",
-            "in": "query",
-            "schema": {
-              "pattern": "^-?(?:0|[1-9]\\d*)$",
-              "type": [
-                "integer",
-                "string"
-              ],
-              "format": "int32",
-              "default": 20
-            }
-          }
-        ],
+        "summary": "List all managed prompts",
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "List of prompts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ManagedPrompt"
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -432,30 +468,30 @@
         "tags": [
           "Admin"
         ],
-        "summary": "Create a new prompt",
+        "summary": "Create a new managed prompt",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/PromptRequest"
               }
-            },
-            "text/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PromptRequest"
-              }
-            },
-            "application/*+json": {
-              "schema": {
-                "$ref": "#/components/schemas/PromptRequest"
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Prompt created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedPrompt"
+                }
               }
             }
           },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "OK"
+          "400": {
+            "description": "Invalid request"
           }
         }
       }
@@ -465,7 +501,7 @@
         "tags": [
           "Admin"
         ],
-        "summary": "Update an existing prompt",
+        "summary": "Update an existing managed prompt",
         "parameters": [
           {
             "name": "id",
@@ -478,28 +514,28 @@
           }
         ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/PromptRequest"
               }
-            },
-            "text/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PromptRequest"
-              }
-            },
-            "application/*+json": {
-              "schema": {
-                "$ref": "#/components/schemas/PromptRequest"
-              }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "Prompt updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedPrompt"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Prompt not found"
           }
         }
       },
@@ -507,7 +543,7 @@
         "tags": [
           "Admin"
         ],
-        "summary": "Delete a prompt",
+        "summary": "Delete a managed prompt",
         "parameters": [
           {
             "name": "id",
@@ -520,8 +556,11 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "OK"
+          "204": {
+            "description": "Prompt deleted"
+          },
+          "404": {
+            "description": "Prompt not found"
           }
         }
       }
@@ -531,18 +570,13 @@
         "tags": [
           "Admin"
         ],
-        "summary": "Get resource groups with pagination and caching",
+        "summary": "List all resource groups",
         "parameters": [
           {
             "name": "page",
             "in": "query",
             "schema": {
-              "pattern": "^-?(?:0|[1-9]\\d*)$",
-              "type": [
-                "integer",
-                "string"
-              ],
-              "format": "int32",
+              "type": "integer",
               "default": 1
             }
           },
@@ -550,19 +584,24 @@
             "name": "pageSize",
             "in": "query",
             "schema": {
-              "pattern": "^-?(?:0|[1-9]\\d*)$",
-              "type": [
-                "integer",
-                "string"
-              ],
-              "format": "int32",
+              "type": "integer",
               "default": 20
             }
           }
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "List of resource groups",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ResourceGroup"
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -572,33 +611,65 @@
         ],
         "summary": "Create a new resource group",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/GroupRequest"
               }
-            },
-            "text/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GroupRequest"
-              }
-            },
-            "application/*+json": {
-              "schema": {
-                "$ref": "#/components/schemas/GroupRequest"
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Group created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResourceGroup"
+                }
               }
             }
           },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "OK"
+          "400": {
+            "description": "Invalid request"
           }
         }
       }
     },
     "/api/admin/groups/{id}": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Get detailed information about a resource group",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resource group details including files and prompts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResourceGroup"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Group not found"
+          }
+        }
+      },
       "put": {
         "tags": [
           "Admin"
@@ -616,28 +687,28 @@
           }
         ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/GroupRequest"
               }
-            },
-            "text/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GroupRequest"
-              }
-            },
-            "application/*+json": {
-              "schema": {
-                "$ref": "#/components/schemas/GroupRequest"
-              }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "Group updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResourceGroup"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Group not found"
           }
         }
       },
@@ -658,8 +729,11 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "OK"
+          "204": {
+            "description": "Group deleted"
+          },
+          "404": {
+            "description": "Group not found"
           }
         }
       }
@@ -669,7 +743,7 @@
         "tags": [
           "Admin"
         ],
-        "summary": "Add a file to a group",
+        "summary": "Add a file to a resource group",
         "parameters": [
           {
             "name": "groupId",
@@ -692,7 +766,10 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "File added to group"
+          },
+          "404": {
+            "description": "Group or file not found"
           }
         }
       },
@@ -700,7 +777,7 @@
         "tags": [
           "Admin"
         ],
-        "summary": "Remove a file from a group",
+        "summary": "Remove a file from a resource group",
         "parameters": [
           {
             "name": "groupId",
@@ -722,8 +799,11 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "OK"
+          "204": {
+            "description": "File removed from group"
+          },
+          "404": {
+            "description": "Group or file not found"
           }
         }
       }
@@ -733,7 +813,7 @@
         "tags": [
           "Admin"
         ],
-        "summary": "Add a prompt to a group",
+        "summary": "Add a prompt to a resource group",
         "parameters": [
           {
             "name": "groupId",
@@ -756,7 +836,10 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "Prompt added to group"
+          },
+          "404": {
+            "description": "Group or prompt not found"
           }
         }
       },
@@ -764,7 +847,7 @@
         "tags": [
           "Admin"
         ],
-        "summary": "Remove a prompt from a group",
+        "summary": "Remove a prompt from a resource group",
         "parameters": [
           {
             "name": "groupId",
@@ -786,8 +869,24 @@
           }
         ],
         "responses": {
+          "204": {
+            "description": "Prompt removed from group"
+          },
+          "404": {
+            "description": "Group or prompt not found"
+          }
+        }
+      }
+    },
+    "/api/admin/clear-all": {
+      "post": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Clear all history data (destructive)",
+        "responses": {
           "200": {
-            "description": "OK"
+            "description": "All data cleared"
           }
         }
       }
@@ -818,12 +917,7 @@
             "name": "limit",
             "in": "query",
             "schema": {
-              "pattern": "^-?(?:0|[1-9]\\d*)$",
-              "type": [
-                "integer",
-                "string"
-              ],
-              "format": "int32",
+              "type": "integer",
               "default": 50
             }
           },
@@ -831,33 +925,21 @@
             "name": "offset",
             "in": "query",
             "schema": {
-              "pattern": "^-?(?:0|[1-9]\\d*)$",
-              "type": [
-                "integer",
-                "string"
-              ],
-              "format": "int32",
+              "type": "integer",
               "default": 0
             }
           }
         ],
         "responses": {
           "200": {
-            "description": "OK",
+            "description": "List of AI interaction log summaries",
             "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "array"
-                }
-              },
               "application/json": {
                 "schema": {
-                  "type": "array"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "type": "array"
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
                 }
               }
             }
@@ -884,24 +966,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK",
+            "description": "AI interaction log detail",
             "content": {
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/AIInteractionLog"
-                }
-              },
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AIInteractionLog"
-                }
-              },
-              "text/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AIInteractionLog"
                 }
               }
             }
+          },
+          "404": {
+            "description": "Interaction log not found"
           }
         }
       }
@@ -917,6 +992,7 @@
             "name": "startDate",
             "in": "query",
             "schema": {
+              "type": "string",
               "format": "date-time"
             }
           },
@@ -939,95 +1015,11 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
-          }
-        }
-      }
-    },
-    "/api/transcribe": {
-      "post": {
-        "tags": [
-          "Audio"
-        ],
-        "summary": "Transcribes audio from base64-encoded data",
-        "requestBody": {
-          "description": "Audio request containing base64-encoded audio data",
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AudioRequest"
-              }
-            },
-            "text/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AudioRequest"
-              }
-            },
-            "application/*+json": {
-              "schema": {
-                "$ref": "#/components/schemas/AudioRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Audio successfully transcribed",
+            "description": "AI usage statistics",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AudioUploadResponse"
-                },
-                "examples": {
-                  "success": {
-                    "summary": "Successful transcription",
-                    "value": {
-                      "storageKey": "audio/2026-01-28/recording1.wav",
-                      "transcription": "Hello world",
-                      "requestId": "550e8400-e29b-41d4-a716-446655440200"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid audio data or request format",
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal server error during processing",
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
+                  "type": "object"
                 }
               }
             }
@@ -1035,47 +1027,27 @@
         }
       }
     },
-    "/api/Conversations": {
+    "/api/conversations": {
       "post": {
         "tags": [
           "Conversations"
         ],
         "summary": "Create a new conversation",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/CreateConversationRequest"
               }
-            },
-            "text/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateConversationRequest"
-              }
-            },
-            "application/*+json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateConversationRequest"
-              }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
-            "description": "Created",
+            "description": "Conversation created",
             "content": {
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/Conversation"
-                }
-              },
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Conversation"
-                }
-              },
-              "text/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Conversation"
                 }
@@ -1088,7 +1060,7 @@
         "tags": [
           "Conversations"
         ],
-        "summary": "Get all active conversations",
+        "summary": "List conversations",
         "parameters": [
           {
             "name": "groupId",
@@ -1097,34 +1069,31 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
           }
         ],
         "responses": {
           "200": {
-            "description": "OK",
+            "description": "Paginated list of conversations",
             "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/Conversation"
-                  }
-                }
-              },
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/Conversation"
-                  }
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/Conversation"
-                  }
+                  "type": "object"
                 }
               }
             }
@@ -1132,12 +1101,12 @@
         }
       }
     },
-    "/api/Conversations/{id}": {
+    "/api/conversations/{id}": {
       "get": {
         "tags": [
           "Conversations"
         ],
-        "summary": "Get a specific conversation with its messages",
+        "summary": "Get a conversation by ID",
         "parameters": [
           {
             "name": "id",
@@ -1151,19 +1120,9 @@
         ],
         "responses": {
           "200": {
-            "description": "OK",
+            "description": "Conversation details",
             "content": {
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/Conversation"
-                }
-              },
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Conversation"
-                }
-              },
-              "text/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Conversation"
                 }
@@ -1171,29 +1130,75 @@
             }
           },
           "404": {
-            "description": "Not Found",
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
+            "description": "Conversation not found"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Update conversation title",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateConversationRequest"
               }
             }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Conversation updated"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "404": {
+            "description": "Conversation not found"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Permanently delete a conversation and its messages",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Conversation deleted"
+          },
+          "404": {
+            "description": "Conversation not found"
           }
         }
       }
     },
-    "/api/Conversations/{id}/messages": {
+    "/api/conversations/{id}/messages": {
       "post": {
         "tags": [
           "Conversations"
@@ -1211,40 +1216,20 @@
           }
         ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/AddMessageRequest"
               }
-            },
-            "text/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AddMessageRequest"
-              }
-            },
-            "application/*+json": {
-              "schema": {
-                "$ref": "#/components/schemas/AddMessageRequest"
-              }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
-            "description": "Created",
+            "description": "Message added",
             "content": {
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ChatMessage"
-                }
-              },
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ChatMessage"
-                }
-              },
-              "text/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ChatMessage"
                 }
@@ -1252,34 +1237,17 @@
             }
           },
           "404": {
-            "description": "Not Found",
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
+            "description": "Conversation not found"
           }
         }
       }
     },
-    "/api/Conversations/{id}/query": {
+    "/api/conversations/{id}/query": {
       "post": {
         "tags": [
           "Conversations"
         ],
-        "summary": "Query documents with conversation context",
+        "summary": "Query using a conversation's context with RAG",
         "parameters": [
           {
             "name": "id",
@@ -1292,55 +1260,38 @@
           }
         ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/ConversationQueryRequest"
               }
-            },
-            "text/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ConversationQueryRequest"
-              }
-            },
-            "application/*+json": {
-              "schema": {
-                "$ref": "#/components/schemas/ConversationQueryRequest"
-              }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
-            "description": "OK",
+            "description": "Query result",
             "content": {
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/QueryResult"
-                }
-              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/QueryResult"
                 }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/QueryResult"
-                }
               }
             }
+          },
+          "404": {
+            "description": "Conversation not found"
           }
         }
       }
     },
-    "/api/Conversations/{id}/summarize": {
+    "/api/conversations/{id}/summarize": {
       "post": {
         "tags": [
           "Conversations"
         ],
-        "summary": "Summarize a conversation and optionally generate embedding",
+        "summary": "Generate a summary for a conversation",
         "parameters": [
           {
             "name": "id",
@@ -1362,49 +1313,22 @@
         ],
         "responses": {
           "200": {
-            "description": "OK",
+            "description": "Summary generated",
             "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              },
               "application/json": {
                 "schema": {
-                  "type": "string"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "type": "string"
+                  "type": "object"
                 }
               }
             }
           },
           "404": {
-            "description": "Not Found",
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
+            "description": "Conversation not found"
           }
         }
       }
     },
-    "/api/Conversations/{id}/archive": {
+    "/api/conversations/{id}/archive": {
       "post": {
         "tags": [
           "Conversations"
@@ -1423,77 +1347,264 @@
         ],
         "responses": {
           "204": {
-            "description": "No Content"
+            "description": "Conversation archived"
+          },
+          "404": {
+            "description": "Conversation not found"
           }
         }
       }
     },
-    "/api/Documents/upload": {
+    "/api/conversations/{id}/group": {
+      "put": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Update the resource group associated with a conversation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateConversationGroupRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Conversation group updated"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "404": {
+            "description": "Conversation not found"
+          }
+        }
+      }
+    },
+    "/api/conversations/mapping": {
+      "get": {
+        "tags": [
+          "GroupConversationMappings"
+        ],
+        "summary": "Get the conversation mapped to a resource group",
+        "parameters": [
+          {
+            "name": "groupId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Mapping found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupConversationMapping"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Mapping not found"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "GroupConversationMappings"
+        ],
+        "summary": "Create or update the conversation mapping for a resource group",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupConversationMapping"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Mapping upserted"
+          },
+          "400": {
+            "description": "Invalid request"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "GroupConversationMappings"
+        ],
+        "summary": "Delete the conversation mapping for a resource group",
+        "parameters": [
+          {
+            "name": "groupId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Mapping deleted"
+          },
+          "400": {
+            "description": "Invalid request"
+          }
+        }
+      }
+    },
+    "/api/debug/tasks/status": {
+      "get": {
+        "tags": [
+          "Debug"
+        ],
+        "summary": "Get status of all background tasks",
+        "responses": {
+          "200": {
+            "description": "Background task status summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/debug/echo-form": {
       "post": {
         "tags": [
-          "Documents"
+          "Debug"
         ],
-        "summary": "Upload and process a document (PDF, DOCX, TXT, or image)",
+        "summary": "Echo back multipart/form-data fields and files (for debugging)",
         "requestBody": {
           "content": {
             "multipart/form-data": {
               "schema": {
                 "type": "object",
-                "allOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "file": {
-                        "$ref": "#/components/schemas/IFormFile"
-                      }
-                    }
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "groupIds": {
-                        "type": "array",
-                        "items": {
-                          "type": "string",
-                          "format": "uuid"
-                        }
-                      }
-                    }
-                  }
-                ]
+                "additionalProperties": true
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
-            "description": "OK",
+            "description": "Echoed form data",
             "content": {
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/DocumentMetadata"
-                }
-              },
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DocumentMetadata"
-                },
-                "examples": {
-                  "success": {
-                    "summary": "Successful upload",
-                    "value": {
-                      "id": "550e8400-e29b-41d4-a716-446655440000",
-                      "fileName": "requirements.pdf",
-                      "documentType": "pdf",
-                      "totalPages": 10,
-                      "chunkCount": 50,
-                      "groups": []
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/debug/echo-raw": {
+      "post": {
+        "tags": [
+          "Debug"
+        ],
+        "summary": "Echo back raw request body (for debugging)",
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Echoed raw body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/documents/upload": {
+      "post": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Upload a document for RAG indexing",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  },
+                  "groupIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
                     }
                   }
                 }
-              },
-              "text/json": {
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "groupIds",
+            "in": "query",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Document uploaded and indexed",
+            "content": {
+              "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/DocumentMetadata"
                 }
@@ -1501,185 +1612,34 @@
             }
           },
           "400": {
-            "description": "Bad Request",
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
+            "description": "Invalid file"
           }
         }
       }
     },
-    "/api/Documents/query": {
+    "/api/documents/query": {
       "post": {
         "tags": [
           "Documents"
         ],
-"requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/QueryRequest"
-              },
-              "examples": {
-                "simpleQuery": {
-                  "summary": "Simple query",
-                  "value": {
-                    "query": "What are the main requirements?",
-                    "topK": 5
-                  }
-                },
-                "groupFilteredQuery": {
-                  "summary": "Query with group filter",
-                  "value": {
-                    "query": "What did we decide about the budget?",
-                    "topK": 5,
-                    "groupIds": ["550e8400-e29b-41d4-a716-446655440000"]
-                  }
-                }
-              }
-            },
-            "text/json": {
-              "schema": {
-                "$ref": "#/components/schemas/QueryRequest"
-              }
-            },
-            "application/*+json": {
-              "schema": {
-                "$ref": "#/components/schemas/QueryRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/QueryResult"
-                }
-              },
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/QueryResult"
-                },
-                "examples": {
-                  "withSources": {
-                    "summary": "Query result with sources",
-                    "value": {
-                      "answer": "The main requirements include: 1) User authentication, 2) Data encryption, 3) API rate limiting. These are detailed on page 3 of the requirements document.",
-                      "sources": [
-                        {
-                          "documentId": "550e8400-e29b-41d4-a716-446655440000",
-                          "fileName": "requirements.pdf",
-                          "pageNumber": 3,
-                          "chunkId": "650e8400-e29b-41d4-a716-446655440000",
-                          "chunkText": "1. User Authentication\n   - OAuth 2.0 integration\n   - Multi-factor authentication\n2. Data Encryption\n   - AES-256 for data at rest..."
-                        }
-                      ]
-                    }
-                  }
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/QueryResult"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/Documents/{documentId}/highlight": {
-      "post": {
-        "tags": [
-          "Documents"
-        ],
-        "summary": "Get a highlighted copy of a document showing where specific information is located",
-        "parameters": [
-          {
-            "name": "documentId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
+        "summary": "Query documents using RAG",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/HighlightRequest"
-              }
-            },
-            "text/json": {
-              "schema": {
-                "$ref": "#/components/schemas/HighlightRequest"
-              }
-            },
-            "application/*+json": {
-              "schema": {
-                "$ref": "#/components/schemas/HighlightRequest"
+                "$ref": "#/components/schemas/QueryRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
-            "description": "OK",
+            "description": "Query result with AI answer and sources",
             "content": {
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/FileStreamResult"
-                }
-              },
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FileStreamResult"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FileStreamResult"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Not Found",
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
+                  "$ref": "#/components/schemas/QueryResult"
                 }
               }
             }
@@ -1687,23 +1647,18 @@
         }
       }
     },
-    "/api/Documents": {
+    "/api/documents": {
       "get": {
         "tags": [
           "Documents"
         ],
-        "summary": "List all uploaded documents",
+        "summary": "List all documents",
         "parameters": [
           {
             "name": "page",
             "in": "query",
             "schema": {
-              "pattern": "^-?(?:0|[1-9]\\d*)$",
-              "type": [
-                "integer",
-                "string"
-              ],
-              "format": "int32",
+              "type": "integer",
               "default": 1
             }
           },
@@ -1711,37 +1666,49 @@
             "name": "pageSize",
             "in": "query",
             "schema": {
-              "pattern": "^-?(?:0|[1-9]\\d*)$",
-              "type": [
-                "integer",
-                "string"
-              ],
-              "format": "int32",
+              "type": "integer",
               "default": 20
             }
           }
         ],
         "responses": {
           "200": {
-            "description": "OK",
+            "description": "Paginated list of documents",
             "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/DocumentMetadata"
-                  }
-                }
-              },
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/DocumentMetadata"
-                  }
+                  "type": "object"
                 }
-              },
-              "text/json": {
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/documents/reprocess": {
+      "post": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Reprocess all failed document uploads",
+        "responses": {
+          "200": {
+            "description": "Reprocess started"
+          }
+        }
+      }
+    },
+    "/api/documents/unprocessed": {
+      "get": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "List unprocessed documents",
+        "responses": {
+          "200": {
+            "description": "List of unprocessed documents",
+            "content": {
+              "application/json": {
                 "schema": {
                   "type": "array",
                   "items": {
@@ -1754,12 +1721,12 @@
         }
       }
     },
-    "/api/Documents/{documentId}": {
+    "/api/documents/{documentId}": {
       "get": {
         "tags": [
           "Documents"
         ],
-        "summary": "Get details of a specific document",
+        "summary": "Get a document by ID",
         "parameters": [
           {
             "name": "documentId",
@@ -1773,19 +1740,9 @@
         ],
         "responses": {
           "200": {
-            "description": "OK",
+            "description": "Document metadata",
             "content": {
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/DocumentMetadata"
-                }
-              },
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DocumentMetadata"
-                }
-              },
-              "text/json": {
                 "schema": {
                   "$ref": "#/components/schemas/DocumentMetadata"
                 }
@@ -1793,24 +1750,7 @@
             }
           },
           "404": {
-            "description": "Not Found",
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
+            "description": "Document not found"
           }
         }
       },
@@ -1818,7 +1758,7 @@
         "tags": [
           "Documents"
         ],
-        "summary": "Delete a document and all its chunks",
+        "summary": "Delete a document",
         "parameters": [
           {
             "name": "documentId",
@@ -1832,63 +1772,135 @@
         ],
         "responses": {
           "204": {
-            "description": "No Content"
+            "description": "Document deleted"
           },
           "404": {
-            "description": "Not Found",
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
+            "description": "Document not found"
           }
         }
       }
     },
-    "/api/Documents/reprocess": {
-      "post": {
-        "tags": [
-          "Documents"
-        ],
-        "summary": "Reprocess failed or unprocessed documents",
-        "responses": {
-          "200": {
-            "description": "OK"
-          }
-        }
-      }
-    },
-    "/api/Documents/unprocessed": {
+    "/api/documents/{documentId}/download": {
       "get": {
         "tags": [
           "Documents"
         ],
-        "summary": "Get list of unprocessed documents",
+        "summary": "Download a document file",
+        "parameters": [
+          {
+            "name": "documentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "Document file (streamed)"
+          },
+          "404": {
+            "description": "Document not found"
           }
         }
       }
     },
-    "/api/Documents/{id}/move": {
+    "/api/documents/{documentId}/highlight": {
       "post": {
         "tags": [
           "Documents"
         ],
-        "summary": "Move a document to different groups (reindexing)",
+        "summary": "Highlight specific chunks or text within a document",
+        "parameters": [
+          {
+            "name": "documentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HighlightRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Highlight result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Document not found"
+          }
+        }
+      }
+    },
+    "/api/documents/{documentId}/find-location": {
+      "post": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Find the page location of specific text within a document",
+        "parameters": [
+          {
+            "name": "documentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FindLocationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Text location result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FindLocationResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Document not found"
+          }
+        }
+      }
+    },
+    "/api/documents/{id}/move": {
+      "post": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Move a document to one or more resource groups",
         "parameters": [
           {
             "name": "id",
@@ -1901,120 +1913,46 @@
           }
         ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/MoveDocumentRequest"
               }
-            },
-            "text/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MoveDocumentRequest"
-              }
-            },
-            "application/*+json": {
-              "schema": {
-                "$ref": "#/components/schemas/MoveDocumentRequest"
-              }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "Document moved"
           },
           "404": {
-            "description": "Not Found",
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
+            "description": "Document not found"
           }
         }
       }
     },
-    "/api/History": {
+    "/api/history": {
       "get": {
         "tags": [
           "History"
         ],
+        "summary": "Get recent request history",
         "parameters": [
           {
             "name": "count",
             "in": "query",
             "schema": {
-              "pattern": "^-?(?:0|[1-9]\\d*)$",
-              "type": [
-                "integer",
-                "string"
-              ],
-              "format": "int32",
+              "type": "integer",
               "default": 10
             }
           }
         ],
         "responses": {
           "200": {
-            "description": "OK",
+            "description": "List of recent history entries",
             "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/RequestHistory"
-                  }
-                }
-              },
               "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/RequestHistory"
-                  }
-                },
-                "examples": {
-                  "recentHistory": {
-                    "summary": "Recent history entries",
-                    "value": [
-                      {
-                        "id": "550e8400-e29b-41d4-a716-446655440001",
-                        "requestType": "Audio",
-                        "inputText": "Set a reminder for tomorrow at 3 PM",
-                        "detectedTask": "reminder",
-                        "response": "Reminder set for tomorrow at 3 PM",
-                        "usedAdvancedModel": false,
-                        "mediaStorageKey": null,
-                        "timestamp": "2026-01-28T10:30:00Z"
-                      },
-                      {
-                        "id": "550e8400-e29b-41d4-a716-446655440002",
-                        "requestType": "Media",
-                        "inputText": "What is in this image?",
-                        "detectedTask": "general",
-                        "response": "The image shows a sunset over the ocean with birds flying in the distance.",
-                        "usedAdvancedModel": true,
-                        "mediaStorageKey": "media/2026-01-28/image123.jpg",
-                        "timestamp": "2026-01-28T09:15:00Z"
-                      }
-                    ]
-                  }
-                }
-              },
-              "text/json": {
                 "schema": {
                   "type": "array",
                   "items": {
@@ -2023,15 +1961,19 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "No history found"
           }
         }
       }
     },
-    "/api/History/{id}": {
+    "/api/history/{id}": {
       "get": {
         "tags": [
           "History"
         ],
+        "summary": "Get a history entry by ID",
         "parameters": [
           {
             "name": "id",
@@ -2045,69 +1987,42 @@
         ],
         "responses": {
           "200": {
-            "description": "OK",
+            "description": "History entry",
             "content": {
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestHistory"
-                }
-              },
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestHistory"
-                }
-              },
-              "text/json": {
                 "schema": {
                   "$ref": "#/components/schemas/RequestHistory"
                 }
               }
             }
+          },
+          "404": {
+            "description": "History entry not found"
           }
         }
       }
     },
-    "/api/History/reminders": {
+    "/api/history/reminders": {
       "get": {
         "tags": [
           "History"
         ],
+        "summary": "Get reminder history entries",
         "parameters": [
           {
             "name": "count",
             "in": "query",
             "schema": {
-              "pattern": "^-?(?:0|[1-9]\\d*)$",
-              "type": [
-                "integer",
-                "string"
-              ],
-              "format": "int32",
+              "type": "integer",
               "default": 100
             }
           }
         ],
         "responses": {
           "200": {
-            "description": "OK",
+            "description": "List of reminders",
             "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/RequestHistory"
-                  }
-                }
-              },
               "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/RequestHistory"
-                  }
-                }
-              },
-              "text/json": {
                 "schema": {
                   "type": "array",
                   "items": {
@@ -2120,11 +2035,12 @@
         }
       }
     },
-    "/api/History/type/{requestType}": {
+    "/api/history/type/{requestType}": {
       "get": {
         "tags": [
           "History"
         ],
+        "summary": "Get history entries filtered by request type",
         "parameters": [
           {
             "name": "requestType",
@@ -2138,37 +2054,16 @@
             "name": "count",
             "in": "query",
             "schema": {
-              "pattern": "^-?(?:0|[1-9]\\d*)$",
-              "type": [
-                "integer",
-                "string"
-              ],
-              "format": "int32",
+              "type": "integer",
               "default": 100
             }
           }
         ],
         "responses": {
           "200": {
-            "description": "OK",
+            "description": "List of history entries",
             "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/RequestHistory"
-                  }
-                }
-              },
               "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/RequestHistory"
-                  }
-                }
-              },
-              "text/json": {
                 "schema": {
                   "type": "array",
                   "items": {
@@ -2181,11 +2076,12 @@
         }
       }
     },
-    "/api/History/reminders/{id}": {
+    "/api/history/reminders/{id}": {
       "put": {
         "tags": [
           "History"
         ],
+        "summary": "Update a reminder's text",
         "parameters": [
           {
             "name": "id",
@@ -2198,45 +2094,34 @@
           }
         ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/UpdateReminderRequest"
               }
-            },
-            "text/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateReminderRequest"
-              }
-            },
-            "application/*+json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateReminderRequest"
-              }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
-            "description": "OK",
+            "description": "Reminder updated",
             "content": {
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestHistory"
-                }
-              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/RequestHistory"
                 }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestHistory"
-                }
               }
             }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Not a reminder entry"
+          },
+          "404": {
+            "description": "Reminder not found"
           }
         }
       },
@@ -2244,6 +2129,7 @@
         "tags": [
           "History"
         ],
+        "summary": "Delete a reminder",
         "parameters": [
           {
             "name": "id",
@@ -2256,52 +2142,39 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "OK"
+          "204": {
+            "description": "Reminder deleted"
+          },
+          "403": {
+            "description": "Not a reminder entry"
+          },
+          "404": {
+            "description": "Reminder not found"
           }
         }
       }
     },
-    "/api/History/reminders/query": {
+    "/api/history/reminders/query": {
       "post": {
         "tags": [
           "History"
         ],
+        "summary": "Query reminders using semantic search",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/QueryRequest"
               }
-            },
-            "text/json": {
-              "schema": {
-                "$ref": "#/components/schemas/QueryRequest"
-              }
-            },
-            "application/*+json": {
-              "schema": {
-                "$ref": "#/components/schemas/QueryRequest"
-              }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
-            "description": "OK",
+            "description": "Query result",
             "content": {
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/QueryResult"
-                }
-              },
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/QueryResult"
-                }
-              },
-              "text/json": {
                 "schema": {
                   "$ref": "#/components/schemas/QueryResult"
                 }
@@ -2313,102 +2186,45 @@
     },
     "/api/ask": {
       "post": {
-      "tags": ["Media"],
-      "summary": "Process media files (images, videos, audio) with optional AI prompt",
-      "description": "Accepts multipart/form-data with media files and optional prompts. All uploaded files are stored in MinIO, processed through RAG indexing, and analyzed by AI. Audio files are automatically transcribed. This endpoint supports multiple file uploads and processes them asynchronously. Fields:\n- files: One or more media files (images, videos, audio)\n- prompt: Optional text prompt for AI processing\n- promptAudio: Optional audio file containing the prompt (mutually exclusive with prompt)\n- manifest: Optional JSON array specifying file processing order\n- perFileTranscriptions: Optional JSON object mapping filenames to transcriptions\n\nSupported file formats:\n- Images: .jpg, .jpeg, .png, .gif\n- Videos: .mp4, .avi, .mov\n- Audio: .wav, .mp3, .m4a, .flac, .aac",
-      "operationId": "askWithMedia",
+        "tags": [
+          "Media"
+        ],
+        "summary": "Process media files (audio, images, video) with AI",
+        "description": "Accepts multipart/form-data with one or more media files and an optional text prompt. Supports async processing via background tasks.",
         "requestBody": {
-          "description": "Media request containing files and optional prompt",
+          "required": true,
           "content": {
-            "application/x-www-form-urlencoded": {
+            "multipart/form-data": {
               "schema": {
-                "type": "object",
-                "properties": {
-                  "Files": {
-                    "type": "array",
-                    "items": {
-                      "$ref": "#/components/schemas/IFormFile"
-                    }
-                  },
-                  "Prompt": {
-                    "maxLength": 5000,
-                    "minLength": 0,
-                    "type": "string"
-                  },
-                  "Transcription": {
-                    "maxLength": 10000,
-                    "minLength": 0,
-                    "type": "string"
-                  },
-                  "Manifest": {
-                    "type": "string"
-                  },
-                  "PerFileTranscriptions": {
-                    "type": "string"
-                  }
-                }
+                "$ref": "#/components/schemas/MediaRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
-          "202": {
-            "description": "Request accepted for background processing",
+          "200": {
+            "description": "Synchronous processing result",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/MediaUploadResponse"
-                },
-                "examples": {
-                  "success_simple": {
-                    "summary": "Successful media processing (single file)",
-                    "value": {
-                      "task": "general",
-                      "response": "Processed successfully",
-                      "usedAdvancedModel": false,
-                      "requestId": "550e8400-e29b-41d4-a716-446655440100",
-                      "items": [
-                        {
-                          "fileName": "image123.jpg",
-                          "contentType": "image/jpeg",
-                          "storageKey": "media/2026-01-28/image123.jpg",
-                          "transcription": null
-                        }
-                      ]
-                    }
-                  },
-                  "success_multiple": {
-                    "summary": "Successful processing (multiple files with transcription)",
-                    "value": {
-                      "task": "general",
-                      "response": "I see a beach scene with people and umbrellas.",
-                      "usedAdvancedModel": true,
-                      "requestId": "550e8400-e29b-41d4-a716-446655440101",
-                      "items": [
-                        {
-                          "fileName": "photo1.jpg",
-                          "contentType": "image/jpeg",
-                          "storageKey": "media/2026-01-28/photo1.jpg",
-                          "transcription": null
-                        },
-                        {
-                          "fileName": "note1.wav",
-                          "contentType": "audio/wav",
-                          "storageKey": "media/2026-01-28/note1.wav",
-                          "transcription": "Buy milk tomorrow"
-                        }
-                      ]
-                    }
-                  },
-                  "transcription_only": {
-                    "summary": "Transcription-only / prompt-only ask (no media)",
-                    "value": {
-                      "task": "reminder",
-                      "response": "Reminder set for tomorrow at 3 PM",
-                      "usedAdvancedModel": false,
-                      "requestId": "550e8400-e29b-41d4-a716-446655440102",
-                      "transcription": "Set a reminder for tomorrow at 3 PM"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Processing queued as background task",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "taskId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "statusUrl": {
+                      "type": "string"
                     }
                   }
                 }
@@ -2416,53 +2232,106 @@
             }
           },
           "400": {
-            "description": "Invalid request format or unsupported file types",
+            "description": "Invalid request"
+          }
+        }
+      }
+    },
+    "/api/monitoring/requests": {
+      "get": {
+        "tags": [
+          "Monitoring"
+        ],
+        "summary": "Get recent monitored requests",
+        "parameters": [
+          {
+            "name": "count",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of recent request statuses",
             "content": {
-              "application/problem+json": {
-                "schema": { "$ref": "#/components/schemas/ProblemDetails" },
-                "examples": {
-                  "invalidRequest": {
-                    "summary": "Invalid file type",
-                    "value": {
-                      "type": "https://tools.ietf.org/html/rfc7231#section-6.5.1",
-                      "title": "Validation Failed",
-                      "status": 400,
-                      "detail": "File 'bad.exe' has an unsupported file type. Allowed types: .jpg, .jpeg, .png, .gif, .mp4, .avi, .mov, .wav, .mp3, .m4a, .flac, .aac",
-                      "instance": "/api/ask",
-                      "requestId": "00000000-0000-0000-0000-000000000004",
-                      "timestamp": "2026-01-28T00:00:00Z"
-                    }
-                  }
-                }
-              },
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RequestStatus"
+                  }
                 }
-              },
-              "text/json": {
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/process/preview": {
+      "post": {
+        "tags": [
+          "Process"
+        ],
+        "summary": "Preview which AI model will be used for a given input",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProcessRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Model selection preview",
+            "content": {
+              "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
+                  "type": "object",
+                  "properties": {
+                    "willUseAdvanced": {
+                      "type": "boolean"
+                    }
+                  }
                 }
               }
             }
           },
-          "500": {
-            "description": "Server Error",
+          "400": {
+            "description": "Input is required"
+          }
+        }
+      }
+    },
+    "/api/process/client-settings": {
+      "get": {
+        "tags": [
+          "Process"
+        ],
+        "summary": "Get client-facing configuration settings",
+        "responses": {
+          "200": {
+            "description": "Client settings",
             "content": {
-              "application/problem+json": {
-                "schema": { "$ref": "#/components/schemas/ProblemDetails" },
-                "examples": {
-                  "serverError": {
-                    "summary": "Internal error",
-                    "value": {
-                      "type": "about:blank",
-                      "title": "Internal Server Error",
-                      "status": 500,
-                      "detail": "An unexpected error occurred.",
-                      "instance": "/api/ask",
-                      "requestId": "00000000-0000-0000-0000-000000000003",
-                      "timestamp": "2026-01-28T00:00:00Z"
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "speechTranscriptionMode": {
+                      "type": "string",
+                      "enum": [
+                        "auto",
+                        "webspeech-only",
+                        "whisper-only"
+                      ]
+                    },
+                    "activationWord": {
+                      "type": "string"
                     }
                   }
                 }
@@ -2472,94 +2341,109 @@
         }
       }
     },
-
-    "/api/history": {
-      "get": {
-        "summary": "Retrieve request history",
-        "description": "Fetches recent request history entries from the database, including both audio and media processing requests. Supports pagination via the count parameter to retrieve a specific number of recent entries.",
-        "tags": ["History"],
-        "operationId": "getHistory",
-        "parameters": [
-          { "name": "count", "in": "query", "schema": { "type": "integer", "default": 10 }, "description": "Number of recent history entries to retrieve" }
+    "/api/process": {
+      "post": {
+        "tags": [
+          "Process"
         ],
+        "summary": "Process a text/voice input through the AI pipeline",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProcessRequest"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
-            "description": "List of recent history entries",
+            "description": "AI processing result",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/RequestHistory"
-                  }
-                },
-                "examples": {
-                  "recentHistory": {
-                    "summary": "Recent history entries",
-                    "value": [
-                      {
-                        "id": "550e8400-e29b-41d4-a716-446655440001",
-                        "requestType": "Audio",
-                        "inputText": "What time is it in Tokyo?",
-                        "detectedTask": "time",
-                        "response": "The current time in Tokyo is 7:30 PM JST.",
-                        "usedAdvancedModel": false,
-                        "mediaStorageKey": null,
-                        "timestamp": "2026-01-28T10:30:00Z"
-                      },
-                      {
-                        "id": "550e8400-e29b-41d4-a716-446655440002",
-                        "requestType": "Media",
-                        "inputText": "Describe this photo",
-                        "detectedTask": "general",
-                        "response": "The photo shows a scenic mountain landscape with snow-capped peaks and a lake in the foreground.",
-                        "usedAdvancedModel": true,
-                        "mediaStorageKey": "media/2026-01-28/photo456.jpg",
-                        "timestamp": "2026-01-28T09:15:00Z"
-                      }
-                    ]
-                  }
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/RequestHistory"
+                  "type": "object",
+                  "properties": {
+                    "task": {
+                      "type": "string"
+                    },
+                    "response": {
+                      "type": "string"
+                    },
+                    "usedAdvancedModel": {
+                      "type": "boolean"
+                    }
                   }
                 }
               }
             }
           },
+          "400": {
+            "description": "Input is required"
+          },
+          "408": {
+            "description": "Request timed out"
+          },
           "500": {
-            "description": "Internal server error during processing",
+            "description": "Processing failed"
+          }
+        }
+      }
+    },
+    "/api/process/summarize-page": {
+      "post": {
+        "tags": [
+          "Process"
+        ],
+        "summary": "Summarize a page of a document using AI",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PageSummaryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Page summary",
             "content": {
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
+                  "type": "object",
+                  "properties": {
+                    "summary": {
+                      "type": "string"
+                    },
+                    "usedAdvancedModel": {
+                      "type": "boolean"
+                    }
+                  }
                 }
               }
             }
+          },
+          "400": {
+            "description": "Page text is required"
+          },
+          "408": {
+            "description": "Request timed out"
+          },
+          "503": {
+            "description": "Service unavailable"
           }
         }
       }
     },
     "/api/tasks/{id}": {
       "get": {
-        "tags": ["Tasks"],
-        "summary": "Get background task status",
-        "description": "Retrieves the status and result for a background processing task created by /api/ask.",
-        "operationId": "getTask",
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Get the status of a background task",
         "parameters": [
           {
             "name": "id",
@@ -2577,116 +2461,30 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": { "type": "string", "format": "uuid" },
-                    "status": { "type": "string" },
-                    "createdAt": { "type": "string", "format": "date-time" },
-                    "updatedAt": { "type": "string", "format": "date-time" },
-                    "error": { "type": ["string", "null"] },
-                    "result": { "type": ["object", "null"] }
-                  }
-                },
-                "examples": {
-                  "completed": {
-                    "summary": "Completed task",
-                    "value": {
-                      "id": "550e8400-e29b-41d4-a716-446655440120",
-                      "status": "Completed",
-                      "createdAt": "2026-01-28T12:00:00Z",
-                      "updatedAt": "2026-01-28T12:00:10Z",
-                      "error": null,
-                      "result": {
-                        "task": "general",
-                        "response": "Processed successfully",
-                        "usedAdvancedModel": false
-                      }
-                    }
-                  }
+                  "$ref": "#/components/schemas/BackgroundTaskEntry"
                 }
               }
             }
           },
           "202": {
-            "description": "Task still processing",
+            "description": "Task still in progress",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": { "type": "string", "format": "uuid" },
-                    "status": { "type": "string" },
-                    "createdAt": { "type": "string", "format": "date-time" },
-                    "updatedAt": { "type": "string", "format": "date-time" },
-                    "error": { "type": ["string", "null"] },
-                    "result": { "type": ["object", "null"] }
-                  }
-                },
-                "examples": {
-                  "processing": {
-                    "summary": "Processing task",
-                    "value": {
-                      "id": "550e8400-e29b-41d4-a716-446655440121",
-                      "status": "Processing",
-                      "createdAt": "2026-01-28T12:05:00Z",
-                      "updatedAt": "2026-01-28T12:05:02Z",
-                      "error": null,
-                      "result": null
-                    }
-                  }
+                  "$ref": "#/components/schemas/BackgroundTaskEntry"
                 }
               }
             }
           },
           "404": {
-            "description": "Task not found",
-            "content": {
-              "application/problem+json": {
-                "schema": { "$ref": "#/components/schemas/ProblemDetails" },
-                "examples": {
-                  "notFound": {
-                    "summary": "Task not found",
-                    "value": {
-                      "type": "https://example.com/probs/not-found",
-                      "title": "Not Found",
-                      "status": 404,
-                      "detail": "Task not found",
-                      "instance": "/api/tasks/550e8400-e29b-41d4-a716-446655440121",
-                      "requestId": "550e8400-e29b-41d4-a716-446655440122",
-                      "timestamp": "2026-01-28T12:06:00Z"
-                    }
-                  }
-                }
-              }
-            }
+            "description": "Task not found"
           },
           "500": {
             "description": "Task failed",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": { "type": "string", "format": "uuid" },
-                    "status": { "type": "string" },
-                    "createdAt": { "type": "string", "format": "date-time" },
-                    "updatedAt": { "type": "string", "format": "date-time" },
-                    "error": { "type": ["string", "null"] },
-                    "result": { "type": ["object", "null"] }
-                  }
-                },
-                "examples": {
-                  "failed": {
-                    "summary": "Failed task",
-                    "value": {
-                      "id": "550e8400-e29b-41d4-a716-446655440123",
-                      "status": "Failed",
-                      "createdAt": "2026-01-28T12:10:00Z",
-                      "updatedAt": "2026-01-28T12:10:05Z",
-                      "error": "Processing error",
-                      "result": null
-                    }
-                  }
+                  "$ref": "#/components/schemas/BackgroundTaskEntry"
                 }
               }
             }
@@ -2694,217 +2492,99 @@
         }
       }
     },
-    "/metrics": {
+    "/api/admin/batch": {
       "get": {
-        "summary": "Retrieve application metrics and performance statistics",
-        "description": "Returns real-time application metrics including request counts, error rates, average response times, and timestamps for each API endpoint. Useful for monitoring system performance and identifying bottlenecks.",
-        "tags": ["System"],
-        "operationId": "getMetrics",
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Get files, prompts, and groups in a single batch request for efficiency",
+        "parameters": [
+          {
+            "name": "includeFiles",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true
+            }
+          },
+          {
+            "name": "includePrompts",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true
+            }
+          },
+          {
+            "name": "includeGroups",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true
+            }
+          },
+          {
+            "name": "maxItems",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 1000
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "Application metrics and statistics",
+            "description": "Batch data containing files, prompts, and groups",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "timestamp": { "type": "string", "format": "date-time" },
-                    "endpoints": {
+                    "files": {
                       "type": "object",
-                      "additionalProperties": {
-                        "$ref": "#/components/schemas/MetricsSummary"
-                      }
-                    }
-                  }
-                },
-                "examples": {
-                  "metricsExample": {
-                    "summary": "Metrics example",
-                    "value": {
-                      "timestamp": "2026-01-28T12:00:00Z",
-                      "endpoints": {
-                        "/api/transcribe": {
-                          "totalRequests": 150,
-                          "totalErrors": 2,
-                          "averageDurationMs": 245.5,
-                          "lastRequestUtc": "2026-01-28T11:58:30Z"
+                      "properties": {
+                        "data": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
                         },
-                        "/api/ask": {
-                          "totalRequests": 89,
-                          "totalErrors": 1,
-                          "averageDurationMs": 1520.3,
-                          "lastRequestUtc": "2026-01-28T11:59:45Z"
+                        "count": {
+                          "type": "integer"
                         }
                       }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/admin/files": {
-      "get": {
-        "summary": "List managed files with pagination",
-        "description": "Retrieves a paginated list of all files uploaded through the admin panel. All files returned have been processed through the RAG system for AI searchability. Supports caching for improved performance.",
-        "tags": ["Admin"],
-        "operationId": "getAdminFiles",
-        "parameters": [
-          {
-            "name": "page",
-            "in": "query",
-            "schema": { "type": "integer", "default": 1, "minimum": 1 },
-            "description": "Page number for pagination"
-          },
-          {
-            "name": "pageSize",
-            "in": "query",
-            "schema": { "type": "integer", "default": 20, "minimum": 1, "maximum": 100 },
-            "description": "Number of items per page"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful response with paginated files",
-            "content": {
-              "application/json": {
-                "examples": {
-                  "success": {
-                    "summary": "Successful file listing",
-                    "value": {
-                      "data": [
-                        {
-                          "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-                          "fileName": "presentation.pdf",
-                          "label": "Q4 Sales Presentation",
-                          "contentType": "application/pdf",
-                          "storageKey": "admin/2026-01-28/presentation.pdf",
-                          "uploadedAt": "2026-01-28T10:30:00Z",
-                          "fileSize": 2048576,
-                          "groups": []
+                    },
+                    "prompts": {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        },
+                        "count": {
+                          "type": "integer"
                         }
-                      ],
-                      "pagination": {
-                        "currentPage": 1,
-                        "pageSize": 20,
-                        "totalCount": 45,
-                        "totalPages": 3,
-                        "hasPrevious": false,
-                        "hasNext": true
                       }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "summary": "Upload a new file with label",
-        "description": "Uploads a file to MinIO storage, saves metadata to PostgreSQL, and automatically processes it through the RAG system for AI indexing. The file becomes immediately searchable and referenceable by AI. Files are deduplicated by content hash - if the same file is uploaded again, the existing file is returned instead of creating a duplicate.",
-        "tags": ["Admin"],
-        "operationId": "uploadAdminFile",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "file": { "type": "string", "format": "binary", "description": "File to upload" },
-                  "label": { "type": "string", "description": "Human-readable label for the file" }
-                },
-                "required": ["file", "label"]
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "File uploaded successfully and processed for RAG",
-            "content": {
-              "application/json": {
-                "examples": {
-                  "success": {
-                    "summary": "Successful upload (new file)",
-                    "value": {
-                      "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
-                      "fileName": "report.docx",
-                      "label": "Annual Report 2025",
-                      "contentType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                      "storageKey": "admin/2026-01-28/report.docx",
-                      "uploadedAt": "2026-01-28T14:22:00Z",
-                      "fileSize": 1536000,
-                      "contentHash": "A1B2C3D4E5F67890ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890",
-                      "deduplicated": false
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "200": {
-            "description": "File already exists (deduplicated)",
-            "content": {
-              "application/json": {
-                "examples": {
-                  "deduplicated": {
-                    "summary": "Duplicate file detected",
-                    "value": {
-                      "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
-                      "fileName": "report.docx",
-                      "label": "Annual Report 2025",
-                      "contentType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                      "storageKey": "admin/2026-01-28/report.docx",
-                      "uploadedAt": "2026-01-28T14:22:00Z",
-                      "fileSize": 1536000,
-                      "contentHash": "A1B2C3D4E5F67890ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890",
-                      "deduplicated": true
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad Request - Missing file or label",
-            "content": {
-              "application/problem+json": {
-                "examples": {
-                  "missingFile": {
-                    "summary": "File is required",
-                    "value": {
-                      "title": "Bad Request",
-                      "detail": "File is required",
-                      "status": 400
-                    }
-                  },
-                  "missingLabel": {
-                    "summary": "Label is required",
-                    "value": {
-                      "title": "Bad Request",
-                      "detail": "Label is required",
-                      "status": 400
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Server Error during upload",
-            "content": {
-              "application/problem+json": {
-                "examples": {
-                  "serverError": {
-                    "summary": "Upload failed",
-                    "value": {
-                      "title": "Internal Server Error",
-                      "detail": "An error occurred while uploading the file",
-                      "status": 500
+                    },
+                    "groups": {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        },
+                        "count": {
+                          "type": "integer"
+                        }
+                      }
                     }
                   }
                 }
@@ -2917,212 +2597,166 @@
   },
   "components": {
     "schemas": {
-      "AudioRequest": {
-        "type": "object",
-        "description": "Request payload for audio transcription containing base64-encoded audio data",
-        "properties": { 
-          "audioBase64": { 
-            "type": "string",
-            "description": "Base64-encoded audio data (WAV, MP3, M4A, FLAC, or AAC format)",
-            "example": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA="
-          } 
-        },
-        "required": ["audioBase64"]
-      },
-      "AudioUploadResponse": {
-        "type": "object",
-        "description": "Response from audio transcription including storage location, transcription text, and request ID",
-        "properties": { 
-          "storageKey": { 
-            "type": "string",
-            "description": "MinIO storage key where the audio file is stored",
-            "example": "audio/2026-01-28/recording_20260128_103045.wav"
-          }, 
-          "transcription": { 
-            "type": "string",
-            "description": "Transcribed text from the audio file",
-            "example": "Hello world, this is a test recording"
-          }, 
-          "requestId": { 
-            "type": "string", 
-            "format": "uuid",
-            "description": "Unique identifier for tracking this request in history",
-            "example": "550e8400-e29b-41d4-a716-446655440200"
-          } 
-        }
-      },
-      "MediaUploadResponse": {
-        "type": "object",
-        "description": "Response from media processing including AI analysis, detected task, and processed file information",
-        "properties": {
-          "task": { 
-            "type": "string",
-            "description": "The AI-detected task type (e.g., 'general', 'reminder', 'time', etc.)",
-            "example": "general"
-          },
-          "response": { 
-            "type": "string",
-            "description": "AI-generated response based on the media and prompt",
-            "example": "The image shows a beautiful sunset over the ocean with sailboats in the distance"
-          },
-          "usedAdvancedModel": { 
-            "type": "boolean",
-            "description": "Whether the request was processed by the advanced AI model (true) or local model (false)",
-            "example": true
-          },
-          "requestId": { 
-            "type": "string", 
-            "format": "uuid",
-            "description": "Unique identifier for this request",
-            "example": "550e8400-e29b-41d4-a716-446655440100"
-          },
-          "items": {
-            "type": "array",
-            "description": "List of processed media files with their metadata",
-            "items": {
-              "type": "object",
-              "properties": {
-                "fileName": { 
-                  "type": "string",
-                  "description": "Original filename of the uploaded file",
-                  "example": "sunset_photo.jpg"
-                },
-                "contentType": { 
-                  "type": "string",
-                  "description": "MIME type of the file",
-                  "example": "image/jpeg"
-                },
-                "storageKey": { 
-                  "type": "string",
-                  "description": "MinIO storage location",
-                  "example": "media/2026-01-28/sunset_photo.jpg"
-                },
-                "transcription": { 
-                  "type": "string",
-                  "description": "Transcription text for audio/video files (null for images)",
-                  "nullable": true,
-                  "example": null
-                }
-              }
-            }
-          }
-        }
-      },
-      "AddMessageRequest": {
-        "type": "object",
-        "description": "Request payload for adding a message to a conversation",
-        "properties": {
-          "role": {
-            "type": "string",
-            "description": "Role of the message sender (user, assistant, system)",
-            "example": "user"
-          },
-          "content": {
-            "type": "string",
-            "description": "Message content",
-            "example": "Summarize the document."
-          },
-          "model": {
-            "type": [
-              "null",
-              "string"
-            ],
-            "description": "Optional model override",
-            "example": "gpt-4"
-          }
-        }
-      },
       "AIInteractionLog": {
         "type": "object",
-        "description": "Logs interactions with advanced AI models for auditing and analysis",
+        "description": "Logs an interaction with an advanced AI model for auditing and analysis",
         "properties": {
           "id": {
             "type": "string",
-            "format": "uuid",
-            "description": "Unique identifier for this interaction",
-            "example": "550e8400-e29b-41d4-a716-446655440300"
+            "format": "uuid"
           },
           "input": {
-            "type": "string",
-            "description": "Prompt or input sent to the model",
-            "example": "Summarize the document"
+            "type": "string"
           },
           "output": {
-            "type": "string",
-            "description": "Model output",
-            "example": "Here is a concise summary of the document..."
+            "type": "string"
           },
           "modelUsed": {
-            "type": "string",
-            "description": "Model identifier",
-            "example": "gpt-4"
+            "type": "string"
           },
           "delegationReason": {
-            "type": "string",
-            "description": "Reason advanced model was used",
-            "example": "token_threshold_exceeded"
+            "type": "string"
           },
           "inputTokens": {
-            "type": "integer",
-            "format": "int32"
+            "type": "integer"
           },
           "outputTokens": {
-            "type": "integer",
-            "format": "int32"
+            "type": "integer"
           },
           "totalTokens": {
-            "type": "integer",
-            "format": "int32"
+            "type": "integer"
           },
           "estimatedCost": {
-            "type": [
-              "null",
-              "number"
-            ],
-            "format": "double"
+            "type": "number",
+            "format": "double",
+            "nullable": true
           },
           "timestamp": {
             "type": "string",
             "format": "date-time"
           },
           "responseTimeMs": {
-            "type": "integer",
-            "format": "int32"
+            "type": "integer"
           },
           "resourceGroupId": {
-            "type": [
-              "null",
-              "string"
-            ],
-            "format": "uuid"
-          },
-          "resourceGroup": {
-            "oneOf": [
-              { "type": "null" },
-              { "$ref": "#/components/schemas/ResourceGroup" }
-            ]
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
           },
           "conversationId": {
-            "type": [
-              "null",
-              "string"
-            ],
-            "format": "uuid"
-          },
-          "conversation": {
-            "oneOf": [
-              { "type": "null" },
-              { "$ref": "#/components/schemas/Conversation" }
-            ]
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
           },
           "success": {
             "type": "boolean"
           },
           "errorMessage": {
-            "type": [
-              "null",
-              "string"
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "AddMessageRequest": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string",
+            "description": "Message role: 'user', 'assistant', or 'system'",
+            "example": "user"
+          },
+          "content": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string",
+            "nullable": true
+          },
+          "documentIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "nullable": true
+          }
+        },
+        "required": [
+          "role",
+          "content"
+        ]
+      },
+      "AudioRequest": {
+        "type": "object",
+        "description": "Request payload for audio transcription containing base64-encoded audio data",
+        "properties": {
+          "audioBase64": {
+            "type": "string",
+            "description": "Base64-encoded audio data (WAV, MP3, M4A, FLAC, or AAC format)"
+          },
+          "mimeType": {
+            "type": "string",
+            "nullable": true,
+            "description": "MIME type reported by the browser MediaRecorder (e.g. 'audio/webm;codecs=opus')"
+          },
+          "transcription": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "audioBase64"
+        ]
+      },
+      "AudioUploadResponse": {
+        "type": "object",
+        "description": "Response from audio transcription",
+        "properties": {
+          "storageKey": {
+            "type": "string"
+          },
+          "transcription": {
+            "type": "string"
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "BackgroundTaskEntry": {
+        "type": "object",
+        "description": "Represents the status and result of a background processing task",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "Queued",
+              "Processing",
+              "Completed",
+              "Failed"
             ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "error": {
+            "type": "string",
+            "nullable": true
+          },
+          "result": {
+            "nullable": true
           }
         }
       },
@@ -3137,36 +2771,65 @@
             "type": "string",
             "format": "uuid"
           },
-          "conversation": {
-            "$ref": "#/components/schemas/Conversation"
-          },
           "role": {
-            "type": "string"
+            "type": "string",
+            "description": "'user', 'assistant', or 'system'"
           },
           "content": {
             "type": "string"
           },
           "model": {
-            "type": [
-              "null",
-              "string"
-            ]
+            "type": "string",
+            "nullable": true
           },
           "timestamp": {
             "type": "string",
             "format": "date-time"
           },
           "tokenCount": {
-            "pattern": "^-?(?:0|[1-9]\\d*)$",
-            "type": [
-              "null",
-              "integer",
-              "string"
-            ],
-            "format": "int32"
+            "type": "integer",
+            "nullable": true
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      "CompleteUploadRequest": {
+        "type": "object",
+        "description": "Notifies the server that a presigned S3 upload was completed by the browser",
+        "properties": {
+          "fileId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "key": {
+            "type": "string"
+          },
+          "fileName": {
+            "type": "string"
+          },
+          "contentType": {
+            "type": "string",
+            "nullable": true
+          },
+          "label": {
+            "type": "string",
+            "nullable": true
+          },
+          "fileSize": {
+            "type": "integer",
+            "format": "int64"
           }
         },
-        "description": "Represents a chat message in a conversation"
+        "required": [
+          "key",
+          "fileName"
+        ]
       },
       "Conversation": {
         "type": "object",
@@ -3190,21 +2853,9 @@
             "type": "boolean"
           },
           "resourceGroupId": {
-            "type": [
-              "null",
-              "string"
-            ],
-            "format": "uuid"
-          },
-          "resourceGroup": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/ResourceGroup"
-              }
-            ]
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
           },
           "messages": {
             "type": "array",
@@ -3213,28 +2864,10 @@
             }
           },
           "summary": {
-            "type": [
-              "null",
-              "string"
-            ]
-          },
-          "summaryEmbedding": {
-            "type": [
-              "null",
-              "string"
-            ]
-          },
-          "summaryEmbeddingDimension": {
-            "pattern": "^-?(?:0|[1-9]\\d*)$",
-            "type": [
-              "null",
-              "integer",
-              "string"
-            ],
-            "format": "int32"
+            "type": "string",
+            "nullable": true
           }
-        },
-        "description": "Represents a conversation thread"
+        }
       },
       "ConversationQueryRequest": {
         "type": "object",
@@ -3243,47 +2876,37 @@
             "type": "string"
           },
           "topK": {
-            "pattern": "^-?(?:0|[1-9]\\d*)$",
-            "type": [
-              "null",
-              "integer",
-              "string"
-            ],
-            "format": "int32"
+            "type": "integer",
+            "nullable": true
           },
           "groupIds": {
-            "type": [
-              "null",
-              "array"
-            ],
+            "type": "array",
             "items": {
               "type": "string",
               "format": "uuid"
-            }
+            },
+            "nullable": true
           },
           "model": {
-            "type": [
-              "null",
-              "string"
-            ]
+            "type": "string",
+            "nullable": true
           }
-        }
+        },
+        "required": [
+          "query"
+        ]
       },
       "CreateConversationRequest": {
         "type": "object",
         "properties": {
           "title": {
-            "type": [
-              "null",
-              "string"
-            ]
+            "type": "string",
+            "nullable": true
           },
           "resourceGroupId": {
-            "type": [
-              "null",
-              "string"
-            ],
-            "format": "uuid"
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
           }
         }
       },
@@ -3298,95 +2921,44 @@
             "type": "string",
             "format": "uuid"
           },
-          "documentMetadata": {
-            "$ref": "#/components/schemas/DocumentMetadata"
-          },
           "chunkText": {
             "type": "string"
           },
           "pageNumber": {
-            "pattern": "^-?(?:0|[1-9]\\d*)$",
-            "type": [
-              "integer",
-              "string"
-            ],
-            "format": "int32"
+            "type": "integer"
           },
           "chunkIndex": {
-            "pattern": "^-?(?:0|[1-9]\\d*)$",
-            "type": [
-              "integer",
-              "string"
-            ],
-            "format": "int32"
+            "type": "integer"
           },
           "x": {
-            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
-            "type": [
-              "null",
-              "number",
-              "string"
-            ],
-            "format": "double"
+            "type": "number",
+            "format": "double",
+            "nullable": true
           },
           "y": {
-            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
-            "type": [
-              "null",
-              "number",
-              "string"
-            ],
-            "format": "double"
+            "type": "number",
+            "format": "double",
+            "nullable": true
           },
           "width": {
-            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
-            "type": [
-              "null",
-              "number",
-              "string"
-            ],
-            "format": "double"
+            "type": "number",
+            "format": "double",
+            "nullable": true
           },
           "height": {
-            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
-            "type": [
-              "null",
-              "number",
-              "string"
-            ],
-            "format": "double"
-          },
-          "embedding": {
-            "type": [
-              "null",
-              "string"
-            ]
+            "type": "number",
+            "format": "double",
+            "nullable": true
           },
           "embeddingDimension": {
-            "pattern": "^-?(?:0|[1-9]\\d*)$",
-            "type": [
-              "null",
-              "integer",
-              "string"
-            ],
-            "format": "int32"
-          },
-          "embeddingVector": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/Vector"
-              }
-            ]
+            "type": "integer",
+            "nullable": true
           },
           "createdAt": {
             "type": "string",
             "format": "date-time"
           }
-        },
-        "description": "Represents a chunk of text extracted from a document with positional information"
+        }
       },
       "DocumentGroup": {
         "type": "object",
@@ -3395,21 +2967,15 @@
             "type": "string",
             "format": "uuid"
           },
-          "documentMetadata": {
-            "$ref": "#/components/schemas/DocumentMetadata"
-          },
           "resourceGroupId": {
             "type": "string",
             "format": "uuid"
-          },
-          "resourceGroup": {
-            "$ref": "#/components/schemas/ResourceGroup"
           }
-        },
-        "description": "Join table for many-to-many relationship between DocumentMetadata and ResourceGroup"
+        }
       },
       "DocumentMetadata": {
         "type": "object",
+        "description": "Metadata for a document uploaded to the RAG system",
         "properties": {
           "id": {
             "type": "string",
@@ -3432,39 +2998,32 @@
             "format": "date-time"
           },
           "fileSize": {
-            "pattern": "^-?(?:0|[1-9]\\d*)$",
-            "type": [
-              "integer",
-              "string"
-            ],
+            "type": "integer",
             "format": "int64"
           },
           "totalPages": {
-            "pattern": "^-?(?:0|[1-9]\\d*)$",
-            "type": [
-              "integer",
-              "string"
-            ],
-            "format": "int32"
+            "type": "integer"
           },
           "documentType": {
-            "type": "string"
+            "type": "string",
+            "description": "pdf, docx, txt, image"
           },
           "isProcessed": {
             "type": "boolean"
           },
           "processedAt": {
-            "type": [
-              "null",
-              "string"
-            ],
-            "format": "date-time"
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
           },
           "processingError": {
-            "type": [
-              "null",
-              "string"
-            ]
+            "type": "string",
+            "nullable": true
+          },
+          "managedFileId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
           },
           "chunks": {
             "type": "array",
@@ -3472,9 +3031,13 @@
               "$ref": "#/components/schemas/DocumentChunk"
             }
           },
-          "documentGroups": { }
-        },
-        "description": "Represents metadata for a document uploaded to the RAG system"
+          "documentGroups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DocumentGroup"
+            }
+          }
+        }
       },
       "DocumentSource": {
         "type": "object",
@@ -3487,12 +3050,7 @@
             "type": "string"
           },
           "pageNumber": {
-            "pattern": "^-?(?:0|[1-9]\\d*)$",
-            "type": [
-              "integer",
-              "string"
-            ],
-            "format": "int32"
+            "type": "integer"
           },
           "chunkId": {
             "type": "string",
@@ -3500,60 +3058,107 @@
           },
           "chunkText": {
             "type": "string"
+          },
+          "x": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "y": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "width": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "height": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "position": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "FileUploadRequest": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary"
+          },
+          "label": {
+            "type": "string"
           }
         },
-        "description": "Source document information for a query result"
+        "required": [
+          "file"
+        ]
       },
-      "EntityTagHeaderValue": {
+      "FindLocationRequest": {
         "type": "object",
         "properties": {
-          "tag": {
-            "$ref": "#/components/schemas/StringSegment"
+          "searchText": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "searchText"
+        ]
+      },
+      "FindLocationResponse": {
+        "type": "object",
+        "properties": {
+          "documentId": {
+            "type": "string",
+            "format": "uuid"
           },
-          "isWeak": {
-            "type": "boolean"
+          "documentName": {
+            "type": "string"
+          },
+          "searchText": {
+            "type": "string"
+          },
+          "matchCount": {
+            "type": "integer"
+          },
+          "locations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TextLocation"
+            }
           }
         }
       },
-      "FileStreamResult": {
+      "GroupConversationMapping": {
         "type": "object",
         "properties": {
-          "fileStream": {
-            "$ref": "#/components/schemas/Stream"
+          "id": {
+            "type": "string",
+            "format": "uuid"
           },
-          "contentType": {
-            "type": [
-              "null",
-              "string"
-            ]
+          "resourceGroupId": {
+            "type": "string",
+            "format": "uuid"
           },
-          "fileDownloadName": {
-            "type": [
-              "null",
-              "string"
-            ]
+          "conversationId": {
+            "type": "string",
+            "format": "uuid"
           },
-          "lastModified": {
-            "type": [
-              "null",
-              "string"
-            ],
+          "updatedAt": {
+            "type": "string",
             "format": "date-time"
-          },
-          "entityTag": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/EntityTagHeaderValue"
-              }
-            ]
-          },
-          "enableRangeProcessing": {
-            "type": "boolean"
           }
-        }
+        },
+        "required": [
+          "resourceGroupId",
+          "conversationId"
+        ]
       },
       "GroupRequest": {
         "type": "object",
@@ -3562,41 +3167,34 @@
             "type": "string"
           },
           "description": {
-            "type": [
-              "null",
-              "string"
-            ]
+            "type": "string",
+            "nullable": true
           }
         },
-        "description": "Request model for creating or updating a resource group"
+        "required": [
+          "name"
+        ]
       },
       "HighlightRequest": {
         "type": "object",
         "properties": {
           "chunkIds": {
-            "type": [
-              "null",
-              "array"
-            ],
+            "type": "array",
             "items": {
               "type": "string",
               "format": "uuid"
-            }
+            },
+            "nullable": true
           },
           "searchText": {
-            "type": [
-              "null",
-              "string"
-            ]
+            "type": "string",
+            "nullable": true
           }
         }
       },
-      "IFormFile": {
-        "type": "string",
-        "format": "binary"
-      },
       "ManagedFile": {
         "type": "object",
+        "description": "A file uploaded and managed in the database",
         "properties": {
           "id": {
             "type": "string",
@@ -3614,16 +3212,16 @@
           "storageKey": {
             "type": "string"
           },
+          "contentHash": {
+            "type": "string",
+            "nullable": true
+          },
           "uploadedAt": {
             "type": "string",
             "format": "date-time"
           },
           "fileSize": {
-            "pattern": "^-?(?:0|[1-9]\\d*)$",
-            "type": [
-              "integer",
-              "string"
-            ],
+            "type": "integer",
             "format": "int64"
           },
           "fileGroups": {
@@ -3632,8 +3230,7 @@
               "$ref": "#/components/schemas/ManagedFileGroup"
             }
           }
-        },
-        "description": "Represents a file uploaded and managed in the database"
+        }
       },
       "ManagedFileGroup": {
         "type": "object",
@@ -3642,21 +3239,15 @@
             "type": "string",
             "format": "uuid"
           },
-          "managedFile": {
-            "$ref": "#/components/schemas/ManagedFile"
-          },
           "resourceGroupId": {
             "type": "string",
             "format": "uuid"
-          },
-          "resourceGroup": {
-            "$ref": "#/components/schemas/ResourceGroup"
           }
-        },
-        "description": "Join table for many-to-many relationship between ManagedFile and ResourceGroup"
+        }
       },
       "ManagedPrompt": {
         "type": "object",
+        "description": "A prompt that can be used with the middleware",
         "properties": {
           "id": {
             "type": "string",
@@ -3673,11 +3264,9 @@
             "format": "date-time"
           },
           "updatedAt": {
-            "type": [
-              "null",
-              "string"
-            ],
-            "format": "date-time"
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
           },
           "isPinned": {
             "type": "boolean"
@@ -3688,8 +3277,7 @@
               "$ref": "#/components/schemas/ManagedPromptGroup"
             }
           }
-        },
-        "description": "Represents a prompt that can be used with the middleware"
+        }
       },
       "ManagedPromptGroup": {
         "type": "object",
@@ -3698,74 +3286,217 @@
             "type": "string",
             "format": "uuid"
           },
-          "managedPrompt": {
-            "$ref": "#/components/schemas/ManagedPrompt"
-          },
           "resourceGroupId": {
             "type": "string",
             "format": "uuid"
-          },
-          "resourceGroup": {
-            "$ref": "#/components/schemas/ResourceGroup"
           }
-        },
-        "description": "Join table for many-to-many relationship between ManagedPrompt and ResourceGroup"
+        }
+      },
+      "MediaRequest": {
+        "type": "object",
+        "description": "Request for media processing with optional files, prompt, and transcription",
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "binary"
+            },
+            "description": "One or more media files (audio, image, video)"
+          },
+          "prompt": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 5000
+          },
+          "transcription": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 10000
+          },
+          "manifest": {
+            "type": "string",
+            "nullable": true,
+            "description": "JSON array of filenames indicating processing order"
+          },
+          "perFileTranscriptions": {
+            "type": "string",
+            "nullable": true,
+            "description": "JSON object mapping filename to transcription"
+          }
+        }
+      },
+      "MediaUploadResponse": {
+        "type": "object",
+        "description": "Response from media processing",
+        "properties": {
+          "task": {
+            "type": "string"
+          },
+          "response": {
+            "type": "string"
+          },
+          "usedAdvancedModel": {
+            "type": "boolean"
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "fileName": {
+                  "type": "string"
+                },
+                "contentType": {
+                  "type": "string"
+                },
+                "storageKey": {
+                  "type": "string"
+                },
+                "transcription": {
+                  "type": "string",
+                  "nullable": true
+                }
+              }
+            }
+          }
+        }
       },
       "MoveDocumentRequest": {
         "type": "object",
         "properties": {
           "groupIds": {
-            "type": [
-              "null",
-              "array"
-            ],
+            "type": "array",
             "items": {
               "type": "string",
               "format": "uuid"
-            }
+            },
+            "nullable": true
           },
           "regenerateEmbeddings": {
-            "type": "boolean"
+            "type": "boolean",
+            "default": false
           }
         }
+      },
+      "PageSummaryRequest": {
+        "type": "object",
+        "properties": {
+          "pageText": {
+            "type": "string"
+          },
+          "pageNumber": {
+            "type": "integer",
+            "nullable": true
+          },
+          "documentName": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "pageText"
+        ]
       },
       "ProblemDetails": {
         "type": "object",
         "properties": {
           "type": {
-            "type": [
-              "null",
-              "string"
-            ]
+            "type": "string",
+            "nullable": true
           },
           "title": {
-            "type": [
-              "null",
-              "string"
-            ]
+            "type": "string",
+            "nullable": true
           },
           "status": {
-            "pattern": "^-?(?:0|[1-9]\\d*)$",
-            "type": [
-              "null",
-              "integer",
-              "string"
-            ],
-            "format": "int32"
+            "type": "integer",
+            "nullable": true
           },
           "detail": {
-            "type": [
-              "null",
-              "string"
-            ]
+            "type": "string",
+            "nullable": true
           },
           "instance": {
-            "type": [
-              "null",
-              "string"
-            ]
+            "type": "string",
+            "nullable": true
           }
         }
+      },
+      "ProcessDocumentContext": {
+        "type": "object",
+        "description": "Document context provided to the AI during processing",
+        "properties": {
+          "documentName": {
+            "type": "string",
+            "nullable": true
+          },
+          "currentPage": {
+            "type": "integer",
+            "nullable": true
+          },
+          "totalPages": {
+            "type": "integer",
+            "nullable": true
+          },
+          "pages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProcessDocumentPageContext"
+            }
+          },
+          "highlights": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProcessDocumentHighlightContext"
+            }
+          }
+        }
+      },
+      "ProcessDocumentPageContext": {
+        "type": "object",
+        "properties": {
+          "pageNumber": {
+            "type": "integer"
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      },
+      "ProcessDocumentHighlightContext": {
+        "type": "object",
+        "properties": {
+          "keyword": {
+            "type": "string"
+          },
+          "pages": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          }
+        }
+      },
+      "ProcessRequest": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "string",
+            "description": "Text input to process"
+          },
+          "documentContext": {
+            "$ref": "#/components/schemas/ProcessDocumentContext",
+            "nullable": true
+          }
+        },
+        "required": [
+          "input"
+        ]
       },
       "PromptRequest": {
         "type": "object",
@@ -3777,7 +3508,10 @@
             "type": "string"
           }
         },
-        "description": "Request model for creating or updating a prompt"
+        "required": [
+          "name",
+          "promptText"
+        ]
       },
       "QueryRequest": {
         "type": "object",
@@ -3786,72 +3520,115 @@
             "type": "string"
           },
           "topK": {
-            "pattern": "^-?(?:0|[1-9]\\d*)$",
-            "type": [
-              "null",
-              "integer",
-              "string"
-            ],
-            "format": "int32"
+            "type": "integer",
+            "nullable": true
           },
           "groupIds": {
-            "type": [
-              "null",
-              "array"
-            ],
+            "type": "array",
             "items": {
               "type": "string",
               "format": "uuid"
-            }
+            },
+            "nullable": true
+          },
+          "documentIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "nullable": true
+          },
+          "conversationId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "requestId": {
+            "type": "string",
+            "nullable": true,
+            "description": "Optional client-provided request ID for SignalR progress tracking"
           }
-        }
+        },
+        "required": [
+          "query"
+        ]
       },
       "QueryResult": {
         "type": "object",
+        "description": "Result of a RAG query",
         "properties": {
           "answer": {
             "type": "string"
+          },
+          "conversationId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
           },
           "sources": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/DocumentSource"
-            },
-            "description": "All sources that were provided to the AI as context"
+            }
           },
           "referencedSources": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/DocumentSource"
-            },
-            "description": "Sources that the AI explicitly referenced in its answer"
+            }
+          },
+          "conversationSources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConversationSource"
+            }
           },
           "usedAdvancedModel": {
-            "type": "boolean",
-            "description": "Whether the advanced model was used for this query"
+            "type": "boolean"
           },
           "modelUsed": {
-            "type": "string",
-            "description": "Which model processed the query"
+            "type": "string"
           },
           "tokenCount": {
-            "pattern": "^-?(?:0|[1-9]\\d*)$",
-            "type": [
-              "integer",
-              "string"
-            ],
-            "description": "Estimated tokens in the query context",
-            "format": "int32"
+            "type": "integer"
           },
           "delegationReason": {
-            "type": [
-              "null",
-              "string"
-            ],
-            "description": "Reason for delegation to advanced model (if applicable)"
+            "type": "string",
+            "nullable": true
+          },
+          "topicChanged": {
+            "type": "boolean"
+          },
+          "newConversationId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
           }
-        },
-        "description": "Result of a RAG query including the answer and source documents"
+        }
+      },
+      "ConversationSource": {
+        "type": "object",
+        "properties": {
+          "conversationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "messageId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
       },
       "RequestHistory": {
         "type": "object",
@@ -3871,30 +3648,92 @@
             "type": "string"
           },
           "detectedTask": {
-            "type": [
-              "null",
-              "string"
-            ]
+            "type": "string",
+            "nullable": true
           },
           "response": {
-            "type": [
-              "null",
-              "string"
-            ]
+            "type": "string",
+            "nullable": true
           },
           "usedAdvancedModel": {
             "type": "boolean"
           },
           "mediaStorageKey": {
-            "type": [
-              "null",
-              "string"
-            ]
+            "type": "string",
+            "nullable": true
+          },
+          "correlationId": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "RequestStatus": {
+        "type": "object",
+        "description": "Status of a monitored request",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "requestId": {
+            "type": "string"
+          },
+          "requestType": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "details": {
+            "type": "string",
+            "nullable": true
+          },
+          "progress": {
+            "type": "integer",
+            "nullable": true
+          },
+          "startTime": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastUpdateTime": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "endTime": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "durationMs": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "success": {
+            "type": "boolean"
+          },
+          "result": {
+            "type": "string",
+            "nullable": true
+          },
+          "error": {
+            "type": "string",
+            "nullable": true
+          },
+          "correlationId": {
+            "type": "string",
+            "nullable": true
           }
         }
       },
       "ResourceGroup": {
         "type": "object",
+        "description": "A group that can contain files and prompts",
         "properties": {
           "id": {
             "type": "string",
@@ -3904,10 +3743,8 @@
             "type": "string"
           },
           "description": {
-            "type": [
-              "null",
-              "string"
-            ]
+            "type": "string",
+            "nullable": true
           },
           "createdAt": {
             "type": "string",
@@ -3930,53 +3767,70 @@
             "items": {
               "$ref": "#/components/schemas/DocumentGroup"
             }
-          },
-          "conversations": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Conversation"
-            }
           }
-        },
-        "description": "Represents a group that can contain files and prompts"
+        }
       },
-      "Stream": {
-        "type": "string",
-        "format": "binary"
-      },
-      "StringSegment": {
+      "TextLocation": {
         "type": "object",
         "properties": {
-          "buffer": {
-            "type": [
-              "null",
-              "string"
-            ]
+          "documentId": {
+            "type": "string",
+            "format": "uuid"
           },
-          "offset": {
-            "pattern": "^-?(?:0|[1-9]\\d*)$",
-            "type": [
-              "integer",
-              "string"
-            ],
-            "format": "int32"
+          "documentName": {
+            "type": "string"
           },
-          "length": {
-            "pattern": "^-?(?:0|[1-9]\\d*)$",
-            "type": [
-              "integer",
-              "string"
-            ],
-            "format": "int32"
+          "chunkId": {
+            "type": "string",
+            "format": "uuid"
           },
-          "value": {
-            "type": [
-              "null",
-              "string"
-            ]
+          "pageNumber": {
+            "type": "integer"
           },
-          "hasValue": {
-            "type": "boolean"
+          "x": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "y": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "width": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "height": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "position": {
+            "type": "string"
+          },
+          "contextText": {
+            "type": "string"
+          }
+        }
+      },
+      "UpdateConversationRequest": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "UpdateConversationGroupRequest": {
+        "type": "object",
+        "properties": {
+          "resourceGroupId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
           }
         }
       },
@@ -3986,53 +3840,11 @@
           "text": {
             "type": "string"
           }
-        }
-      },
-      "Vector": {
-        "type": "object",
-        "properties": {
-          "memory": {
-            "type": "array",
-            "items": {
-              "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
-              "type": [
-                "number",
-                "string"
-              ],
-              "format": "float"
-            }
-          }
-        }
+        },
+        "required": [
+          "text"
+        ]
       }
     }
-  },
-  "tags": [
-    {
-      "name": "SmartGlassesMiddleware"
-    },
-    {
-      "name": "Admin"
-    },
-    {
-      "name": "AIInteraction"
-    },
-    {
-      "name": "Audio"
-    },
-    {
-      "name": "Conversations"
-    },
-    {
-      "name": "Documents"
-    },
-    {
-      "name": "History"
-    },
-    {
-      "name": "Media"
-    },
-    {
-      "name": "Tasks"
-    }
-  ]
+  }
 }
