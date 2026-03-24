@@ -460,11 +460,11 @@ export default function App() {
       return true;
     }
 
-    // Check for predominantly filler words (more than 50% filler)
+    // Check for predominantly filler words (more than 30% filler) — stricter to catch background chatter
     const fillerWords = ['um', 'uh', 'ah', 'oh', 'hmm', 'er', 'erm', 'like', 'uh', 'uhh', 'umm'];
     const words = trimmed.split(/\s+/);
     const fillerCount = words.filter(w => fillerWords.includes(w)).length;
-    if (words.length > 0 && fillerCount / words.length > 0.5) {
+    if (words.length > 0 && fillerCount / words.length > 0.3) {
       return true;
     }
 
@@ -502,6 +502,21 @@ export default function App() {
         setPendingAction(null);
         showAiResponse("I didn't hear a clear command. Please say \"Iris\" again.");
         // Return to idle/wake-word mode — requires reactivation
+        resumeListeningRef.current?.();
+        return;
+      }
+
+      // ── Require minimum command length (filter out single-word stray background noise) ─
+      // ── Require minimum command length (but allow known single-word commands) ─
+      const commandWords = commandText.trim().split(/\s+/);
+      const knownSingleWordCommands = ['activate', 'next', 'previous', 'back', 'help', 'menu', 'close'];
+      const isSingleWordCommand = commandWords.length === 1 && knownSingleWordCommands.includes(commandWords[0].toLowerCase());
+      const requiresTwoWords = !isSingleWordCommand && commandWords.length < 2;
+      
+      if (requiresTwoWords) {
+        addLog("⏱️ Command too brief — likely background noise.", "warn");
+        setPendingAction(null);
+        showAiResponse("That was too brief. Please say a full command.");
         resumeListeningRef.current?.();
         return;
       }
@@ -806,7 +821,7 @@ export default function App() {
   useEffect(() => {
     const SAMPLE_RATE          = 16_000;
     const BUFFER_SIZE          = 1024;       // 64 ms per ScriptProcessor callback
-    const RMS_THRESHOLD        = 0.012;      // RMS below this → silence
+    const RMS_THRESHOLD        = 0.022;      // RMS below this → silence (increased to filter background chatter)
     const WAKE_SILENCE_MS      = 220;        // wake-word path: short silence for snappier activation
     const COMMAND_SILENCE_MS   = 650;        // command path: larger chunks for better transcription context
     const SENTENCE_END_MS      = 350;        // pause after sentence-end pattern → submit
