@@ -5,6 +5,7 @@ using System.IO.Compression;
 using System.Xml.Linq;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Npgsql;
 using SmartGlassesMiddleware.Data;
 using SmartGlassesMiddleware.Models;
 
@@ -92,12 +93,37 @@ public class AbbreviationService : IAbbreviationService
         if (_shortFormCache.TryGetValue(normalized, out var cached))
             return cached;
 
-        // Query database
-        var results = await _context.Abbreviations
-            .Where(a => a.ShortForm.ToLower() == normalized.ToLower())
-            .ToListAsync();
+        try
+        {
+            // Query database
+            var results = await _context.Abbreviations
+                .Where(a => a.ShortForm.ToLower() == normalized.ToLower())
+                .ToListAsync();
 
-        return results.Count > 0 ? results : null;
+            if (results.Count > 0)
+            {
+                _shortFormCache[normalized] = results;
+                return results;
+            }
+        }
+        catch (Exception ex) when (IsMissingAbbreviationsTableException(ex))
+        {
+            _logger.LogWarning(ex,
+                "Abbreviations table is not available yet. Using built-in short-form fallback for '{ShortForm}'.",
+                normalized);
+        }
+
+        var fallback = GetBuiltInAbbreviations()
+            .Where(a => a.ShortForm.Equals(normalized, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (fallback.Count > 0)
+        {
+            _shortFormCache[normalized] = fallback;
+            return fallback;
+        }
+
+        return null;
     }
 
     public async Task<List<Abbreviation>?> LookupByExpandedFormAsync(string expandedForm)
@@ -111,12 +137,37 @@ public class AbbreviationService : IAbbreviationService
         if (_expandedFormCache.TryGetValue(normalized, out var cached))
             return cached;
 
-        // Query database
-        var results = await _context.Abbreviations
-            .Where(a => a.ExpandedForm.ToLower() == normalized.ToLower())
-            .ToListAsync();
+        try
+        {
+            // Query database
+            var results = await _context.Abbreviations
+                .Where(a => a.ExpandedForm.ToLower() == normalized.ToLower())
+                .ToListAsync();
 
-        return results.Count > 0 ? results : null;
+            if (results.Count > 0)
+            {
+                _expandedFormCache[normalized] = results;
+                return results;
+            }
+        }
+        catch (Exception ex) when (IsMissingAbbreviationsTableException(ex))
+        {
+            _logger.LogWarning(ex,
+                "Abbreviations table is not available yet. Using built-in expanded-form fallback for '{ExpandedForm}'.",
+                normalized);
+        }
+
+        var fallback = GetBuiltInAbbreviations()
+            .Where(a => a.ExpandedForm.Equals(normalized, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (fallback.Count > 0)
+        {
+            _expandedFormCache[normalized] = fallback;
+            return fallback;
+        }
+
+        return null;
     }
 
     public async Task<(List<string> terms, List<Abbreviation> abbreviations)> GetRelatedTermsAsync(string searchTerm)
@@ -174,9 +225,15 @@ public class AbbreviationService : IAbbreviationService
 
             _logger.LogInformation("Abbreviation cache refreshed. Total entries: {Count}", allAbbreviations.Count);
         }
+        catch (Exception ex) when (IsMissingAbbreviationsTableException(ex))
+        {
+            _logger.LogWarning(ex, "Abbreviations table is not available yet. Seeding cache with built-in abbreviations.");
+            SeedCacheWithBuiltIns();
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to refresh abbreviation cache");
+            SeedCacheWithBuiltIns();
         }
     }
 
@@ -1130,6 +1187,54 @@ public class AbbreviationService : IAbbreviationService
         return list.Any(a =>
             a.ShortForm.Equals(shortForm, StringComparison.OrdinalIgnoreCase) &&
             a.ExpandedForm.Equals(expandedForm, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsMissingAbbreviationsTableException(Exception ex)
+    {
+        Exception? current = ex;
+        while (current != null)
+        {
+            if (current is PostgresException pg && pg.SqlState == "42P01")
+            {
+                return true;
+            }
+
+            current = current.InnerException;
+        }
+
+        return false;
+    }
+
+    private void SeedCacheWithBuiltIns()
+    {
+        var builtIns = GetBuiltInAbbreviations();
+
+        _shortFormCache.Clear();
+        _expandedFormCache.Clear();
+
+        foreach (var abbr in builtIns)
+        {
+            var shortKey = abbr.ShortForm.ToLowerInvariant();
+            var expandedKey = abbr.ExpandedForm.ToLowerInvariant();
+
+            _shortFormCache.AddOrUpdate(shortKey,
+                new List<Abbreviation> { abbr },
+                (_, existing) =>
+                {
+                    existing.Add(abbr);
+                    return existing;
+                });
+
+            _expandedFormCache.AddOrUpdate(expandedKey,
+                new List<Abbreviation> { abbr },
+                (_, existing) =>
+                {
+                    existing.Add(abbr);
+                    return existing;
+                });
+        }
+
+        _logger.LogInformation("Abbreviation cache seeded from built-ins. Total entries: {Count}", builtIns.Count);
     }
 
     private List<Abbreviation> GetBuiltInAbbreviations()

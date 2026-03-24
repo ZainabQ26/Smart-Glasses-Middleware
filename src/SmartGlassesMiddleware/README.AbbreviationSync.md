@@ -45,6 +45,7 @@ The sync pipeline merges data from these sources:
 
 2. Background schedule
 - Controlled by AbbreviationSync:IntervalDays.
+- Default is monthly (30 days).
 - If newest abbreviation UpdatedAt is older than interval, sync runs immediately.
 
 3. Merge and upsert
