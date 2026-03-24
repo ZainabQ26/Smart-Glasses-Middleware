@@ -19,6 +19,7 @@ using System.Linq;
 using System.Threading.RateLimiting;
 using Polly;
 using Polly.Extensions.Http;
+using Scalar.AspNetCore;
 
 #pragma warning disable SKEXP0010
 
@@ -199,7 +200,32 @@ builder.Services.Configure<ApiBehaviorOptions>(options =>
         };
     };
 });
-builder.Services.AddOpenApi();
+builder.Services.AddOpenApi(options =>
+{
+    options.AddDocumentTransformer((document, context, cancellationToken) =>
+    {
+        document.Info = new()
+        {
+            Title = "Smart Glasses Middleware API",
+            Version = "v1",
+            Description = """
+                Backend middleware for a smart glasses application.
+                Provides a multi-modal AI API for voice-driven task dispatch, document processing,
+                audio transcription, and conversation management.
+
+                **Voice pipeline:** Audio is transcribed by an on-device Whisper WebGPU worker.
+                Transcripts are sent to `POST /api/process`, which classifies the intent with
+                AWS Bedrock and routes to the matching task handler.
+
+                **Document pipeline:** Files uploaded via `POST /api/admin/files` are processed
+                by a Lambda function (PyMuPDF + Bedrock embeddings) and stored in PostgreSQL
+                with pgvector for semantic search via `POST /api/documents/query`.
+                """,
+            Contact = new() { Name = "Smart Glasses Middleware" },
+        };
+        return Task.CompletedTask;
+    });
+});
 
 // Add response compression for better performance
 builder.Services.AddResponseCompression(options =>
@@ -972,10 +998,14 @@ app.Use(async (context, next) =>
     await next();
 });
 
-if (app.Environment.IsDevelopment())
+// OpenAPI JSON endpoint (available in all environments)
+app.MapOpenApi();
+
+// Interactive OpenAPI UI at /swagger (powered by Scalar)
+app.MapScalarApiReference("/swagger/{documentName}", options =>
 {
-    app.MapOpenApi();
-}
+    options.WithTitle("Smart Glasses Middleware API");
+});
 
 if (!app.Environment.IsEnvironment("Testing"))
 {

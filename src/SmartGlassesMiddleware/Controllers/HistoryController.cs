@@ -4,6 +4,9 @@ using SmartGlassesMiddleware.Services;
 
 namespace SmartGlassesMiddleware.Controllers;
 
+/// <summary>
+/// Manages request history entries and reminder CRUD operations.
+/// </summary>
 [ApiController]
 [Route("api/[controller]")]
 public class HistoryController : ControllerBase
@@ -22,7 +25,15 @@ public class HistoryController : ControllerBase
         _logger = logger;
     }
 
+    /// <summary>
+    /// Get the most recent request history entries.
+    /// </summary>
+    /// <param name="count">Maximum number of entries to return (default: 10).</param>
+    /// <returns>A list of recent <see cref="RequestHistory"/> entries.</returns>
     [HttpGet]
+    [ProducesResponseType(typeof(List<RequestHistory>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult<List<RequestHistory>>> GetRecentHistory([FromQuery] int count = 10)
     {
         try
@@ -53,7 +64,15 @@ public class HistoryController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Get a single history entry by its ID.
+    /// </summary>
+    /// <param name="id">The unique identifier of the history entry.</param>
+    /// <returns>The matching <see cref="RequestHistory"/> record.</returns>
     [HttpGet("{id}")]
+    [ProducesResponseType(typeof(RequestHistory), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult<RequestHistory>> GetHistoryById(Guid id)
     {
         try
@@ -74,7 +93,14 @@ public class HistoryController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Get all saved reminders (history entries of type "reminder").
+    /// </summary>
+    /// <param name="count">Maximum number of reminders to return (default: 100).</param>
+    /// <returns>A list of reminder <see cref="RequestHistory"/> entries. Returns an empty array when none exist.</returns>
     [HttpGet("reminders")]
+    [ProducesResponseType(typeof(List<RequestHistory>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult<List<RequestHistory>>> GetReminders([FromQuery] int count = 100)
     {
         try
@@ -98,7 +124,15 @@ public class HistoryController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Get history entries filtered by request type (e.g., "reminder", "document-search").
+    /// </summary>
+    /// <param name="requestType">The task/request type to filter by.</param>
+    /// <param name="count">Maximum number of entries to return (default: 100).</param>
+    /// <returns>A list of matching <see cref="RequestHistory"/> entries.</returns>
     [HttpGet("type/{requestType}")]
+    [ProducesResponseType(typeof(List<RequestHistory>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult<List<RequestHistory>>> GetHistoryByType(string requestType, [FromQuery] int count = 100)
     {
         try
@@ -122,7 +156,18 @@ public class HistoryController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Update the text of an existing reminder.
+    /// </summary>
+    /// <param name="id">The unique identifier of the reminder to update.</param>
+    /// <param name="request">Request body containing the new reminder text.</param>
+    /// <returns>The updated <see cref="RequestHistory"/> record.</returns>
     [HttpPut("reminders/{id}")]
+    [ProducesResponseType(typeof(RequestHistory), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult<RequestHistory>> UpdateReminder(Guid id, [FromBody] UpdateReminderRequest request)
     {
         try
@@ -186,7 +231,15 @@ public class HistoryController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Delete a reminder by its ID.
+    /// </summary>
+    /// <param name="id">The unique identifier of the reminder to delete.</param>
     [HttpDelete("reminders/{id}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult> DeleteReminder(Guid id)
     {
         try
@@ -230,7 +283,15 @@ public class HistoryController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Perform a semantic RAG query over saved reminders.
+    /// </summary>
+    /// <param name="request">Query text and optional result limit.</param>
+    /// <returns>A <see cref="QueryResult"/> containing semantically similar reminders.</returns>
     [HttpPost("reminders/query")]
+    [ProducesResponseType(typeof(QueryResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult<QueryResult>> QueryReminders([FromBody] QueryRequest request)
     {
         try
@@ -264,7 +325,9 @@ public class HistoryController : ControllerBase
     }
 }
 
+/// <summary>Request body for updating a reminder's text.</summary>
 public class UpdateReminderRequest
 {
+    /// <summary>The new text for the reminder.</summary>
     public string Text { get; set; } = string.Empty;
 }
