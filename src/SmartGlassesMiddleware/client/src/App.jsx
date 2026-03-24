@@ -1038,18 +1038,18 @@ export default function App() {
         const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
         audioCtxRef.current = ctx;
         const source    = ctx.createMediaStreamSource(stream);
-        // NOTE: ScriptProcessorNode is deprecated; migrating to AudioWorklet requires
-        // a dedicated worker module file which adds Vite build complexity.
-        // TODO: replace with AudioWorkletNode once the project has a processor module.
-        const processor = ctx.createScriptProcessor(BUFFER_SIZE, 1, 1);
+
+        // Add AudioWorklet module
+        await ctx.audioWorklet.addModule('/audioProcessor.js');
+        const processor = new AudioWorkletNode(ctx, 'audio-processor');
         processorRef.current = processor;
+
         source.connect(processor);
         processor.connect(ctx.destination);
 
-        processor.onaudioprocess = (ev) => {
+        processor.port.onmessage = (ev) => {
           if (disposed) return;
-          // Float32Array copy — the underlying buffer is reused after this callback
-          const samples = new Float32Array(ev.inputBuffer.getChannelData(0));
+          const samples = ev.data;
           const rms = Math.sqrt(samples.reduce((s, v) => s + v * v, 0) / samples.length);
           const now = Date.now();
 
@@ -1096,7 +1096,12 @@ export default function App() {
     return () => {
       disposed = true;
       clearTimers();
-      try { processorRef.current?.disconnect(); } catch (_) {}
+      try {
+        if (processorRef.current) {
+          processorRef.current.port.close();
+          processorRef.current.disconnect();
+        }
+      } catch (_) {}
       try { audioCtxRef.current?.close(); } catch (_) {}
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(t => t.stop());
