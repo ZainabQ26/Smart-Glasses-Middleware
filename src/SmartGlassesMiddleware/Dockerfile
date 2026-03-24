@@ -2,7 +2,7 @@
 # Uses a lightweight Node image. Vite is configured (outDir: '../wwwroot') to
 # write the production bundle one directory above the client folder, so the
 # output lands at /app/wwwroot/ inside this stage.
-FROM node:22-alpine3.21 AS frontend-build
+FROM node:25-alpine AS frontend-build
 # Upgrade all Alpine packages to pick up any patched CVEs
 RUN apk upgrade --no-cache
 WORKDIR /app/client
@@ -15,7 +15,7 @@ RUN npm run build
 # Output is now at /app/wwwroot/ (../wwwroot relative to WORKDIR)
 
 # ── Stage 2: Build the .NET API ───────────────────────────────────────────────
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0.102 AS build
 WORKDIR /src
 
 # Restore dependencies as a distinct cached layer

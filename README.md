@@ -104,7 +104,7 @@ Cost while idle: **$0** (Fargate billing stops when `desiredCount=0`).
 
 - Docker Desktop
 - .NET 10 SDK
-- Node.js 22
+- Node.js 25.8.1
 - AWS CLI v2
 
 ### Start with LocalStack

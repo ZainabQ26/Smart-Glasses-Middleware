@@ -1,5 +1,5 @@
 # Build stage
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0.102 AS build
 WORKDIR /src
 
 # Copy csproj and restore dependencies
@@ -14,7 +14,7 @@ RUN dotnet build "SmartGlassesMiddleware.csproj" -c Release -o /app/build
 # Publish stage
 FROM build AS publish
 RUN dotnet publish "SmartGlassesMiddleware.csproj" -c Release -o /app/publish /p:UseAppHost=false \
-    /p:PublishTrimmed=true /p:PublishReadyToRun=true /p:TrimMode=linker
+    /p:SelfContained=false /p:PublishReadyToRun=true
 
 # Runtime stage
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
