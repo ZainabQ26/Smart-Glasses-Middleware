@@ -24,6 +24,43 @@ public class AbbreviationService : IAbbreviationService
     private readonly HttpClient _httpClient;
     private readonly IConfiguration _configuration;
 
+    private static readonly Dictionary<string, string> KnownMedicationAbbreviations =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["ER"] = "extended release",
+            ["XR"] = "extended release",
+            ["SR"] = "sustained release",
+            ["CR"] = "controlled release",
+            ["DR"] = "delayed release",
+            ["IR"] = "immediate release",
+            ["EC"] = "enteric coated",
+            ["ODT"] = "orally disintegrating tablet",
+            ["HCl"] = "hydrochloride",
+            ["HBr"] = "hydrobromide",
+            ["Na"] = "sodium",
+            ["K"] = "potassium",
+            ["Ca"] = "calcium",
+            ["MG"] = "milligram",
+            ["MCG"] = "microgram",
+            ["ML"] = "milliliter",
+            ["IU"] = "international units",
+            ["MEQ"] = "milliequivalent",
+            ["TAB"] = "tablet",
+            ["TABS"] = "tablets",
+            ["CAP"] = "capsule",
+            ["CAPS"] = "capsules",
+            ["SOLN"] = "solution",
+            ["SUSP"] = "suspension",
+            ["SYR"] = "syrup",
+            ["INJ"] = "injection",
+            ["OINT"] = "ointment",
+            ["CRM"] = "cream",
+            ["CREAM"] = "cream",
+            ["GEL"] = "gel",
+            ["PKT"] = "packet",
+            ["PACK"] = "packet"
+        };
+
     // In-memory cache: {shortForm.ToLower() -> [abbreviations]}
     private ConcurrentDictionary<string, List<Abbreviation>> _shortFormCache = 
         new(StringComparer.OrdinalIgnoreCase);
@@ -586,12 +623,16 @@ public class AbbreviationService : IAbbreviationService
 
                         if (concept.TryGetProperty("name", out var name) && name.ValueKind == JsonValueKind.String)
                         {
-                            abbreviations.AddRange(ExtractAbbreviationsFromText(name.GetString() ?? string.Empty, "RxNav"));
+                            var value = name.GetString() ?? string.Empty;
+                            abbreviations.AddRange(ExtractAbbreviationsFromText(value, "RxNav"));
+                            abbreviations.AddRange(ExtractAbbreviationsFromMedicationName(value, "RxNav"));
                         }
 
                         if (concept.TryGetProperty("synonym", out var synonym) && synonym.ValueKind == JsonValueKind.String)
                         {
-                            abbreviations.AddRange(ExtractAbbreviationsFromText(synonym.GetString() ?? string.Empty, "RxNav"));
+                            var value = synonym.GetString() ?? string.Empty;
+                            abbreviations.AddRange(ExtractAbbreviationsFromText(value, "RxNav"));
+                            abbreviations.AddRange(ExtractAbbreviationsFromMedicationName(value, "RxNav"));
                         }
 
                         processed++;
@@ -617,12 +658,16 @@ public class AbbreviationService : IAbbreviationService
 
                             if (concept.TryGetProperty("name", out var name) && name.ValueKind == JsonValueKind.String)
                             {
-                                abbreviations.AddRange(ExtractAbbreviationsFromText(name.GetString() ?? string.Empty, "RxNav"));
+                                var value = name.GetString() ?? string.Empty;
+                                abbreviations.AddRange(ExtractAbbreviationsFromText(value, "RxNav"));
+                                abbreviations.AddRange(ExtractAbbreviationsFromMedicationName(value, "RxNav"));
                             }
 
                             if (concept.TryGetProperty("synonym", out var synonym) && synonym.ValueKind == JsonValueKind.String)
                             {
-                                abbreviations.AddRange(ExtractAbbreviationsFromText(synonym.GetString() ?? string.Empty, "RxNav"));
+                                var value = synonym.GetString() ?? string.Empty;
+                                abbreviations.AddRange(ExtractAbbreviationsFromText(value, "RxNav"));
+                                abbreviations.AddRange(ExtractAbbreviationsFromMedicationName(value, "RxNav"));
                             }
 
                             processed++;
@@ -707,7 +752,10 @@ public class AbbreviationService : IAbbreviationService
                         if (display.ValueKind != JsonValueKind.String)
                             continue;
 
-                        abbreviations.AddRange(ExtractAbbreviationsFromText(display.GetString() ?? string.Empty, "RxTerms"));
+                        var value = display.GetString() ?? string.Empty;
+                        abbreviations.AddRange(ExtractAbbreviationsFromText(value, "RxTerms"));
+                        abbreviations.AddRange(ExtractAbbreviationsFromMedicationName(value, "RxTerms"));
+                        abbreviations.AddRange(ExtractRxTermsStructuredAbbreviations(value));
                         pageCount++;
                     }
 
@@ -758,6 +806,70 @@ public class AbbreviationService : IAbbreviationService
         }
 
         return abbreviations;
+    }
+
+    private List<Abbreviation> ExtractAbbreviationsFromMedicationName(string text, string source)
+    {
+        var abbreviations = new List<Abbreviation>();
+
+        if (string.IsNullOrWhiteSpace(text))
+            return abbreviations;
+
+        // Tokenize simple medication names and capture known shorthand tokens used in Rx data.
+        foreach (Match match in Regex.Matches(text, @"\b[A-Za-z][A-Za-z0-9]{0,6}\b"))
+        {
+            var token = match.Value;
+            if (KnownMedicationAbbreviations.TryGetValue(token, out var expanded))
+            {
+                TryAddExtractedPair(abbreviations, token, expanded, source, "drug name normalization");
+            }
+        }
+
+        return abbreviations;
+    }
+
+    private List<Abbreviation> ExtractRxTermsStructuredAbbreviations(string text)
+    {
+        var abbreviations = new List<Abbreviation>();
+
+        if (string.IsNullOrWhiteSpace(text))
+            return abbreviations;
+
+        // RxTerms display strings often include compact dosage/form tokens without
+        // acronym-style parenthetical patterns (e.g. ER, ODT, TAB, SOLN, HCl).
+        var tokenPattern = new Regex(@"\b(ER|XR|SR|CR|DR|IR|EC|ODT|HCl|HBr|Na|K|Ca|MG|MCG|ML|IU|MEQ|TABS?|CAPS?|SOLN|SUSP|SYR|INJ|OINT|CRM|CREAM|GEL|PKT|PACK)\b", RegexOptions.IgnoreCase);
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (Match match in tokenPattern.Matches(text))
+        {
+            if (!match.Success)
+                continue;
+
+            var raw = match.Value.Trim();
+            if (!seen.Add(raw))
+                continue;
+
+            var normalized = NormalizeRxTermsToken(raw);
+            if (KnownMedicationAbbreviations.TryGetValue(normalized, out var expanded))
+            {
+                TryAddExtractedPair(abbreviations, normalized, expanded, "RxTerms", "drug form normalization");
+            }
+        }
+
+        return abbreviations;
+    }
+
+    private static string NormalizeRxTermsToken(string token)
+    {
+        var t = token.Trim();
+        if (t.Equals("tabs", StringComparison.OrdinalIgnoreCase)) return "TABS";
+        if (t.Equals("tab", StringComparison.OrdinalIgnoreCase)) return "TAB";
+        if (t.Equals("caps", StringComparison.OrdinalIgnoreCase)) return "CAPS";
+        if (t.Equals("cap", StringComparison.OrdinalIgnoreCase)) return "CAP";
+        if (t.Equals("cream", StringComparison.OrdinalIgnoreCase)) return "CREAM";
+        if (t.Equals("hcl", StringComparison.OrdinalIgnoreCase)) return "HCl";
+        if (t.Equals("hbr", StringComparison.OrdinalIgnoreCase)) return "HBr";
+        return t.ToUpperInvariant();
     }
 
     private static void TryAddExtractedPair(List<Abbreviation> abbreviations, string shortFormRaw, string expandedFormRaw, string source, string? category = null)
@@ -815,6 +927,9 @@ public class AbbreviationService : IAbbreviationService
 
     private static bool IsLikelyUsefulAbbreviation(string shortForm, string expandedForm, string source)
     {
+        if (IsKnownPharmaceuticalPair(shortForm, expandedForm))
+            return true;
+
         if (shortForm.Contains(' ')) return false;
         if (shortForm.Length < 2 || shortForm.Length > 12) return false;
         if (expandedForm.IndexOf(shortForm, StringComparison.OrdinalIgnoreCase) >= 0) return false;
@@ -868,6 +983,14 @@ public class AbbreviationService : IAbbreviationService
             return false;
 
         return true;
+    }
+
+    private static bool IsKnownPharmaceuticalPair(string shortForm, string expandedForm)
+    {
+        if (!KnownMedicationAbbreviations.TryGetValue(shortForm, out var expectedExpanded))
+            return false;
+
+        return expectedExpanded.Equals(expandedForm, StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool LooksLikeAcronymExpansion(string shortForm, string expandedForm)
