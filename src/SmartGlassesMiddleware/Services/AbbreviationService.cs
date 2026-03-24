@@ -87,22 +87,23 @@ public class AbbreviationService : IAbbreviationService
         if (string.IsNullOrWhiteSpace(shortForm))
             return null;
 
-        var normalized = shortForm.Trim(); // Normalizing short form
+        var normalized = shortForm.Trim();
+        var normalizedKey = NormalizeLookupKey(normalized);
 
         // Check cache first
-        if (_shortFormCache.TryGetValue(normalized, out var cached))
+        if (_shortFormCache.TryGetValue(normalizedKey, out var cached))
             return cached;
 
         try
         {
             // Query database
             var results = await _context.Abbreviations
-                .Where(a => a.ShortForm.ToLower() == normalized.ToLower())
+                .Where(a => a.ShortForm.ToLower() == normalizedKey)
                 .ToListAsync();
 
             if (results.Count > 0)
             {
-                _shortFormCache[normalized] = results;
+                _shortFormCache[normalizedKey] = results;
                 return results;
             }
         }
@@ -114,12 +115,12 @@ public class AbbreviationService : IAbbreviationService
         }
 
         var fallback = GetBuiltInAbbreviations()
-            .Where(a => a.ShortForm.Equals(normalized, StringComparison.OrdinalIgnoreCase))
+            .Where(a => a.ShortForm.Equals(normalizedKey, StringComparison.OrdinalIgnoreCase))
             .ToList();
 
         if (fallback.Count > 0)
         {
-            _shortFormCache[normalized] = fallback;
+            _shortFormCache[normalizedKey] = fallback;
             return fallback;
         }
 
@@ -131,22 +132,23 @@ public class AbbreviationService : IAbbreviationService
         if (string.IsNullOrWhiteSpace(expandedForm))
             return null;
 
-        var normalized = expandedForm.Trim(); // Normalizing expanded form
+        var normalized = expandedForm.Trim();
+        var normalizedKey = NormalizeLookupKey(normalized);
 
         // Check cache first
-        if (_expandedFormCache.TryGetValue(normalized, out var cached))
+        if (_expandedFormCache.TryGetValue(normalizedKey, out var cached))
             return cached;
 
         try
         {
             // Query database
             var results = await _context.Abbreviations
-                .Where(a => a.ExpandedForm.ToLower() == normalized.ToLower())
+                .Where(a => a.ExpandedForm.ToLower() == normalizedKey)
                 .ToListAsync();
 
             if (results.Count > 0)
             {
-                _expandedFormCache[normalized] = results;
+                _expandedFormCache[normalizedKey] = results;
                 return results;
             }
         }
@@ -158,12 +160,12 @@ public class AbbreviationService : IAbbreviationService
         }
 
         var fallback = GetBuiltInAbbreviations()
-            .Where(a => a.ExpandedForm.Equals(normalized, StringComparison.OrdinalIgnoreCase))
+            .Where(a => a.ExpandedForm.Equals(normalizedKey, StringComparison.OrdinalIgnoreCase))
             .ToList();
 
         if (fallback.Count > 0)
         {
-            _expandedFormCache[normalized] = fallback;
+            _expandedFormCache[normalizedKey] = fallback;
             return fallback;
         }
 
@@ -1188,6 +1190,8 @@ public class AbbreviationService : IAbbreviationService
             a.ShortForm.Equals(shortForm, StringComparison.OrdinalIgnoreCase) &&
             a.ExpandedForm.Equals(expandedForm, StringComparison.OrdinalIgnoreCase));
     }
+
+    private static string NormalizeLookupKey(string value) => value.Trim().ToLowerInvariant();
 
     private static bool IsMissingAbbreviationsTableException(Exception ex)
     {

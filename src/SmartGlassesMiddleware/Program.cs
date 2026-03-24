@@ -134,6 +134,15 @@ static async Task EnsureAbbreviationsTableAsync(IServiceProvider services, ILogg
             ""CreatedAt"" timestamp with time zone NOT NULL,
             CONSTRAINT ""PK_Abbreviations"" PRIMARY KEY (""Id"")
         )",
+                // Keep exactly one row per case-insensitive (ShortForm, ExpandedForm) pair
+                // so we can enforce dedupe with a unique functional index.
+                @"DELETE FROM ""Abbreviations"" a
+                    USING ""Abbreviations"" b
+                    WHERE a.""Id"" > b.""Id""
+                        AND lower(a.""ShortForm"") = lower(b.""ShortForm"")
+                        AND lower(a.""ExpandedForm"") = lower(b.""ExpandedForm"")",
+                @"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_Abbreviations_Short_Expanded_Unique_CI""
+                    ON ""Abbreviations"" (lower(""ShortForm""), lower(""ExpandedForm""))",
         "CREATE INDEX IF NOT EXISTS \"IX_Abbreviations_ShortForm\" ON \"Abbreviations\" (\"ShortForm\")",
         "CREATE INDEX IF NOT EXISTS \"IX_Abbreviations_ExpandedForm\" ON \"Abbreviations\" (\"ExpandedForm\")",
         "CREATE INDEX IF NOT EXISTS \"IX_Abbreviations_Category\" ON \"Abbreviations\" (\"Category\")",

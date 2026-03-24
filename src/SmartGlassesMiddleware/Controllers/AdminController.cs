@@ -6,6 +6,7 @@ using SmartGlassesMiddleware.Services;
 using Microsoft.AspNetCore.SignalR;
 using SmartGlassesMiddleware.Hubs;
 using System.Collections.Concurrent;
+using System.Text;
 
 namespace SmartGlassesMiddleware.Controllers;
 
@@ -1055,6 +1056,56 @@ public class AdminController : ControllerBase
             _logger.LogError(ex, "Error downloading file {FileId}", id);
             return StatusCode(500);
         }
+    }
+
+    /// <summary>
+    /// Download all abbreviations from the database as CSV.
+    /// </summary>
+    [HttpGet("abbreviations/download")]
+    public async Task<IActionResult> DownloadAbbreviationsCsv()
+    {
+        var abbreviations = await _context.Abbreviations
+            .AsNoTracking()
+            .OrderBy(a => a.ShortForm)
+            .ThenBy(a => a.ExpandedForm)
+            .ToListAsync(HttpContext.RequestAborted);
+
+        static string EscapeCsv(string? value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return string.Empty;
+            }
+
+            var escaped = value.Replace("\"", "\"\"");
+            return $"\"{escaped}\"";
+        }
+
+        var sb = new StringBuilder();
+        sb.AppendLine("Id,ShortForm,ExpandedForm,Category,Source,CreatedAt,UpdatedAt");
+
+        foreach (var a in abbreviations)
+        {
+            sb.Append(EscapeCsv(a.Id.ToString()));
+            sb.Append(',');
+            sb.Append(EscapeCsv(a.ShortForm));
+            sb.Append(',');
+            sb.Append(EscapeCsv(a.ExpandedForm));
+            sb.Append(',');
+            sb.Append(EscapeCsv(a.Category));
+            sb.Append(',');
+            sb.Append(EscapeCsv(a.Source));
+            sb.Append(',');
+            sb.Append(EscapeCsv(a.CreatedAt.ToString("o")));
+            sb.Append(',');
+            sb.Append(EscapeCsv(a.UpdatedAt.ToString("o")));
+            sb.AppendLine();
+        }
+
+        var fileName = $"abbreviations-{DateTime.UtcNow:yyyyMMdd-HHmmss}.csv";
+        var csvBytes = Encoding.UTF8.GetBytes(sb.ToString());
+
+        return File(csvBytes, "text/csv; charset=utf-8", fileName);
     }
 
     /// <summary>
