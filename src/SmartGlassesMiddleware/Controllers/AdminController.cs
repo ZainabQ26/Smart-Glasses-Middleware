@@ -169,12 +169,22 @@ public class AdminController : ControllerBase
             .Where(d => d.IsProcessed && d.ManagedFileId != null)
             .ToListAsync();
 
+        if (docs.Count == 0)
+            return Ok(new { updated = 0, total = 0 });
+
+        // Extract distinct ManagedFileIds
+        var mfIds = docs.Select(d => d.ManagedFileId!.Value).Distinct().ToList();
+
+        // Fetch all related ManagedFiles in a single query to avoid N+1 inside the loop
+        var mfs = await _context.ManagedFiles
+            .Where(m => mfIds.Contains(m.Id))
+            .ToDictionaryAsync(m => m.Id);
+
         int updated = 0;
         foreach (var doc in docs)
         {
             if (doc.ManagedFileId is not Guid mfId) continue;
-            var mf = await _context.ManagedFiles.FindAsync(mfId);
-            if (mf == null) continue;
+            if (!mfs.TryGetValue(mfId, out var mf)) continue;
 
             var desiredFileName = doc.FileName;
             if (!desiredFileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
