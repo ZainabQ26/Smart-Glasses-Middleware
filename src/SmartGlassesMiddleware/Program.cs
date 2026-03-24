@@ -254,13 +254,10 @@ builder.Services.Configure<Microsoft.AspNetCore.ResponseCompression.GzipCompress
     options.Level = System.IO.Compression.CompressionLevel.Fastest;
 });
 
-// Enable detailed HTTP request/response logging (bodies limited to reasonable size)
+// Enable detailed HTTP request/response logging (headers/properties only to prevent sensitive data exposure)
 builder.Services.AddHttpLogging(options =>
 {
-    options.LoggingFields = HttpLoggingFields.RequestPropertiesAndHeaders | HttpLoggingFields.RequestBody | HttpLoggingFields.ResponseBody;
-    options.RequestBodyLogLimit = 4096; // bytes
-    options.ResponseBodyLogLimit = 4096; // bytes
-    options.MediaTypeOptions.AddText("application/json");
+    options.LoggingFields = HttpLoggingFields.RequestPropertiesAndHeaders | HttpLoggingFields.ResponsePropertiesAndHeaders;
 });
 
 // Configure PostgreSQL
