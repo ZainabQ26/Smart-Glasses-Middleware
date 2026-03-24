@@ -1529,6 +1529,7 @@ const styles = {
     zIndex: 100,
     padding: 16,
     overflowY: "auto",
+    overflowX: "hidden",
   },
   landingCard: {
     background: "#111",
@@ -1581,12 +1582,13 @@ const styles = {
     width: "100%",
     borderCollapse: "collapse",
     fontSize: "0.875rem",
+    tableLayout: "fixed",
   },
   landingCmd: {
     padding: "5px 10px 5px 0",
     color: "#f97316",
     fontFamily: "monospace",
-    whiteSpace: "nowrap",
+    wordBreak: "break-word",
     verticalAlign: "top",
     width: "40%",
   },
