@@ -27,6 +27,33 @@ The workflow triggers on tags matching:
 - `v*` — full deploy via `deploy-main.yml`
 - `deploy-*` — fast deploy via `deploy-fast.yml`
 
+## Documentation Site (DocFX + GitHub Pages)
+
+This repo includes an automated docs workflow in `.github/workflows/docs-pages.yml`.
+
+- Static docs are built by DocFX from `docs/`
+- C# API reference is generated from `src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj`
+- Runs manually via `workflow_dispatch` and publishes to GitHub Pages
+- Documentation URL: https://robertbiv.github.io/Smart-Glasses-Middleware/
+
+### One-time GitHub setup
+
+1. In GitHub, open **Settings -> Pages**
+2. Under **Build and deployment**, set **Source** to **GitHub Actions**
+
+### Manual run
+
+```bash
+gh workflow run docs-pages.yml --ref main
+```
+
+### Monitor run
+
+```bash
+gh run list --workflow docs-pages.yml --limit 5
+gh run watch <run-id> --exit-status
+```
+
 2. Manual deploy (`workflow_dispatch`) with required inputs:
 
 ```bash
