@@ -45,7 +45,7 @@ resource "aws_iam_role_policy" "lambda_document_processor" {
       {
         Effect = "Allow"
         Action = [
-          "bedrock:InvokeModel"
+          "bedrock-runtime:InvokeModel"
         ]
         Resource = "*"
       },
