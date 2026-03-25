@@ -1006,7 +1006,7 @@ app.Use(async (context, next) =>
 app.MapOpenApi();
 
 // Interactive OpenAPI UI at /swagger (powered by Scalar)
-app.MapScalarApiReference("/swagger/{documentName}", options =>
+app.MapScalarApiReference("/swagger", options =>
 {
     options.WithTitle("Smart Glasses Middleware API");
 });
