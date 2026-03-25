@@ -11,7 +11,7 @@ using System.Threading.Tasks;
 namespace SmartGlassesMiddleware.Tests;
 
 [TestFixture]
-public class RedisCacheServiceTests
+public class RedisCacheServiceBehaviorTests
 {
     private Mock<IConnectionMultiplexer> _redisMock;
     private Mock<IDatabase> _dbMock;
