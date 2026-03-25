@@ -224,12 +224,11 @@ resource "aws_lambda_permission" "allow_function_url_public" {
 }
 
 resource "aws_lambda_permission" "allow_function_url_invoke" {
-  count                  = local.enable_ecs_idle_autoscaler_effective ? 1 : 0
-  statement_id           = "FunctionURLAllowInvokeFunction"
-  action                 = "lambda:InvokeFunction"
-  function_name          = aws_lambda_function.ecs_idle_scaler[0].function_name
-  principal              = "*"
-  invoked_via_function_url = true
+  count         = local.enable_ecs_idle_autoscaler_effective ? 1 : 0
+  statement_id  = "FunctionURLAllowInvokeFunction"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.ecs_idle_scaler[0].function_name
+  principal     = "*"
 }
 
 resource "aws_cloudwatch_metric_alarm" "ecs_wake_on_traffic" {
