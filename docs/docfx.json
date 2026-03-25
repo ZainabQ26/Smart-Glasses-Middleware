@@ -1,0 +1,40 @@
+{
+  "metadata": [
+    {
+      "src": [
+        {
+          "src": "..",
+          "files": [
+            "src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj"
+          ]
+        }
+      ],
+      "dest": "api"
+    }
+  ],
+  "build": {
+    "content": [
+      {
+        "files": [
+          "api/**.yml",
+          "api/index.md"
+        ]
+      },
+      {
+        "files": [
+          "*.md",
+          "toc.yml"
+        ]
+      }
+    ],
+    "output": "_site",
+    "template": [
+      "default"
+    ],
+    "globalMetadata": {
+      "_appTitle": "Smart Glasses Middleware Docs",
+      "_appName": "Smart Glasses Middleware",
+      "_enableSearch": true
+    }
+  }
+}
