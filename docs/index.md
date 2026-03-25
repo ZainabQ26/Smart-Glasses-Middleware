@@ -10,4 +10,4 @@ This site is generated automatically with DocFX and published with GitHub Pages.
 ## Quick Links
 
 - [Project README](../README.md)
-- [OpenAPI spec](../openapi.json)
+- [OpenAPI spec](https://github.com/robertbiv/Smart-Glasses-Middleware/blob/main/openapi.json)
