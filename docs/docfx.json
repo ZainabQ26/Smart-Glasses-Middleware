@@ -25,11 +25,18 @@
           "*.md",
           "toc.yml"
         ]
+      },
+      {
+        "src": "..",
+        "files": [
+          "README.md"
+        ]
       }
     ],
     "output": "_site",
     "template": [
-      "default"
+      "default",
+      "modern"
     ],
     "globalMetadata": {
       "_appTitle": "Smart Glasses Middleware Docs",
