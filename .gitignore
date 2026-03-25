@@ -122,6 +122,7 @@ regression-results*.txt
 test-*.txt
 test_*.txt
 *.json
+!docs/docfx.json
 !package.json
 !package-lock.json
 !appsettings*.json
