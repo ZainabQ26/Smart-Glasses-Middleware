@@ -122,6 +122,7 @@ regression-results*.txt
 test-*.txt
 test_*.txt
 *.json
+!docs/docfx.json
 !package.json
 !package-lock.json
 !appsettings*.json
@@ -165,3 +166,10 @@ aws/lambda-*/package/
 
 # Allow repo-level global.json used to pin the .NET SDK
 !/global.json
+
+# DocFX generated site artifacts
+/docs/_site/
+/docs/api/
+/_site/
+
+TestResults/

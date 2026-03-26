@@ -1038,18 +1038,18 @@ export default function App() {
         const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
         audioCtxRef.current = ctx;
         const source    = ctx.createMediaStreamSource(stream);
-        // NOTE: ScriptProcessorNode is deprecated; migrating to AudioWorklet requires
-        // a dedicated worker module file which adds Vite build complexity.
-        // TODO: replace with AudioWorkletNode once the project has a processor module.
-        const processor = ctx.createScriptProcessor(BUFFER_SIZE, 1, 1);
+
+        // Add AudioWorklet module
+        await ctx.audioWorklet.addModule('/audioProcessor.js');
+        const processor = new AudioWorkletNode(ctx, 'audio-processor');
         processorRef.current = processor;
+
         source.connect(processor);
         processor.connect(ctx.destination);
 
-        processor.onaudioprocess = (ev) => {
+        processor.port.onmessage = (ev) => {
           if (disposed) return;
-          // Float32Array copy — the underlying buffer is reused after this callback
-          const samples = new Float32Array(ev.inputBuffer.getChannelData(0));
+          const samples = ev.data;
           const rms = Math.sqrt(samples.reduce((s, v) => s + v * v, 0) / samples.length);
           const now = Date.now();
 
@@ -1096,7 +1096,12 @@ export default function App() {
     return () => {
       disposed = true;
       clearTimers();
-      try { processorRef.current?.disconnect(); } catch (_) {}
+      try {
+        if (processorRef.current) {
+          processorRef.current.port.close();
+          processorRef.current.disconnect();
+        }
+      } catch (_) {}
       try { audioCtxRef.current?.close(); } catch (_) {}
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(t => t.stop());
@@ -1232,7 +1237,7 @@ export default function App() {
                 </div>
               )}
             </div>
-            <div style={styles.landingSection}>
+            <div style={styles.landingSection} className="sgm-landing-how">
               <h2 style={styles.landingH2}>🎤 How It Works</h2>
               <ol style={styles.landingOl}>
                 <li>Say <em>"{activationWord}"</em> to wake the assistant.</li>
@@ -1242,7 +1247,7 @@ export default function App() {
                 <li>After "search recent files", you can specify file number without reactivating.</li>
               </ol>
             </div>
-            <div style={styles.landingSection}>
+            <div style={styles.landingSection} className="sgm-landing-cmds">
               <h2 style={styles.landingH2}>📋 Common Commands</h2>
               <table style={styles.landingTable}>
                 <tbody>
@@ -1475,13 +1480,14 @@ function logBg(type) {
 
 const styles = {
   page: {
-    minHeight: "100vh",
+    height: "100%",
     background: "#000",
     color: "#e0e0e0",
     display: "flex",
     flexDirection: "column",
     fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
     position: "relative",
+    overflow: "hidden",
   },
   serverWakeOverlay: {
     position: "fixed",
@@ -1524,11 +1530,11 @@ const styles = {
     inset: 0,
     background: "rgba(0,0,0,0.92)",
     display: "flex",
-    alignItems: "flex-start",
+    alignItems: "center",
     justifyContent: "center",
     zIndex: 100,
     padding: 16,
-    overflowY: "auto",
+    overflowY: "hidden",
     overflowX: "hidden",
   },
   landingCard: {
@@ -1538,10 +1544,12 @@ const styles = {
     padding: "32px 28px",
     maxWidth: 620,
     width: "100%",
+    // Keep the card within the visible overlay (overlay has 16px padding on each side = 32px total)
+    maxHeight: "calc(100dvh - 32px)",
     display: "flex",
     flexDirection: "column",
     gap: 20,
-    margin: "auto",
+    overflowY: "auto",
   },
   landingTitle: {
     margin: 0,
@@ -1708,6 +1716,7 @@ const styles = {
   indicatorText: { fontSize: "0.85rem", color: "#ccc" },
   main: {
     flex: 1,
+    minHeight: 0,
     maxWidth: 680,
     width: "100%",
     margin: "48px auto 32px",
@@ -1715,6 +1724,7 @@ const styles = {
     display: "flex",
     flexDirection: "column",
     gap: 24,
+    overflowY: "auto",
   },
   btnWrap: {
     display: "flex",
@@ -1899,8 +1909,10 @@ const styles = {
     position: "fixed",
     bottom: 60,
     right: 20,
-    width: 360,
-    maxHeight: 400,
+    // Responsive width: at most 360px but never wider than the viewport minus 40px (20px margin each side)
+    width: "min(360px, calc(100vw - 40px))",
+    // Responsive height: at most 400px but never taller than viewport minus log-toggle button area (~80px)
+    maxHeight: "min(400px, calc(100dvh - 80px))",
     background: "#111",
     borderRadius: 12,
     padding: 16,
@@ -2023,5 +2035,22 @@ if (typeof document !== "undefined" && !document.getElementById("app-spin-style"
   const style = document.createElement("style");
   style.id = "app-spin-style";
   style.textContent = "@keyframes spin { to { transform: rotate(360deg); } }";
+  document.head.appendChild(style);
+}
+
+// Inject mobile-responsive rules once.
+// On small screens (narrow or short) the landing card commands table and "How It Works"
+// list are hidden so all remaining content fits within the viewport without scrolling.
+if (typeof document !== "undefined" && !document.getElementById("app-mobile-style")) {
+  const style = document.createElement("style");
+  style.id = "app-mobile-style";
+  style.textContent = `
+    @media (max-width: 480px), (max-height: 650px) {
+      .sgm-landing-cmds { display: none; }
+    }
+    @media (max-width: 360px), (max-height: 540px) {
+      .sgm-landing-how { display: none; }
+    }
+  `;
   document.head.appendChild(style);
 }

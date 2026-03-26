@@ -13,6 +13,7 @@ namespace SmartGlassesMiddleware.Controllers;
 /// <summary>
 /// Handles administrative operations for managing files, prompts, and resource groups
 /// </summary>
+
 [ApiController]
 [Route("api/admin")]
 public class AdminController : ControllerBase
@@ -159,6 +160,7 @@ public class AdminController : ControllerBase
     /// <summary>
     /// Fix ManagedFile entries for already-processed documents so filenames and content-types reflect the converted PDF.
     /// </summary>
+
     [HttpPost("fix-processed-managedfiles")]
     public async Task<IActionResult> FixProcessedManagedFiles()
     {
@@ -167,12 +169,22 @@ public class AdminController : ControllerBase
             .Where(d => d.IsProcessed && d.ManagedFileId != null)
             .ToListAsync();
 
+        if (docs.Count == 0)
+            return Ok(new { updated = 0, total = 0 });
+
+        // Extract distinct ManagedFileIds
+        var mfIds = docs.Select(d => d.ManagedFileId!.Value).Distinct().ToList();
+
+        // Fetch all related ManagedFiles in a single query to avoid N+1 inside the loop
+        var mfs = await _context.ManagedFiles
+            .Where(m => mfIds.Contains(m.Id))
+            .ToDictionaryAsync(m => m.Id);
+
         int updated = 0;
         foreach (var doc in docs)
         {
             if (doc.ManagedFileId is not Guid mfId) continue;
-            var mf = await _context.ManagedFiles.FindAsync(mfId);
-            if (mf == null) continue;
+            if (!mfs.TryGetValue(mfId, out var mf)) continue;
 
             var desiredFileName = doc.FileName;
             if (!desiredFileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
@@ -211,6 +223,7 @@ public class AdminController : ControllerBase
     /// <summary>
     /// Get managed files with pagination and caching
     /// </summary>
+
     [HttpGet("files")]
     public async Task<ActionResult<object>> GetFiles([FromQuery] int page = 1, [FromQuery] int pageSize = DefaultPageSize)
     {
@@ -332,6 +345,7 @@ public class AdminController : ControllerBase
     /// Returns a presigned S3 PUT URL so the browser can upload directly to S3, bypassing
     /// the CloudFront 60-second origin_read_timeout.  Returns 501 when not available (LocalStack/MinIO).
     /// </summary>
+
     [HttpGet("files/upload-url")]
     public async Task<IActionResult> GetPresignedUploadUrl([FromQuery] string filename, [FromQuery] string contentType = "application/octet-stream")
     {
@@ -353,6 +367,7 @@ public class AdminController : ControllerBase
     /// Called by the browser after a successful direct-to-S3 presigned upload.
     /// Creates a DB placeholder and starts RAG processing in the background.
     /// </summary>
+
     [HttpPost("files/complete")]
     public async Task<IActionResult> CompletePresignedUpload([FromBody] CompleteUploadRequest request)
     {
@@ -577,6 +592,7 @@ public class AdminController : ControllerBase
     /// <summary>
     /// Upload a new file with label - queues S3 upload and RAG processing to background to avoid request timeouts
     /// </summary>
+
     [HttpPost("files")]
     [ProducesResponseType(StatusCodes.Status202Accepted)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -846,6 +862,7 @@ public class AdminController : ControllerBase
     /// <summary>
     /// Delete a managed file
     /// </summary>
+
     [HttpDelete("files/{id}")]
     public async Task<ActionResult> DeleteFile(Guid id)
     {
@@ -898,6 +915,7 @@ public class AdminController : ControllerBase
     /// <summary>
     /// Preview a managed file (inline display). Falls back to DocumentMetadatas if not found in ManagedFiles.
     /// </summary>
+
     [HttpGet("files/{id}/preview")]
     public async Task<ActionResult> PreviewFile(Guid id)
     {
@@ -995,6 +1013,7 @@ public class AdminController : ControllerBase
     /// <summary>
     /// Download a managed file (force download). Falls back to DocumentMetadatas if not found in ManagedFiles.
     /// </summary>
+
     [HttpGet("files/{id}/download")]
     public async Task<ActionResult> DownloadFile(Guid id)
     {
@@ -1064,6 +1083,9 @@ public class AdminController : ControllerBase
     /// <summary>
     /// Download all abbreviations from the database as CSV.
     /// </summary>
+
+
+    /// <returns>A file containing the abbreviations in CSV format.</returns>
     [HttpGet("abbreviations/download")]
     public async Task<IActionResult> DownloadAbbreviationsCsv()
     {
@@ -1114,6 +1136,7 @@ public class AdminController : ControllerBase
     /// <summary>
     /// Debug: returns size, first 16 bytes (hex), stored content-type and storage key for a file.
     /// </summary>
+
     [HttpGet("files/{id}/status")]
     public async Task<IActionResult> FileStatus(Guid id)
     {
@@ -1259,6 +1282,9 @@ public class AdminController : ControllerBase
     /// <summary>
     /// Reindex all documents' embeddings. Use `force=true` to re-embed already processed documents.
     /// </summary>
+
+
+    /// <returns>A status confirming the reindex.</returns>
     [HttpPost("reindex")]
     public async Task<ActionResult> ReindexAll([FromQuery] bool force = false)
     {
@@ -1299,6 +1325,7 @@ public class AdminController : ControllerBase
     /// <summary>
     /// Get managed prompts with pagination and caching
     /// </summary>
+
     [HttpGet("prompts")]
     public async Task<ActionResult<object>> GetPrompts([FromQuery] int page = 1, [FromQuery] int pageSize = DefaultPageSize)
     {
@@ -1370,6 +1397,7 @@ public class AdminController : ControllerBase
     /// <summary>
     /// Create a new prompt
     /// </summary>
+
     [HttpPost("prompts")]
     public async Task<ActionResult> CreatePrompt([FromBody] PromptRequest request)
     {
@@ -1442,6 +1470,7 @@ public class AdminController : ControllerBase
     /// <summary>
     /// Update an existing prompt
     /// </summary>
+
     [HttpPut("prompts/{id}")]
     public async Task<ActionResult> UpdatePrompt(Guid id, [FromBody] PromptRequest request)
     {
@@ -1520,6 +1549,7 @@ public class AdminController : ControllerBase
     /// <summary>
     /// Delete a prompt
     /// </summary>
+
     [HttpDelete("prompts/{id}")]
     public async Task<ActionResult> DeletePrompt(Guid id)
     {
@@ -1571,6 +1601,7 @@ public class AdminController : ControllerBase
     /// <summary>
     /// Get resource groups with pagination and caching
     /// </summary>
+
     [HttpGet("groups")]
     public async Task<ActionResult<object>> GetGroups([FromQuery] int page = 1, [FromQuery] int pageSize = DefaultPageSize)
     {
@@ -1765,6 +1796,7 @@ public class AdminController : ControllerBase
     /// <summary>
     /// Create a new resource group
     /// </summary>
+
     [HttpPost("groups")]
     public async Task<ActionResult> CreateGroup([FromBody] GroupRequest request)
     {
@@ -1828,6 +1860,7 @@ public class AdminController : ControllerBase
     /// <summary>
     /// Update a resource group
     /// </summary>
+
     [HttpPut("groups/{id}")]
     public async Task<ActionResult> UpdateGroup(Guid id, [FromBody] GroupRequest request)
     {
@@ -1896,6 +1929,7 @@ public class AdminController : ControllerBase
     /// <summary>
     /// Delete a resource group
     /// </summary>
+
     [HttpDelete("groups/{id}")]
     public async Task<ActionResult> DeleteGroup(Guid id)
     {
@@ -1991,6 +2025,7 @@ public class AdminController : ControllerBase
     /// <summary>
     /// Get detailed information about a specific group including all its contents
     /// </summary>
+
     [HttpGet("groups/{id}")]
     public async Task<ActionResult<object>> GetGroupDetails(Guid id)
     {
@@ -2071,6 +2106,7 @@ public class AdminController : ControllerBase
     /// <summary>
     /// Add a file to a group
     /// </summary>
+
     [HttpPost("groups/{groupId}/files/{fileId}")]
     public async Task<ActionResult> AddFileToGroup(Guid groupId, Guid fileId)
     {
@@ -2138,6 +2174,7 @@ public class AdminController : ControllerBase
     /// <summary>
     /// Remove a file from a group
     /// </summary>
+
     [HttpDelete("groups/{groupId}/files/{fileId}")]
     public async Task<ActionResult> RemoveFileFromGroup(Guid groupId, Guid fileId)
     {
@@ -2185,6 +2222,7 @@ public class AdminController : ControllerBase
     /// <summary>
     /// Add a prompt to a group
     /// </summary>
+
     [HttpPost("groups/{groupId}/prompts/{promptId}")]
     public async Task<ActionResult> AddPromptToGroup(Guid groupId, Guid promptId)
     {
@@ -2251,6 +2289,7 @@ public class AdminController : ControllerBase
     /// <summary>
     /// Remove a prompt from a group
     /// </summary>
+
     [HttpDelete("groups/{groupId}/prompts/{promptId}")]
     public async Task<ActionResult> RemovePromptFromGroup(Guid groupId, Guid promptId)
     {
@@ -2369,6 +2408,7 @@ public class AdminController : ControllerBase
     /// <summary>
     /// Auto-delete a group if it has no files, prompts, or conversations
     /// </summary>
+
     private async Task AutoDeleteEmptyGroup(Guid groupId)
     {
         try
@@ -2407,6 +2447,7 @@ public class AdminController : ControllerBase
     /// <summary>
     /// Invalidate files cache for all pages
     /// </summary>
+
     private async Task InvalidateFilesCache()
     {
         try
@@ -2435,6 +2476,7 @@ public class AdminController : ControllerBase
     /// <summary>
     /// Invalidate prompts cache for all pages
     /// </summary>
+
     private async Task InvalidatePromptsCache()
     {
         try
@@ -2460,6 +2502,7 @@ public class AdminController : ControllerBase
     /// <summary>
     /// Invalidate groups cache for all pages
     /// </summary>
+
     private async Task InvalidateGroupsCache()
     {
         try
@@ -2485,6 +2528,7 @@ public class AdminController : ControllerBase
     /// <summary>
     /// Invalidate all caches (files, prompts, groups)
     /// </summary>
+
     private async Task InvalidateAllCaches()
     {
         await Task.WhenAll(
@@ -2501,6 +2545,7 @@ public class AdminController : ControllerBase
     /// <summary>
     /// Get files, prompts, and groups in a single batch request for efficiency
     /// </summary>
+
     [HttpGet("batch")]
     public async Task<ActionResult<object>> GetBatch(
         [FromQuery] bool includeFiles = true,
@@ -2599,6 +2644,10 @@ public class AdminController : ControllerBase
     /// <summary>
     /// Get server-side prevent-sleep setting for admin keepalive behavior.
     /// </summary>
+
+
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The current prevent-sleep setting state.</returns>
     [HttpGet("settings/prevent-sleep")]
     public async Task<ActionResult<object>> GetPreventSleepSetting(CancellationToken cancellationToken)
     {
@@ -2627,6 +2676,11 @@ public class AdminController : ControllerBase
     /// <summary>
     /// Update server-side prevent-sleep setting for admin keepalive behavior.
     /// </summary>
+
+
+    /// <param name="request">The request body containing the desired prevent-sleep state.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The updated setting state.</returns>
     [HttpPut("settings/prevent-sleep")]
     public async Task<ActionResult<object>> SetPreventSleepSetting(
         [FromBody] PreventSleepSettingRequest request,
@@ -2658,6 +2712,9 @@ public class AdminController : ControllerBase
     /// Clear ALL history data: request monitoring, files, documents, conversations, AI logs, and transcription jobs.
     /// Nothing is preserved — all user data is deleted.
     /// </summary>
+
+
+    /// <returns>A dictionary of deleted record counts.</returns>
     [HttpPost("clear-all")]
     public async Task<IActionResult> ClearAll()
     {

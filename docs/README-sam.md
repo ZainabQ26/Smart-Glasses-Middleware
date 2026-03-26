@@ -38,5 +38,5 @@ Notes on LocalStack
 
 Files
 
-- SAM template: [aws/sam/template.yaml](aws/sam/template.yaml)
-- Template README: [aws/sam/README.md](aws/sam/README.md)
+- SAM template: [aws/sam/template.yaml](https://github.com/robertbiv/Smart-Glasses-Middleware/blob/main/aws/sam/template.yaml)
+- Template README: [aws/sam/README.md](https://github.com/robertbiv/Smart-Glasses-Middleware/blob/main/aws/sam/README.md)

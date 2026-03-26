@@ -4,6 +4,10 @@
   padding: 0;
 }
 
+html {
+  height: 100%;
+}
+
 :root {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
   font-size: 16px;
@@ -14,5 +18,14 @@
 
 body {
   background: #000000;
-  min-height: 100vh;
+  /* Fallback for browsers that don't support dvh */
+  height: 100vh;
+  /* Use dvh so the page matches the visible viewport on mobile (excludes browser chrome like the address bar) */
+  height: 100dvh;
+  overflow: hidden;
+}
+
+#root {
+  height: 100%;
+  overflow: hidden;
 }
