@@ -44,6 +44,11 @@
         "files": [
           "swagger/index.html"
         ]
+      },
+      {
+        "files": [
+          "public/main.css"
+        ]
       }
     ],
     "output": "_site",
@@ -54,7 +59,10 @@
     "globalMetadata": {
       "_appTitle": "Smart Glasses Middleware Docs",
       "_appName": "Smart Glasses Middleware",
-      "_enableSearch": true
+      "_enableSearch": true,
+      "_customCss": [
+        "public/main.css"
+      ]
     }
   }
 }

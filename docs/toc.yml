@@ -1,7 +1,7 @@
 - name: Home
   href: index.md
 - name: API Reference
-  href: api/index.md
+  href: api/toc.yml
 - name: Swagger API UI
   href: swagger/index.html
 - name: Advanced API Sample Calls
