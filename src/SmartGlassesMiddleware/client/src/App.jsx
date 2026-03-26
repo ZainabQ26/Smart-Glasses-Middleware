@@ -1194,7 +1194,6 @@ export default function App() {
     [`"clear highlights"`,     "delete all highlights"],
     [`"search for [text]"`,    "search document"],
     [`"print document"`,       "save document as PDF with highlights"],
-    [`"print highlighted pages"`, "print only pages that contain highlights"],
     [`"show my reminders"`,    "list reminders"],
     [`"remind me to…"`,        "set reminder"],
     [`"admin panel"`,          "open settings"],
@@ -1264,7 +1263,6 @@ export default function App() {
                     ["remind me to…", "Set a reminder"],
                     ["show my reminders", "List all your reminders"],
                     ["print document", "Print the open document with highlights"],
-                    ["print highlighted pages", "Print only pages with highlights"],
                     ["admin panel", "Open the admin panel"],
                   ].map(([cmd, desc]) => (
                     <tr key={cmd}>
