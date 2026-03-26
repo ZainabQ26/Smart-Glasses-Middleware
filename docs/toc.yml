@@ -2,6 +2,8 @@
   href: index.md
 - name: API Reference
   href: api/index.md
+- name: Swagger API UI
+  href: swagger/index.html
 - name: Advanced API Sample Calls
   href: ADVANCED_API_SAMPLE_CALLS.md
 - name: Blank Audio Detection
@@ -22,5 +24,3 @@
   href: README-sam.md
 - name: Tasks
   href: README-tasks.md
-- name: Explanation
-  href: explanation.md
