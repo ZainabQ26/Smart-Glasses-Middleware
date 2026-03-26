@@ -1,0 +1,26 @@
+- name: Home
+  href: index.md
+- name: API Reference
+  href: api/index.md
+- name: Advanced API Sample Calls
+  href: ADVANCED_API_SAMPLE_CALLS.md
+- name: Blank Audio Detection
+  href: BLANK_AUDIO_DETECTION.md
+- name: LocalStack
+  href: LOCALSTACK.md
+- name: Abbreviation Sync
+  href: README-AbbreviationSync.md
+- name: Actions Runner
+  href: README-actions-runner.md
+- name: AWS
+  href: README-aws.md
+- name: ECS API
+  href: README-ecs-api.md
+- name: Lambda Document Processor
+  href: README-lambda-document-processor.md
+- name: SAM
+  href: README-sam.md
+- name: Tasks
+  href: README-tasks.md
+- name: Explanation
+  href: explanation.md

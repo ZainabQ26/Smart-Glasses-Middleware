@@ -1,0 +1,99 @@
+name: Docs (GitHub Pages)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Install DocFX
+        run: dotnet tool update --global docfx
+
+      - name: Build docs site
+        run: |
+          set -euo pipefail
+          export PATH="$PATH:$HOME/.dotnet/tools"
+
+          if [ -f "docs/docfx.json" ]; then
+            CONFIG_PATH="docs/docfx.json"
+          elif [ -f "docfx.json" ]; then
+            CONFIG_PATH="docfx.json"
+          else
+            echo "No docfx config found in repo; generating fallback config for this run."
+            cat > /tmp/docfx.json <<'EOF'
+          {
+            "metadata": [
+              {
+                "src": [
+                  {
+                    "src": ".",
+                    "files": [
+                      "src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj"
+                    ]
+                  }
+                ],
+                "dest": "docs/api"
+              }
+            ],
+            "build": {
+              "content": [
+                {
+                  "files": [
+                    "docs/**.md",
+                    "docs/toc.yml",
+                    "docs/api/**.yml",
+                    "docs/api/index.md"
+                  ]
+                }
+              ],
+              "output": "docs/_site",
+              "template": [
+                "default"
+              ],
+              "globalMetadata": {
+                "_appTitle": "Smart Glasses Middleware Docs",
+                "_appName": "Smart Glasses Middleware",
+                "_enableSearch": true
+              }
+            }
+          }
+          EOF
+            CONFIG_PATH="/tmp/docfx.json"
+          fi
+
+          echo "Using DocFX config: ${CONFIG_PATH}"
+          docfx "${CONFIG_PATH}"
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/_site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

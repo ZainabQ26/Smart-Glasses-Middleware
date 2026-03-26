@@ -254,18 +254,18 @@ builder.Services.Configure<Microsoft.AspNetCore.ResponseCompression.GzipCompress
     options.Level = System.IO.Compression.CompressionLevel.Fastest;
 });
 
-// Enable detailed HTTP request/response logging (bodies limited to reasonable size)
+// Enable detailed HTTP request/response logging (headers/properties only to prevent sensitive data exposure)
 builder.Services.AddHttpLogging(options =>
 {
-    options.LoggingFields = HttpLoggingFields.RequestPropertiesAndHeaders | HttpLoggingFields.RequestBody | HttpLoggingFields.ResponseBody;
-    options.RequestBodyLogLimit = 4096; // bytes
-    options.ResponseBodyLogLimit = 4096; // bytes
-    options.MediaTypeOptions.AddText("application/json");
+    options.LoggingFields = HttpLoggingFields.RequestPropertiesAndHeaders | HttpLoggingFields.ResponsePropertiesAndHeaders;
 });
 
 // Configure PostgreSQL
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
-    ?? "Host=localhost;Database=smartglasses;Username=postgres;Password=postgres";
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+if (string.IsNullOrWhiteSpace(connectionString))
+{
+    throw new InvalidOperationException("Database connection string 'DefaultConnection' is not configured.");
+}
 
 // db.t3.micro has ~112 max_connections. Npgsql's default pool is 100 per process,
 // which would monopolise the entire DB budget and cause connection starvation.
@@ -340,9 +340,9 @@ if (!useAwsStorage)
 {
     builder.Services.AddSingleton<IMinioClient>(sp =>
     {
-        var endpoint = builder.Configuration["MinIO:Endpoint"] ?? "localhost:9000";
-        var accessKey = builder.Configuration["MinIO:AccessKey"] ?? "minioadmin";
-        var secretKey = builder.Configuration["MinIO:SecretKey"] ?? "minioadmin";
+        var endpoint = builder.Configuration["MinIO:Endpoint"];
+        var accessKey = builder.Configuration["MinIO:AccessKey"];
+        var secretKey = builder.Configuration["MinIO:SecretKey"];
 
         return new MinioClient()
             .WithEndpoint(endpoint)
@@ -692,19 +692,23 @@ builder.Services.AddCors(options =>
         var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
             ?? new[] { "http://localhost:3000", "http://localhost:5000" };
 
-        if (builder.Environment.IsDevelopment() || allowedOrigins.Contains("*"))
+        if (builder.Environment.IsDevelopment())
         {
-            // In development or when wildcard is configured, allow any origin
+            // In development, allow any origin
             policy.AllowAnyOrigin()
                   .AllowAnyMethod()
                   .AllowAnyHeader();
         }
         else
         {
-            // In production, restrict to specific origins
-            policy.WithOrigins(allowedOrigins)
-                  .AllowAnyMethod()
-                  .AllowAnyHeader();
+            // In production, restrict to specific origins and explicitly ignore wildcards
+            var validOrigins = allowedOrigins.Where(o => o != "*").ToArray();
+            if (validOrigins.Length > 0)
+            {
+                policy.WithOrigins(validOrigins)
+                      .AllowAnyMethod()
+                      .AllowAnyHeader();
+            }
         }
     });
 });
@@ -736,7 +740,7 @@ try
     var minioSecretKey = config["MinIO:SecretKey"];
     if (string.IsNullOrWhiteSpace(minioAccessKey) || string.IsNullOrWhiteSpace(minioSecretKey))
     {
-        logger.LogWarning("MinIO credentials not properly configured. Using default credentials.");
+        logger.LogWarning("MinIO credentials not properly configured. MinIO storage may be unavailable.");
     }
 
     // Validate advanced Bedrock model configuration
@@ -1002,7 +1006,7 @@ app.Use(async (context, next) =>
 app.MapOpenApi();
 
 // Interactive OpenAPI UI at /swagger (powered by Scalar)
-app.MapScalarApiReference("/swagger/{documentName}", options =>
+app.MapScalarApiReference("/swagger", options =>
 {
     options.WithTitle("Smart Glasses Middleware API");
 });

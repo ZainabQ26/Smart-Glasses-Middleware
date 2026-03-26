@@ -21,7 +21,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: smart-glasses-document-processor
-      Handler: handler
+      Handler: index.handler
       CodeUri: ../lambda-document-processor/
       Environment:
         Variables:
@@ -30,28 +30,26 @@ Resources:
           AWS_REGION: !Ref "AWS::Region"
       Policies:
         - AWSLambdaBasicExecutionRole
-        - PolicyName: DocumentProcessorInlinePolicy
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - s3:PutObject
-                  - s3:DeleteObject
-                Resource: !Sub arn:aws:s3:::${DocumentsBucket}/*
-              - Effect: Allow
-                Action:
-                  - secretsmanager:GetSecretValue
-                Resource: !Ref DBSecretArn
-              - Effect: Allow
-                Action:
-                  - textract:DetectDocumentText
-                Resource: "*"
-              - Effect: Allow
-                Action:
-                  - bedrock-runtime:InvokeModel
-                Resource: "*"
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+                - s3:DeleteObject
+              Resource: !Sub arn:aws:s3:::${DocumentsBucket}/*
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Ref DBSecretArn
+            - Effect: Allow
+              Action:
+                - textract:DetectDocumentText
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - bedrock-runtime:InvokeModel
+              Resource: "*"
 
 Outputs:
   DocumentProcessorFunctionArn:

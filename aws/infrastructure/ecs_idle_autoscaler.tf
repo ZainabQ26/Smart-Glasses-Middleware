@@ -210,6 +210,28 @@ resource "aws_lambda_function_url" "ecs_idle_scaler" {
   }
 }
 
+# Public invoke permissions for Lambda Function URL.
+# Both actions are required so anonymous callers can invoke the URL:
+# - lambda:InvokeFunctionUrl (URL endpoint permission)
+# - lambda:InvokeFunction (actual function invoke, constrained to URL path)
+resource "aws_lambda_permission" "allow_function_url_public" {
+  count                 = local.enable_ecs_idle_autoscaler_effective ? 1 : 0
+  statement_id_prefix   = "FunctionURLAllowPublicAccess"
+  action                = "lambda:InvokeFunctionUrl"
+  function_name         = aws_lambda_function.ecs_idle_scaler[0].function_name
+  principal             = "*"
+  function_url_auth_type = "NONE"
+}
+
+resource "aws_lambda_permission" "allow_function_url_invoke" {
+  count                  = local.enable_ecs_idle_autoscaler_effective ? 1 : 0
+  statement_id_prefix    = "FunctionURLAllowInvokeFunction"
+  action                 = "lambda:InvokeFunctionUrl"
+  function_name          = aws_lambda_function.ecs_idle_scaler[0].function_name
+  principal              = "*"
+  function_url_auth_type = "NONE"
+}
+
 resource "aws_cloudwatch_metric_alarm" "ecs_wake_on_traffic" {
   count               = local.enable_ecs_idle_autoscaler_effective ? 1 : 0
   alarm_name          = "${var.project_name}-${var.environment}-ecs-wake-on-traffic"
@@ -367,19 +389,19 @@ resource "aws_cloudwatch_event_target" "ecs_sleep_on_alarm" {
 }
 
 resource "aws_lambda_permission" "allow_events_wake" {
-  count         = local.enable_ecs_idle_autoscaler_effective ? 1 : 0
-  statement_id  = "AllowExecutionFromEventBridgeWake"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.ecs_idle_scaler[0].function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.ecs_wake_on_alarm[0].arn
+  count               = local.enable_ecs_idle_autoscaler_effective ? 1 : 0
+  statement_id_prefix = "AllowExecutionFromEventBridgeWake"
+  action              = "lambda:InvokeFunction"
+  function_name       = aws_lambda_function.ecs_idle_scaler[0].function_name
+  principal           = "events.amazonaws.com"
+  source_arn          = aws_cloudwatch_event_rule.ecs_wake_on_alarm[0].arn
 }
 
 resource "aws_lambda_permission" "allow_events_sleep" {
-  count         = local.enable_ecs_idle_autoscaler_effective ? 1 : 0
-  statement_id  = "AllowExecutionFromEventBridgeSleep"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.ecs_idle_scaler[0].function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.ecs_sleep_on_alarm[0].arn
+  count               = local.enable_ecs_idle_autoscaler_effective ? 1 : 0
+  statement_id_prefix = "AllowExecutionFromEventBridgeSleep"
+  action              = "lambda:InvokeFunction"
+  function_name       = aws_lambda_function.ecs_idle_scaler[0].function_name
+  principal           = "events.amazonaws.com"
+  source_arn          = aws_cloudwatch_event_rule.ecs_sleep_on_alarm[0].arn
 }

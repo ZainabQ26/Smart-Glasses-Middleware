@@ -569,6 +569,14 @@ jobs:
           safe_import aws_ecs_cluster.main "$ECS_CLUSTER"
           safe_import aws_ecs_service.api  "${ECS_CLUSTER}/${PREFIX}-api-service"
 
+          # ── Lambda wake permissions (Function URL) ───────────────────────────
+          # These statements may already exist if they were added manually to
+          # hotfix wake-up behavior. Import them so terraform apply does not hit
+          # ResourceConflictException (statement id already exists).
+          WAKE_LAMBDA_NAME="${PREFIX}-ecs-idle-scaler"
+          safe_import "aws_lambda_permission.allow_function_url_public[0]" "${WAKE_LAMBDA_NAME}/FunctionURLAllowPublicAccess"
+          safe_import "aws_lambda_permission.allow_function_url_invoke[0]" "${WAKE_LAMBDA_NAME}/FunctionURLAllowInvokeFunction"
+
           # ── VPC and all sub-resources ─────────────────────────────────────────
           # Use the ALB's VPC as authoritative so all sub-resources land in the
           # correct VPC.  tf_import is used throughout so any stale wrong-VPC
