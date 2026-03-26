@@ -1293,7 +1293,7 @@ export default function App() {
         </div>
       )}
 
-      <div style={styles.indicator}>
+      <div style={styles.indicator} onClick={handleMicButton}>
         <span style={dotStyle} />
         <span style={styles.indicatorText}>{btnLabel}</span>
         {usedAdvancedModel && (
@@ -1661,7 +1661,7 @@ const styles = {
   // Full command list overlay shown at top-left only while the assistant is listening.
   commandList: {
     position: "fixed",
-    top: 12,
+    top: 60,
     left: 12,
     background: "rgba(10,10,10,0.93)",
     border: "1px solid #2a2a2a",
@@ -1669,7 +1669,7 @@ const styles = {
     padding: "10px 14px",
     zIndex: 50,
     maxWidth: 320,
-    maxHeight: "calc(100vh - 60px)",
+    maxHeight: "calc(100vh - 80px)",
     overflowY: "auto",
   },
   commandListTitle: {
