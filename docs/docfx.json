@@ -33,6 +33,19 @@
         ]
       }
     ],
+    "resource": [
+      {
+        "src": "..",
+        "files": [
+          "openapi.json"
+        ]
+      },
+      {
+        "files": [
+          "swagger/index.html"
+        ]
+      }
+    ],
     "output": "_site",
     "template": [
       "default",
