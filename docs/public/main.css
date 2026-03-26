@@ -8,4 +8,9 @@ body {
 
 .navbar {
   margin-top: 15px !important;
+  flex-wrap: wrap !important;
+}
+
+#navpanel {
+  flex-wrap: wrap !important;
 }

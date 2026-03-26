@@ -4,23 +4,25 @@
   href: api/toc.yml
 - name: Swagger API UI
   href: swagger/index.html
-- name: Advanced API Sample Calls
-  href: ADVANCED_API_SAMPLE_CALLS.md
-- name: Blank Audio Detection
-  href: BLANK_AUDIO_DETECTION.md
-- name: LocalStack
-  href: LOCALSTACK.md
-- name: Abbreviation Sync
-  href: README-AbbreviationSync.md
-- name: Actions Runner
-  href: README-actions-runner.md
-- name: AWS
-  href: README-aws.md
-- name: ECS API
-  href: README-ecs-api.md
-- name: Lambda Document Processor
-  href: README-lambda-document-processor.md
-- name: SAM
-  href: README-sam.md
-- name: Tasks
-  href: README-tasks.md
+- name: Guides
+  items:
+    - name: Advanced API Sample Calls
+      href: ADVANCED_API_SAMPLE_CALLS.md
+    - name: Blank Audio Detection
+      href: BLANK_AUDIO_DETECTION.md
+    - name: LocalStack
+      href: LOCALSTACK.md
+    - name: Abbreviation Sync
+      href: README-AbbreviationSync.md
+    - name: Actions Runner
+      href: README-actions-runner.md
+    - name: AWS
+      href: README-aws.md
+    - name: ECS API
+      href: README-ecs-api.md
+    - name: Lambda Document Processor
+      href: README-lambda-document-processor.md
+    - name: SAM
+      href: README-sam.md
+    - name: Tasks
+      href: README-tasks.md
