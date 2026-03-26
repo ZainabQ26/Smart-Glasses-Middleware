@@ -500,7 +500,7 @@ export default function App() {
       if (isBlankAudioOrNoise(commandText)) {
         addLog("🔊 Detected blank audio or background noise — requiring reactivation.", "warn");
         setPendingAction(null);
-        showAiResponse("I didn't hear a clear command. Please say \"Hi Iris\" again.");
+        showAiResponse("I didn't hear a clear command. Please say \"Iris\" again.");
         // Return to idle/wake-word mode — requires reactivation
         resumeListeningRef.current?.();
         return;
@@ -1183,18 +1183,15 @@ export default function App() {
     [`"search recent files"`,  "browse recent uploaded files"],
     [`"number "#"`,            "goes to file number in recent files list"],
     [`"select document"`,      "open last uploaded document"],
-    [`"next page"`,            "next page"],
-    [`"previous page"`,        "previous page"],
+    [`"next/previous page"`,   "next/previous page"],
     [`"go to page 5"`,         "jump to page"],
     [`"highlight [word]"`,     "highlight text"],
     [`"clear highlights"`,     "delete all highlights"],
     [`"search for [text]"`,    "search document"],
     [`"print document"`,       "save document as PDF with highlights"],
     [`"print highlighted pages"`, "print only pages that contain highlights"],
-    [`"close document"`,       "close PDF"],
     [`"show my reminders"`,    "list reminders"],
     [`"remind me to…"`,        "set reminder"],
-    [`"what time is it"`,      "current time"],
     [`"admin panel"`,          "open settings"],
   ];
 
@@ -1253,8 +1250,7 @@ export default function App() {
                     ["search recent files", "browse recent uploaded files"],
                     ["number #", "go to file number in recent files list"],
                     ["select document", "Open the last uploaded document"],
-                    ["next page", "Go to the next page"],
-                    ["previous page", "Go to the previous page"],
+                    ["next/previous page", "Go to the next/previous page"],
                     ["go to page 5", "Jump to a specific page"],
                     ["highlight aspirin", "Highlight a word in the open document"],
                     ["clear highlights", "Remove all highlights"],
@@ -1262,10 +1258,8 @@ export default function App() {
                     ["search for BP", "Search using FDA SPL abbreviations"],
                     ["remind me to…", "Set a reminder"],
                     ["show my reminders", "List all your reminders"],
-                    ["what time is it", "Get the current date and time"],
                     ["print document", "Print the open document with highlights"],
                     ["print highlighted pages", "Print only pages with highlights"],
-                    ["close document", "Close the open PDF"],
                     ["admin panel", "Open the admin panel"],
                   ].map(([cmd, desc]) => (
                     <tr key={cmd}>
