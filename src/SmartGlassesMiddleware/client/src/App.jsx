@@ -1541,14 +1541,14 @@ const styles = {
     background: "#111",
     border: "1px solid #333",
     borderRadius: 16,
-    padding: "32px 28px",
+    padding: "min(32px, 5vh) min(28px, 5vw)",
     maxWidth: 620,
     width: "100%",
     // Keep the card within the visible overlay (overlay has 16px padding on each side = 32px total)
     maxHeight: "calc(100dvh - 32px)",
     display: "flex",
     flexDirection: "column",
-    gap: 20,
+    gap: "min(20px, 3vh)",
     overflowY: "auto",
   },
   landingTitle: {
@@ -2045,11 +2045,11 @@ if (typeof document !== "undefined" && !document.getElementById("app-mobile-styl
   const style = document.createElement("style");
   style.id = "app-mobile-style";
   style.textContent = `
-    @media (max-width: 480px), (max-height: 650px) {
-      .sgm-landing-cmds { display: none; }
+    @media (max-width: 600px), (max-height: 800px) {
+      .sgm-landing-cmds { display: none !important; }
     }
-    @media (max-width: 360px), (max-height: 540px) {
-      .sgm-landing-how { display: none; }
+    @media (max-width: 400px), (max-height: 600px) {
+      .sgm-landing-how { display: none !important; }
     }
   `;
   document.head.appendChild(style);
