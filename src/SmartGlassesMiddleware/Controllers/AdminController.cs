@@ -594,6 +594,7 @@ public class AdminController : ControllerBase
     /// </summary>
 
     [HttpPost("files")]
+    [IgnoreAntiforgeryToken]
     [ProducesResponseType(StatusCodes.Status202Accepted)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult> UploadFile([FromForm] FileUploadRequest request)
