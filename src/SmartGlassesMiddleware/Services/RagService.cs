@@ -810,8 +810,10 @@ Answer:";
             if (currentDim > 0 && currentDim != _embeddingDimension)
             {
                 _logger.LogInformation("EmbeddingVector column is vector({Current}), altering to vector({Target})", currentDim, _embeddingDimension);
+#pragma warning disable EF1002 // Vulnerability mitigated: vector dimension is an internal, safe integer value
                 await _context.Database.ExecuteSqlRawAsync(
-                    $"ALTER TABLE \"DocumentChunks\" ALTER COLUMN \"EmbeddingVector\" TYPE vector({_embeddingDimension}) USING NULL;");
+                    $"ALTER TABLE \"DocumentChunks\" ALTER COLUMN \"EmbeddingVector\" TYPE vector({(int)_embeddingDimension}) USING NULL;");
+#pragma warning restore EF1002
             }
             else
             {
