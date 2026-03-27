@@ -10,6 +10,7 @@
 import { normalize } from "./pdfMozilla.js";
 import { HighlightColors, HIGHLIGHT_COLOR_COUNT } from "./pdfClasses.js";
 import { getAllPdfText, renderPdfPage } from "./pdfRendering.js";
+import { PDFDocument, rgb } from "pdf-lib";
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
@@ -45,6 +46,157 @@ function findNearestPage(rectangles, currentPage) {
   const next = pages.find(p => p > currentPage);
   return next ?? pages[0];
 }
+
+/**
+ * Round a number to the requested decimal places.
+ *
+ * @param {number} value
+ * @param {number} decimalPlaces
+ * @returns {number}
+ */
+function round(value, decimalPlaces) {
+  return Math.round(value * Math.pow(10, decimalPlaces)) / Math.pow(10, decimalPlaces);
+}
+
+/**
+ * Convert HighlightColors to pdf-lib compatible normalized RGBA values.
+ *
+ * @returns {Record<string, [number, number, number, number]>}
+ */
+function normalizeColorValues() {
+  const colorMap = {};
+  const names = Object.keys(HighlightColors);
+  const arrays = Object.values(HighlightColors);
+
+  for (let i = 0; i < arrays.length; i++) {
+    const [r, g, b, a] = arrays[i];
+    colorMap[names[i]] = [
+      round(r / 255, 2),
+      round(g / 255, 2),
+      round(b / 255, 2),
+      a,
+    ];
+  }
+
+  return colorMap;
+}
+
+/**
+ * Draw all active highlight rectangles into a pdf-lib document.
+ *
+ * @param {import('pdf-lib').PDFDocument} pdfDoc
+ * @param {import('./pdfClasses.js').ViewerState} viewerState
+ * @returns {Promise<void>}
+ */
+async function exportHighlightsToPdfLib(pdfDoc, viewerState) {
+  const colorMap = normalizeColorValues();
+  const colorNames = Object.keys(colorMap);
+  let colorIndex = 0;
+
+  for (const highlight of viewerState.highlights) {
+    const colorName = colorNames[colorIndex % colorNames.length];
+    const [r, g, b, opacity] = colorMap[colorName];
+
+    for (const rect of highlight.rectangleArrays) {
+      const page = pdfDoc.getPage(rect.pageNumber - 1);
+      const { height } = page.getSize();
+      const pdfY = height - rect.canvasY - rect.canvasHeight;
+
+      page.drawRectangle({
+        x: rect.canvasX,
+        y: pdfY,
+        width: rect.canvasWidth,
+        height: rect.canvasHeight,
+        color: rgb(r, g, b),
+        opacity,
+      });
+    }
+
+    colorIndex++;
+  }
+}
+
+/**
+ * Return a new PDF containing only pages with highlights.
+ *
+ * @param {import('pdf-lib').PDFDocument} pdfDocument
+ * @param {import('./pdfClasses.js').ViewerState} viewerState
+ * @returns {Promise<import('pdf-lib').PDFDocument>}
+ */
+async function saveHighlightedOnlyPages(pdfDocument, viewerState) {
+  let pageNumbers = viewerState.highlights.flatMap((h) =>
+    h.rectangleArrays.map((r) => r.pageNumber - 1)
+  );
+
+  pageNumbers = [...new Set(pageNumbers)].sort((a, b) => a - b);
+  return getSpecificPageNumbers(pdfDocument, pageNumbers);
+}
+
+/**
+ * Copy selected pages into a new document.
+ *
+ * @param {import('pdf-lib').PDFDocument} originalDocument
+ * @param {number[]} pageNumbers - Zero-based page indexes.
+ * @returns {Promise<import('pdf-lib').PDFDocument>}
+ */
+async function getSpecificPageNumbers(originalDocument, pageNumbers) {
+  const newDocument = await PDFDocument.create();
+
+  if (pageNumbers.length > 0) {
+    const copiedPages = await newDocument.copyPages(originalDocument, pageNumbers);
+    for (const page of copiedPages) {
+      newDocument.addPage(page);
+    }
+  }
+
+  return newDocument;
+}
+
+/**
+ * Export a downloadable PDF with highlights burned into the file.
+ *
+ * This is voice-command friendly and does not require any UI buttons.
+ *
+ * @param {import('./pdfClasses.js').ViewerState} viewerState
+ * @param {string} pdfAddress
+ * @param {{isAllPages?: boolean, downloadName?: string}} [options]
+ * @returns {Promise<boolean>}
+ */
+export async function exportHighlightedPdf(viewerState, pdfAddress, options = {}) {
+  const { isAllPages = true, downloadName = "highlighted.pdf" } = options;
+
+  try {
+    const originalPdfBytes = await fetch(pdfAddress)
+      .then((result) => result.arrayBuffer())
+      .then((buffer) => new Uint8Array(buffer));
+
+    let pdfDocument = await PDFDocument.load(originalPdfBytes);
+
+    await exportHighlightsToPdfLib(pdfDocument, viewerState);
+
+    if (!isAllPages) {
+      pdfDocument = await saveHighlightedOnlyPages(pdfDocument, viewerState);
+    }
+
+    const exportedPdfBytes = await pdfDocument.save();
+    const safePdfBytes = Uint8Array.from(exportedPdfBytes);
+    const blob = new Blob([safePdfBytes], { type: "application/pdf" });
+    const url = URL.createObjectURL(blob);
+
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = downloadName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
+    return true;
+  } catch (error) {
+    console.error("Error exporting highlighted PDF:", error);
+    return false;
+  }
+}
+
 
 // ── Public API ────────────────────────────────────────────────────────────────
 

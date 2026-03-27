@@ -509,7 +509,7 @@ export default function App() {
       // ── Require minimum command length (filter out single-word stray background noise) ─
       // ── Require minimum command length (but allow known single-word commands) ─
       const commandWords = commandText.trim().split(/\s+/);
-      const knownSingleWordCommands = ['activate', 'next', 'previous', 'back', 'help', 'menu', 'close'];
+      const knownSingleWordCommands = ['activate', 'next', 'previous', 'back', 'help', 'menu', 'close', 'export'];
       const isSingleWordCommand = commandWords.length === 1 && knownSingleWordCommands.includes(commandWords[0].toLowerCase());
       const requiresTwoWords = !isSingleWordCommand && commandWords.length < 2;
       
@@ -584,6 +584,22 @@ export default function App() {
           setAiResponse(null);
           setPendingAction(null);
           localPdf.removeHighlights();
+          return;
+        }
+
+        if (/\b(?:export|download|save)\s+(?:the\s+)?(?:whole\s+|full\s+|entire\s+)?(?:pdf|document)(?:\s+with\s+highlights?)?\b/.test(lowered)) {
+          addLog("💾 Command: export document", "voice");
+          setAiResponse(null);
+          setPendingAction(null);
+          await localPdf.exportDocument?.();
+          return;
+        }
+
+        if (/\b(?:export|download|save)\s+(?:only\s+|just\s+)?(?:highlighted\s+pages?|pages\s+with\s+highlights?|highlights\s+only)\b/.test(lowered)) {
+          addLog("💾 Command: export highlighted pages", "voice");
+          setAiResponse(null);
+          setPendingAction(null);
+          await localPdf.exportHighlightedPages?.();
           return;
         }
 
@@ -758,6 +774,24 @@ export default function App() {
         } else {
           showAiResponse("No document is open. Open a document first.");
         }
+      } else if (answer === "__ACTION:EXPORT_PDF__") {
+        addLog("💾 Command: export document", "voice");
+        setAiResponse(null);
+        setPendingAction(null);
+        if (pdfViewerRef.current) {
+          await pdfViewerRef.current.exportDocument?.();
+        } else {
+          showAiResponse("No document is open. Open a document first.");
+        }
+      } else if (answer === "__ACTION:EXPORT_HIGHLIGHTED_PAGES__") {
+        addLog("💾 Command: export highlighted pages", "voice");
+        setAiResponse(null);
+        setPendingAction(null);
+        if (pdfViewerRef.current) {
+          await pdfViewerRef.current.exportHighlightedPages?.();
+        } else {
+          showAiResponse("No document is open. Open a document first.");
+        }
       } else if (answer === "__ACTION:SUMMARIZE_CURRENT_PAGE__") {
         await summarizeCurrentPage();
       } else if (answer.startsWith("__ACTION:SHOW_REMINDERS:")) {
@@ -862,6 +896,8 @@ export default function App() {
       if (/^(clear|remove)\s+(all\s+)?highlights?$/i.test(t)) return true;
       if (/^print(\s+(document|pdf))?$/i.test(t)) return true;
       if (/^print\s+((only|just)\s+)?(highlighted\s+pages?|pages\s+with\s+highlights?|highlights\s+only)$/i.test(t)) return true;
+      if (/^(export|download|save)(\s+the)?\s+(whole\s+|full\s+|entire\s+)?(document|pdf)(\s+with\s+highlights?)?$/i.test(t)) return true;
+      if (/^(export|download|save)\s+((only|just)\s+)?(highlighted\s+pages?|pages\s+with\s+highlights?|highlights\s+only)$/i.test(t)) return true;
       if (/^what('s|\s+is)\s+the\s+time\??$/i.test(t)) return true;
       if (/^show(\s+my|\s+all)?\s+reminders?$/i.test(t)) return true;
       if (/^(open\s+)?admin(\s+panel)?$/i.test(t)) return true;

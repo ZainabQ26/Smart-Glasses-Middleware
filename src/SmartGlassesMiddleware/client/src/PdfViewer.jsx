@@ -45,6 +45,7 @@ import {
   removeAllHighlights,
   searchForKeyword,
   drawSingleHighlights,
+  exportHighlightedPdf,
 } from "./pdf/pdfHighlighting.js";
 import { ViewerState, HighlightColors } from "./pdf/pdfClasses.js";
 
@@ -60,6 +61,8 @@ import { ViewerState, HighlightColors } from "./pdf/pdfClasses.js";
  * @property {() => Promise<object | null>} getDocumentContext - Return full document text and active highlight metadata.
  * @property {() => Promise<void>} printDocument      - Print the whole document with all highlights.
  * @property {() => Promise<void>} printHighlightedPages - Print only pages that contain highlights.
+ * @property {() => Promise<void>} exportDocument - Download the whole PDF with highlights burned in.
+ * @property {() => Promise<void>} exportHighlightedPages - Download only highlighted pages with highlights burned in.
  */
 
 // Color names in the same order as the HighlightColors palette, used for the legend.
@@ -485,6 +488,42 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
     showToast("Print dialog opened for highlighted pages.", 3000);
   }, [showToast, documentName]);
 
+  /** Download the whole document with highlight rectangles burned into the PDF. */
+  const exportDocument = useCallback(async () => {
+    const state = viewerStateRef.current;
+    if (!state) return;
+
+    const fileNameBase = (documentName || "document").replace(/\.pdf$/i, "");
+    const ok = await exportHighlightedPdf(
+      state,
+      `/api/admin/files/${documentId}/preview`,
+      { isAllPages: true, downloadName: `${fileNameBase}-highlighted.pdf` }
+    );
+
+    showToast(ok ? "Exported highlighted PDF." : "Export failed. Please try again.", 3000);
+  }, [documentId, documentName, showToast]);
+
+  /** Download only highlighted pages with highlight rectangles burned into the PDF. */
+  const exportHighlightedPages = useCallback(async () => {
+    const state = viewerStateRef.current;
+    if (!state) return;
+
+    const hasHighlights = state.highlights.some((h) => h.rectangleArrays.length > 0);
+    if (!hasHighlights) {
+      showToast("No highlighted pages to export.", 3000);
+      return;
+    }
+
+    const fileNameBase = (documentName || "document").replace(/\.pdf$/i, "");
+    const ok = await exportHighlightedPdf(
+      state,
+      `/api/admin/files/${documentId}/preview`,
+      { isAllPages: false, downloadName: `${fileNameBase}-highlighted-pages.pdf` }
+    );
+
+    showToast(ok ? "Exported highlighted pages PDF." : "Export failed. Please try again.", 3000);
+  }, [documentId, documentName, showToast]);
+
   // ── Expose imperative handle to parent ──────────────────────────────────────
   useImperativeHandle(ref, () => ({
     nextPage,
@@ -497,7 +536,9 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
     getDocumentContext,
     printDocument,
     printHighlightedPages,
-  }), [nextPage, prevPage, goToPage, highlightWord, goToLoincCode, removeHighlights, getCurrentPageText, getDocumentContext, printDocument, printHighlightedPages]);
+    exportDocument,
+    exportHighlightedPages,
+  }), [nextPage, prevPage, goToPage, highlightWord, goToLoincCode, removeHighlights, getCurrentPageText, getDocumentContext, printDocument, printHighlightedPages, exportDocument, exportHighlightedPages]);
 
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
