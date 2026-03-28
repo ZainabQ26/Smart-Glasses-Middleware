@@ -173,3 +173,7 @@ aws/lambda-*/package/
 /_site/
 
 TestResults/
+
+# Test reports
+CoverageReport/
+TestResults/

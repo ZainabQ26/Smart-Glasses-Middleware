@@ -1,52 +1,83 @@
 using NUnit.Framework;
-using Moq;
-using Microsoft.Extensions.Configuration;
 using SmartGlassesMiddleware.Services;
 
-namespace SmartGlassesMiddleware.Tests
+namespace SmartGlassesMiddleware.Tests.Services;
+
+[TestFixture]
+public class HelpersTests
 {
-    [TestFixture]
-    public class ConfigurationSectionTests
+    [Test]
+    public void ConfigurationWrapper_Works()
     {
-        [Test]
-        public void Indexer_Set_SetsValueInUnderlyingConfiguration()
-        {
-            // Arrange
-            var mockConfig = new Mock<IConfiguration>();
-            var path = "TestPath";
-            var key = "TestKey";
-            var newValue = "NewValue";
-            var expectedConfigKey = $"{path}:{key}";
+        var config = new ConfigurationWrapper(3, 500);
+        Assert.That(config["RAG:MaxRetries"], Is.EqualTo("3"));
+        Assert.That(config["RAG:RetryDelayMs"], Is.EqualTo("500"));
+        Assert.That(config["Missing"], Is.Null);
 
-            mockConfig.SetupSet(c => c[expectedConfigKey] = newValue).Verifiable();
+        config["Test"] = "Value";
+        Assert.That(config["Test"], Is.EqualTo("Value"));
 
-            var section = new Services.ConfigurationSection(mockConfig.Object, path);
+        var children = config.GetChildren();
+        Assert.That(children, Is.Empty);
 
-            // Act
-            section[key] = newValue;
+        var token = config.GetReloadToken();
+        Assert.That(token, Is.Not.Null);
 
-            // Assert
-            mockConfig.Verify();
-        }
+        var section = config.GetSection("TestSection");
+        Assert.That(section, Is.Not.Null);
+    }
 
-        [Test]
-        public void Indexer_Get_ReturnsValueFromUnderlyingConfiguration()
-        {
-            // Arrange
-            var mockConfig = new Mock<IConfiguration>();
-            var path = "TestPath";
-            var key = "TestKey";
-            var expectedValue = "TestValue";
+    [Test]
+    public void ConfigurationSection_Works()
+    {
+        var config = new ConfigurationWrapper(3, 500);
+        config["Path:TestKey"] = "TestValue";
 
-            mockConfig.Setup(c => c[$"{path}:{key}"]).Returns(expectedValue);
+        var section = new SmartGlassesMiddleware.Services.ConfigurationSection(config, "Path");
+        Assert.That(section["TestKey"], Is.EqualTo("TestValue"));
 
-            var section = new Services.ConfigurationSection(mockConfig.Object, path);
+        section["TestKey"] = "NewValue";
+        Assert.That(config["Path:TestKey"], Is.EqualTo("NewValue"));
 
-            // Act
-            var result = section[key];
+        Assert.That(section.Key, Is.EqualTo("Path"));
+        Assert.That(section.Path, Is.EqualTo("Path"));
 
-            // Assert
-            Assert.That(result, Is.EqualTo(expectedValue));
-        }
+        section.Value = "SectionValue";
+        Assert.That(section.Value, Is.EqualTo("SectionValue"));
+
+        var children = section.GetChildren();
+        Assert.That(children, Is.Empty);
+
+        var token = section.GetReloadToken();
+        Assert.That(token, Is.Not.Null);
+
+        var subSection = section.GetSection("Sub");
+        Assert.That(subSection.Path, Is.EqualTo("Path:Sub"));
+    }
+
+    [Test]
+    public void ConfigurationReloadToken_Works()
+    {
+        var token = new ConfigurationReloadToken();
+        Assert.That(token.HasChanged, Is.False);
+        Assert.That(token.ActiveChangeCallbacks, Is.False);
+
+        var disposable = token.RegisterChangeCallback(_ => { }, null);
+        Assert.That(disposable, Is.Not.Null);
+    }
+
+    [Test]
+    public void EmptyDisposable_Works()
+    {
+        var disposable = new EmptyDisposable();
+        Assert.DoesNotThrow(() => disposable.Dispose());
+    }
+
+    [Test]
+    public void HttpClientFactory_Works()
+    {
+        var factory = new SmartGlassesMiddleware.Services.HttpClientFactory();
+        var client = factory.CreateClient("test");
+        Assert.That(client, Is.Not.Null);
     }
 }

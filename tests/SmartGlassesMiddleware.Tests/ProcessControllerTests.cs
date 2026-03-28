@@ -1,75 +1,115 @@
-using NUnit.Framework;
-using Moq;
 using Microsoft.AspNetCore.Mvc;
-using SmartGlassesMiddleware.Controllers;
-using SmartGlassesMiddleware.Services;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Configuration;
-using System.Threading.Tasks;
-using System.Threading;
+using Microsoft.Extensions.Logging;
+using Moq;
+using NUnit.Framework;
+using SmartGlassesMiddleware.Controllers;
 using SmartGlassesMiddleware.Models;
+using SmartGlassesMiddleware.Services;
 
-namespace SmartGlassesMiddleware.Tests
+namespace SmartGlassesMiddleware.Tests.Controllers;
+
+[TestFixture]
+public class ProcessControllerTests
 {
-    [TestFixture]
-    public class ProcessControllerTests
+    private Mock<IAIService> _aiServiceMock;
+    private Mock<IPageSummaryService> _pageSummaryServiceMock;
+    private Mock<ILogger<ProcessController>> _loggerMock;
+    private Mock<IConfiguration> _configMock;
+    private ProcessController _controller;
+
+    [SetUp]
+    public void Setup()
     {
-        private ProcessController _controller;
-        private Mock<IAIService> _mockAiService;
-        private Mock<ILogger<ProcessController>> _mockLogger;
-        private Mock<IConfiguration> _mockConfiguration;
-        private Mock<IPageSummaryService> _mockPageSummary;
+        _aiServiceMock = new Mock<IAIService>();
+        _pageSummaryServiceMock = new Mock<IPageSummaryService>();
+        _loggerMock = new Mock<ILogger<ProcessController>>();
+        _configMock = new Mock<IConfiguration>();
 
-        [SetUp]
-        public void Setup()
-        {
-            _mockAiService = new Mock<IAIService>();
-            _mockLogger = new Mock<ILogger<ProcessController>>();
-            _mockConfiguration = new Mock<IConfiguration>();
-            _mockPageSummary = new Mock<IPageSummaryService>();
+        _controller = new ProcessController(
+            _aiServiceMock.Object,
+            _pageSummaryServiceMock.Object,
+            _loggerMock.Object,
+            _configMock.Object);
+    }
 
-            var mockConfigSection = new Mock<IConfigurationSection>();
-            mockConfigSection.Setup(x => x.Value).Returns("whisper-only");
-            _mockConfiguration.Setup(x => x.GetSection("AI:SpeechTranscriptionMode")).Returns(mockConfigSection.Object);
+    [Test]
+    public async Task Preview_NullInput_ReturnsBadRequest()
+    {
+        var result = await _controller.Preview(new ProcessRequest { Input = null! }, CancellationToken.None);
+        Assert.That(result, Is.InstanceOf<BadRequestObjectResult>());
+    }
 
-            var mockWakeWordSection = new Mock<IConfigurationSection>();
-            mockWakeWordSection.Setup(x => x.Value).Returns("Iris");
-            _mockConfiguration.Setup(x => x.GetSection("AI:ActivationWord")).Returns(mockWakeWordSection.Object);
+    [Test]
+    public async Task Preview_ValidInput_ReturnsOkWithWillUseAdvanced()
+    {
+        _aiServiceMock.Setup(x => x.WillUseAdvancedModelAsync("test", It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        var result = await _controller.Preview(new ProcessRequest { Input = "test" }, CancellationToken.None) as OkObjectResult;
 
-            _controller = new ProcessController(
-                _mockAiService.Object,
-                _mockPageSummary.Object,
-                _mockLogger.Object,
-                _mockConfiguration.Object
-            );
-        }
+        Assert.That(result, Is.Not.Null);
+        Assert.That(result!.Value!.ToString(), Contains.Substring("willUseAdvanced = True"));
+    }
 
-        [Test]
-        public void GetClientSettings_ReturnsConfiguredValues()
-        {
-            var result = _controller.GetClientSettings();
+    [Test]
+    public void GetClientSettings_ReturnsOkWithConfiguredValues()
+    {
+        _configMock.Setup(x => x["AI:SpeechTranscriptionMode"]).Returns("webspeech-only");
+        _configMock.Setup(x => x["AI:ActivationWord"]).Returns("TestWord");
 
-            Assert.That(result, Is.InstanceOf<OkObjectResult>());
-            var okResult = result as OkObjectResult;
-            Assert.That(okResult, Is.Not.Null);
-        }
+        var result = _controller.GetClientSettings() as OkObjectResult;
 
-        [Test]
-        public async Task PostProcess_EmptyTranscript_ReturnsBadRequest()
-        {
-            var req = new ProcessRequest { Input = "   " };
-            var result = await _controller.Process(req, CancellationToken.None);
+        Assert.That(result, Is.Not.Null);
+        Assert.That(result!.Value!.ToString(), Contains.Substring("speechTranscriptionMode = webspeech-only"));
+        Assert.That(result.Value.ToString(), Contains.Substring("activationWord = testword"));
+    }
 
-            Assert.That(result, Is.InstanceOf<BadRequestObjectResult>());
-        }
+    [Test]
+    public async Task Process_NullInput_ReturnsBadRequest()
+    {
+        var result = await _controller.Process(new ProcessRequest { Input = null! }, CancellationToken.None);
+        Assert.That(result, Is.InstanceOf<BadRequestObjectResult>());
+    }
 
-        [Test]
-        public async Task SummarizePage_EmptyPageText_ReturnsBadRequest()
-        {
-            var req = new PageSummaryRequest { PageText = "   " };
-            var result = await _controller.SummarizePage(req, CancellationToken.None);
+    [Test]
+    public async Task Process_ValidInput_ReturnsOkWithTaskAndResponse()
+    {
+        _aiServiceMock.Setup(x => x.ProcessRequestAsync("test", It.IsAny<CancellationToken>(), null))
+                      .ReturnsAsync(("Task", "Response", true));
 
-            Assert.That(result, Is.InstanceOf<BadRequestObjectResult>());
-        }
+        var result = await _controller.Process(new ProcessRequest { Input = "test" }, CancellationToken.None) as OkObjectResult;
+
+        Assert.That(result, Is.Not.Null);
+        Assert.That(result!.Value!.ToString(), Contains.Substring("usedAdvancedModel = True"));
+    }
+
+    [Test]
+    public async Task Process_OperationCanceled_Returns408()
+    {
+        _aiServiceMock.Setup(x => x.ProcessRequestAsync("test", It.IsAny<CancellationToken>(), null))
+                      .ThrowsAsync(new OperationCanceledException());
+
+        var result = await _controller.Process(new ProcessRequest { Input = "test" }, CancellationToken.None) as ObjectResult;
+
+        Assert.That(result, Is.Not.Null);
+        Assert.That(result!.StatusCode, Is.EqualTo(408));
+    }
+
+    [Test]
+    public async Task SummarizePage_NullInput_ReturnsBadRequest()
+    {
+        var result = await _controller.SummarizePage(new PageSummaryRequest { PageText = null! }, CancellationToken.None);
+        Assert.That(result, Is.InstanceOf<BadRequestObjectResult>());
+    }
+
+    [Test]
+    public async Task SummarizePage_ValidInput_ReturnsOkWithSummary()
+    {
+        _pageSummaryServiceMock.Setup(x => x.SummarizePageAsync("text", "doc", 1, It.IsAny<CancellationToken>()))
+                               .ReturnsAsync("Summary");
+
+        var result = await _controller.SummarizePage(new PageSummaryRequest { PageText = "text", DocumentName = "doc", PageNumber = 1 }, CancellationToken.None) as OkObjectResult;
+
+        Assert.That(result, Is.Not.Null);
+        Assert.That(result!.Value!.ToString(), Contains.Substring("summary = Summary"));
     }
 }
