@@ -17,6 +17,9 @@ public class ServerSettingsServiceTests
     {
         _cacheMock = new Mock<ICacheService>();
         _loggerMock = new Mock<ILogger<ServerSettingsService>>();
+        var timeProviderMock = new Mock<TimeProvider>();
+        timeProviderMock.Setup(x => x.GetUtcNow()).Returns(new DateTimeOffset(DateTime.UtcNow));
+        _service = new ServerSettingsService(_cacheMock.Object, _loggerMock.Object, timeProviderMock.Object);
     }
 
     [Test]
