@@ -1,3 +1,9 @@
+/* 
+  This Document uses code supported by PDF.js by the Mozilla Foundation.
+  Licensed under Apache 2.0
+  https://mozilla.github.io/pdf.js/
+*/
+
 // Ported from pdf.js (mozilla/pdf_find_controller & mozilla/pdf_find_utils).
 // Used to normalize text before searching so that accented characters, ligatures,
 // and other Unicode variants match correctly.
