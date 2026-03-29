@@ -647,9 +647,13 @@ export default function App() {
                   addLog(`➡️ Command: next highlight for "${currentHighlightKeyword}"`, "voice");
                   setAiResponse(null);
                   setPendingAction(null);
-                  if (typeof localPdf.nextHighlight === 'function') {
-                    localPdf.nextHighlight(currentHighlightKeyword);
+                  if (
+                    pdfViewerRef.current &&
+                    typeof pdfViewerRef.current.nextHighlight === 'function'
+                  ) {
+                    pdfViewerRef.current.nextHighlight(currentHighlightKeyword);
                   } else {
+                    console.warn('nextHighlight method is not available on pdfViewerRef.current:', pdfViewerRef.current);
                     setAiResponse("Highlight navigation is not available. Please try again after the document loads.");
                   }
                 } else {
@@ -664,9 +668,13 @@ export default function App() {
                   addLog(`⬅️ Command: previous highlight for "${currentHighlightKeyword}"`, "voice");
                   setAiResponse(null);
                   setPendingAction(null);
-                  if (typeof localPdf.prevHighlight === 'function') {
-                    localPdf.prevHighlight(currentHighlightKeyword);
+                  if (
+                    pdfViewerRef.current &&
+                    typeof pdfViewerRef.current.prevHighlight === 'function'
+                  ) {
+                    pdfViewerRef.current.prevHighlight(currentHighlightKeyword);
                   } else {
+                    console.warn('prevHighlight method is not available on pdfViewerRef.current:', pdfViewerRef.current);
                     setAiResponse("Highlight navigation is not available. Please try again after the document loads.");
                   }
                 } else {
