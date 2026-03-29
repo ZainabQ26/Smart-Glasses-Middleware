@@ -647,7 +647,11 @@ export default function App() {
                   addLog(`➡️ Command: next highlight for "${currentHighlightKeyword}"`, "voice");
                   setAiResponse(null);
                   setPendingAction(null);
-                  localPdf.nextHighlight(currentHighlightKeyword);
+                  if (typeof localPdf.nextHighlight === 'function') {
+                    localPdf.nextHighlight(currentHighlightKeyword);
+                  } else {
+                    setAiResponse("Highlight navigation is not available. Please try again after the document loads.");
+                  }
                 } else {
                   setAiResponse("Say 'highlight [word]' first, then 'next highlight'.");
                 }
@@ -660,7 +664,11 @@ export default function App() {
                   addLog(`⬅️ Command: previous highlight for "${currentHighlightKeyword}"`, "voice");
                   setAiResponse(null);
                   setPendingAction(null);
-                  localPdf.prevHighlight(currentHighlightKeyword);
+                  if (typeof localPdf.prevHighlight === 'function') {
+                    localPdf.prevHighlight(currentHighlightKeyword);
+                  } else {
+                    setAiResponse("Highlight navigation is not available. Please try again after the document loads.");
+                  }
                 } else {
                   setAiResponse("Say 'highlight [word]' first, then 'previous highlight'.");
                 }
