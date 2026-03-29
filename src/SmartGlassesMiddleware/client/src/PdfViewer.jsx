@@ -228,6 +228,7 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
     if (!state) return;
     goToPage(state.pageNumber - 1);
   }, [goToPage]);
+  
 
   // ── Highlighting ─────────────────────────────────────────────────────────────
 
@@ -497,7 +498,124 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
     getDocumentContext,
     printDocument,
     printHighlightedPages,
-  }), [nextPage, prevPage, goToPage, highlightWord, goToLoincCode, removeHighlights, getCurrentPageText, getDocumentContext, printDocument, printHighlightedPages]);
+    /**
+     * Move to the next or previous highlight of a given keyword.
+     * @param {string} keyword
+     * @param {"next"|"prev"} direction
+     */
+
+    moveToHighlight: async (keyword, direction) => {
+      const state = viewerStateRef.current;
+      const canvas = canvasRef.current;  
+      let arrayOfLocations = [];
+      let newIndex = -1;
+      let currentHighlightIndex = state.currentIndexOfHighlight;
+      let pageOfWord = -1;
+      let key = "";
+
+      // Don't progress because we cannot vizualize the changes
+      if (!state || !canvas) {
+        return;
+      }
+
+      // Check to see if the keyword is either empty, or if it is just whitespace. If so, don't do anything
+      if (!keyword || !keyword?.trim()) {
+        return;
+      }
+      
+      // Make the key lowercase so that it doesn't cause errors when doing keyword searchs
+      key = keyword.toLocaleLowerCase();
+      
+      // Get all the locations of that key
+      arrayOfLocations = state.getRectangleArray(key);
+
+      // Check to see if the word either is not found in the highlighted section, or if there is only one instance of that word
+      // If that is the case, don't do anything
+      if (arrayOfLocations.length <= 1) {
+          return;
+      }
+
+      switch (direction) {
+        case "prev":
+          newIndex = getPrevHighlight(arrayOfLocations, currentHighlightIndex);
+          break;
+        case "next":
+          newIndex = getNextHighlight(arrayOfLocations, currentHighlightIndex);
+          break;
+      }
+
+      // Either way update the object current Highlight Rectangle
+      state.currentIndexOfHighlight = newIndex;
+
+      // Update the page of the current location of the rectangle
+      pageOfWord = arrayOfLocations[state.currentIndexOfHighlight].pageNumber;
+
+      // Check to see if we need to update the page 
+      if (state.pageNumber !== pageOfWord) {
+        await renderPageWithHighlights(state, pageOfWord, canvas);
+        setCurrentPage(pageOfWord);
+      }
+
+      // Show toast feedback for highlight movement
+      const dirText = direction === "next" ? "next" : "previous";
+      showToast(`Moved to ${dirText} "${keyword}" highlight (${newIndex + 1}/${arrayOfLocations.length})`);
+    },
+    /**
+     * Navigate to the next highlight of a given keyword.
+     * @param {string} keyword
+     */
+    nextHighlight: async (keyword) => {
+      await PdfViewer.moveToHighlight(keyword, "next");
+    },
+    /**
+     * Navigate to the previous highlight of a given keyword.
+     * @param {string} keyword
+     */
+    prevHighlight: async (keyword) => {
+      await PdfViewer.moveToHighlight(keyword, "prev");
+    }
+  }), [nextPage, prevPage, goToPage, highlightWord, goToLoincCode, removeHighlights, getCurrentPageText, getDocumentContext, printDocument, printHighlightedPages, prevHighlight, nextHighlight, showToast]);
+
+  /**
+   * 
+   * @param {*} arrayOfLocations 
+   * @param {*} currentIndexOfHighlight 
+   * @returns 
+   */
+  function getPrevHighlight (arrayOfLocations, currentIndexOfHighlight) {
+    // If the currently highlighted rectangle is at the front of the array locations, then the prev will be the last location in the array.
+    if (currentIndexOfHighlight === 0) {
+      currentIndexOfHighlight = arrayOfLocations.length - 1;
+    }
+    // Whent he currently highlighted rectangle is not at the front of the array
+    else {
+      currentIndexOfHighlight--;
+    }
+
+    // Return the new index
+    return currentIndexOfHighlight;
+  } 
+
+  /**
+   * 
+   * @param {*} arrayOfLocations 
+   * @param {*} currentIndexOfHighlight 
+   * @returns 
+   */
+  function getNextHighlight (arrayOfLocations, currentIndexOfHighlight) {
+    // If the the currently highlighted is at the end of the highlight locations, then the next will be the first location in the array
+    if (currentIndexOfHighlight === arrayOfLocations.length - 1) {
+          currentIndexOfHighlight = 0;
+       }
+    // When the currently highlighted rectangle is not at the end of the array
+    else {
+      currentIndexOfHighlight++;
+    }       
+
+    // Return the new index
+    return currentIndexOfHighlight;
+  }
+
 
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
