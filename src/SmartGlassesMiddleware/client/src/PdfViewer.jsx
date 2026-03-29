@@ -498,6 +498,9 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
     getDocumentContext,
     printDocument,
     printHighlightedPages,
+    prevHighlight,
+    nextHighlight,
+
     /**
      * Move to the next or previous highlight of a given keyword.
      * @param {string} keyword
