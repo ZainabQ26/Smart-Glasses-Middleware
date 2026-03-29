@@ -1,10 +1,3 @@
-/* 
-  This Document uses code supported by PDF.js by the Mozilla Foundation.
-  Licensed under Apache 2.0
-  https://mozilla.github.io/pdf.js/
-*/
-
-
 /**
  * PDF viewer state and constants.
  *
