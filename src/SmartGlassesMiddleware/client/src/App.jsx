@@ -2043,10 +2043,10 @@ if (typeof document !== "undefined" && !document.getElementById("app-mobile-styl
   const style = document.createElement("style");
   style.id = "app-mobile-style";
   style.textContent = `
-    @media (max-width: 600px), (max-height: 800px) {
+    @media (max-width: 768px), (max-height: 900px) {
       .sgm-landing-cmds { display: none !important; }
     }
-    @media (max-width: 400px), (max-height: 600px) {
+    @media (max-width: 500px), (max-height: 750px) {
       .sgm-landing-how { display: none !important; }
     }
   `;
