@@ -117,7 +117,7 @@ async function getTranscriber() {
       }
     },
     dtype: resolvedDevice === 'wasm' ? {
-      encoder_model: 'fp32',
+      encoder_model: 'q4',
       decoder_model_merged: 'q4'
     } : undefined
   };
