@@ -119,7 +119,9 @@ async function getTranscriber() {
           self.postMessage({ type: 'loading', message: `Downloading Whisper model… ${pct}%` });
         }
       },
-      dtype: resolvedDevice === 'wasm' ? 'q4' : undefined
+      // Force 'q4' for all backends (WASM and WebGPU) to prevent OOM
+      // crashes on memory-constrained mobile browsers (Safari/iOS/Android).
+      dtype: 'q4'
     };
 
     if (resolvedDevice === 'webgpu') opts.device = 'webgpu';
