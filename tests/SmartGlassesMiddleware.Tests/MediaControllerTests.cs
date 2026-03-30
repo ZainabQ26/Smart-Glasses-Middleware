@@ -66,9 +66,8 @@ public class MediaControllerTests
     public async Task ProcessMedia_NoFiles_NoPrompt_ReturnsBadRequest()
     {
         var controller = CreateController();
-        controller.ControllerContext.HttpContext.Request.ContentType = "multipart/form-data; boundary=----boundary";
-
-        var result = await controller.ProcessMedia(new MediaRequest { Files = null, Prompt = null });
+        // Don't set multipart content type to avoid form parsing; pass empty request
+        var result = await controller.ProcessMedia(new MediaRequest { Files = new List<IFormFile>(), Prompt = null });
 
         // Without valid files the implementation returns BadRequest or Problem
         Assert.That(result, Is.Not.Null);
