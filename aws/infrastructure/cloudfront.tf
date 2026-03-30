@@ -308,6 +308,11 @@ resource "aws_cloudfront_distribution" "frontend" {
     max_ttl                = 0
     compress               = true
     response_headers_policy_id = aws_cloudfront_response_headers_policy.coop_coep.id
+
+    function_association {
+      event_type   = "viewer-response"
+      function_arn = aws_cloudfront_function.secure_cookies.arn
+    }
   }
 
   # Health, swagger, and other top-level ALB-served endpoints
@@ -376,6 +381,11 @@ resource "aws_cloudfront_distribution" "frontend" {
     default_ttl            = 0
     max_ttl                = 0
     compress               = false
+
+    function_association {
+      event_type   = "viewer-response"
+      function_arn = aws_cloudfront_function.secure_cookies.arn
+    }
   }
 
   # Custom error response for SPA routing
@@ -428,4 +438,12 @@ resource "aws_cloudfront_origin_request_policy" "api" {
   query_strings_config {
     query_string_behavior = "all"
   }
+}
+
+resource "aws_cloudfront_function" "secure_cookies" {
+  name    = "${var.project_name}-${var.environment}-secure-cookies"
+  runtime = "cloudfront-js-1.0"
+  comment = "Adds the Secure flag to AWS ALB stickiness cookies that are generated over HTTP."
+  publish = true
+  code    = file("${path.module}/cloudfront-function.js")
 }
