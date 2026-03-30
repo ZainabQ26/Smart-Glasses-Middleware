@@ -52,8 +52,18 @@ let transcriberPromise  = null;
 async function probeWebGPU() {
   try {
     if (typeof navigator === 'undefined' || !navigator.gpu) return false;
+
+    // Fast-fail for mobile devices as WebGPU support for fp16/transformers is often incomplete
+    // or causes an infinite loop/crash during model load.
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    if (isMobile) return false;
+
     const adapter = await navigator.gpu.requestAdapter();
     if (!adapter) return false;
+
+    // Transformers.js Whisper models with WebGPU currently rely on fp16
+    if (!adapter.features.has('shader-f16')) return false;
+
     const device = await adapter.requestDevice();
     try { device.destroy(); } catch (_) {}
     return true;
@@ -74,9 +84,9 @@ async function ensureTransformers() {
     env.useBrowserCache   = true;
 
     const gpuAvailable = await probeWebGPU();
-  if (gpuAvailable) {
-    resolvedDevice = 'webgpu';
-    self.postMessage({ type: 'loading', message: 'Using WebGPU backend for Whisper' });
+    if (gpuAvailable) {
+      resolvedDevice = 'webgpu';
+      self.postMessage({ type: 'loading', message: 'Using WebGPU backend for Whisper' });
     } else {
       resolvedDevice = 'wasm';
       let desiredThreads = 1;
@@ -126,7 +136,18 @@ async function getTranscriber() {
 
     if (resolvedDevice === 'webgpu') opts.device = 'webgpu';
 
-    transcriber = await pipelineFn('automatic-speech-recognition', MODEL_ID, opts);
+    try {
+      transcriber = await pipelineFn('automatic-speech-recognition', MODEL_ID, opts);
+    } catch (err) {
+      if (resolvedDevice === 'webgpu') {
+        self.postMessage({ type: 'loading', message: 'WebGPU failed, falling back to WASM…' });
+        resolvedDevice = 'wasm';
+        delete opts.device; // remove device constraint to use wasm fallback
+        transcriber = await pipelineFn('automatic-speech-recognition', MODEL_ID, opts);
+      } else {
+        throw err;
+      }
+    }
 
     // Signal to the main thread that the model is fully loaded and instantiated.
     self.postMessage({ type: 'ready', message: `Whisper model ready (${resolvedDevice})` });
