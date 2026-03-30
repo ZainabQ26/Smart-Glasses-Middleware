@@ -49,6 +49,11 @@
         "files": [
           "public/main.css"
         ]
+      },
+      {
+        "files": [
+          "tests/**"
+        ]
       }
     ],
     "output": "_site",
