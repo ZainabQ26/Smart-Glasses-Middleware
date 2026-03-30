@@ -1,5 +1,7 @@
 - name: Home
   href: index.md
+- name: Test Coverage
+  href: tests/summary.html
 - name: API Reference
   href: api/toc.yml
 - name: Swagger API UI
