@@ -121,7 +121,7 @@ async function getTranscriber() {
       },
       // Force 'q4' for all backends (WASM and WebGPU) to prevent OOM
       // crashes on memory-constrained mobile browsers (Safari/iOS/Android).
-      dtype: 'q4'
+      dtype: { encoder_model: 'q4', decoder_model_merged: 'q4' }
     };
 
     if (resolvedDevice === 'webgpu') opts.device = 'webgpu';
