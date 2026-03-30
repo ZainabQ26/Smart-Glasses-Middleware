@@ -116,6 +116,10 @@ async function getTranscriber() {
         self.postMessage({ type: 'ready', message: `Whisper model ready (${resolvedDevice})` });
       }
     },
+    dtype: resolvedDevice === 'wasm' ? {
+      encoder_model: 'fp32',
+      decoder_model_merged: 'q4'
+    } : undefined
   };
 
   if (resolvedDevice === 'webgpu') opts.device = 'webgpu';
