@@ -35,9 +35,9 @@ self.addEventListener('unhandledrejection', (e) => {
 });
 
 // ── Model configuration ──────────────────────────────────────────────────────
-// whisper-base multilingual — good balance of speed (~145 MB) and accuracy;
+// whisper-tiny multilingual — good balance of speed (~73 MB) and accuracy;
 // supports 99 languages including Spanish without any model swap.
-const MODEL_ID = 'Xenova/whisper-base';
+const MODEL_ID = 'Xenova/whisper-tiny';
 
 let pipelineFn     = null;
 let resolvedDevice = null;
@@ -53,16 +53,8 @@ async function probeWebGPU() {
   try {
     if (typeof navigator === 'undefined' || !navigator.gpu) return false;
 
-    // Fast-fail for mobile devices as WebGPU support for fp16/transformers is often incomplete
-    // or causes an infinite loop/crash during model load.
-    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    if (isMobile) return false;
-
     const adapter = await navigator.gpu.requestAdapter();
     if (!adapter) return false;
-
-    // Transformers.js Whisper models with WebGPU currently rely on fp16
-    if (!adapter.features.has('shader-f16')) return false;
 
     const device = await adapter.requestDevice();
     try { device.destroy(); } catch (_) {}
