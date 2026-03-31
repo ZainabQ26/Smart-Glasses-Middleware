@@ -2710,6 +2710,62 @@ public class AdminController : ControllerBase
     }
 
     /// <summary>
+    /// Get runtime Groq command transcription setting.
+    /// </summary>
+    [HttpGet("settings/groq-command-transcription")]
+    public async Task<ActionResult<object>> GetGroqCommandTranscriptionSetting(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var state = await _serverSettingsService.GetGroqCommandTranscriptionSettingAsync(cancellationToken);
+            return Ok(new
+            {
+                enabled = state.Enabled,
+                evaluatedAtUtc = state.RetrievedAtUtc
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to read Groq command transcription setting");
+            return StatusCode(500, new ProblemDetails
+            {
+                Title = "Internal Server Error",
+                Detail = "Failed to read Groq command transcription setting",
+                Status = StatusCodes.Status500InternalServerError
+            });
+        }
+    }
+
+    /// <summary>
+    /// Update runtime Groq command transcription setting.
+    /// </summary>
+    [HttpPut("settings/groq-command-transcription")]
+    public async Task<ActionResult<object>> SetGroqCommandTranscriptionSetting(
+        [FromBody] GroqCommandTranscriptionSettingRequest request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var state = await _serverSettingsService.SetGroqCommandTranscriptionEnabledAsync(request.Enabled, cancellationToken);
+            return Ok(new
+            {
+                enabled = state.Enabled,
+                evaluatedAtUtc = state.RetrievedAtUtc
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to update Groq command transcription setting to {Enabled}", request.Enabled);
+            return StatusCode(500, new ProblemDetails
+            {
+                Title = "Internal Server Error",
+                Detail = "Failed to update Groq command transcription setting",
+                Status = StatusCodes.Status500InternalServerError
+            });
+        }
+    }
+
+    /// <summary>
     /// Clear ALL history data: request monitoring, files, documents, conversations, AI logs, and transcription jobs.
     /// Nothing is preserved — all user data is deleted.
     /// </summary>

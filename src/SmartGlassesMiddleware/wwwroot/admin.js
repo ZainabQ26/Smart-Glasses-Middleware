@@ -65,6 +65,19 @@ async function fetchPreventSleepState() {
     return await response.json();
 }
 
+async function fetchGroqCommandTranscriptionState() {
+    const response = await fetch(`${API_BASE}/settings/groq-command-transcription`, {
+        method: 'GET',
+        cache: 'no-store'
+    });
+
+    if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+    }
+
+    return await response.json();
+}
+
 async function sendAdminKeepAlivePing() {
     try {
         const state = await fetchPreventSleepState();
@@ -149,6 +162,49 @@ function applyKeepAwakeToggle(enabled, showToast = false, persist = false) {
     }
 }
 
+function applyGroqToggle(enabled, showToast = false, persist = false) {
+    const normalized = !!enabled;
+
+    const toggle = document.getElementById('groq-toggle');
+    const label = document.getElementById('groq-label');
+    if (toggle) toggle.checked = normalized;
+    if (label) label.textContent = normalized ? 'Groq command transcription: On' : 'Groq command transcription';
+
+    if (showToast && typeof showMessage === 'function') {
+        showMessage(
+            normalized
+                ? 'Groq Whisper Turbo enabled for final command transcription.'
+                : 'Groq Whisper Turbo disabled. Local Whisper command transcription will be used.',
+            'info'
+        );
+    }
+
+    if (persist) {
+        fetch(`${API_BASE}/settings/groq-command-transcription`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: normalized })
+        })
+            .then(async (res) => {
+                if (!res.ok) {
+                    throw new Error(`HTTP ${res.status}`);
+                }
+
+                const payload = await res.json().catch(() => null);
+                const serverEnabled = payload?.enabled;
+                if (typeof serverEnabled === 'boolean' && serverEnabled !== normalized) {
+                    applyGroqToggle(serverEnabled, false, false);
+                }
+            })
+            .catch((err) => {
+                console.warn('[GROQ] Failed to persist server setting:', err);
+                if (typeof showMessage === 'function') {
+                    showMessage('Failed to update Groq transcription setting on server.', 'error');
+                }
+            });
+    }
+}
+
 async function initializeKeepAwakeToggle() {
     const toggle = document.getElementById('keepawake-toggle');
     if (!toggle) {
@@ -168,6 +224,25 @@ async function initializeKeepAwakeToggle() {
 
     toggle.addEventListener('change', () => {
         applyKeepAwakeToggle(toggle.checked, true, true);
+    });
+}
+
+async function initializeGroqToggle() {
+    const toggle = document.getElementById('groq-toggle');
+    if (!toggle) {
+        return;
+    }
+
+    try {
+        const state = await fetchGroqCommandTranscriptionState();
+        applyGroqToggle(!!state?.enabled, false, false);
+    } catch (err) {
+        console.warn('[GROQ] Failed to fetch initial server setting:', err);
+        applyGroqToggle(true, false, false);
+    }
+
+    toggle.addEventListener('change', () => {
+        applyGroqToggle(toggle.checked, true, true);
     });
 }
 
@@ -5198,6 +5273,7 @@ async function init() {
             applyTheme(nextTheme);
         });
         initializeKeepAwakeToggle();
+        initializeGroqToggle();
     } catch (e) {
         console.warn('[INIT] Failed to attach theme toggle early:', e);
     }

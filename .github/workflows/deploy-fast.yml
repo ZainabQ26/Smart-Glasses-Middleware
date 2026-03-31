@@ -66,6 +66,7 @@ jobs:
       contents: read
     env:
       AWS_REGION: ${{ secrets.AWS_REGION }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
     outputs:
       cluster: ${{ steps.rollout.outputs.cluster }}
       service: ${{ steps.rollout.outputs.service }}
@@ -123,8 +124,22 @@ jobs:
             --query 'taskDefinition' \
             --output json > taskdef-current.json
 
-          jq --arg IMAGE "$IMAGE" '
-            .containerDefinitions |= map(if .name == "api" then .image = $IMAGE else . end)
+          jq --arg IMAGE "$IMAGE" --arg GROQ_API_KEY "$GROQ_API_KEY" '
+            .containerDefinitions |= map(
+              if .name == "api" then
+                .image = $IMAGE
+                | if ($GROQ_API_KEY | length) > 0 then
+                    .environment = (
+                      ((.environment // []) | map(select(.name != "AI__Groq__ApiKey")))
+                      + [{"name":"AI__Groq__ApiKey","value":$GROQ_API_KEY}]
+                    )
+                  else
+                    .
+                  end
+              else
+                .
+              end
+            )
             | del(
                 .taskDefinitionArn,
                 .revision,

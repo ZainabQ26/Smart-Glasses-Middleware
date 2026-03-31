@@ -9,7 +9,8 @@ import PdfViewer from "./PdfViewer.jsx";
 //   - Amplitude VAD detects speech vs silence
 //   - Wake-word mode: each speech chunk sent to Whisper; "activate" triggers command mode
 //   - Command mode: chunks sent as partial results; sentence-end pattern or 2.5 s
-//     silence submits the full accumulated audio for final transcription
+//     silence submits the full accumulated audio for final transcription via
+//     Groq Whisper Turbo, with local Whisper fallback if Groq is unavailable
 //
 export default function App() {
   const [status, setStatus]       = useState("idle"); // idle | listening | processing | sending
@@ -31,6 +32,7 @@ export default function App() {
   const [showLanding, setShowLanding] = useState(() => {
     try { return !localStorage.getItem("sgm_activated"); } catch (_) { return true; }
   });
+  const [groqCommandTranscriptionEnabled, setGroqCommandTranscriptionEnabled] = useState(true);
   // Configurable activation word — stored in localStorage and updated live when
   // the admin panel changes it (via the storage event).
   const [activationWord, setActivationWord] = useState(() => {
@@ -39,6 +41,7 @@ export default function App() {
   // Ref copy so the async voice pipeline always reads the current value without
   // needing to restart the AudioContext effect.
   const activationWordRef = useRef(activationWord);
+  const groqCommandTranscriptionEnabledRef = useRef(groqCommandTranscriptionEnabled);
   // Wrapper keeps the ref in sync so async callbacks always read the current value.
   const setPendingAction = useCallback((val) => {
     pendingActionRef.current = typeof val === "function" ? val(pendingActionRef.current) : val;
@@ -148,11 +151,78 @@ export default function App() {
     }
   }, [API_TIMEOUT_MS]);
 
+  const float32ToWavBlob = useCallback((samples, sampleRate = 16000) => {
+    const bytesPerSample = 2;
+    const blockAlign = bytesPerSample;
+    const byteRate = sampleRate * blockAlign;
+    const dataSize = samples.length * bytesPerSample;
+    const buffer = new ArrayBuffer(44 + dataSize);
+    const view = new DataView(buffer);
+
+    const writeString = (offset, str) => {
+      for (let i = 0; i < str.length; i += 1) {
+        view.setUint8(offset + i, str.charCodeAt(i));
+      }
+    };
+
+    writeString(0, "RIFF");
+    view.setUint32(4, 36 + dataSize, true);
+    writeString(8, "WAVE");
+    writeString(12, "fmt ");
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, byteRate, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, 16, true);
+    writeString(36, "data");
+    view.setUint32(40, dataSize, true);
+
+    let offset = 44;
+    for (let i = 0; i < samples.length; i += 1) {
+      const s = Math.max(-1, Math.min(1, samples[i]));
+      const pcm = s < 0 ? s * 0x8000 : s * 0x7fff;
+      view.setInt16(offset, pcm, true);
+      offset += 2;
+    }
+
+    return new Blob([buffer], { type: "audio/wav" });
+  }, []);
+
   const addLog = useCallback((text, type = "info") => {
     setLogs(prev =>
       [{ id: Date.now() + Math.random(), text, type, ts: new Date().toLocaleTimeString() }, ...prev].slice(0, 50)
     );
   }, []);
+
+  const transcribeCommandWithGroq = useCallback(async (audio) => {
+    if (!groqCommandTranscriptionEnabledRef.current) {
+      addLog("ℹ️ Groq command transcription is disabled in admin settings", "info");
+      return null;
+    }
+
+    try {
+      const formData = new FormData();
+      formData.append("audio", float32ToWavBlob(audio), "command.wav");
+      formData.append("language", "en");
+
+      const payload = await fetchJsonWithTimeout(
+        "/api/process/transcribe-command",
+        {
+          method: "POST",
+          body: formData,
+        },
+        API_TIMEOUT_MS,
+      );
+
+      const text = (payload?.text || "").trim();
+      return text || null;
+    } catch (err) {
+      addLog(`⚠️ Groq Whisper Turbo unavailable (${err?.message || "unknown error"}) — using local Whisper fallback`, "warn");
+      return null;
+    }
+  }, [API_TIMEOUT_MS, addLog, fetchJsonWithTimeout, float32ToWavBlob]);
 
   useEffect(() => {
     return () => {
@@ -163,6 +233,7 @@ export default function App() {
 
   // Keep activationWordRef in sync with the state value.
   useEffect(() => { activationWordRef.current = activationWord; }, [activationWord]);
+  useEffect(() => { groqCommandTranscriptionEnabledRef.current = groqCommandTranscriptionEnabled; }, [groqCommandTranscriptionEnabled]);
 
   // Listen for changes made in the admin panel (different tab/window) and apply live.
   useEffect(() => {
@@ -206,6 +277,12 @@ export default function App() {
             setActivationWord(w);
             activationWordRef.current = w;
           }
+
+          const groqEnabled = typeof data?.groqCommandTranscriptionEnabled === "boolean"
+            ? data.groqCommandTranscriptionEnabled
+            : true;
+          setGroqCommandTranscriptionEnabled(groqEnabled);
+          groqCommandTranscriptionEnabledRef.current = groqEnabled;
 
           if (!cancelled) {
             setBackendReady(true);
@@ -807,6 +884,9 @@ export default function App() {
   sendToAIRef.current = sendToAI;
   useEffect(() => { sendToAIRef.current = sendToAI; }, [sendToAI]);
 
+  const transcribeCommandWithGroqRef = useRef(transcribeCommandWithGroq);
+  useEffect(() => { transcribeCommandWithGroqRef.current = transcribeCommandWithGroq; }, [transcribeCommandWithGroq]);
+
   // ── Voice pipeline: Whisper WebGPU + AudioContext mic capture ────────────
   //
   // One multilingual whisper-base model handles all modes:
@@ -877,7 +957,7 @@ export default function App() {
       }
     }
 
-    function submitCommand() {
+    async function submitCommand() {
       if (disposed || !activatedRef.current) return;
       clearTimers();
       const audio   = concatF32(commandChunks);
@@ -904,6 +984,20 @@ export default function App() {
       activatedRef.current = false;
       if (partial) showTranscript(partial); // preview while final runs
       setStatus("processing");
+
+      // Primary path: Groq Whisper Turbo for the final command transcript.
+      // Fallback path: local Whisper worker command mode.
+      const groqText = await transcribeCommandWithGroqRef.current?.(audio);
+      if (groqText && groqText.length >= 2 && /[A-Za-z0-9]/.test(groqText)) {
+        addLog(`🗣️ Groq Whisper Turbo: "${groqText}"`, "voice");
+        showTranscript(groqText);
+        setAiResponse(null);
+        setStatus("sending");
+        sendToAIRef.current?.(groqText);
+        return;
+      }
+
+      addLog("⚠️ Falling back to local Whisper command transcription", "warn");
       workerRef.current?.postMessage({ type: "transcribe", audio, mode: "command" });
     }
 

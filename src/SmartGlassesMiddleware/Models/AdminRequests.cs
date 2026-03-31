@@ -49,3 +49,11 @@ public class PreventSleepSettingRequest
 {
     public bool Enabled { get; set; }
 }
+
+/// <summary>
+/// Request model for toggling Groq command transcription at runtime.
+/// </summary>
+public class GroqCommandTranscriptionSettingRequest
+{
+    public bool Enabled { get; set; }
+}
