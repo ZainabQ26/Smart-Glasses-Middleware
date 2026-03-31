@@ -171,5 +171,26 @@ namespace SmartGlassesMiddleware.Tests
             var result = await _handler.HandleAsync("change buy milk to buy bread");
             Assert.That(result, Does.Contain("Reminder is locked").Or.Contain("couldn't update"));
         }
+
+        [Test]
+        public async Task HandleAsync_InputWithNoToPattern_ReturnsCannotParseMessage()
+        {
+            // "ParseEditInstruction" returns (null, null) when the input doesn't contain
+            // a recognizable "X to Y" pattern — exercising line 117 (return (null, null))
+            _mockHistory
+                .Setup(h => h.GetHistoryByTypeAsync("reminder", It.IsAny<int>()))
+                .ReturnsAsync(new List<RequestHistory>());
+
+            var result = await _handler.HandleAsync("edit reminder something");
+
+            // Handler should respond with a prompt asking for more information
+            Assert.That(result, Is.Not.Null);
+            // The result should be a message about not being able to parse or requesting clarification
+            Assert.That(result, Does.Contain("couldn't").IgnoreCase
+                .Or.Contain("parse").IgnoreCase
+                .Or.Contain("remind me").IgnoreCase
+                .Or.Contain("no reminders").IgnoreCase
+                .Or.Contain("what").IgnoreCase);
+        }
     }
 }
