@@ -1308,15 +1308,14 @@ export default function App() {
       )}
 
       {/* ── Landing screen — shown until first activation ─────────────────────── */}
-      <div className="assistant-container">
-        <img src={glassesImg} alt="Smart Glasses" className="assistant-logo" />
-        <div className="assistant-square">
-          {/* ...existing square content... */}
-        </div>
-      </div>
-
       {showLanding && (
         <div style={styles.landing}>
+          <img
+            src={glassesImg}
+            alt="Smart Glasses"
+            className="assistant-logo"
+            style={{ display: 'block', margin: '40px auto 24px auto', maxWidth: '340px', width: '100%', height: 'auto' }}
+          />
           <div style={styles.landingCard}>
             <h1 style={styles.landingTitle}>Hey, Eye-ris here. How can I help?</h1>
             <p style={styles.landingSubtitle}>
