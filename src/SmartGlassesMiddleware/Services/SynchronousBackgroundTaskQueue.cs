@@ -7,6 +7,7 @@ namespace SmartGlassesMiddleware.Services;
 /// Test-friendly background queue which executes tasks synchronously when enqueued.
 /// Use only in E2E/test environments to make processing deterministic.
 /// </summary>
+[System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverage]
 public class SynchronousBackgroundTaskQueue : IBackgroundTaskQueue
 {
     private readonly ConcurrentDictionary<Guid, BackgroundTaskEntry> _store = new();
