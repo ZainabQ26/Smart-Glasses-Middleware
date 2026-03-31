@@ -9,6 +9,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="BouncyCastle.Cryptography" Version="2.4.0" />
     <PackageReference Include="Markdig" Version="0.45.0" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.2" />
     <!-- Roslyn is used only for runtime .cs plugin drops (local dev).
@@ -20,11 +21,15 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.Extensions.Http.Polly" Version="8.0.0" />
-    <PackageReference Include="Microsoft.SemanticKernel" Version="1.70.0" />
+    <PackageReference Include="Microsoft.SemanticKernel" Version="1.74.0" />
     <PackageReference Include="Minio" Version="6.0.3" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.0" />
     <PackageReference Include="Polly.Extensions.Http" Version="3.0.0" />
     <PackageReference Include="Scalar.AspNetCore" Version="2.13.14" />
+    <PackageReference Include="SecurityCodeScan.VS2019" Version="5.6.7">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
     <PackageReference Include="StackExchange.Redis" Version="2.8.16" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" ExcludeAssets="runtime" />
     <PackageReference Include="Microsoft.CodeAnalysis.NetAnalyzers" Version="10.0.102">

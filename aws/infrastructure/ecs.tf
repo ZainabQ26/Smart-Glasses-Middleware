@@ -245,35 +245,43 @@ locals {
         protocol      = "tcp"
       }]
 
-      environment = [
-        {
-          name  = "ASPNETCORE_ENVIRONMENT"
-          value = var.environment == "prod" ? "Production" : "AWS"
-        },
-        {
-          name  = "AWS_REGION"
-          value = var.aws_region
-        },
-        {
-          name  = "AWS__S3__MediaBucket"
-          value = aws_s3_bucket.media.id
-        },
-        {
-          name  = "AWS__S3__DocumentsBucket"
-          value = aws_s3_bucket.documents.id
-        },
-        {
-          name  = "DEPLOYMENT_ID"
-          value = var.deployment_id
-        },
-        {
-          # Migrations are applied by the CI run-migrations job (one-shot Fargate task
-          # with MIGRATE_ONLY=true) before new tasks handle traffic. No migration on
-          # every cold start.
-          name  = "MIGRATE_ON_STARTUP"
-          value = "false"
-        },
-      ]
+      environment = concat(
+        [
+          {
+            name  = "ASPNETCORE_ENVIRONMENT"
+            value = var.environment == "prod" ? "Production" : "AWS"
+          },
+          {
+            name  = "AWS_REGION"
+            value = var.aws_region
+          },
+          {
+            name  = "AWS__S3__MediaBucket"
+            value = aws_s3_bucket.media.id
+          },
+          {
+            name  = "AWS__S3__DocumentsBucket"
+            value = aws_s3_bucket.documents.id
+          },
+          {
+            name  = "DEPLOYMENT_ID"
+            value = var.deployment_id
+          },
+          {
+            # Migrations are applied by the CI run-migrations job (one-shot Fargate task
+            # with MIGRATE_ONLY=true) before new tasks handle traffic. No migration on
+            # every cold start.
+            name  = "MIGRATE_ON_STARTUP"
+            value = "false"
+          },
+        ],
+        trimspace(var.groq_api_key) != "" ? [
+          {
+            name  = "AI__Groq__ApiKey"
+            value = var.groq_api_key
+          }
+        ] : []
+      )
 
       secrets = concat(
         [

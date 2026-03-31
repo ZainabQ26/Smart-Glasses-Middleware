@@ -35,13 +35,16 @@ self.addEventListener('unhandledrejection', (e) => {
 });
 
 // ── Model configuration ──────────────────────────────────────────────────────
-// whisper-base multilingual — good balance of speed (~145 MB) and accuracy;
+// whisper-tiny multilingual — good balance of speed (~73 MB) and accuracy;
 // supports 99 languages including Spanish without any model swap.
-const MODEL_ID = 'Xenova/whisper-base';
+const MODEL_ID = 'Xenova/whisper-tiny';
 
 let pipelineFn     = null;
 let resolvedDevice = null;
 let transcriber    = null;   // lazily initialised, reused across calls
+
+let transformersPromise = null;
+let transcriberPromise  = null;
 
 // ── Environment detection ────────────────────────────────────────────────────
 
@@ -49,8 +52,10 @@ let transcriber    = null;   // lazily initialised, reused across calls
 async function probeWebGPU() {
   try {
     if (typeof navigator === 'undefined' || !navigator.gpu) return false;
+
     const adapter = await navigator.gpu.requestAdapter();
     if (!adapter) return false;
+
     const device = await adapter.requestDevice();
     try { device.destroy(); } catch (_) {}
     return true;
@@ -60,68 +65,89 @@ async function probeWebGPU() {
 }
 
 async function ensureTransformers() {
-  if (pipelineFn) return;
+  if (transformersPromise) return transformersPromise;
 
-  const { pipeline, env } = await import('@huggingface/transformers');
-  pipelineFn = pipeline;
+  transformersPromise = (async () => {
+    const { pipeline, env } = await import('@huggingface/transformers');
+    pipelineFn = pipeline;
 
-  env.allowLocalModels  = false;
-  env.allowRemoteModels = true;
-  env.useBrowserCache   = true;
+    env.allowLocalModels  = false;
+    env.allowRemoteModels = true;
+    env.useBrowserCache   = true;
 
-  const gpuAvailable = await probeWebGPU();
-  if (gpuAvailable) {
-    resolvedDevice = 'webgpu';
-    self.postMessage({ type: 'loading', message: 'Using WebGPU backend for Whisper' });
-  } else {
-    resolvedDevice = 'wasm';
-    let desiredThreads = 1;
-    try {
-      const hw = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) ? navigator.hardwareConcurrency : 2;
-      if (typeof SharedArrayBuffer !== 'undefined' && typeof MessageChannel !== 'undefined') {
-        try {
-          const mc = new MessageChannel();
-          mc.port1.postMessage(new SharedArrayBuffer(1));
-          desiredThreads = Math.min(8, Math.max(1, Math.floor(hw / 2)));
-        } catch (_) {
-          desiredThreads = 1;
+    const gpuAvailable = await probeWebGPU();
+    if (gpuAvailable) {
+      resolvedDevice = 'webgpu';
+      self.postMessage({ type: 'loading', message: 'Using WebGPU backend for Whisper' });
+    } else {
+      resolvedDevice = 'wasm';
+      let desiredThreads = 1;
+      try {
+        const hw = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) ? navigator.hardwareConcurrency : 2;
+        if (typeof SharedArrayBuffer !== 'undefined' && typeof MessageChannel !== 'undefined') {
+          try {
+            const mc = new MessageChannel();
+            mc.port1.postMessage(new SharedArrayBuffer(1));
+            desiredThreads = Math.min(8, Math.max(1, Math.floor(hw / 2)));
+          } catch (_) {
+            desiredThreads = 1;
+          }
         }
+      } catch (_) {
+        desiredThreads = 1;
       }
-    } catch (_) {
-      desiredThreads = 1;
+      env.backends.onnx.wasm.numThreads = desiredThreads;
+      self.postMessage({ type: 'loading', message: `Using WASM backend for Whisper (${desiredThreads} thread${desiredThreads !== 1 ? 's' : ''})` });
     }
-    env.backends.onnx.wasm.numThreads = desiredThreads;
-    self.postMessage({ type: 'loading', message: `Using WASM backend for Whisper (${desiredThreads} thread${desiredThreads !== 1 ? 's' : ''})` });
-  }
+  })();
+
+  return transformersPromise;
 }
 
 // ── Model loader (singleton) ─────────────────────────────────────────────────
 
 async function getTranscriber() {
-  if (transcriber) return transcriber;
+  if (transcriberPromise) return transcriberPromise;
 
-  await ensureTransformers();
+  transcriberPromise = (async () => {
+    await ensureTransformers();
 
-  self.postMessage({ type: 'loading', message: 'Loading Whisper model…' });
+    self.postMessage({ type: 'loading', message: 'Loading Whisper model…' });
 
-  const opts = {
-    progress_callback: (p) => {
-      if (p.status === 'downloading') {
-        const pct = Math.round(p.progress ?? 0);
-        self.postMessage({ type: 'loading', message: `Downloading Whisper model… ${pct}%` });
+    const opts = {
+      progress_callback: (p) => {
+        if (p.status === 'downloading') {
+          const pct = Math.round(p.progress ?? 0);
+          self.postMessage({ type: 'loading', message: `Downloading Whisper model… ${pct}%` });
+        }
+      },
+      // Force 'q4' for all backends (WASM and WebGPU) to prevent OOM
+      // crashes on memory-constrained mobile browsers (Safari/iOS/Android).
+      dtype: { encoder_model: 'q4', decoder_model_merged: 'q4' }
+    };
+
+    if (resolvedDevice === 'webgpu') opts.device = 'webgpu';
+
+    try {
+      transcriber = await pipelineFn('automatic-speech-recognition', MODEL_ID, opts);
+    } catch (err) {
+      if (resolvedDevice === 'webgpu') {
+        self.postMessage({ type: 'loading', message: 'WebGPU failed, falling back to WASM…' });
+        resolvedDevice = 'wasm';
+        delete opts.device; // remove device constraint to use wasm fallback
+        transcriber = await pipelineFn('automatic-speech-recognition', MODEL_ID, opts);
+      } else {
+        throw err;
       }
-      if (p.status === 'ready') {
-        // Signal to the main thread that the model is ready.
-        // Send only the explicit 'ready' message (avoid duplicate 'loading').
-        self.postMessage({ type: 'ready', message: `Whisper model ready (${resolvedDevice})` });
-      }
-    },
-  };
+    }
 
-  if (resolvedDevice === 'webgpu') opts.device = 'webgpu';
+    // Signal to the main thread that the model is fully loaded and instantiated.
+    self.postMessage({ type: 'ready', message: `Whisper model ready (${resolvedDevice})` });
 
-  transcriber = await pipelineFn('automatic-speech-recognition', MODEL_ID, opts);
-  return transcriber;
+    return transcriber;
+  })();
+
+  return transcriberPromise;
 }
 
 // ── Message handler ──────────────────────────────────────────────────────────

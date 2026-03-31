@@ -594,6 +594,7 @@ public class AdminController : ControllerBase
     /// </summary>
 
     [HttpPost("files")]
+    [IgnoreAntiforgeryToken]
     [ProducesResponseType(StatusCodes.Status202Accepted)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult> UploadFile([FromForm] FileUploadRequest request)
@@ -2703,6 +2704,62 @@ public class AdminController : ControllerBase
             {
                 Title = "Internal Server Error",
                 Detail = "Failed to update prevent-sleep setting",
+                Status = StatusCodes.Status500InternalServerError
+            });
+        }
+    }
+
+    /// <summary>
+    /// Get runtime Groq command transcription setting.
+    /// </summary>
+    [HttpGet("settings/groq-command-transcription")]
+    public async Task<ActionResult<object>> GetGroqCommandTranscriptionSetting(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var state = await _serverSettingsService.GetGroqCommandTranscriptionSettingAsync(cancellationToken);
+            return Ok(new
+            {
+                enabled = state.Enabled,
+                evaluatedAtUtc = state.RetrievedAtUtc
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to read Groq command transcription setting");
+            return StatusCode(500, new ProblemDetails
+            {
+                Title = "Internal Server Error",
+                Detail = "Failed to read Groq command transcription setting",
+                Status = StatusCodes.Status500InternalServerError
+            });
+        }
+    }
+
+    /// <summary>
+    /// Update runtime Groq command transcription setting.
+    /// </summary>
+    [HttpPut("settings/groq-command-transcription")]
+    public async Task<ActionResult<object>> SetGroqCommandTranscriptionSetting(
+        [FromBody] GroqCommandTranscriptionSettingRequest request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var state = await _serverSettingsService.SetGroqCommandTranscriptionEnabledAsync(request.Enabled, cancellationToken);
+            return Ok(new
+            {
+                enabled = state.Enabled,
+                evaluatedAtUtc = state.RetrievedAtUtc
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to update Groq command transcription setting to {Enabled}", request.Enabled);
+            return StatusCode(500, new ProblemDetails
+            {
+                Title = "Internal Server Error",
+                Detail = "Failed to update Groq command transcription setting",
                 Status = StatusCodes.Status500InternalServerError
             });
         }

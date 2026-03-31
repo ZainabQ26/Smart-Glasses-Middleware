@@ -242,3 +242,10 @@ variable "deployment_id" {
   type        = string
   default     = ""
 }
+
+variable "groq_api_key" {
+  description = "Groq API key injected into ECS as AI__Groq__ApiKey"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
