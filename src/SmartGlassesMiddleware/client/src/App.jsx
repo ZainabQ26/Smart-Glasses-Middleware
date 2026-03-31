@@ -11,6 +11,8 @@ import PdfViewer from "./PdfViewer.jsx";
 //   - Command mode: chunks sent as partial results; sentence-end pattern or 2.5 s
 //     silence submits the full accumulated audio for final transcription
 //
+import glassesImg from "./pdf/image/Gemini_Generated_Image_8mwak58mwak58mwa.png";
+
 export default function App() {
   const [status, setStatus]       = useState("idle"); // idle | listening | processing | sending
   const [logs, setLogs]           = useState([]);
@@ -1212,10 +1214,17 @@ export default function App() {
       )}
 
       {/* ── Landing screen — shown until first activation ─────────────────────── */}
+      <div className="assistant-container">
+        <img src={glassesImg} alt="Smart Glasses" className="assistant-logo" />
+        <div className="assistant-square">
+          {/* ...existing square content... */}
+        </div>
+      </div>
+
       {showLanding && (
         <div style={styles.landing}>
           <div style={styles.landingCard}>
-            <h1 style={styles.landingTitle}>Smart Glasses Assistant</h1>
+            <h1 style={styles.landingTitle}>Hey, Eye-ris here. How can I help?</h1>
             <p style={styles.landingSubtitle}>
               Say <strong style={{color:"#f97316"}}>"{activationWord}"</strong> to start, then speak your command.
             </p>
