@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Mvc;
 using SmartGlassesMiddleware.Models;
 using SmartGlassesMiddleware.Services;
+using System.Net.Http.Headers;
+using System.Text.Json;
 
 namespace SmartGlassesMiddleware.Controllers;
 
@@ -10,6 +12,7 @@ public class ProcessController : ControllerBase
 {
     private readonly IAIService _aiService;
     private readonly IPageSummaryService _pageSummaryService;
+    private readonly IServerSettingsService? _serverSettingsService;
     private readonly ILogger<ProcessController> _logger;
     private readonly IConfiguration _configuration;
 
@@ -19,6 +22,12 @@ public class ProcessController : ControllerBase
         _pageSummaryService = pageSummaryService;
         _logger = logger;
         _configuration = configuration;
+    }
+
+    public ProcessController(IAIService aiService, IPageSummaryService pageSummaryService, IServerSettingsService serverSettingsService, ILogger<ProcessController> logger, IConfiguration configuration)
+        : this(aiService, pageSummaryService, logger, configuration)
+    {
+        _serverSettingsService = serverSettingsService;
     }
 
     /// <summary>
@@ -59,7 +68,93 @@ public class ProcessController : ControllerBase
         if (string.IsNullOrWhiteSpace(activationWord))
             activationWord = "Iris";
 
-        return Ok(new { speechTranscriptionMode = mode, activationWord });
+        var groqEnabled = true;
+        if (_serverSettingsService is not null)
+        {
+            groqEnabled = _serverSettingsService.GetGroqCommandTranscriptionSettingAsync(HttpContext?.RequestAborted ?? CancellationToken.None)
+                .GetAwaiter()
+                .GetResult()
+                .Enabled;
+        }
+
+        return Ok(new { speechTranscriptionMode = mode, activationWord, groqCommandTranscriptionEnabled = groqEnabled });
+    }
+
+    [HttpPost]
+    [Route("transcribe-command")]
+    [RequestSizeLimit(12 * 1024 * 1024)]
+    public async Task<IActionResult> TranscribeCommand([FromForm] IFormFile? audio, [FromForm] string? language, CancellationToken cancellationToken)
+    {
+        if (audio is null || audio.Length == 0)
+            return BadRequest(new { error = "Audio is required" });
+
+        if (_serverSettingsService is not null)
+        {
+            var groqSetting = await _serverSettingsService.GetGroqCommandTranscriptionSettingAsync(cancellationToken);
+            if (!groqSetting.Enabled)
+                return StatusCode(503, new { error = "Groq transcription is disabled" });
+        }
+
+        var configuredGroqEnabled = _configuration["AI:Groq:Enabled"]?.Trim();
+        if (bool.TryParse(configuredGroqEnabled, out var configEnabled) && !configEnabled)
+            return StatusCode(503, new { error = "Groq transcription is disabled" });
+
+        var apiKey = _configuration["AI:Groq:ApiKey"]?.Trim();
+        if (string.IsNullOrWhiteSpace(apiKey))
+            return StatusCode(503, new { error = "Groq transcription is not configured" });
+
+        var endpoint = _configuration["AI:Groq:WhisperEndpoint"]?.Trim();
+        if (string.IsNullOrWhiteSpace(endpoint))
+            endpoint = "https://api.groq.com/openai/v1/audio/transcriptions";
+
+        var model = _configuration["AI:Groq:WhisperModel"]?.Trim();
+        if (string.IsNullOrWhiteSpace(model))
+            model = "whisper-large-v3-turbo";
+
+        try
+        {
+            var factory = HttpContext.RequestServices.GetService<IHttpClientFactory>();
+            using var http = factory?.CreateClient() ?? new HttpClient();
+
+            http.Timeout = TimeSpan.FromSeconds(20);
+            http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+
+            using var content = new MultipartFormDataContent();
+            await using var stream = audio.OpenReadStream();
+            using var streamContent = new StreamContent(stream);
+            streamContent.Headers.ContentType = new MediaTypeHeaderValue(audio.ContentType ?? "audio/wav");
+            content.Add(streamContent, "file", string.IsNullOrWhiteSpace(audio.FileName) ? "command.wav" : audio.FileName);
+            content.Add(new StringContent(model), "model");
+
+            if (!string.IsNullOrWhiteSpace(language))
+                content.Add(new StringContent(language), "language");
+
+            content.Add(new StringContent("json"), "response_format");
+
+            using var response = await http.PostAsync(endpoint, content, cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Groq transcription failed ({StatusCode}): {Body}", (int)response.StatusCode, body);
+                return StatusCode(502, new { error = "Groq transcription failed" });
+            }
+
+            using var jsonDoc = JsonDocument.Parse(body);
+            var text = jsonDoc.RootElement.TryGetProperty("text", out var textElement)
+                ? (textElement.GetString() ?? string.Empty).Trim()
+                : string.Empty;
+
+            return Ok(new { text, provider = "groq", model });
+        }
+        catch (OperationCanceledException)
+        {
+            return StatusCode(408, new { error = "Groq transcription timed out or was cancelled" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Groq command transcription unavailable; caller should fallback to local Whisper.");
+            return StatusCode(503, new { error = "Groq transcription unavailable" });
+        }
     }
 
     [HttpPost]
