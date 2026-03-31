@@ -117,4 +117,34 @@ public class MediaControllerTests
 
         Assert.That(result, Is.Not.Null);
     }
+
+    [Test]
+    public async Task ProcessMedia_WithFormContentType_ReadsFormAndContinues()
+    {
+        // Exercise the HasFormContentType == true branch (lines 106-108)
+        var httpContext = new DefaultHttpContext();
+        httpContext.Request.ContentType = "application/x-www-form-urlencoded";
+
+        var controller = new MediaController(
+            _mediaStorageMock.Object,
+            _aiServiceMock.Object,
+            _historyServiceMock.Object,
+            _backgroundQueueMock.Object,
+            _mediaProcessorMock.Object,
+            _ragServiceMock.Object,
+            _context,
+            _loggerMock.Object);
+
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = httpContext
+        };
+
+        ActionResult? result = null;
+        Assert.DoesNotThrowAsync(async () =>
+        {
+            result = await controller.ProcessMedia(new MediaRequest { Prompt = "test", Files = new List<IFormFile>() });
+        });
+        Assert.That(result, Is.Not.Null);
+    }
 }
