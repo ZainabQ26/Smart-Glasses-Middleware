@@ -11,7 +11,7 @@ rm -rf ./TestResults
 rm -rf ./CoverageReport
 
 echo "Running tests with coverage..."
-dotnet test Smart-Glasses-Middleware.sln --collect:"XPlat Code Coverage" --results-directory ./TestResults
+dotnet test Smart-Glasses-Middleware.sln --settings tests/SmartGlassesMiddleware.Tests/coverage.runsettings --collect:"XPlat Code Coverage" --results-directory ./TestResults
 
 # Find the generated coverage file
 COVERAGE_FILE=$(find ./TestResults -name "coverage.cobertura.xml" | sort -r | head -n 1)
