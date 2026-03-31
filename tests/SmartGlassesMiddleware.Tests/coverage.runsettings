@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat Code Coverage">
+        <Configuration>
+          <ExcludeByFile>
+            **/Migrations/**,
+            **/Program.cs,
+            **/*.generated.cs,
+            **/DocumentProcessingService.cs,
+            **/DocumentHighlightService.cs,
+            **/AwsS3MediaStorageService.cs,
+            **/MediaStorageService.cs,
+            **/Services/AWS/S3MediaStorageService.cs,
+            **/MediaProcessor.cs,
+            **/PageSummaryService.cs,
+            **/BedrockChatCompletionService.cs,
+            **/BedrockEmbeddingClient.cs,
+            **/BackgroundTaskHostedService.cs,
+            **/BackgroundTaskCleanupService.cs,
+            **/AbbreviationSyncBackgroundService.cs,
+            **/DocumentProcessingBackgroundService.cs,
+            **/BackgroundTaskQueue.cs,
+            **/AIService.cs
+          </ExcludeByFile>
+          <ExcludeByAttribute>GeneratedCodeAttribute,CompilerGeneratedAttribute,ExcludeFromCodeCoverage</ExcludeByAttribute>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>

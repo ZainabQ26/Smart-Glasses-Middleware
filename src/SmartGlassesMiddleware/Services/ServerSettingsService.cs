@@ -161,6 +161,7 @@ public class ServerSettingsService : IServerSettingsService
     }
 }
 
+[System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverage]
 public class PreventSleepResetBackgroundService : BackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromMinutes(1);
