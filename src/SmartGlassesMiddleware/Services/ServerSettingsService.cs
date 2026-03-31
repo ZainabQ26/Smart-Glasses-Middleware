@@ -1,13 +1,18 @@
 using System.Globalization;
+using System.Threading;
+using Microsoft.Extensions.Configuration;
 
 namespace SmartGlassesMiddleware.Services;
 
 public sealed record PreventSleepSettingState(bool Enabled, bool AutoDisabledAt2AmEt, DateTime RetrievedAtUtc);
+public sealed record GroqCommandTranscriptionSettingState(bool Enabled, DateTime RetrievedAtUtc);
 
 public interface IServerSettingsService
 {
     Task<PreventSleepSettingState> GetPreventSleepStateAsync(CancellationToken cancellationToken = default);
     Task<PreventSleepSettingState> SetPreventSleepEnabledAsync(bool enabled, CancellationToken cancellationToken = default);
+    Task<GroqCommandTranscriptionSettingState> GetGroqCommandTranscriptionSettingAsync(CancellationToken cancellationToken = default);
+    Task<GroqCommandTranscriptionSettingState> SetGroqCommandTranscriptionEnabledAsync(bool enabled, CancellationToken cancellationToken = default);
     Task EnsureDailyResetAppliedAsync(CancellationToken cancellationToken = default);
 }
 
@@ -15,19 +20,28 @@ public class ServerSettingsService : IServerSettingsService
 {
     private const string PreventSleepEnabledKey = "admin:setting:prevent-sleep:enabled";
     private const string PreventSleepLastResetEtDateKey = "admin:setting:prevent-sleep:last-reset-et-date";
+    private static volatile bool _groqCommandTranscriptionEnabled = true;
+    private static int _groqSettingInitialized;
 
     private readonly ICacheService _cache;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<ServerSettingsService> _logger;
     private readonly TimeProvider _timeProvider;
     private readonly TimeZoneInfo _easternTimeZone;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
-    public ServerSettingsService(ICacheService cache, ILogger<ServerSettingsService> logger, TimeProvider? timeProvider = null)
+    public ServerSettingsService(ICacheService cache, IConfiguration configuration, ILogger<ServerSettingsService> logger, TimeProvider? timeProvider = null)
     {
         _cache = cache;
+        _configuration = configuration;
         _logger = logger;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _easternTimeZone = ResolveEasternTimeZone();
+    }
+
+    public ServerSettingsService(ICacheService cache, ILogger<ServerSettingsService> logger, TimeProvider? timeProvider = null)
+        : this(cache, new ConfigurationBuilder().Build(), logger, timeProvider)
+    {
     }
 
     public async Task<PreventSleepSettingState> GetPreventSleepStateAsync(CancellationToken cancellationToken = default)
@@ -49,6 +63,19 @@ public class ServerSettingsService : IServerSettingsService
     public async Task EnsureDailyResetAppliedAsync(CancellationToken cancellationToken = default)
     {
         await EvaluatePreventSleepStateAsync(cancellationToken: cancellationToken);
+    }
+
+    public Task<GroqCommandTranscriptionSettingState> GetGroqCommandTranscriptionSettingAsync(CancellationToken cancellationToken = default)
+    {
+        EnsureGroqSettingInitialized();
+        return Task.FromResult(new GroqCommandTranscriptionSettingState(_groqCommandTranscriptionEnabled, _timeProvider.GetUtcNow().UtcDateTime));
+    }
+
+    public Task<GroqCommandTranscriptionSettingState> SetGroqCommandTranscriptionEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        EnsureGroqSettingInitialized();
+        _groqCommandTranscriptionEnabled = enabled;
+        return Task.FromResult(new GroqCommandTranscriptionSettingState(_groqCommandTranscriptionEnabled, _timeProvider.GetUtcNow().UtcDateTime));
     }
 
     private async Task<(bool enabled, bool autoDisabled)> EvaluatePreventSleepStateAsync(
@@ -114,8 +141,27 @@ public class ServerSettingsService : IServerSettingsService
             }
         }
     }
+
+    private void EnsureGroqSettingInitialized()
+    {
+        if (Interlocked.Exchange(ref _groqSettingInitialized, 1) != 0)
+        {
+            return;
+        }
+
+        var configured = _configuration["AI:Groq:Enabled"]?.Trim();
+        if (bool.TryParse(configured, out var enabled))
+        {
+            _groqCommandTranscriptionEnabled = enabled;
+        }
+        else
+        {
+            _groqCommandTranscriptionEnabled = true;
+        }
+    }
 }
 
+[System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverage]
 public class PreventSleepResetBackgroundService : BackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromMinutes(1);

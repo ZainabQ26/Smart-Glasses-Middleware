@@ -1,6 +1,9 @@
 name: Docs (GitHub Pages)
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -23,6 +26,16 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
+
+      - name: Run Tests & Generate Coverage
+        run: |
+          chmod +x ./scripts/run_tests.sh
+          ./scripts/run_tests.sh || true
+
+      - name: Move test reports to docs
+        run: |
+          mkdir -p docs/tests
+          cp -r CoverageReport/* docs/tests/ || echo "No coverage report found"
 
       - name: Install DocFX
         run: dotnet tool update --global docfx

@@ -33,6 +33,29 @@
         ]
       }
     ],
+    "resource": [
+      {
+        "src": "..",
+        "files": [
+          "openapi.json"
+        ]
+      },
+      {
+        "files": [
+          "swagger/index.html"
+        ]
+      },
+      {
+        "files": [
+          "public/main.css"
+        ]
+      },
+      {
+        "files": [
+          "tests/**"
+        ]
+      }
+    ],
     "output": "_site",
     "template": [
       "default",
@@ -41,7 +64,10 @@
     "globalMetadata": {
       "_appTitle": "Smart Glasses Middleware Docs",
       "_appName": "Smart Glasses Middleware",
-      "_enableSearch": true
+      "_enableSearch": true,
+      "_customCss": [
+        "public/main.css"
+      ]
     }
   }
 }
