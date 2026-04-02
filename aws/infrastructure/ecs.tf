@@ -78,10 +78,7 @@ resource "aws_iam_role_policy" "ecs_task_execution_secrets" {
         Action = [
           "secretsmanager:GetSecretValue"
         ]
-        Resource = concat([
-          aws_secretsmanager_secret.db_credentials.arn
-        ], local.enable_customer_managed_kms_effective ? [aws_kms_key.s3[0].arn] : [], local.enable_redis_effective ? [aws_secretsmanager_secret.redis_credentials[0].arn] : [])
-        
+        Resource = local.enable_customer_managed_kms_effective ? [aws_kms_key.s3[0].arn] : ["*"]
       }
     ], local.enable_customer_managed_kms_effective ? [
       {
@@ -180,15 +177,6 @@ resource "aws_iam_role_policy" "ecs_task" {
         ]
         Resource = "*"
       },
-      {
-        Effect = "Allow"
-        Action = [
-          "secretsmanager:GetSecretValue"
-        ]
-        Resource = concat([
-          aws_secretsmanager_secret.db_credentials.arn
-        ], local.enable_redis_effective ? [aws_secretsmanager_secret.redis_credentials[0].arn] : [])
-      }
     ], local.enable_customer_managed_kms_effective ? [
       {
         # KMS permissions required for S3 SSE-KMS (PutObject needs GenerateDataKey, GetObject needs Decrypt)
@@ -281,19 +269,6 @@ locals {
             value = var.groq_api_key
           }
         ] : []
-      )
-
-      secrets = concat(
-        [
-          {
-            name      = "ConnectionStrings__DefaultConnection"
-            valueFrom = "${aws_secretsmanager_secret.db_credentials.arn}:connection_string::"
-          }
-        ],
-        local.enable_redis_effective ? [{
-          name      = "ConnectionStrings__Redis"
-          valueFrom = "${aws_secretsmanager_secret.redis_credentials[0].arn}:connection_string::"
-        }] : []
       )
 
       logConfiguration = {
