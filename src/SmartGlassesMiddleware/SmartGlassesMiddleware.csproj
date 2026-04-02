@@ -59,6 +59,7 @@
     <PackageReference Include="AWSSDK.SecretsManager" Version="3.7.400.44" />
     <PackageReference Include="AWSSDK.Lambda" Version="3.7.400.44" />
     <PackageReference Include="AWSSDK.SQS" Version="3.7.400.44" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="8.0.10" />
     <PackageReference Include="AWSSDK.Extensions.NETCore.Setup" Version="3.7.301" />
   </ItemGroup>
 

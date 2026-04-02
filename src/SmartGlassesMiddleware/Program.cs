@@ -78,85 +78,6 @@ static async Task ResetStalePendingUploadsAsync(IServiceProvider services, ILogg
     }
 }
 
-static async Task EnsureAdminListPerformanceIndexesAsync(IServiceProvider services, ILogger? logger)
-{
-    using var scope = services.CreateScope();
-    var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-    var provider = db.Database.ProviderName ?? string.Empty;
-    if (!provider.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
-    {
-        return;
-    }
-
-    // These indexes target the exact predicates used by admin files/groups list endpoints.
-    var sqlStatements = new[]
-    {
-        // Partial index covering the exact filter used by GetFiles (visible files only).
-        // Dramatically speeds up both the COUNT(*) and the paginated SELECT.
-        "CREATE INDEX IF NOT EXISTS \"IX_ManagedFiles_Visible_UploadedAt\" ON \"ManagedFiles\" (\"UploadedAt\" DESC) WHERE \"FileSize\" > 0 AND \"StorageKey\" IS NOT NULL AND \"StorageKey\" != '' AND \"StorageKey\" NOT LIKE 'FAILED:%' AND \"StorageKey\" NOT LIKE 'PENDING:%'",
-        "CREATE INDEX IF NOT EXISTS \"IX_ManagedFiles_UploadedAt\" ON \"ManagedFiles\" (\"UploadedAt\" DESC)",
-        "CREATE INDEX IF NOT EXISTS \"IX_ResourceGroups_CreatedAt\" ON \"ResourceGroups\" (\"CreatedAt\" DESC)",
-        "CREATE INDEX IF NOT EXISTS \"IX_ManagedFileGroups_ResourceGroupId\" ON \"ManagedFileGroups\" (\"ResourceGroupId\")",
-        "CREATE INDEX IF NOT EXISTS \"IX_ManagedPromptGroups_ResourceGroupId\" ON \"ManagedPromptGroups\" (\"ResourceGroupId\")",
-        "CREATE INDEX IF NOT EXISTS \"IX_DocumentGroups_ResourceGroupId\" ON \"DocumentGroups\" (\"ResourceGroupId\")",
-        "CREATE INDEX IF NOT EXISTS \"IX_Conversations_ResourceGroupId\" ON \"Conversations\" (\"ResourceGroupId\")",
-        "CREATE INDEX IF NOT EXISTS \"IX_ChatMessages_ConversationId\" ON \"ChatMessages\" (\"ConversationId\")"
-    };
-
-    foreach (var sql in sqlStatements)
-    {
-        await db.Database.ExecuteSqlRawAsync(sql);
-    }
-
-    logger?.LogInformation("Ensured admin list performance indexes");
-}
-
-static async Task EnsureAbbreviationsTableAsync(IServiceProvider services, ILogger? logger)
-{
-    using var scope = services.CreateScope();
-    var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-    var provider = db.Database.ProviderName ?? string.Empty;
-    if (!provider.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
-    {
-        return;
-    }
-
-    // Some environments run with migrations disabled; ensure the abbreviation sync
-    // storage exists so startup sync does not fail on missing relation errors.
-    var sqlStatements = new[]
-    {
-        @"CREATE TABLE IF NOT EXISTS ""Abbreviations"" (
-            ""Id"" uuid NOT NULL,
-            ""ShortForm"" character varying(255) NOT NULL,
-            ""ExpandedForm"" character varying(500) NOT NULL,
-            ""Category"" character varying(100),
-            ""Source"" character varying(50) NOT NULL,
-            ""UpdatedAt"" timestamp with time zone NOT NULL,
-            ""CreatedAt"" timestamp with time zone NOT NULL,
-            CONSTRAINT ""PK_Abbreviations"" PRIMARY KEY (""Id"")
-        )",
-                // Keep exactly one row per case-insensitive (ShortForm, ExpandedForm) pair
-                // so we can enforce dedupe with a unique functional index.
-                @"DELETE FROM ""Abbreviations"" a
-                    USING ""Abbreviations"" b
-                    WHERE a.""Id"" > b.""Id""
-                        AND lower(a.""ShortForm"") = lower(b.""ShortForm"")
-                        AND lower(a.""ExpandedForm"") = lower(b.""ExpandedForm"")",
-                @"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_Abbreviations_Short_Expanded_Unique_CI""
-                    ON ""Abbreviations"" (lower(""ShortForm""), lower(""ExpandedForm""))",
-        "CREATE INDEX IF NOT EXISTS \"IX_Abbreviations_ShortForm\" ON \"Abbreviations\" (\"ShortForm\")",
-        "CREATE INDEX IF NOT EXISTS \"IX_Abbreviations_ExpandedForm\" ON \"Abbreviations\" (\"ExpandedForm\")",
-        "CREATE INDEX IF NOT EXISTS \"IX_Abbreviations_Category\" ON \"Abbreviations\" (\"Category\")",
-        "CREATE INDEX IF NOT EXISTS \"IX_Abbreviations_Source\" ON \"Abbreviations\" (\"Source\")"
-    };
-
-    foreach (var sql in sqlStatements)
-    {
-        await db.Database.ExecuteSqlRawAsync(sql);
-    }
-
-    logger?.LogInformation("Ensured Abbreviations table and indexes");
-}
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -260,32 +181,9 @@ builder.Services.AddHttpLogging(options =>
     options.LoggingFields = HttpLoggingFields.RequestPropertiesAndHeaders | HttpLoggingFields.ResponsePropertiesAndHeaders;
 });
 
-// Configure PostgreSQL
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
-if (string.IsNullOrWhiteSpace(connectionString))
-{
-    throw new InvalidOperationException("Database connection string 'DefaultConnection' is not configured.");
-}
-
-// db.t3.micro has ~112 max_connections. Npgsql's default pool is 100 per process,
-// which would monopolise the entire DB budget and cause connection starvation.
-// Cap the pool and set a short command timeout so slow queries fail fast
-// and release connections back to the pool quickly.
-var npgsqlConnBuilder = new Npgsql.NpgsqlConnectionStringBuilder(connectionString);
-if (npgsqlConnBuilder.MaxPoolSize >= 90)   npgsqlConnBuilder.MaxPoolSize   = 20;
-if (npgsqlConnBuilder.MinPoolSize > 2)     npgsqlConnBuilder.MinPoolSize   = 1;
-if (npgsqlConnBuilder.CommandTimeout >= 30) npgsqlConnBuilder.CommandTimeout = 10;
-var tunedConnectionString = npgsqlConnBuilder.ConnectionString;
-
+// Configure In-Memory Database
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseNpgsql(tunedConnectionString, o =>
-    {
-        o.UseVector();
-        o.EnableRetryOnFailure(
-            maxRetryCount: 3,
-            maxRetryDelay: TimeSpan.FromSeconds(2),
-            errorCodesToAdd: null);
-    }));
+    options.UseInMemoryDatabase("SmartGlassesMiddleware"));
 
 // Configure Redis (only when a connection string is provided)
 var redisConnection = builder.Configuration.GetConnectionString("Redis");
@@ -605,6 +503,9 @@ builder.Services.AddHostedService<DocumentProcessingBackgroundService>();
 builder.Services.AddHostedService<AbbreviationSyncBackgroundService>();
 builder.Services.AddHostedService<PreventSleepResetBackgroundService>();
 
+// Database state loading/saving using S3
+builder.Services.AddHostedService<StatePersistenceService>();
+
 // Add SignalR for real-time notifications with WebSocket optimizations
 builder.Services.AddSignalR(options =>
 {
@@ -761,134 +662,31 @@ catch (Exception ex)
 
 // Configure the HTTP request pipeline.
 
-// Apply EF Core migrations at startup if enabled (guarded to avoid test-time provider conflicts)
+// Initialize cache and reset stale uploads
 using (var scope = app.Services.CreateScope())
 {
+    var logger = scope.ServiceProvider.GetService<ILogger<Program>>();
+
     try
     {
-        var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
-        var logger = scope.ServiceProvider.GetService<ILogger<Program>>();
-
-        // Check configuration key first, then environment variable. Default: disabled.
-        var migrateSetting = configuration.GetValue<bool?>("MigrateOnStartup");
-        var migrateEnv = Environment.GetEnvironmentVariable("MIGRATE_ON_STARTUP");
-        // MIGRATE_ONLY=true is set by the CI run-migrations job; it forces migration
-        // and then exits cleanly so no HTTP server starts.
-        var migrateOnly = string.Equals(Environment.GetEnvironmentVariable("MIGRATE_ONLY"), "true", StringComparison.OrdinalIgnoreCase);
-        var shouldMigrate = migrateOnly || (migrateSetting ?? string.Equals(migrateEnv, "true", StringComparison.OrdinalIgnoreCase));
-
-        if (shouldMigrate)
-        {
-            var maxMigrationAttempts = migrateOnly ? 5 : 1;
-            var migrationDelay = TimeSpan.FromSeconds(migrateOnly ? 30 : 5);
-            var migrationTimeout = TimeSpan.FromSeconds(migrateOnly ? 300 : 120);
-
-            for (var attempt = 1; attempt <= maxMigrationAttempts; attempt++)
-            {
-                try
-                {
-                    logger?.LogInformation("Starting database migration (attempt {Attempt}/{Total})...", attempt, maxMigrationAttempts);
-
-                    using var migrationScope = app.Services.CreateScope();
-                    var db = migrationScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-
-                    var migrationTask = Task.Run(() => db.Database.Migrate());
-                    var timeoutTask = Task.Delay(migrationTimeout);
-
-                    var completedTask = await Task.WhenAny(migrationTask, timeoutTask);
-
-                    if (completedTask == timeoutTask)
-                    {
-                        var errorMessage = $"Database migration timed out after {migrationTimeout.TotalSeconds:0} seconds on attempt {attempt}/{maxMigrationAttempts}. " +
-                            "Application startup aborted to prevent schema issues.";
-                        logger?.LogCritical(errorMessage);
-                        throw new TimeoutException(errorMessage);
-                    }
-
-                    await migrationTask;
-                    logger?.LogInformation("Database migration completed successfully.");
-                    break;
-                }
-                catch (Exception ex) when (migrateOnly && attempt < maxMigrationAttempts && IsTransientMigrationConnectivityFailure(ex))
-                {
-                    logger?.LogWarning(ex,
-                        "Database migration attempt {Attempt}/{Total} failed due to transient connectivity. Retrying in {DelaySeconds}s...",
-                        attempt,
-                        maxMigrationAttempts,
-                        migrationDelay.TotalSeconds);
-                    await Task.Delay(migrationDelay);
-                }
-            }
-
-        }
-        else
-        {
-            logger?.LogInformation("Skipping database migration on startup (MIGRATE_ON_STARTUP not set).");
-        }
-
-        try
-        {
-            await EnsureAdminListPerformanceIndexesAsync(app.Services, logger);
-        }
-        catch (Exception ex)
-        {
-            logger?.LogWarning(ex, "Failed to ensure admin list performance indexes during startup; continuing");
-        }
-
-        try
-        {
-            await ResetStalePendingUploadsAsync(app.Services, logger);
-        }
-        catch (Exception ex)
-        {
-            logger?.LogWarning(ex, "Failed to reset stale pending uploads at startup; continuing");
-        }
-
-        try
-        {
-            await EnsureAbbreviationsTableAsync(app.Services, logger);
-        }
-        catch (Exception ex)
-        {
-            logger?.LogWarning(ex, "Failed to ensure abbreviations table at startup; continuing");
-        }
-
-        try
-        {
-            _startupLogger.LogInformation("Warming abbreviation cache from database...");
-            using var abbrScope = app.Services.CreateScope();
-            var abbrService = abbrScope.ServiceProvider.GetRequiredService<IAbbreviationService>();
-            await abbrService.RefreshCacheAsync();
-            _startupLogger.LogInformation("Abbreviation cache warmed. Scheduled sync service will decide whether a fetch is needed.");
-        }
-        catch (Exception ex)
-        {
-            _startupLogger.LogWarning(ex, "Failed to warm abbreviation cache at startup; continuing (scheduled sync can repopulate cache)");
-        }
-
-        // When MIGRATE_ONLY is set the container is a one-shot CI task — exit cleanly
-        // so ECS marks it as stopped with exit code 0 and the CI job succeeds.
-        if (migrateOnly)
-        {
-            _startupLogger.LogInformation("MIGRATE_ONLY=true — migrations complete, exiting.");
-            return;
-        }
-    }
-    catch (InvalidOperationException ex) when (app.Environment.IsEnvironment("Testing"))
-    {
-        var logger = scope.ServiceProvider.GetService<ILogger<Program>>();
-        logger?.LogWarning(ex, "Skipping Database.Migrate during startup (likely test environment with multiple EF providers)");
-    }
-    catch (TimeoutException)
-    {
-        // Re-throw timeout exceptions to prevent app from starting with incomplete migrations
-        throw;
+        await ResetStalePendingUploadsAsync(app.Services, logger);
     }
     catch (Exception ex)
     {
-        var logger = scope.ServiceProvider.GetService<ILogger<Program>>();
-        logger?.LogError(ex, "Failed to apply migrations during startup; aborting application start");
-        throw; // Re-throw to prevent app from starting with schema issues
+        logger?.LogWarning(ex, "Failed to reset stale pending uploads at startup; continuing");
+    }
+
+    try
+    {
+        _startupLogger.LogInformation("Warming abbreviation cache from database...");
+        using var abbrScope = app.Services.CreateScope();
+        var abbrService = abbrScope.ServiceProvider.GetRequiredService<IAbbreviationService>();
+        await abbrService.RefreshCacheAsync();
+        _startupLogger.LogInformation("Abbreviation cache warmed. Scheduled sync service will decide whether a fetch is needed.");
+    }
+    catch (Exception ex)
+    {
+        _startupLogger.LogWarning(ex, "Failed to warm abbreviation cache at startup; continuing (scheduled sync can repopulate cache)");
     }
 }
 
@@ -1140,43 +938,22 @@ app.MapGet("/health", async (IServiceProvider services, HttpContext context) =>
     return Results.Ok(new { status = "Healthy", timestamp = DateTime.UtcNow });
 });
 
-// DB + Redis readiness endpoint — 503 until Postgres is reachable.
+// DB + Redis readiness endpoint.
 // The admin page's waitForAPI() polls this before loading data so it waits out
-// the full RDS cold-start without showing 500 errors to the user.
+// the full cold-start without showing 500 errors to the user.
 app.MapGet("/ready", async (IServiceProvider services, HttpContext context) =>
 {
     context.Response.Headers.CacheControl = "no-store, no-cache, must-revalidate";
     context.Response.Headers.Pragma = "no-cache";
 
     using var scope = services.CreateScope();
-    var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
     var redis = scope.ServiceProvider.GetService<IConnectionMultiplexer>();
     var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
 
     var checks = new Dictionary<string, object>();
     var ready = true;
 
-    // Postgres is required for API traffic.
-    // Use a short timeout so /ready never hangs on a stuck connection.
-    var dbOk = false;
-    string? dbError = null;
-    try
-    {
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        dbOk = await db.Database.CanConnectAsync(cts.Token);
-    }
-    catch (OperationCanceledException)
-    {
-        dbError = "Timeout: database check took too long";
-    }
-    catch (Exception ex)
-    {
-        dbError = ex.Message;
-    }
-    checks["postgres"] = new { healthy = dbOk, error = dbError };
-    ready &= dbOk;
-    if (!dbOk)
-        logger.LogWarning("Postgres readiness check failed: {DbError}", dbError);
+    // Removed postgres readiness checks since it's an in-memory DB now
 
     // Redis is useful but non-blocking for readiness.
     if (redis != null)
