@@ -79,6 +79,12 @@ public class DocumentsController : ControllerBase
 
         var requestId = await _monitoringService.StartRequest("DocumentUpload", file.FileName ?? "unknown");
         var originalFileName = file.FileName ?? string.Empty;
+
+        var ext = Path.GetExtension(originalFileName).ToLowerInvariant();
+        var allowedExtensions = new[] { ".pdf", ".png", ".jpg", ".jpeg", ".webp", ".bmp" };
+        if (!allowedExtensions.Contains(ext))
+            return BadRequest($"Unsupported file type {ext}");
+
         var originalContentType = file.ContentType ?? "application/octet-stream";
 
         try
@@ -89,7 +95,7 @@ public class DocumentsController : ControllerBase
             {
                 placeholderBaseName = "document";
             }
-            var placeholderPdfName = $"{placeholderBaseName}.pdf";
+            var placeholderFileName = $"{placeholderBaseName}{ext}";
 
             // Read uploaded bytes once and process in a background task.
             // This keeps the request short and avoids CloudFront 504 timeouts.
@@ -107,13 +113,13 @@ public class DocumentsController : ControllerBase
             var metadata = new DocumentMetadata
             {
                 Id = documentId,
-                FileName = placeholderPdfName,
+                FileName = placeholderFileName,
                 OriginalFileName = originalFileName,
-                ContentType = "application/pdf",
+                ContentType = originalContentType,
                 StorageKey = string.Empty,
                 UploadedAt = DateTime.UtcNow,
                 FileSize = 0,
-                DocumentType = "pdf",
+                DocumentType = ext.TrimStart('.'),
                 IsProcessed = false
             };
             _context.DocumentMetadatas.Add(metadata);
@@ -122,9 +128,9 @@ public class DocumentsController : ControllerBase
             var managedFile = new ManagedFile
             {
                 Id = documentId,
-                FileName = placeholderPdfName,
+                FileName = placeholderFileName,
                 Label = originalFileName,
-                ContentType = "application/pdf",
+                ContentType = originalContentType,
                 StorageKey = string.Empty,
                 UploadedAt = DateTime.UtcNow,
                 FileSize = 0
@@ -198,8 +204,9 @@ public class DocumentsController : ControllerBase
                 throw new InvalidOperationException("PDF conversion produced empty stream");
             }
 
-            var uploadKey = $"uploads/{documentId}.pdf";
-            await mediaStorageService.UploadFileAsync(uploadKey, pdfStream, "application/pdf");
+            var ext = Path.GetExtension(originalFileName).ToLowerInvariant();
+            var uploadKey = $"uploads/{documentId}{ext}";
+            await mediaStorageService.UploadFileAsync(uploadKey, pdfStream, originalContentType);
 
             var metadata = await db.DocumentMetadatas.FirstOrDefaultAsync(d => d.Id == documentId);
             var managedFile = await db.ManagedFiles.FirstOrDefaultAsync(f => f.Id == documentId);
@@ -208,10 +215,10 @@ public class DocumentsController : ControllerBase
             {
                 metadata.FileName = pdfFileName;
                 metadata.OriginalFileName = originalFileName;
-                metadata.ContentType = "application/pdf";
+                metadata.ContentType = originalContentType;
                 metadata.StorageKey = uploadKey;
                 metadata.FileSize = pdfStream.Length;
-                metadata.DocumentType = "pdf";
+                metadata.DocumentType = ext.TrimStart('.');
                 metadata.IsProcessed = !_ragEnabled;
                 metadata.ProcessedAt = _ragEnabled ? null : DateTime.UtcNow;
                 metadata.ProcessingError = _ragEnabled ? null : "RAG disabled: indexing skipped.";
@@ -222,7 +229,7 @@ public class DocumentsController : ControllerBase
             {
                 managedFile.FileName = pdfFileName;
                 managedFile.Label = originalFileName;
-                managedFile.ContentType = "application/pdf";
+                managedFile.ContentType = originalContentType;
                 managedFile.StorageKey = uploadKey;
                 managedFile.FileSize = pdfStream.Length;
             }
