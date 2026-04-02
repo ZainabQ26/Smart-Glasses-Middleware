@@ -748,6 +748,7 @@ jobs:
           done
 
       - name: Terraform apply
+        timeout-minutes: 20
         working-directory: aws/infrastructure
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
