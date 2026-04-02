@@ -20,7 +20,6 @@ public class MediaControllerTests
     private Mock<IHistoryService> _historyServiceMock = null!;
     private Mock<IBackgroundTaskQueue> _backgroundQueueMock = null!;
     private Mock<IMediaProcessor> _mediaProcessorMock = null!;
-    private Mock<IRagService> _ragServiceMock = null!;
     private Mock<ILogger<MediaController>> _loggerMock = null!;
 
     [SetUp]
@@ -36,7 +35,6 @@ public class MediaControllerTests
         _historyServiceMock = new Mock<IHistoryService>();
         _backgroundQueueMock = new Mock<IBackgroundTaskQueue>();
         _mediaProcessorMock = new Mock<IMediaProcessor>();
-        _ragServiceMock = new Mock<IRagService>();
         _loggerMock = new Mock<ILogger<MediaController>>();
     }
 
@@ -51,7 +49,6 @@ public class MediaControllerTests
             _historyServiceMock.Object,
             _backgroundQueueMock.Object,
             _mediaProcessorMock.Object,
-            _ragServiceMock.Object,
             _context,
             _loggerMock.Object);
 
@@ -131,7 +128,6 @@ public class MediaControllerTests
             _historyServiceMock.Object,
             _backgroundQueueMock.Object,
             _mediaProcessorMock.Object,
-            _ragServiceMock.Object,
             _context,
             _loggerMock.Object);
 

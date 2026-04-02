@@ -12,16 +12,14 @@ namespace SmartGlassesMiddleware.Controllers;
 public class HistoryController : ControllerBase
 {
     private readonly IHistoryService _historyService;
-    private readonly IRAGService _ragService;
     private readonly ILogger<HistoryController> _logger;
 
     public HistoryController(
         IHistoryService historyService,
-        IRAGService ragService,
+
         ILogger<HistoryController> logger)
     {
         _historyService = historyService;
-        _ragService = ragService;
         _logger = logger;
     }
 
@@ -306,7 +304,7 @@ public class HistoryController : ControllerBase
                 });
             }
 
-            var result = await _ragService.QueryRemindersAsync(request.Query, request.TopK ?? 10);
+            var result = new QueryResult { Answer = "RAG queries are disabled." };
             return Ok(result);
         }
         catch (Exception ex)

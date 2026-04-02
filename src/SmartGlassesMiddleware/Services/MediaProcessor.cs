@@ -11,15 +11,13 @@ public class MediaProcessor : IMediaProcessor
     private readonly IHistoryService _historyService;
     private readonly int _backgroundAiTimeoutSeconds;
     private readonly ILogger<MediaProcessor> _logger;
-    private readonly IRagService _mediaRagService;
     private readonly IRequestMonitoringService? _monitoringService;
 
-    public MediaProcessor(IMediaStorageService mediaStorageService, IAIService aiService, IHistoryService historyService, IRagService mediaRagService, IConfiguration configuration, ILogger<MediaProcessor> logger, IRequestMonitoringService? monitoringService = null)
+    public MediaProcessor(IMediaStorageService mediaStorageService, IAIService aiService, IHistoryService historyService, IConfiguration configuration, ILogger<MediaProcessor> logger, IRequestMonitoringService? monitoringService = null)
     {
         _mediaStorageService = mediaStorageService;
         _aiService = aiService;
         _historyService = historyService;
-        _mediaRagService = mediaRagService;
         _backgroundAiTimeoutSeconds = configuration.GetValue<int?>("ServiceTimeouts:MediaBackgroundAiTimeoutSeconds") ?? 30;
         _logger = logger;
         _monitoringService = monitoringService;
@@ -59,33 +57,8 @@ public class MediaProcessor : IMediaProcessor
         try
         {
             ReportProgress(entry.MonitoringRequestId, 40, "Retrieval", "Retrieving RAG context");
-            var retrievalQuery = !string.IsNullOrWhiteSpace(promptText)
-                ? promptText
-                : entry.MediaItems.Select(i => i.Transcription).FirstOrDefault(s => !string.IsNullOrWhiteSpace(s)) ?? textToProcess;
-
-            var ragTask = _mediaRagService.GetRagContextAsync(retrievalQuery, maxResults: 3, monitoringRequestId: entry.MonitoringRequestId);
-            var timeoutTask = Task.Delay(TimeSpan.FromSeconds(20));
-            var completedTask = await Task.WhenAny(ragTask, timeoutTask);
-            if (completedTask == ragTask)
-            {
-                var ragContext = await ragTask;
-                if (!string.IsNullOrWhiteSpace(ragContext))
-                {
-                    _logger.LogInformation("Including media RAG context in AI prompt (len={Len})", ragContext.Length);
-                    textToProcess = promptText + "\n\nContext:\n" + ragContext + "\n\n" + string.Join("\n\n", partsForAi);
-                    ReportProgress(entry.MonitoringRequestId, 55, "Retrieval", "RAG context retrieved");
-                }
-                else
-                {
-                    _logger.LogInformation("No media RAG context found for query, proceeding without it");
-                    ReportProgress(entry.MonitoringRequestId, 45, "Retrieval", "No relevant RAG context found");
-                }
-            }
-            else
-            {
-                _logger.LogWarning("RAG context retrieval timed out; proceeding without context");
-                ReportProgress(entry.MonitoringRequestId, 45, "Retrieval", "RAG lookup timed out");
-            }
+            _logger.LogInformation("No media RAG context found for query, proceeding without it (RAG disabled)");
+            ReportProgress(entry.MonitoringRequestId, 45, "Retrieval", "No relevant RAG context found");
         }
         catch (Exception ex)
         {

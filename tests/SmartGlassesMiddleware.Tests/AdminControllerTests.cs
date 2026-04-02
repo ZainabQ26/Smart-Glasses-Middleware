@@ -18,8 +18,6 @@ namespace SmartGlassesMiddleware.Tests
         private AdminController _controller;
         private Mock<IMediaStorageService> _mockMediaStorage;
         private Mock<ICacheService> _mockCache;
-        private Mock<IRagService> _mockRagService;
-        private Mock<IRAGService> _mockDocRagService;
         private Mock<ILogger<AdminController>> _mockLogger;
         private Mock<IRequestMonitoringService> _mockMonitoring;
         private Mock<IServerSettingsService> _mockSettings;
@@ -36,8 +34,6 @@ namespace SmartGlassesMiddleware.Tests
 
             _mockMediaStorage = new Mock<IMediaStorageService>();
             _mockCache = new Mock<ICacheService>();
-            _mockRagService = new Mock<IRagService>();
-            _mockDocRagService = new Mock<IRAGService>();
             _mockLogger = new Mock<ILogger<AdminController>>();
             _mockMonitoring = new Mock<IRequestMonitoringService>();
             _mockSettings = new Mock<IServerSettingsService>();
@@ -47,8 +43,6 @@ namespace SmartGlassesMiddleware.Tests
                 dbContext,
                 _mockMediaStorage.Object,
                 _mockCache.Object,
-                _mockRagService.Object,
-                _mockDocRagService.Object,
                 _mockLogger.Object,
                 _mockMonitoring.Object,
                 _mockSettings.Object,
@@ -75,12 +69,10 @@ namespace SmartGlassesMiddleware.Tests
         [Test]
         public async Task ReindexAll_CallsDocumentRagService()
         {
-            _mockDocRagService.Setup(s => s.ReindexAllDocumentsAsync(It.IsAny<bool>())).ReturnsAsync(5);
 
             var result = await _controller.ReindexAll(force: true);
 
             Assert.That(result, Is.InstanceOf<OkObjectResult>());
-            _mockDocRagService.Verify(s => s.ReindexAllDocumentsAsync(true), Times.Once);
         }
     }
 }

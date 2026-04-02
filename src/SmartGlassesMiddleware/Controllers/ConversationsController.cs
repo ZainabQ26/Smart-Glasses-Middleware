@@ -15,7 +15,6 @@ public class ConversationsController : ControllerBase
 {
     private readonly ILogger<ConversationsController> _logger;
     private readonly IConversationService _conversationService;
-    private readonly IRAGService _ragService;
     private readonly ApplicationDbContext _context;
     private readonly ICacheService _cacheService;
     private readonly IHubContext<ResourceHub>? _resourceHub;
@@ -26,14 +25,13 @@ public class ConversationsController : ControllerBase
     public ConversationsController(
         ILogger<ConversationsController> logger,
         IConversationService conversationService,
-        IRAGService ragService,
+
         ApplicationDbContext context,
         ICacheService cacheService,
         IHubContext<ResourceHub>? resourceHub = null)
     {
         _logger = logger;
         _conversationService = conversationService;
-        _ragService = ragService;
         _context = context;
         _cacheService = cacheService;
         _resourceHub = resourceHub;
@@ -371,13 +369,11 @@ public class ConversationsController : ControllerBase
             // Add user message to conversation (original or new)
             await _conversationService.AddMessageAsync(targetConversationId, "user", request.Query);
 
-            // Query with conversation context
-            var result = await _ragService.QueryDocumentsWithConversationAsync(
-                request.Query,
-                targetConversationId,
-                request.TopK ?? 5,
-                request.GroupIds,
-                null);
+            var result = new QueryResult
+            {
+                Answer = "RAG queries are disabled.",
+                ConversationId = targetConversationId
+            };
 
             // Add assistant response to conversation
             await _conversationService.AddMessageAsync(
@@ -422,15 +418,15 @@ public class ConversationsController : ControllerBase
                 var conversation = await _context.Conversations.FindAsync(id);
                 if (conversation != null)
                 {
-                    var (embeddingJson, dimension) = await _ragService.GenerateTextEmbeddingJsonAsync(summary);
-                    conversation.SummaryEmbedding = embeddingJson;
-                    conversation.SummaryEmbeddingDimension = dimension;
+                    // RAG embeddings are disabled
+                    // conversation.SummaryEmbedding = embeddingJson;
+                    // conversation.SummaryEmbeddingDimension = dimension;
                     await _context.SaveChangesAsync();
-                    _logger.LogInformation("Generated embedding for conversation {ConversationId} summary", id);
+                    _logger.LogInformation("Embeddings disabled, skipped generation for conversation {ConversationId} summary", id);
                 }
             }
 
-            return Ok(new { summary, embeddingGenerated = generateEmbedding });
+            return Ok(new { summary, embeddingGenerated = false });
         }
         catch (ArgumentException ex)
         {

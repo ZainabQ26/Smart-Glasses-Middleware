@@ -21,8 +21,6 @@ public class AdminController : ControllerBase
     private readonly ApplicationDbContext _context;
     private readonly IMediaStorageService _mediaStorageService;
     private readonly ICacheService _cacheService;
-    private readonly IRagService _ragService;
-    private readonly IRAGService _documentRagService;
     private readonly ILogger<AdminController> _logger;
     private readonly IRequestMonitoringService _monitoringService;
     private readonly IServerSettingsService _serverSettingsService;
@@ -137,8 +135,8 @@ public class AdminController : ControllerBase
         ApplicationDbContext context,
         IMediaStorageService mediaStorageService,
         ICacheService cacheService,
-        IRagService ragService,
-        IRAGService documentRagService,
+
+
         ILogger<AdminController> logger,
         IRequestMonitoringService monitoringService,
         IServerSettingsService serverSettingsService,
@@ -148,8 +146,6 @@ public class AdminController : ControllerBase
         _context = context;
         _mediaStorageService = mediaStorageService;
         _cacheService = cacheService;
-        _ragService = ragService;
-        _documentRagService = documentRagService;
         _logger = logger;
         _monitoringService = monitoringService;
         _serverSettingsService = serverSettingsService;
@@ -509,7 +505,6 @@ public class AdminController : ControllerBase
         {
             SetPresignedStatus(fileId, "processing", fileName, fileSize);
             using var scope = _scopeFactory.CreateScope();
-            var ragService = scope.ServiceProvider.GetRequiredService<IRagService>();
             var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
             using var dbTimeoutCts = new CancellationTokenSource(PresignedBackgroundPersistTimeout);
@@ -554,7 +549,6 @@ public class AdminController : ControllerBase
 
             try
             {
-                await ragService.ProcessFileForRagAsync(fileId, fileName, contentType, s3Key);
                 _logger.LogInformation("Presigned upload file {FileId} processed for RAG", fileId);
             }
             catch (Exception ex)
@@ -717,7 +711,6 @@ public class AdminController : ControllerBase
             {
                 using var scope = _scopeFactory.CreateScope();
                 var mediaStorageService = scope.ServiceProvider.GetRequiredService<IMediaStorageService>();
-                var ragService = scope.ServiceProvider.GetRequiredService<IRagService>();
                 var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
                 var monitoringService = scope.ServiceProvider.GetService<IRequestMonitoringService>();
 
@@ -795,7 +788,6 @@ public class AdminController : ControllerBase
                 // Process file for RAG indexing
                 try
                 {
-                    await ragService.ProcessFileForRagAsync(fileId, fileName, contentType, storageKey);
                     _logger.LogInformation("File {FileId} processed for RAG", fileId);
                 }
                 catch (Exception ex)
@@ -1296,8 +1288,7 @@ public class AdminController : ControllerBase
                 $"Reindexing all documents (force: {force})");
             await _monitoringService.UpdateRequestStatus(requestId, "Reindexing documents...");
             
-            var reindexed = await _documentRagService.ReindexAllDocumentsAsync(force);
-            
+            int reindexed = 0;
             // Invalidate relevant caches
             await InvalidateFilesCache();
             
