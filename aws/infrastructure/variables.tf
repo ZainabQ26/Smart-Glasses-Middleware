@@ -194,6 +194,7 @@ variable "rds_monitoring_interval" {
   description = "Deprecated compatibility variable retained for CI inputs (0 disables enhanced monitoring)."
   type        = number
   default     = 0
+}
 
 variable "db_username" {
   description = "PostgreSQL database username"
@@ -223,5 +224,4 @@ variable "db_name" {
   description = "PostgreSQL database name"
   type        = string
   default     = "smart_glasses"
-}
 }
