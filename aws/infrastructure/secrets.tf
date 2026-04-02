@@ -1,3 +1,24 @@
+
+resource "aws_secretsmanager_secret" "db_connection" {
+  name                    = "${local.app_name}-db-connection-${local.environment}"
+  recovery_window_in_days = 0  # Allow immediate deletion in dev
+
+  tags = {
+    environment = local.environment
+    app_name    = local.app_name
+  }
+}
+
+resource "aws_secretsmanager_secret_version" "db_connection" {
+  secret_id = aws_secretsmanager_secret.db_connection.id
+  secret_string = jsonencode({
+    username = var.db_username
+    password = var.db_password
+    host     = var.db_host
+    port     = var.db_port
+    dbname   = var.db_name
+  })
+}
 # Application Secrets
 resource "aws_secretsmanager_secret" "app_secrets" {
   count       = var.environment == "prod" ? 1 : 0

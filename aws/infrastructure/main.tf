@@ -50,4 +50,40 @@ provider "aws" {
       sts            = var.localstack_endpoint
     }
   }
+
+  dynamic "endpoints" {
+    for_each = var.use_localstack ? [1] : []
+    content {
+      ec2                = "http://localhost:4566"
+      s3                 = "http://localhost:4566"
+      iam                = "http://localhost:4566"
+      rds                = "http://localhost:4566"
+      lambda             = "http://localhost:4566"
+      apigateway         = "http://localhost:4566"
+      cloudformation     = "http://localhost:4566"
+      ecs                = "http://localhost:4566"
+      ecr                = "http://localhost:4566"
+      logs               = "http://localhost:4566"
+      secretsmanager     = "http://localhost:4566"
+      dynamodb           = "http://localhost:4566"
+      kms                = "http://localhost:4566"
+      cloudwatch         = "http://localhost:4566"
+      sns                = "http://localhost:4566"
+      sqs                = "http://localhost:4566"
+      sts                = "http://localhost:4566"
+      kinesis            = "http://localhost:4566"
+      bedrock            = "http://localhost:4566"
+      bedrock_runtime    = "http://localhost:4566"
+      route53            = "http://localhost:4566"
+      cloudfront         = "http://localhost:4566"
+      acm                = "http://localhost:4566"
+      elasticloadbalancing = "http://localhost:4566"
+    }
+    }
+  }
+# Data sources for current AWS account and region
+data "aws_region" "current" {
+}
+
+data "aws_caller_identity" "current" {
 }

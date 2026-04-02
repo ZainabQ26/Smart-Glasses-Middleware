@@ -152,29 +152,6 @@ variable "api_image" {
   default     = ""
 }
 
-variable "lambda_image" {
-  description = "Optional: full image URI (including tag) for the Whisper Lambda image. If empty, Terraform will expect a default or separate variable."
-  type        = string
-  default     = ""
-}
-
-variable "lambda_whisper_image" {
-  description = "Full image URI for the Whisper Lambda Docker image"
-  type        = string
-  default     = ""
-}
-
-variable "lambda_document_image" {
-  description = "Full image URI for the Document Processor Lambda (if packaged as image)."
-  type        = string
-  default     = ""
-}
-
-variable "client_image" {
-  description = "Optional: full image URI (including tag) for the client container (optional)."
-  type        = string
-  default     = ""
-}
 
 variable "use_localstack" {
   description = "When true, configure the AWS provider to use LocalStack endpoints."
@@ -199,4 +176,52 @@ variable "groq_api_key" {
   type        = string
   default     = ""
   sensitive   = true
+}
+
+variable "enable_redis" {
+  description = "Deprecated compatibility variable. Redis is currently not provisioned by this root module."
+  type        = bool
+  default     = false
+}
+
+variable "enable_rds_performance_insights" {
+  description = "Deprecated compatibility variable retained for CI inputs."
+  type        = bool
+  default     = false
+}
+
+variable "rds_monitoring_interval" {
+  description = "Deprecated compatibility variable retained for CI inputs (0 disables enhanced monitoring)."
+  type        = number
+  default     = 0
+
+variable "db_username" {
+  description = "PostgreSQL database username"
+  type        = string
+  default     = "postgres"
+  sensitive   = true
+}
+
+variable "db_password" {
+  description = "PostgreSQL database password"
+  type        = string
+  sensitive   = true
+}
+
+variable "db_host" {
+  description = "PostgreSQL database host"
+  type        = string
+}
+
+variable "db_port" {
+  description = "PostgreSQL database port"
+  type        = number
+  default     = 5432
+}
+
+variable "db_name" {
+  description = "PostgreSQL database name"
+  type        = string
+  default     = "smart_glasses"
+}
 }
