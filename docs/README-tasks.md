@@ -50,21 +50,6 @@ The application automatically:
 - Returns highlighted copy without modifying original
 - Usage: "highlight [text] in document [id]"
 
-**OCRTaskHandler.cs** - `task: ocr`
-- OCR (Optical Character Recognition) for images
-- Reprocesses a document and regenerates embeddings when given a document ID
-- Full OCR requires Tesseract to be configured
-- Usage: "ocr [document-id]"
-
-**OCRRetryTaskHandler.cs** - `task: ocr-retry`
-- Explicitly retries OCR and embedding generation for an existing document
-- Usage: provide a document ID (GUID)
-
-**DocumentQueryTaskHandler.cs** - `task: document-query`
-- RAG-based intelligent document queries
-- Searches documents semantically and provides answers
-- Usage: "What does the document say about [topic]?"
-
 ### Advanced Model (External REST API)
 
 **AdvancedTaskHandler.cs** - `task: advanced`

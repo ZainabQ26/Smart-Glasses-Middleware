@@ -259,9 +259,6 @@ The middleware dispatches AI-classified requests to typed task handlers. Handler
 | `OpenFileTaskHandler` | `open-file` | Lists the last 5 uploaded files so the user can choose one to open |
 | `DocumentSearchTaskHandler` | `document-search` | Finds text in documents, returns page/position |
 | `DocumentHighlightTaskHandler` | `document-highlight` | Highlights text in a document |
-| `DocumentQueryTaskHandler` | `document-query` | Semantic RAG query over uploaded documents |
-| `OCRTaskHandler` | `ocr` | Runs OCR on an image or scanned PDF page |
-| `OCRRetryTaskHandler` | `ocr-retry` | Retries a failed OCR job |
 | `AdvancedTaskHandler` | `advanced` | Forwards to the configured external REST API endpoint |
 | `TemplateTaskHandler` | `template` | Starter template for new handlers |
 | `NextPageTaskHandler` | `next-page` | Navigates the inline PDF viewer to the next page |

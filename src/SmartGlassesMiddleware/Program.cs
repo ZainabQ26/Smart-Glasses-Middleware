@@ -201,7 +201,6 @@ else
 var awsRegion = builder.Configuration["AWS:Region"] ?? "us-east-1";
 var awsRegionEndpoint = Amazon.RegionEndpoint.GetBySystemName(awsRegion);
 builder.Services.AddSingleton<Amazon.S3.IAmazonS3>(_ => new Amazon.S3.AmazonS3Client(awsRegionEndpoint));
-builder.Services.AddSingleton<Amazon.Lambda.IAmazonLambda>(_ => new Amazon.Lambda.AmazonLambdaClient(awsRegionEndpoint));
 
 // Use native AWS S3 for media storage unless LocalStack/MinIO is explicitly enabled.
 // Storage backend must not depend on whether Bedrock is enabled.
@@ -558,8 +557,7 @@ builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
-        var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
-            ?? new[] { "http://localhost:3000", "http://localhost:5000" };
+        var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>();
 
         if (builder.Environment.IsDevelopment())
         {
@@ -570,6 +568,12 @@ builder.Services.AddCors(options =>
         }
         else
         {
+            // In production, require explicit CORS origins
+            if (allowedOrigins == null || allowedOrigins.Length == 0)
+            {
+                throw new InvalidOperationException("Cors:AllowedOrigins must be configured for non-development environments");
+            }
+
             // In production, restrict to specific origins and explicitly ignore wildcards
             var validOrigins = allowedOrigins.Where(o => o != "*").ToArray();
             if (validOrigins.Length > 0)

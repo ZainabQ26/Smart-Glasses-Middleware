@@ -54,13 +54,13 @@ public class AIService : IAIService
         _logger = logger;
         if (configuration == null)
         {
-            _advancedModelEndpoint = "http://localhost:5000/api/chat";
+            _advancedModelEndpoint = string.Empty;
             _useAdvancedModel = false;
             _allowBedrockProcessing = false;
         }
         else
         {
-            _advancedModelEndpoint = configuration["AI:AdvancedModelEndpoint"] ?? "http://localhost:5000/api/chat";
+            _advancedModelEndpoint = configuration["AI:AdvancedModelEndpoint"] ?? string.Empty;
             try
             {
                 _useAdvancedModel = configuration.GetValue<bool?>("AI:UseAdvancedModel") ?? false;
