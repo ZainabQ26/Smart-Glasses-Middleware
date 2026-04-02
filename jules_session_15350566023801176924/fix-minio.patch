@@ -1,0 +1,11 @@
+--- src/SmartGlassesMiddleware/Program.cs
++++ src/SmartGlassesMiddleware/Program.cs
+@@ -257,7 +257,7 @@
+         var accessKey = builder.Configuration["MinIO:AccessKey"];
+         var secretKey = builder.Configuration["MinIO:SecretKey"];
+ 
+-        return new MinioClient()
++        return new Minio.MinioClient()
+             .WithEndpoint(endpoint)
+             .WithCredentials(accessKey, secretKey)
+             .Build();

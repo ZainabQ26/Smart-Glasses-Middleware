@@ -1,0 +1,19 @@
+--- src/SmartGlassesMiddleware/Controllers/AdminController.cs
++++ src/SmartGlassesMiddleware/Controllers/AdminController.cs
+@@ -1969,16 +1969,6 @@
+ 
+-            // Delete linked DocumentMetadata entries that belong only to this group
+-            var soloDocIds = await _context.DocumentGroups
+-                .Where(dg => dg.ResourceGroupId == id)
+-                .GroupBy(dg => dg.DocumentMetadataId)
+-                .Where(g2 => g2.Count() == 1)  // only linked to this one group
+-                .Select(g2 => g2.Key)
+-                .ToListAsync();
+-
+-            if (soloDocIds.Count > 0)
+-            {
+-                await _context.DocumentMetadatas
+-                    .Where(d => soloDocIds.Contains(d.Id))
+-                    .ExecuteDeleteAsync();
+-            }
+             

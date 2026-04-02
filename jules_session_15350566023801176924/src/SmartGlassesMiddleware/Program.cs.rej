@@ -1,0 +1,11 @@
+--- src/SmartGlassesMiddleware/Program.cs
++++ src/SmartGlassesMiddleware/Program.cs
+@@ -253,7 +253,7 @@
+ if (!useAwsStorage)
+ {
+-    builder.Services.AddSingleton<Minio.IMinioClient>(sp =>
++    builder.Services.AddSingleton<IMinioClient>(sp =>
+     {
+         var endpoint = builder.Configuration["MinIO:Endpoint"];
+         var accessKey = builder.Configuration["MinIO:AccessKey"];
+ 
