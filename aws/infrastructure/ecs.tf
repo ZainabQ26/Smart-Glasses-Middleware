@@ -78,7 +78,10 @@ resource "aws_iam_role_policy" "ecs_task_execution_secrets" {
         Action = [
           "secretsmanager:GetSecretValue"
         ]
-        Resource = local.enable_customer_managed_kms_effective ? [aws_kms_key.s3[0].arn] : ["*"]
+        Resource = concat(
+          [aws_secretsmanager_secret.db_connection.arn],
+          local.enable_customer_managed_kms_effective ? [aws_kms_key.s3[0].arn] : ["*"]
+        )
       }
     ], local.enable_customer_managed_kms_effective ? [
       {
@@ -287,6 +290,13 @@ locals {
         retries     = 3
         startPeriod = 20  # reduced from 60 s; .NET 10 + ReadyToRun starts in ~15-20 s
       }
+
+        secrets = [
+          {
+            name      = "ConnectionStrings__DefaultConnection"
+            valueFrom = "${aws_secretsmanager_secret.db_connection.arn}:username::"
+          }
+        ]
     }
   ])
 
