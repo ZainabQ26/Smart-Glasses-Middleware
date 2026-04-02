@@ -312,7 +312,8 @@ resource "aws_ecs_service" "api" {
     capacity_provider = "FARGATE_SPOT"
     weight            = 1
   }
-  force_new_deployment = true  # Force new deployment on every terraform apply
+  force_new_deployment   = true  # Force new deployment on every terraform apply
+  wait_for_steady_state  = false # Do not block Terraform; circuit breaker handles failed rollback
 
   network_configuration {
     subnets          = local.ecs_service_subnet_ids
