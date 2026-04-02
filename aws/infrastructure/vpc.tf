@@ -45,19 +45,6 @@ resource "aws_subnet" "private_app" {
   }
 }
 
-# Private Subnets for Database
-resource "aws_subnet" "private_db" {
-  count             = length(var.availability_zones)
-  vpc_id            = aws_vpc.main.id
-  cidr_block        = cidrsubnet(var.vpc_cidr, 8, count.index + 20)
-  availability_zone = var.availability_zones[count.index]
-
-  tags = {
-    Name = "${var.project_name}-${var.environment}-private-db-${count.index + 1}"
-    Type = "private-db"
-  }
-}
-
 # Elastic IP for NAT Gateway
 resource "aws_eip" "nat" {
   count  = var.enable_nat_gateway ? length(var.availability_zones) : 0

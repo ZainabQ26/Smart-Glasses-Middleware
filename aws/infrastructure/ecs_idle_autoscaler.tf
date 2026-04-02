@@ -138,17 +138,6 @@ resource "aws_iam_role_policy" "ecs_idle_scaler_lambda" {
         Resource = [
           aws_ecs_cluster.main.arn
         ]
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "rds:DescribeDBInstances",
-          "rds:StartDBInstance",
-          "rds:StopDBInstance"
-        ]
-        Resource = [
-          aws_db_instance.main.arn
-        ]
       }
     ]
   })
@@ -179,7 +168,6 @@ resource "aws_lambda_function" "ecs_idle_scaler" {
       ECS_CLUSTER_NAME      = aws_ecs_cluster.main.name
       ECS_SERVICE_NAME      = aws_ecs_service.api.name
       DEFAULT_DESIRED_COUNT = tostring(var.ecs_warm_desired_count)
-      RDS_INSTANCE_ID       = aws_db_instance.main.id
       ALLOW_DB_STOP         = var.environment == "prod" ? "false" : "true"
     }
   }

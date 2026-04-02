@@ -4,12 +4,6 @@ variable "aws_region" {
   default     = "us-east-1"
 }
 
-variable "enable_rds" {
-  description = "Kept for backward compatibility; RDS is always created (standard db.t3.micro, free-tier eligible)"
-  type        = bool
-  default     = true
-}
-
 variable "cost_optimized_non_prod" {
   description = "When true, non-prod defaults favor minimum idle cost (ECS min/desired=0, Redis off, and reduced telemetry)."
   type        = bool
@@ -66,30 +60,6 @@ variable "availability_zones" {
   default     = ["us-east-1a", "us-east-1b"]
 }
 
-variable "db_instance_class" {
-  description = "RDS instance class (db.t3.micro = free tier eligible)"
-  type        = string
-  default     = "db.t3.micro"
-}
-
-variable "db_name" {
-  description = "Database name"
-  type        = string
-  default     = "smartglasses"
-}
-
-variable "db_username" {
-  description = "Database master username"
-  type        = string
-  default     = "postgres"
-}
-
-variable "elasticache_node_type" {
-  description = "ElastiCache node type"
-  type        = string
-  default     = "cache.t3.micro"
-}
-
 variable "ecs_api_cpu" {
   description = "CPU units for API ECS task"
   type        = number
@@ -127,13 +97,6 @@ variable "enable_container_insights" {
   nullable    = true
 }
 
-variable "enable_redis" {
-  description = "Enable Redis/ElastiCache resources. Set null to use environment-aware defaults."
-  type        = bool
-  default     = null
-  nullable    = true
-}
-
 variable "enable_nat_gateway" {
   description = "Enable NAT Gateway for private subnets"
   type        = bool
@@ -145,18 +108,6 @@ variable "enable_vpc_interface_endpoints" {
   type        = bool
   default     = null
   nullable    = true
-}
-
-variable "enable_rds_performance_insights" {
-  description = "Enable RDS Performance Insights"
-  type        = bool
-  default     = false
-}
-
-variable "rds_monitoring_interval" {
-  description = "RDS Enhanced Monitoring interval in seconds (0 disables)"
-  type        = number
-  default     = 0
 }
 
 variable "enable_ecs_idle_autoscaler" {
