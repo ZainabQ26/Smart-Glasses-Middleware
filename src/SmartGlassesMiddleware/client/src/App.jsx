@@ -237,18 +237,7 @@ export default function App() {
   useEffect(() => { activationWordRef.current = activationWord; }, [activationWord]);
   useEffect(() => { groqCommandTranscriptionEnabledRef.current = groqCommandTranscriptionEnabled; }, [groqCommandTranscriptionEnabled]);
 
-  // Listen for changes made in the admin panel (different tab/window) and apply live.
-  useEffect(() => {
-    const handler = (e) => {
-      if (e.key === "sgm_activation_word") {
-        const w = e.newValue?.trim() || "activate";
-        setActivationWord(w);
-        activationWordRef.current = w;
-      }
-    };
-    window.addEventListener("storage", handler);
-    return () => window.removeEventListener("storage", handler);
-  }, []);
+
 
   // Probe backend on load and keep retrying while the service scales up from idle.
   // This endpoint is lightweight and also provides the activation word.
@@ -256,12 +245,16 @@ export default function App() {
     let cancelled = false;
 
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const POLL_INTERVAL_MS = 5000;
 
     const probeBackend = async () => {
       let attempts = 0;
+      let isReady = false;
 
       while (!cancelled) {
-        setBackendStatusText(attempts === 0 ? "Checking server status…" : "Waking backend server…");
+        if (!isReady) {
+          setBackendStatusText(attempts === 0 ? "Checking server status…" : "Waking backend server…");
+        }
 
         try {
           const response = await fetch("/api/process/client-settings", {
@@ -286,15 +279,22 @@ export default function App() {
           setGroqCommandTranscriptionEnabled(groqEnabled);
           groqCommandTranscriptionEnabledRef.current = groqEnabled;
 
-          if (!cancelled) {
+          if (!cancelled && !isReady) {
             setBackendReady(true);
             setBackendStatusText("Backend is ready");
             addLog("✅ Backend server is ready.", "info");
+            isReady = true;
           }
-          return;
+
+          if (!cancelled) {
+            await sleep(POLL_INTERVAL_MS);
+          }
         } catch (_) {
           attempts += 1;
-          await sleep(Math.min(2000 + attempts * 1000, 10000));
+          isReady = false; // if the server goes offline, we revert to waking
+          if (!cancelled) {
+            await sleep(Math.min(2000 + attempts * 1000, 10000));
+          }
         }
       }
     };
