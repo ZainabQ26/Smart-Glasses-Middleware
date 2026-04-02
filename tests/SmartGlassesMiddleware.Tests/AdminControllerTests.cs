@@ -67,7 +67,7 @@ namespace SmartGlassesMiddleware.Tests
         }
 
         [Test]
-        public async Task ReindexAll_CallsDocumentRagService()
+        public async Task ReindexAll_ReturnsOkResult()
         {
 
             var result = await _controller.ReindexAll(force: true);
