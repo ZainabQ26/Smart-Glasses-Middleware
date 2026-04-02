@@ -17,7 +17,6 @@ public class ConversationsControllerTests
     private ApplicationDbContext _context = null!;
     private Mock<ILogger<ConversationsController>> _loggerMock = null!;
     private Mock<IConversationService> _conversationMock = null!;
-    private Mock<IRAGService> _ragMock = null!;
     private Mock<ICacheService> _cacheMock = null!;
 
     [SetUp]
@@ -30,7 +29,6 @@ public class ConversationsControllerTests
 
         _loggerMock = new Mock<ILogger<ConversationsController>>();
         _conversationMock = new Mock<IConversationService>();
-        _ragMock = new Mock<IRAGService>();
         _cacheMock = new Mock<ICacheService>();
     }
 
@@ -45,7 +43,6 @@ public class ConversationsControllerTests
         var controller = new ConversationsController(
             _loggerMock.Object,
             _conversationMock.Object,
-            _ragMock.Object,
             _context,
             _cacheMock.Object,
             resourceHub: null);

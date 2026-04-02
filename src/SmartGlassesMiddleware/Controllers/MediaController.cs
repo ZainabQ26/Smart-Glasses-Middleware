@@ -19,7 +19,6 @@ public class MediaController : ControllerBase
     private readonly IHistoryService _historyService;
     private readonly IBackgroundTaskQueue _backgroundQueue;
     private readonly IMediaProcessor _mediaProcessor;
-    private readonly IRagService _ragService;
     private readonly IRequestMonitoringService? _monitoringService;
     private readonly ApplicationDbContext _context;
 
@@ -29,7 +28,7 @@ public class MediaController : ControllerBase
         IHistoryService historyService,
         IBackgroundTaskQueue backgroundQueue,
         IMediaProcessor mediaProcessor,
-        IRagService ragService,
+
         ApplicationDbContext context,
         ILogger<MediaController> logger,
         IRequestMonitoringService? monitoringService = null)
@@ -39,7 +38,6 @@ public class MediaController : ControllerBase
         _historyService = historyService;
         _backgroundQueue = backgroundQueue;
         _mediaProcessor = mediaProcessor;
-        _ragService = ragService;
         _context = context;
         _logger = logger;
         _monitoringService = monitoringService;
@@ -411,13 +409,7 @@ public class MediaController : ControllerBase
                 // Process file for RAG indexing
                 try
                 {
-                    await _ragService.ProcessFileForRagAsync(
-                        fileId,
-                        file.FileName,
-                        contentType,
-                        storageKey,
-                        item.Transcription);
-                    _logger.LogInformation("File {FileName} processed for RAG with ID {FileId}", file.FileName, fileId);
+                    _logger.LogInformation("RAG disabled, skipping processing for {FileName} with ID {FileId}", file.FileName, fileId);
                 }
                 catch (Exception ex)
                 {

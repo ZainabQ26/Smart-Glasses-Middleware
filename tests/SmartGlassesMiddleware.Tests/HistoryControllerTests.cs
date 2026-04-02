@@ -13,7 +13,6 @@ namespace SmartGlassesMiddleware.Tests.Controllers;
 public class HistoryControllerTests
 {
     private Mock<IHistoryService> _historyServiceMock;
-    private Mock<IRAGService> _ragServiceMock;
     private Mock<ILogger<HistoryController>> _loggerMock;
     private HistoryController _controller;
 
@@ -21,10 +20,9 @@ public class HistoryControllerTests
     public void Setup()
     {
         _historyServiceMock = new Mock<IHistoryService>();
-        _ragServiceMock = new Mock<IRAGService>();
         _loggerMock = new Mock<ILogger<HistoryController>>();
 
-        _controller = new HistoryController(_historyServiceMock.Object, _ragServiceMock.Object, _loggerMock.Object);
+        _controller = new HistoryController(_historyServiceMock.Object, _loggerMock.Object);
         _controller.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext()
@@ -88,7 +86,6 @@ public class HistoryControllerTests
     [Test]
     public async Task QueryReminders_ValidQuery_ReturnsOk()
     {
-        _ragServiceMock.Setup(x => x.QueryRemindersAsync("test", 10)).ReturnsAsync(new QueryResult());
         var result = await _controller.QueryReminders(new QueryRequest { Query = "test" });
         Assert.That(result.Result, Is.InstanceOf<OkObjectResult>());
     }

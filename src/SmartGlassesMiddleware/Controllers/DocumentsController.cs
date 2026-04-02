@@ -14,9 +14,6 @@ namespace SmartGlassesMiddleware.Controllers;
 public class DocumentsController : ControllerBase
 {
     private readonly ILogger<DocumentsController> _logger;
-    private readonly IDocumentProcessingService _processingService;
-    private readonly IRAGService _ragService;
-    private readonly IDocumentHighlightService _highlightService;
     private readonly ApplicationDbContext _context;
     private readonly IConfiguration _configuration;
     private readonly IRequestMonitoringService _monitoringService;
@@ -37,9 +34,9 @@ public class DocumentsController : ControllerBase
 
     public DocumentsController(
         ILogger<DocumentsController> logger,
-        IDocumentProcessingService processingService,
-        IRAGService ragService,
-        IDocumentHighlightService highlightService,
+
+
+
         ApplicationDbContext context,
         IConfiguration configuration,
         IRequestMonitoringService monitoringService,
@@ -52,9 +49,6 @@ public class DocumentsController : ControllerBase
         IHubContext<ResourceHub>? resourceHub = null)
     {
         _logger = logger;
-        _processingService = processingService;
-        _ragService = ragService;
-        _highlightService = highlightService;
         _context = context;
         _configuration = configuration;
         _monitoringService = monitoringService;
@@ -185,8 +179,6 @@ public class DocumentsController : ControllerBase
         try
         {
             using var scope = _scopeFactory.CreateScope();
-            var processingService = scope.ServiceProvider.GetRequiredService<IDocumentProcessingService>();
-            var ragService = scope.ServiceProvider.GetRequiredService<IRAGService>();
             var mediaStorageService = scope.ServiceProvider.GetRequiredService<IMediaStorageService>();
             var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
             var monitoringService = scope.ServiceProvider.GetService<IRequestMonitoringService>();
@@ -197,7 +189,8 @@ public class DocumentsController : ControllerBase
             }
 
             using var input = new MemoryStream(uploadedBytes);
-            var (pdfStream, pdfFileName) = await processingService.ConvertToPdfAsync(input, originalFileName, originalContentType, requestId);
+            var pdfStream = new MemoryStream(uploadedBytes);
+            var pdfFileName = originalFileName;
             pdfStream.Position = 0;
 
             if (pdfStream.Length == 0)
@@ -253,8 +246,7 @@ public class DocumentsController : ControllerBase
 
             if (_ragEnabled)
             {
-                await processingService.ReprocessDocumentAsync(documentId);
-                await ragService.GenerateEmbeddingsAsync(documentId);
+                // await processingService.ReprocessDocumentAsync(documentId);
             }
 
             if (monitoringService != null)
@@ -526,22 +518,12 @@ public class DocumentsController : ControllerBase
             if (conversation != null)
             {
                 _logger.LogInformation("Calling RAG service QueryDocumentsWithConversationAsync...");
-                result = await _ragService.QueryDocumentsWithConversationAsync(
-                    request.Query,
-                    conversation.Id,
-                    request.TopK ?? 5,
-                    request.GroupIds,
-                    effectiveDocumentIds).WaitAsync(QueryExecutionTimeout);
+                result = new QueryResult { Answer = "RAG queries are disabled." };
             }
             else
             {
                 _logger.LogInformation("Falling back to stateless QueryDocumentsAsync (no conversation context)...");
-                result = await _ragService.QueryDocumentsAsync(
-                    request.Query,
-                    request.TopK ?? 5,
-                    request.GroupIds,
-                    effectiveDocumentIds,
-                    monitoringRequestId: requestId).WaitAsync(QueryExecutionTimeout);
+                result = new QueryResult { Answer = "RAG queries are disabled." };
             }
 
             _logger.LogInformation("RAG service returned result. Answer length: {Length}", result.Answer?.Length ?? 0);
@@ -711,15 +693,15 @@ public class DocumentsController : ControllerBase
     {
         try
         {
-            Stream highlightedStream;
+            Stream highlightedStream = Stream.Null;
 
             if (request.ChunkIds != null && request.ChunkIds.Any())
             {
-                highlightedStream = await _highlightService.HighlightDocumentAsync(documentId, request.ChunkIds);
+                // highlightedStream = await _highlightService.HighlightDocumentAsync(documentId, request.ChunkIds);
             }
             else if (!string.IsNullOrWhiteSpace(request.SearchText))
             {
-                highlightedStream = await _highlightService.HighlightTextLocationsAsync(documentId, request.SearchText);
+                // highlightedStream = await _highlightService.HighlightTextLocationsAsync(documentId, request.SearchText);
             }
             else
             {
@@ -1000,7 +982,7 @@ public class DocumentsController : ControllerBase
     {
         try
         {
-            var reprocessedCount = await _ragService.ReprocessFailedDocumentsAsync();
+            var reprocessedCount = 0;
             return Ok(new { reprocessedCount, message = $"Reprocessed {reprocessedCount} documents" });
         }
         catch (Exception ex)
@@ -1019,7 +1001,7 @@ public class DocumentsController : ControllerBase
     {
         try
         {
-            var docs = await _ragService.GetUnprocessedDocumentsAsync();
+            var docs = new List<DocumentMetadata>();
             return Ok(docs.Select(d => new
             {
                 d.Id,
@@ -1078,7 +1060,7 @@ public class DocumentsController : ControllerBase
             if (request.RegenerateEmbeddings)
             {
                 _logger.LogInformation("Regenerating embeddings for moved document {DocumentId}", id);
-                await _ragService.GenerateEmbeddingsAsync(id);
+                // await _ragService.GenerateEmbeddingsAsync(id);
             }
 
             return Ok(new
