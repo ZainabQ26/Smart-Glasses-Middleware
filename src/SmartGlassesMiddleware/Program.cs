@@ -304,13 +304,9 @@ else
 }
 builder.Services.AddSingleton<IMetricsService, MetricsService>();
 builder.Services.AddSingleton<IRequestMonitoringService, RequestMonitoringService>();
-builder.Services.AddScoped<IRagService, RagService>();
 // Always use Bedrock (Titan Embed V2) for embeddings
 builder.Services.AddScoped<IEmbeddingClient, SmartGlassesMiddleware.Services.BedrockEmbeddingClient>();
 // Document processing and RAG services
-builder.Services.AddScoped<IDocumentProcessingService, DocumentProcessingService>();
-builder.Services.AddScoped<IRAGService, RAGService>();
-builder.Services.AddScoped<IDocumentHighlightService, DocumentHighlightService>();
 builder.Services.AddScoped<IConversationService, ConversationService>();
 builder.Services.AddScoped<IPageSummaryService, BedrockPageSummaryService>();
 // Global mapping service for ResourceGroup -> Conversation
@@ -497,7 +493,6 @@ if (!builder.Environment.IsEnvironment("Testing") && !string.IsNullOrWhiteSpace(
     builder.Services.AddHostedService<BackgroundTaskCleanupService>();
 }
 
-builder.Services.AddHostedService<DocumentProcessingBackgroundService>();
 
 // Monthly FDA abbreviation sync background service
 builder.Services.AddHostedService<AbbreviationSyncBackgroundService>();

@@ -18,8 +18,6 @@ public class MoreAdminControllerTests2
     private ApplicationDbContext _context = null!;
     private Mock<IMediaStorageService> _mediaStorageMock = null!;
     private Mock<ICacheService> _cacheMock = null!;
-    private Mock<IRagService> _ragServiceMock = null!;
-    private Mock<IRAGService> _docRagServiceMock = null!;
     private Mock<ILogger<AdminController>> _loggerMock = null!;
     private Mock<IRequestMonitoringService> _monitoringMock = null!;
     private Mock<IServerSettingsService> _settingsMock = null!;
@@ -35,8 +33,6 @@ public class MoreAdminControllerTests2
 
         _mediaStorageMock = new Mock<IMediaStorageService>();
         _cacheMock = new Mock<ICacheService>();
-        _ragServiceMock = new Mock<IRagService>();
-        _docRagServiceMock = new Mock<IRAGService>();
         _loggerMock = new Mock<ILogger<AdminController>>();
         _monitoringMock = new Mock<IRequestMonitoringService>();
         _settingsMock = new Mock<IServerSettingsService>();
@@ -62,8 +58,6 @@ public class MoreAdminControllerTests2
             _context,
             _mediaStorageMock.Object,
             _cacheMock.Object,
-            _ragServiceMock.Object,
-            _docRagServiceMock.Object,
             _loggerMock.Object,
             _monitoringMock.Object,
             _settingsMock.Object,
