@@ -8,7 +8,6 @@ This directory contains AWS-specific code and infrastructure configurations for 
 - `docker-compose.localstack.yml` - LocalStack docker compose configuration (in root directory)
 - `infrastructure/` - Terraform configurations for AWS resources
 - `lambda-document-processor/` - Lambda function for document processing
-- `lambda-whisper/` - Lambda function for audio transcription
 - `ecs-api/` - ECS container configurations
 - `sam/` - AWS SAM (Serverless Application Model) templates
 

@@ -1,4 +1,4 @@
-This folder contains a minimal AWS SAM template and quick commands to build and deploy the two Python Lambda functions used by the project.
+This folder contains a minimal AWS SAM template and quick commands to build and deploy the Document Processor Lambda function used by the project.
 
 Quick steps
 
@@ -18,9 +18,8 @@ sam deploy --guided --region us-east-1
 
 Notes
 
-- The template expects two parameters: `DocumentsBucket` and `DBSecretArn` (you will be prompted during `sam deploy --guided`).
-- `CodeUri` paths are relative to this template file and point at `aws/lambda-document-processor/` and `aws/lambda-whisper/`.
-- The `whisper` lambda includes heavy native dependencies; building may require Docker and extra time. If you prefer container packaging for the whisper runtime, we can adjust the template to use `PackageType: Image`.
+- The template expects one parameter: `DocumentsBucket` (you will be prompted during `sam deploy --guided`).
+- `CodeUri` path points at `aws/lambda-document-processor/`.
 
 Using the AWS Toolkit (VS Code)
 
