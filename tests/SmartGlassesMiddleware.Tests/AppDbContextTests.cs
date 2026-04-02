@@ -22,7 +22,6 @@ namespace SmartGlassesMiddleware.Tests
             Assert.That(context.RequestHistories, Is.Not.Null);
             Assert.That(context.DocumentMetadatas, Is.Not.Null);
             Assert.That(context.DocumentChunks, Is.Not.Null);
-            Assert.That(context.RagEntries, Is.Not.Null);
             Assert.That(context.AIInteractionLogs, Is.Not.Null);
             Assert.That(context.TranscriptionJobs, Is.Not.Null);
             Assert.That(context.Abbreviations, Is.Not.Null);

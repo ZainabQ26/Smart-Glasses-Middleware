@@ -86,7 +86,7 @@ public class MoreModelsTests
     }
 
     [Test]
-    public void RagEntry_Properties_Work()
+    public void DocumentChunk_Properties_Work()
     {
         var chunk = new DocumentChunk
         {

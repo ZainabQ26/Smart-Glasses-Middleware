@@ -23,32 +23,6 @@ using Scalar.AspNetCore;
 
 #pragma warning disable SKEXP0010
 
-static bool IsTransientMigrationConnectivityFailure(Exception ex)
-{
-    Exception? current = ex;
-    while (current != null)
-    {
-        var typeName = current.GetType().FullName ?? string.Empty;
-        var message = current.Message ?? string.Empty;
-        var connectivityRelated = typeName.Contains("Npgsql", StringComparison.OrdinalIgnoreCase)
-            || typeName.Contains("SocketException", StringComparison.OrdinalIgnoreCase)
-            || current is TimeoutException;
-
-        if (connectivityRelated &&
-            (message.Contains("Failed to connect", StringComparison.OrdinalIgnoreCase)
-                || message.Contains("Timeout during connection attempt", StringComparison.OrdinalIgnoreCase)
-                || message.Contains("connection attempt", StringComparison.OrdinalIgnoreCase)
-                || message.Contains("timed out", StringComparison.OrdinalIgnoreCase)))
-        {
-            return true;
-        }
-
-        current = current.InnerException;
-    }
-
-    return false;
-}
-
 static async Task ResetStalePendingUploadsAsync(IServiceProvider services, ILogger? logger)
 {
     try
@@ -255,7 +229,6 @@ builder.Services.AddSingleton<Amazon.BedrockRuntime.IAmazonBedrockRuntime>(_ =>
     new Amazon.BedrockRuntime.AmazonBedrockRuntimeClient(awsRegionEndpoint));
 
 // Build the Semantic Kernel with the Bedrock chat completion service.
-// RagService uses the kernel for local response generation.
 builder.Services.AddSingleton<Kernel>(sp =>
 {
     var kernelBuilder = Kernel.CreateBuilder();

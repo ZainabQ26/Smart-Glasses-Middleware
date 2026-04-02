@@ -12,7 +12,6 @@ public class DatabaseState
     public List<Models.ManagedFile> ManagedFiles { get; set; } = new();
     public List<Models.ManagedPrompt> ManagedPrompts { get; set; } = new();
     public List<Models.ResourceGroup> ResourceGroups { get; set; } = new();
-    public List<Models.RagEntry> RagEntries { get; set; } = new();
     public List<Models.DocumentMetadata> DocumentMetadatas { get; set; } = new();
     public List<Models.DocumentChunk> DocumentChunks { get; set; } = new();
     public List<Models.DocumentGroup> DocumentGroups { get; set; } = new();
@@ -77,7 +76,6 @@ public class StatePersistenceService : IHostedService
                         if (state.ManagedFiles?.Any() == true) context.ManagedFiles.AddRange(state.ManagedFiles);
                         if (state.ManagedPrompts?.Any() == true) context.ManagedPrompts.AddRange(state.ManagedPrompts);
                         if (state.ResourceGroups?.Any() == true) context.ResourceGroups.AddRange(state.ResourceGroups);
-                        if (state.RagEntries?.Any() == true) context.RagEntries.AddRange(state.RagEntries);
                         if (state.DocumentMetadatas?.Any() == true) context.DocumentMetadatas.AddRange(state.DocumentMetadatas);
                         if (state.DocumentChunks?.Any() == true) context.DocumentChunks.AddRange(state.DocumentChunks);
                         if (state.DocumentGroups?.Any() == true) context.DocumentGroups.AddRange(state.DocumentGroups);
@@ -122,7 +120,6 @@ public class StatePersistenceService : IHostedService
                 ManagedFiles = await context.ManagedFiles.AsNoTracking().ToListAsync(cancellationToken),
                 ManagedPrompts = await context.ManagedPrompts.AsNoTracking().ToListAsync(cancellationToken),
                 ResourceGroups = await context.ResourceGroups.AsNoTracking().ToListAsync(cancellationToken),
-                RagEntries = await context.RagEntries.AsNoTracking().ToListAsync(cancellationToken),
                 DocumentMetadatas = await context.DocumentMetadatas.AsNoTracking().ToListAsync(cancellationToken),
                 DocumentChunks = await context.DocumentChunks.AsNoTracking().ToListAsync(cancellationToken),
                 DocumentGroups = await context.DocumentGroups.AsNoTracking().ToListAsync(cancellationToken),

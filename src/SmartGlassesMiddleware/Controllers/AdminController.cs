@@ -2786,8 +2786,7 @@ public class AdminController : ControllerBase
             counts["documentGroups"] = await _context.DocumentGroups.ExecuteDeleteAsync();
             counts["documentMetadatas"] = await _context.DocumentMetadatas.ExecuteDeleteAsync();
 
-            // Delete RAG entries and managed files
-            counts["ragEntries"] = await _context.RagEntries.ExecuteDeleteAsync();
+            // Delete managed files
             counts["managedFiles"] = await _context.ManagedFiles.ExecuteDeleteAsync();
 
             // Delete AI interaction logs and transcription jobs

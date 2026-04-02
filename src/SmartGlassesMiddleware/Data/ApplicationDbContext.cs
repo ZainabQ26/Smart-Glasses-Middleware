@@ -24,7 +24,6 @@ public class ApplicationDbContext : DbContext
     public DbSet<ManagedFile> ManagedFiles { get; set; }
     public DbSet<ManagedPrompt> ManagedPrompts { get; set; }
     public DbSet<ResourceGroup> ResourceGroups { get; set; }
-    public DbSet<RagEntry> RagEntries { get; set; }
     public DbSet<DocumentMetadata> DocumentMetadatas { get; set; }
     public DbSet<DocumentChunk> DocumentChunks { get; set; }
     public DbSet<DocumentGroup> DocumentGroups { get; set; }
@@ -124,28 +123,6 @@ public class ApplicationDbContext : DbContext
                 .HasForeignKey(e => e.ResourceGroupId);
             // Composite PK starts with ManagedPromptId, so add lookup index for ResourceGroupId-based filters.
             entity.HasIndex(e => e.ResourceGroupId);
-        });
-        modelBuilder.Entity<RagEntry>(entity =>
-        {
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.FileId).IsRequired();
-            entity.Property(e => e.FileName).IsRequired().HasMaxLength(255);
-            entity.Property(e => e.ContentType).IsRequired().HasMaxLength(100);
-            entity.Property(e => e.StorageKey).IsRequired();
-            entity.Property(e => e.ProcessedAt).IsRequired();
-            entity.Property(e => e.IndexedContent).IsRequired();
-
-            // Add unique index on FileId to prevent duplicate RAG entries
-            entity.HasIndex(e => e.FileId).IsUnique();
-            // Add unique index on StorageKey to prevent duplicate RAG entries
-            entity.HasIndex(e => e.StorageKey).IsUnique();
-            entity.HasIndex(e => e.ProcessedAt);
-
-            // Add foreign key relationship to ManagedFile with cascade delete
-            entity.HasOne<ManagedFile>()
-                .WithMany()
-                .HasForeignKey(e => e.FileId)
-                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<DocumentMetadata>(entity =>
