@@ -52,15 +52,6 @@ resource "aws_iam_role_policy" "lambda_document_processor" {
       {
         Effect = "Allow"
         Action = [
-          "secretsmanager:GetSecretValue"
-        ]
-        Resource = [
-          aws_secretsmanager_secret.db_credentials.arn
-        ]
-      },
-      {
-        Effect = "Allow"
-        Action = [
           "logs:CreateLogGroup",
           "logs:CreateLogStream",
           "logs:PutLogEvents"
@@ -106,7 +97,6 @@ resource "aws_lambda_function" "document_processor" {
   environment {
     variables = {
       DOCUMENTS_BUCKET      = aws_s3_bucket.documents.id
-      DB_SECRET_ARN         = aws_secretsmanager_secret.db_credentials.arn
       BEDROCK_MODEL_ID      = "anthropic.claude-3-sonnet-20240229-v1:0"
       EMBEDDING_MODEL_ID    = "amazon.titan-embed-text-v2:0"
       MAX_CHUNK_SIZE        = "1000"

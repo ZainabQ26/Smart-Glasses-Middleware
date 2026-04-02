@@ -3,16 +3,6 @@ output "vpc_id" {
   value       = aws_vpc.main.id
 }
 
-output "rds_endpoint" {
-  description = "RDS PostgreSQL endpoint"
-  value       = local.rds_endpoint
-}
-
-output "elasticache_endpoint" {
-  description = "ElastiCache Redis endpoint"
-  value       = local.enable_redis_effective ? (var.environment == "dev" ? aws_elasticache_cluster.redis_single[0].cache_nodes[0].address : aws_elasticache_replication_group.redis[0].primary_endpoint_address) : null
-}
-
 output "s3_media_bucket" {
   description = "S3 bucket for media storage"
   value       = aws_s3_bucket.media.id
@@ -61,11 +51,6 @@ output "frontend_bucket_name" {
 output "cloudfront_distribution_id" {
   description = "CloudFront distribution ID (used for cache invalidation)"
   value       = aws_cloudfront_distribution.frontend.id
-}
-
-output "secrets_manager_arn" {
-  description = "Secrets Manager secret ARN"
-  value       = aws_secretsmanager_secret.db_credentials.arn
 }
 
 output "ecs_wake_url" {
