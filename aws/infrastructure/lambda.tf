@@ -36,18 +36,12 @@ resource "aws_iam_role_policy" "lambda_document_processor" {
         Effect = "Allow"
         Action = [
           "s3:GetObject",
-          "s3:PutObject"
+          "s3:PutObject",
+          "s3:DeleteObject"
         ]
         Resource = [
           "${aws_s3_bucket.documents.arn}/*"
         ]
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "bedrock-runtime:InvokeModel"
-        ]
-        Resource = "*"
       },
       {
         Effect = "Allow"
@@ -105,10 +99,6 @@ resource "aws_lambda_function" "document_processor" {
     variables = {
         DB_SECRET_ARN          = aws_secretsmanager_secret.db_connection.arn
       DOCUMENTS_BUCKET      = aws_s3_bucket.documents.id
-      BEDROCK_MODEL_ID      = "anthropic.claude-3-sonnet-20240229-v1:0"
-      EMBEDDING_MODEL_ID    = "amazon.titan-embed-text-v2:0"
-      MAX_CHUNK_SIZE        = "1000"
-      CHUNK_OVERLAP         = "200"
       DEPLOYMENT_ID         = var.deployment_id  # Changes on every deploy
     }
   }
@@ -138,6 +128,41 @@ resource "aws_s3_bucket_notification" "document_upload" {
     events              = ["s3:ObjectCreated:*"]
     filter_prefix       = "uploads/"
     filter_suffix       = ".docx"
+  }
+
+  lambda_function {
+    lambda_function_arn = aws_lambda_function.document_processor.arn
+    events              = ["s3:ObjectCreated:*"]
+    filter_prefix       = "uploads/"
+    filter_suffix       = ".jpg"
+  }
+
+  lambda_function {
+    lambda_function_arn = aws_lambda_function.document_processor.arn
+    events              = ["s3:ObjectCreated:*"]
+    filter_prefix       = "uploads/"
+    filter_suffix       = ".jpeg"
+  }
+
+  lambda_function {
+    lambda_function_arn = aws_lambda_function.document_processor.arn
+    events              = ["s3:ObjectCreated:*"]
+    filter_prefix       = "uploads/"
+    filter_suffix       = ".png"
+  }
+
+  lambda_function {
+    lambda_function_arn = aws_lambda_function.document_processor.arn
+    events              = ["s3:ObjectCreated:*"]
+    filter_prefix       = "uploads/"
+    filter_suffix       = ".webp"
+  }
+
+  lambda_function {
+    lambda_function_arn = aws_lambda_function.document_processor.arn
+    events              = ["s3:ObjectCreated:*"]
+    filter_prefix       = "uploads/"
+    filter_suffix       = ".bmp"
   }
 
   depends_on = [aws_lambda_permission.allow_s3]
