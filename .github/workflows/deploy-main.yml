@@ -356,6 +356,7 @@ jobs:
           terraform init -backend-config="bucket=${BUCKET_NAME}" -backend-config="key=state/terraform.tfstate" -backend-config="region=${AWS_REGION}" -backend-config="dynamodb_table=${DDB_NAME}"
 
       - name: Import pre-existing resources into Terraform state
+        timeout-minutes: 20
         working-directory: aws/infrastructure
         run: |
           set +e
@@ -369,7 +370,7 @@ jobs:
           # Fetch the full state list once so safe_import can check membership
           # with a fast grep instead of an individual round-trip per resource.
           echo "  Fetching Terraform state list..."
-          EXISTING_STATE=$(terraform state list 2>/dev/null || echo "")
+          EXISTING_STATE=$(terraform state list -lock=false 2>/dev/null || echo "")
 
           # safe_import: skip if already in TF state (avoids "Resource already
           # managed by Terraform" abort).  Used for global/stable resources.
@@ -379,8 +380,7 @@ jobs:
             if echo "$EXISTING_STATE" | grep -qxF "$TF_RES"; then
               echo "  Already in state: $TF_RES (skipping)"
             else
-              terraform import "$TF_RES" "$IMPORT_ID" || true
-              # Keep the in-memory list current so later calls in the same run are accurate
+              terraform import -lock=false "$TF_RES" "$IMPORT_ID" || true
               EXISTING_STATE="${EXISTING_STATE}${NEWLINE}${TF_RES}"
             fi
           }
@@ -391,11 +391,11 @@ jobs:
           tf_import() {
             local TF_RES="$1" IMPORT_ID="$2"
             [ -z "$IMPORT_ID" ] || [ "$IMPORT_ID" = "None" ] || [ "$IMPORT_ID" = "null" ] && return 0
-            terraform state rm "$TF_RES" 2>/dev/null || true
+            terraform state rm -lock=false "$TF_RES" 2>/dev/null || true
             # Invalidate in-memory cache so the resource is not skipped if safe_import
             # is called for it later in the same run.
             EXISTING_STATE=$(printf '%s\n' "$EXISTING_STATE" | grep -vxF "$TF_RES" || true)
-            terraform import "$TF_RES" "$IMPORT_ID" || true
+            terraform import -lock=false "$TF_RES" "$IMPORT_ID" || true
             EXISTING_STATE="${EXISTING_STATE}${NEWLINE}${TF_RES}"
           }
 
@@ -408,7 +408,7 @@ jobs:
             aws_rds_cluster.main \
             "aws_rds_cluster_instance.main[0]" \
             "aws_rds_cluster_instance.main[1]"; do
-            terraform state rm "$OLD_RES" 2>/dev/null && echo "  Removed $OLD_RES from state" || true
+            terraform state rm -lock=false "$OLD_RES" 2>/dev/null && echo "  Removed $OLD_RES from state" || true
           done
 
           # ── S3 (data must never be destroyed) ─────────────────────────────────
@@ -435,10 +435,10 @@ jobs:
           import_secret aws_secretsmanager_secret.db_credentials    "${PREFIX}-db-credentials"
           # app_secrets is now prod-only. Ensure stale dev state is removed.
           if [ "$ENV" = "dev" ]; then
-            terraform state rm "aws_secretsmanager_secret.app_secrets" 2>/dev/null || true
-            terraform state rm "aws_secretsmanager_secret.app_secrets[0]" 2>/dev/null || true
-            terraform state rm "aws_secretsmanager_secret_version.app_secrets" 2>/dev/null || true
-            terraform state rm "aws_secretsmanager_secret_version.app_secrets[0]" 2>/dev/null || true
+            terraform state rm -lock=false "aws_secretsmanager_secret.app_secrets" 2>/dev/null || true
+            terraform state rm -lock=false "aws_secretsmanager_secret.app_secrets[0]" 2>/dev/null || true
+            terraform state rm -lock=false "aws_secretsmanager_secret_version.app_secrets" 2>/dev/null || true
+            terraform state rm -lock=false "aws_secretsmanager_secret_version.app_secrets[0]" 2>/dev/null || true
             EXISTING_STATE=$(printf '%s\n' "$EXISTING_STATE" | grep -vxF "aws_secretsmanager_secret.app_secrets" || true)
             EXISTING_STATE=$(printf '%s\n' "$EXISTING_STATE" | grep -vxF "aws_secretsmanager_secret.app_secrets[0]" || true)
             EXISTING_STATE=$(printf '%s\n' "$EXISTING_STATE" | grep -vxF "aws_secretsmanager_secret_version.app_secrets" || true)
@@ -450,7 +450,7 @@ jobs:
           # Importing it would leave a count=0 resource in state, causing a
           # prevent_destroy-blocked destroy on apply. Remove from state instead.
           if [ "$ENV" = "dev" ]; then
-            terraform state rm "aws_secretsmanager_secret.redis_credentials[0]" 2>/dev/null || true
+            terraform state rm -lock=false "aws_secretsmanager_secret.redis_credentials[0]" 2>/dev/null || true
             EXISTING_STATE=$(printf '%s\n' "$EXISTING_STATE" | grep -vxF "aws_secretsmanager_secret.redis_credentials[0]" || true)
           else
             import_secret aws_secretsmanager_secret.redis_credentials "${PREFIX}-redis-credentials"
@@ -483,11 +483,11 @@ jobs:
             --query 'CacheClusters[0].CacheClusterId' --output text 2>/dev/null || true)
           if [ -z "$REDIS_CLUSTER_EXISTS" ] || [ "$REDIS_CLUSTER_EXISTS" = "None" ]; then
             echo "  ElastiCache cluster not found in AWS — removing stale state entries"
-            terraform state rm "aws_elasticache_cluster.redis_single[0]"        2>/dev/null || true
-            terraform state rm "aws_elasticache_replication_group.redis[0]"     2>/dev/null || true
-            terraform state rm aws_elasticache_replication_group.redis           2>/dev/null || true
-            terraform state rm "aws_elasticache_subnet_group.main[0]"            2>/dev/null || true
-            terraform state rm "aws_elasticache_parameter_group.redis[0]"        2>/dev/null || true
+            terraform state rm -lock=false "aws_elasticache_cluster.redis_single[0]"        2>/dev/null || true
+            terraform state rm -lock=false "aws_elasticache_replication_group.redis[0]"     2>/dev/null || true
+            terraform state rm -lock=false aws_elasticache_replication_group.redis           2>/dev/null || true
+            terraform state rm -lock=false "aws_elasticache_subnet_group.main[0]"            2>/dev/null || true
+            terraform state rm -lock=false "aws_elasticache_parameter_group.redis[0]"        2>/dev/null || true
             # Invalidate in-memory cache for all rm'd resources so safe_import
             # correctly re-imports them instead of skipping them.
             for _rmres in \
@@ -502,7 +502,7 @@ jobs:
           # For dev: replication group has count=0 always (its count expr uses != "dev").
           # Remove any previously-imported entry to prevent a prevent_destroy conflict.
           if [ "$ENV" = "dev" ]; then
-            terraform state rm "aws_elasticache_replication_group.redis[0]" 2>/dev/null || true
+            terraform state rm -lock=false "aws_elasticache_replication_group.redis[0]" 2>/dev/null || true
             EXISTING_STATE=$(printf '%s\n' "$EXISTING_STATE" | grep -vxF "aws_elasticache_replication_group.redis[0]" || true)
           fi
           safe_import "aws_elasticache_parameter_group.redis[0]"   "${PREFIX}-redis-params"
@@ -728,6 +728,7 @@ jobs:
           set -e
 
       - name: Remove stale domain/ACM state entries
+        timeout-minutes: 5
         working-directory: aws/infrastructure
         run: |
           # domain_name is not used in CI (no custom domain configured).
@@ -742,7 +743,7 @@ jobs:
             "aws_acm_certificate_validation.cloudfront[0]" \
             "aws_route53_record.cert_validation" \
             "aws_route53_record.cloudfront_alias[0]"; do
-            terraform state rm "$RES" 2>/dev/null && echo "  Removed $RES" || true
+            terraform state rm -lock=false "$RES" 2>/dev/null && echo "  Removed $RES" || true
           done
 
       - name: Terraform apply
