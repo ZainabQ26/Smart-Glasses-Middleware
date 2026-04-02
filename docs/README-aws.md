@@ -77,7 +77,7 @@ terraform apply \
 	-var="enable_nat_gateway=true"
 ```
 
-### Automatic Wake On Access + Idle Sleep
+### Optional Wake On Access + Idle Sleep
 
 Terraform now includes an ECS idle autoscaler for the API service:
 - When ALB request traffic appears, CloudWatch alarm triggers a Lambda that sets ECS desired count to `ecs_warm_desired_count` (default `1`)
@@ -87,7 +87,7 @@ Terraform now includes an ECS idle autoscaler for the API service:
 This gives near-zero compute cost while idle, with a brief cold-start delay on first request after sleep.
 
 Variables:
-- `enable_ecs_idle_autoscaler` (default: `true`)
+- `enable_ecs_idle_autoscaler` (default: `false`)
 - `ecs_warm_desired_count` (default: `1`)
 - `ecs_idle_timeout_minutes` (default: `15`)
 
