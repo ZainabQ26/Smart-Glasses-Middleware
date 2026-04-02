@@ -1,0 +1,10 @@
+--- src/SmartGlassesMiddleware/Program.cs
++++ src/SmartGlassesMiddleware/Program.cs
+@@ -7,6 +7,7 @@
+ using Microsoft.AspNetCore.Mvc;
+ 
+ using Minio;
++using SmartGlassesMiddleware;
+ using SmartGlassesMiddleware.Data;
+ using SmartGlassesMiddleware.Services;
+ using SmartGlassesMiddleware.Models;

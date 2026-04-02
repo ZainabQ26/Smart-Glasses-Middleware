@@ -1,0 +1,17 @@
+--- src/SmartGlassesMiddleware/Program.cs
++++ src/SmartGlassesMiddleware/Program.cs
+@@ -271,13 +271,1 @@
+-// Build the Semantic Kernel with the Bedrock chat completion service.
+-// RagService uses the kernel for local response generation.
+-builder.Services.AddSingleton<Kernel>(sp =>
+-{
+-    var bedrockRuntime = sp.GetRequiredService<Amazon.BedrockRuntime.IAmazonBedrockRuntime>();
+-    var bedrockLogger = sp.GetRequiredService<ILogger<BedrockChatCompletionService>>();
+-    var completionService = new BedrockChatCompletionService(
+-        bedrockRuntime, builder.Configuration, bedrockLogger);
+-
+-    return Kernel.CreateBuilder()
+-        .AddChatCompletionService(completionService)
+-        .Build();
+-});
++builder.Services.AddSingleton<BedrockChatCompletionService>();

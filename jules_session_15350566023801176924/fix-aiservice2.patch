@@ -1,0 +1,11 @@
+--- src/SmartGlassesMiddleware/Services/AIService.cs
++++ src/SmartGlassesMiddleware/Services/AIService.cs
+@@ -38,7 +38,7 @@
+         ["advanced"] = "Routes complex requests to an external advanced model endpoint."
+     };
+ 
+-    private readonly Kernel _kernel;
++    private readonly BedrockChatCompletionService _bedrockService;
+     private readonly HttpClient _httpClient;
+     private readonly ILogger<AIService> _logger;
+     private readonly string _advancedModelEndpoint;

@@ -1,0 +1,22 @@
+--- src/SmartGlassesMiddleware/Program.cs
++++ src/SmartGlassesMiddleware/Program.cs
+@@ -1313,10 +1313,7 @@
+                 if (state.ManagedFiles != null) db.ManagedFiles.AddRange(state.ManagedFiles);
+                 if (state.ManagedPrompts != null) db.ManagedPrompts.AddRange(state.ManagedPrompts);
+                 if (state.ResourceGroups != null) db.ResourceGroups.AddRange(state.ResourceGroups);
+-                if (state.RagEntries != null) db.RagEntries.AddRange(state.RagEntries);
+                 if (state.DocumentMetadatas != null) db.DocumentMetadatas.AddRange(state.DocumentMetadatas);
+-                if (state.DocumentChunks != null) db.DocumentChunks.AddRange(state.DocumentChunks);
+-                if (state.DocumentGroups != null) db.DocumentGroups.AddRange(state.DocumentGroups);
+                 if (state.AIInteractionLogs != null) db.AIInteractionLogs.AddRange(state.AIInteractionLogs);
+                 if (state.Conversations != null) db.Conversations.AddRange(state.Conversations);
+@@ -1351,10 +1348,7 @@
+                 ManagedFiles = db.ManagedFiles.ToList(),
+                 ManagedPrompts = db.ManagedPrompts.ToList(),
+                 ResourceGroups = db.ResourceGroups.ToList(),
+-                RagEntries = db.RagEntries.ToList(),
+                 DocumentMetadatas = db.DocumentMetadatas.ToList(),
+-                DocumentChunks = db.DocumentChunks.ToList(),
+-                DocumentGroups = db.DocumentGroups.ToList(),
+                 AIInteractionLogs = db.AIInteractionLogs.ToList(),
+                 Conversations = db.Conversations.ToList(),

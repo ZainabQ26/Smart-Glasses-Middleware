@@ -1,0 +1,81 @@
+--- src/SmartGlassesMiddleware/Program.cs
++++ src/SmartGlassesMiddleware/Program.cs
+@@ -640,73 +640,11 @@
+ // Apply EF Core migrations at startup if enabled (guarded to avoid test-time provider conflicts)
+ using (var scope = app.Services.CreateScope())
+ {
+     try
+     {
+-        var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+-        var logger = scope.ServiceProvider.GetService<ILogger<Program>>();
+-
+-        // Check configuration key first, then environment variable. Default: disabled.
+-        var migrateSetting = configuration.GetValue<bool?>("MigrateOnStartup");
+-        var migrateEnv = Environment.GetEnvironmentVariable("MIGRATE_ON_STARTUP");
+-        // MIGRATE_ONLY=true is set by the CI run-migrations job; it forces migration
+-        // and then exits cleanly so no HTTP server starts.
+-        var migrateOnly = string.Equals(Environment.GetEnvironmentVariable("MIGRATE_ONLY"), "true", StringComparison.OrdinalIgnoreCase);
+-        var shouldMigrate = migrateOnly || (migrateSetting ?? string.Equals(migrateEnv, "true", StringComparison.OrdinalIgnoreCase));
+-
+-        if (shouldMigrate)
+-        {
+-            var maxMigrationAttempts = migrateOnly ? 5 : 1;
+-            var migrationDelay = TimeSpan.FromSeconds(migrateOnly ? 30 : 5);
+-            var migrationTimeout = TimeSpan.FromSeconds(migrateOnly ? 300 : 120);
+-
+-            for (var attempt = 1; attempt <= maxMigrationAttempts; attempt++)
+-            {
+-                try
+-                {
+-                    logger?.LogInformation("Starting database migration (attempt {Attempt}/{Total})...", attempt, maxMigrationAttempts);
+-
+-                    using var migrationScope = app.Services.CreateScope();
+-                    var db = migrationScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+-
+-                    var migrationTask = Task.Run(() => db.Database.Migrate());
+-                    var timeoutTask = Task.Delay(migrationTimeout);
+-
+-                    var completedTask = await Task.WhenAny(migrationTask, timeoutTask);
+-
+-                    if (completedTask == timeoutTask)
+-                    {
+-                        var errorMessage = $"Database migration timed out after {migrationTimeout.TotalSeconds:0} seconds on attempt {attempt}/{maxMigrationAttempts}. " +
+-                            "Application startup aborted to prevent schema issues.";
+-                        logger?.LogCritical(errorMessage);
+-                        throw new TimeoutException(errorMessage);
+-                    }
+-
+-                    await migrationTask;
+-                    logger?.LogInformation("Database migration completed successfully.");
+-                    break;
+-                }
+-                catch (Exception ex) when (migrateOnly && attempt < maxMigrationAttempts && IsTransientMigrationConnectivityFailure(ex))
+-                {
+-                    logger?.LogWarning(ex,
+-                        "Database migration attempt {Attempt}/{Total} failed due to transient connectivity. Retrying in {DelaySeconds}s...",
+-                        attempt,
+-                        maxMigrationAttempts,
+-                        migrationDelay.TotalSeconds);
+-                    await Task.Delay(migrationDelay);
+-                }
+-            }
+-
+-        }
+-        else
+-        {
+-            logger?.LogInformation("Skipping database migration on startup (MIGRATE_ON_STARTUP not set).");
+-        }
+-
+-        try
+-        {
+-            await EnsureAdminListPerformanceIndexesAsync(app.Services, logger);
+-        }
+-        catch (Exception ex)
+-        {
+-            logger?.LogWarning(ex, "Failed to verify or apply performance indexes on startup. Performance degradation may occur on list endpoints, but functionality will remain.");
+-        }
++        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
++        db.Database.EnsureCreated();
+     }
+     catch (Exception ex)
+     {

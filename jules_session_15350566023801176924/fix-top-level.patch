@@ -1,0 +1,23 @@
+--- src/SmartGlassesMiddleware/Program.cs
++++ src/SmartGlassesMiddleware/Program.cs
+@@ -1010,20 +1010,6 @@
+ // Add a test minimal API endpoint to verify routing works
+ app.MapGet("/test", () => "Test endpoint works!");
+ 
+-// Helper methods for retry policies
+-static IAsyncPolicy<HttpResponseMessage> GetRetryPolicy()
+-{
+-    return HttpPolicyExtensions
+-        .HandleTransientHttpError()
+-        .OrResult(msg => msg.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+-        .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)));
+-}
+-
+-static IAsyncPolicy<HttpResponseMessage> GetCircuitBreakerPolicy()
+-{
+-    return HttpPolicyExtensions
+-        .HandleTransientHttpError()
+-        .CircuitBreakerAsync(5, TimeSpan.FromSeconds(30));
+-}
+-
+ // Health endpoint used by WakeupGate, ALB health checks, and deployment smoke tests.

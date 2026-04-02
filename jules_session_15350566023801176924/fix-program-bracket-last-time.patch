@@ -1,0 +1,9 @@
+--- src/SmartGlassesMiddleware/Program.cs
++++ src/SmartGlassesMiddleware/Program.cs
+@@ -584,6 +584,7 @@
+         }
+     });
+ });
++}
+ 
+ var app = builder.Build();

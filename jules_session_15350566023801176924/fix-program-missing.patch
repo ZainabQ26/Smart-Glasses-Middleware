@@ -1,0 +1,9 @@
+--- src/SmartGlassesMiddleware/Program.cs
++++ src/SmartGlassesMiddleware/Program.cs
+@@ -572,4 +572,6 @@
+ 
+ var app = builder.Build();
++
++app.MapControllers();
+ 
+ // Validate critical configuration at startup

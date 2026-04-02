@@ -1,0 +1,21 @@
+--- src/SmartGlassesMiddleware/Program.cs
++++ src/SmartGlassesMiddleware/Program.cs
+@@ -279,16 +279,12 @@
+     var timeoutSeconds = config.GetValue<int?>("ServiceTimeouts:AIServiceTimeoutSeconds") ?? 60;
+     client.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
+-})
+-.AddPolicyHandler(GetRetryPolicy())
+-.AddPolicyHandler(GetCircuitBreakerPolicy());
++});
+ 
+ // Configure HttpClient for abbreviation/FDA service with timeout and retry
+ builder.Services.AddHttpClient<IAbbreviationService, AbbreviationService>((sp, client) =>
+ {
+     client.Timeout = TimeSpan.FromSeconds(30); // openFDA requests should be fast
+-})
+-.AddPolicyHandler(GetRetryPolicy())
+-.AddPolicyHandler(GetCircuitBreakerPolicy());
++});
+ 
+ // Register application services
+ builder.Services.AddScoped<IHistoryService, HistoryService>();
