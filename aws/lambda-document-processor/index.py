@@ -12,7 +12,6 @@ from datetime import datetime, timezone
 
 # Initialize AWS clients
 s3_client = boto3.client('s3')
-bedrock_runtime = boto3.client('bedrock-runtime', region_name=os.environ['AWS_REGION'])
 secrets_client = boto3.client('secretsmanager')
 
 logger = logging.getLogger()
@@ -21,8 +20,6 @@ logger.setLevel(logging.INFO)
 # Configuration
 DOCUMENTS_BUCKET = os.environ['DOCUMENTS_BUCKET']
 DB_SECRET_ARN = os.environ['DB_SECRET_ARN']
-BEDROCK_MODEL_ID = os.environ.get('BEDROCK_MODEL_ID', 'anthropic.claude-3-sonnet-20240229-v1:0')
-EMBEDDING_MODEL_ID = os.environ.get('EMBEDDING_MODEL_ID', 'amazon.titan-embed-text-v2:0')
 MAX_CHUNK_SIZE = int(os.environ.get('MAX_CHUNK_SIZE', 1000))
 CHUNK_OVERLAP = int(os.environ.get('CHUNK_OVERLAP', 200))
 
@@ -76,186 +73,144 @@ def get_db_connection():
     return db_connection
 
 
-def extract_text_from_pdf(bucket: str, key: str) -> str:
-    """Extract all text from a searchable PDF stored in S3 using PyMuPDF.
 
-    The uploaded file is a text-based PDF produced by iText/LibreOffice, so the
-    text layer is read directly — no OCR or Textract calls are made.
+import os
+from PIL import Image
+import pytesseract
+import io
 
-    Args:
-        bucket: S3 bucket name containing the PDF.
-        key: S3 object key for the PDF file.
+# Setup tesseract path if in AWS Lambda (using the bundled binary from build.sh)
+if os.path.exists('/var/task/tesseract/tesseract'):
+    pytesseract.pytesseract.tesseract_cmd = '/var/task/tesseract/tesseract'
+    os.environ['TESSDATA_PREFIX'] = '/var/task/tesseract/tessdata'
+    os.environ['LD_LIBRARY_PATH'] = '/var/task/tesseract/lib:' + os.environ.get('LD_LIBRARY_PATH', '')
 
-    Returns:
-        The full extracted text with pages separated by newlines.
-        Returns an empty string if no text layer is found (image-only PDFs).
-
-    Raises:
-        botocore.exceptions.ClientError: If the S3 GetObject call fails.
-        fitz.FitzError: If the file cannot be parsed as a PDF.
-    """
+def create_searchable_pdf_from_image(bucket: str, key: str) -> str:
+    """Download an image from S3, extract text using pytesseract, and create a text-searchable PDF.
+    Returns the extracted text, saves the generated PDF back to S3 with a .pdf extension, and deletes the original image."""
     obj = s3_client.get_object(Bucket=bucket, Key=key)
-    pdf_bytes = obj['Body'].read()
+    image_bytes = obj['Body'].read()
 
-    text_parts = []
-    with fitz.open(stream=pdf_bytes, filetype='pdf') as doc:
-        for page in doc:
-            text_parts.append(page.get_text())
+    # Create a new PDF
+    doc = fitz.open()
 
-    extracted = '\n'.join(text_parts).strip()
+    # Open image with fitz to get dimensions
+    img_doc = fitz.open(stream=image_bytes, filetype=key.split('.')[-1])
+    img_page = img_doc[0]
+    rect = img_page.rect
 
-    if not extracted:
-        logger.warning("PyMuPDF extracted no text from %s/%s — PDF may be image-only", bucket, key)
-
-    return extracted
-
-
-def chunk_text(text: str, max_chunk_size: int = MAX_CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> List[Dict[str, Any]]:
-    """Split text into overlapping word-based chunks for embedding generation.
-
-    Overlapping windows ensure that context spanning chunk boundaries is
-    captured in at least one chunk, improving RAG retrieval accuracy.
-
-    Args:
-        text: The full document text to split.
-        max_chunk_size: Maximum number of words per chunk (default: ``MAX_CHUNK_SIZE``).
-        overlap: Number of words shared between consecutive chunks (default: ``CHUNK_OVERLAP``).
-
-    Returns:
-        A list of chunk dicts, each with keys:
-        - ``text`` (str): The chunk content.
-        - ``index`` (int): Zero-based position in the document.
-        - ``start_position`` (int): Word index where this chunk starts.
-        - ``end_position`` (int): Word index where this chunk ends (exclusive).
-    """
-    chunks = []
-    words = text.split()
+    # Insert a new page with the image dimensions
+    page = doc.new_page(width=rect.width, height=rect.height)
     
-    start = 0
-    chunk_index = 0
+    # Insert the image
+    page.insert_image(rect, stream=image_bytes)
     
-    while start < len(words):
-        end = min(start + max_chunk_size, len(words))
-        chunk_text = ' '.join(words[start:end])
-        
-        chunks.append({
-            'text': chunk_text,
-            'index': chunk_index,
-            'start_position': start,
-            'end_position': end
-        })
-        
-        chunk_index += 1
-        start = end - overlap if end < len(words) else end
-    
-    return chunks
-
-
-def get_embedding(text: str) -> List[float]:
-    """Generate a 1024-dimensional embedding vector using Amazon Bedrock Titan Embeddings V2.
-
-    Truncates input to 25 000 characters (≈ 6 250 tokens) to stay within the
-    model's 8 192-token context window.  Falls back to a zero vector on error so
-    a single bad chunk does not abort the entire document ingestion.
-
-    Args:
-        text: The text to embed.
-
-    Returns:
-        A list of 1024 floats representing the embedding.  A zero vector
-        ``[0.0] * 1024`` is returned if the Bedrock call fails.
-    """
+    extracted_text = ""
+    # Call pytesseract to extract text
     try:
-        # Prepare request for Titan Embeddings V2
-        # Titan V2 supports up to 8192 tokens (~32768 characters for English)
-        # Using 25000 characters as a conservative estimate (1 token ≈ 4 chars)
-        request_body = json.dumps({
-            "inputText": text[:25000],
-            "dimensions": 1024,  # Match pgvector dimension (vector1024 migration)
-            "normalize": True
-        })
+        image = Image.open(io.BytesIO(image_bytes))
+
+        # Get data with bounding boxes
+        data = pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT)
         
-        response = bedrock_runtime.invoke_model(
-            modelId=EMBEDDING_MODEL_ID,
-            body=request_body
-        )
-        
-        response_body = json.loads(response['body'].read())
-        return response_body['embedding']
+        extracted_text_parts = []
+        n_boxes = len(data['text'])
+        for i in range(n_boxes):
+            text = data['text'][i].strip()
+            if int(data['conf'][i]) > 10 and text:
+                extracted_text_parts.append(text)
+
+                # Get bounding box coordinates
+                x, y, w, h = data['left'][i], data['top'][i], data['width'][i], data['height'][i]
+
+                # Using render_mode=3 (invisible text) to make it searchable
+                try:
+                    # Basic font size approximation
+                    fontsize = h * 0.8 if h > 0 else 12
+                    page.insert_text(fitz.Point(x, y + h), text, fontsize=fontsize, render_mode=3)
+                except Exception as e:
+                    logger.warning(f"Failed to insert text {text}: {e}")
+
+        extracted_text = '\n'.join(extracted_text_parts).strip()
     except Exception as e:
-        logger.error(f"Error generating embedding: {str(e)}")
-        # Return zero vector as fallback (must match 1024-dim schema from SwitchToBedrockEmbeddings_vector1024 migration)
-        return [0.0] * 1024
+        logger.error(f"Failed to extract text using pytesseract: {str(e)}")
+        # If tesseract fails, fallback to simple image embedded PDF
+        extracted_text = ""
+        
+    # Save the new PDF to S3
+    pdf_bytes = doc.tobytes()
+    pdf_key = key.rsplit('.', 1)[0] + '.pdf'
+
+    s3_client.put_object(
+        Bucket=bucket,
+        Key=pdf_key,
+        Body=pdf_bytes,
+        ContentType='application/pdf'
+    )
+    logger.info(f"Created text-searchable PDF from image and saved to s3://{bucket}/{pdf_key}")
+
+    # Delete the original image file
+    s3_client.delete_object(Bucket=bucket, Key=key)
+    logger.info(f"Deleted original image file s3://{bucket}/{key}")
+    
+    return extracted_text
 
 
-def store_chunks_in_db(document_id: str, chunks: List[Dict[str, Any]], file_name: str):
-    """Upsert document metadata and all embedding chunks into PostgreSQL.
+
+
+
+
+
+
+
+
+
+def update_document_metadata(document_id: str, file_name: str, storage_key: str):
+    """Upsert document metadata into PostgreSQL.
 
     Uses an INSERT … ON CONFLICT DO UPDATE strategy so re-processing a document
     is idempotent.  The function writes to two EF Core-managed tables:
 
     - ``DocumentMetadatas`` — one row per document (upsert by primary key).
-    - ``DocumentChunks`` — one row per chunk, with the ``EmbeddingVector`` stored
-      as a pgvector ``vector(1024)`` literal.
+    - ``ManagedFiles`` — update if it exists.
 
-    After inserting all chunks the document's ``IsProcessed`` flag is set to
+    After updating, the document's ``IsProcessed`` flag is set to
     ``True`` and ``ProcessedAt`` is recorded.
 
     Args:
-        document_id: UUID string identifying the document (must match the
-            ``DocumentMetadatas.Id`` column).
-        chunks: List of chunk dicts produced by :func:`chunk_text`.
-        file_name: Original file name stored in ``DocumentMetadatas.FileName``.
+        document_id: UUID string identifying the document.
+        file_name: Original file name.
+        storage_key: The storage key of the generated PDF in S3.
 
     Raises:
-        psycopg2.Error: On any database error; the transaction is rolled back
-            before re-raising so the caller can decide on retry logic.
+        psycopg2.Error: On any database error; the transaction is rolled back.
     """
     conn = get_db_connection()
     cursor = conn.cursor()
     now = datetime.now(timezone.utc)
 
     try:
-        # Upsert into DocumentMetadatas using EF Core column names
+        # Upsert into DocumentMetadatas
         cursor.execute("""
             INSERT INTO "DocumentMetadatas"
                 ("Id", "FileName", "OriginalFileName", "ContentType", "FileSize",
                  "DocumentType", "StorageKey", "UploadedAt", "IsProcessed")
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT ("Id") DO UPDATE
-                SET "IsProcessed" = EXCLUDED."IsProcessed"
+                SET "IsProcessed" = EXCLUDED."IsProcessed",
+                    "FileName" = EXCLUDED."FileName",
+                    "StorageKey" = EXCLUDED."StorageKey",
+                    "ContentType" = EXCLUDED."ContentType",
+                    "DocumentType" = EXCLUDED."DocumentType"
         """, (document_id, file_name, file_name, 'application/pdf', 0,
-               'pdf', '', now, False))
+               'pdf', storage_key, now, False))
 
-        # Generate embeddings and store chunks using EF Core column names
-        chunk_data = []
-        for chunk in chunks:
-            embedding = get_embedding(chunk['text'])
-            chunk_id = str(uuid.uuid4())
-            chunk_data.append((
-                chunk_id,
-                document_id,
-                chunk['text'],
-                1,                  # PageNumber — Lambda has no page info, default to 1
-                chunk['index'],     # ChunkIndex
-                '[' + ','.join(str(v) for v in embedding) + ']',  # EmbeddingVector as pgvector literal
-                now
-            ))
-
-        execute_values(
-            cursor,
-            """
-            INSERT INTO "DocumentChunks"
-                ("Id", "DocumentMetadataId", "ChunkText", "PageNumber",
-                 "ChunkIndex", "EmbeddingVector", "CreatedAt")
-            VALUES %s
-            ON CONFLICT ("Id") DO UPDATE
-                SET "ChunkText" = EXCLUDED."ChunkText",
-                    "EmbeddingVector" = EXCLUDED."EmbeddingVector"
-            """,
-            chunk_data,
-            template='(%s, %s, %s, %s, %s, %s::vector, %s)'
-        )
+        # Update ManagedFile as well if it exists
+        cursor.execute("""
+            UPDATE "ManagedFiles"
+            SET "FileName" = %s, "StorageKey" = %s, "ContentType" = %s
+            WHERE "Id" = %s
+        """, (file_name, storage_key, 'application/pdf', document_id))
 
         # Mark document as processed
         cursor.execute("""
@@ -265,11 +220,11 @@ def store_chunks_in_db(document_id: str, chunks: List[Dict[str, Any]], file_name
         """, (True, now, document_id))
 
         conn.commit()
-        logger.info(f"Successfully stored {len(chunks)} chunks for document {document_id}")
+        logger.info(f"Successfully updated metadata for document {document_id}")
 
     except Exception as e:
         conn.rollback()
-        logger.error(f"Error storing chunks in database: {str(e)}")
+        logger.error(f"Error updating database: {str(e)}")
         raise
     finally:
         cursor.close()
@@ -310,22 +265,25 @@ def handler(event, context):
             document_id = key.split('/')[-1].split('.')[0]
             file_name = key.split('/')[-1]
             
-            # Extract text
-            text = extract_text_from_pdf(bucket, key)
-            logger.info(f"Extracted {len(text)} characters from document")
+            # Check if image or pdf
+            is_image = key.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.bmp'))
             
-            # Chunk text
-            chunks = chunk_text(text)
-            logger.info(f"Created {len(chunks)} chunks")
+            # Extract text and process
+            if is_image:
+                text = create_searchable_pdf_from_image(bucket, key)
+                logger.info(f"Extracted {len(text)} characters from image via pytesseract")
+                # Change the file_name for DB insertion to .pdf since we uploaded a converted PDF
+                file_name = file_name.rsplit('.', 1)[0] + '.pdf'
+            else:
+                logger.info(f"Document is already a PDF: s3://{bucket}/{key}")
             
             # Store in database
-            store_chunks_in_db(document_id, chunks, file_name)
+            update_document_metadata(document_id, file_name, f'uploads/{file_name}')
             
         return {
             'statusCode': 200,
             'body': json.dumps({
-                'message': 'Document processed successfully',
-                'chunks': len(chunks)
+                'message': 'Document processed successfully'
             })
         }
         
