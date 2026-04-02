@@ -14,10 +14,10 @@ echo "Copying function code..."
 cp index.py package/
 
 echo "Downloading tesseract static binary..."
-mkdir -p package/tesseract
+
 # Download a lightweight compiled static tesseract for amazon linux (lambda environment)
-curl -sL https://github.com/bhadreshpsavani/tesseract-lambda/raw/master/tesseract-standalone.zip -o tesseract.zip
-unzip -q tesseract.zip -d package/
+curl -sL https://github.com/felipedemacedo/tesseract-aws-lambda/raw/master/tesseract-standalone.zip -o tesseract.zip
+unzip -o -q tesseract.zip -d package/
 rm tesseract.zip
 
 
