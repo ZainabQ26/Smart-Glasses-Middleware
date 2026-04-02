@@ -788,9 +788,10 @@ jobs:
             -var "rds_monitoring_interval=0" \
             -var "ecs_api_cpu=512" \
             -var "ecs_api_memory=1024" \
-            -var "ecs_api_desired_count=0" \
-            -var "ecs_api_min_capacity=0" \
+            -var "ecs_api_desired_count=1" \
+            -var "ecs_api_min_capacity=1" \
             -var "ecs_api_max_capacity=1" \
+            -var "enable_ecs_idle_autoscaler=false" \
             -var "ecs_idle_timeout_minutes=5" \
             -var "domain_name=" \
             -var "certificate_arn=${CERTIFICATE_ARN}"
