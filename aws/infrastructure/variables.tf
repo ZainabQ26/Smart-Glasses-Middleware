@@ -75,19 +75,19 @@ variable "ecs_api_memory" {
 variable "ecs_api_desired_count" {
   description = "Desired number of API ECS tasks"
   type        = number
-  default     = 0
+  default     = 1
 }
 
 variable "ecs_api_min_capacity" {
   description = "Minimum ECS desired count for autoscaling"
   type        = number
-  default     = 0
+  default     = 1
 }
 
 variable "ecs_api_max_capacity" {
   description = "Maximum ECS desired count for autoscaling"
   type        = number
-  default     = 4
+  default     = 1
 }
 
 variable "enable_container_insights" {
@@ -113,7 +113,7 @@ variable "enable_vpc_interface_endpoints" {
 variable "enable_ecs_idle_autoscaler" {
   description = "Enable CloudWatch/EventBridge/Lambda based wake-on-traffic and idle scale-to-zero for ECS API service."
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "ecs_warm_desired_count" {
