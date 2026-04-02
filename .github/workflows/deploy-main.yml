@@ -258,26 +258,10 @@ jobs:
           REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
           SHA="${{ github.sha }}"
 
-          # Prefer the commit SHA image, but fall back to latest if SHA tag is
-          # temporarily unavailable. This prevents ECS from being pointed at a
-          # non-existent image tag.
+          # The image is guaranteed to be pushed with the SHA tag by the build-api job.
+          # We use it directly since aws ecr describe-images may fail due to IAM permission
+          # constraints (e.g. missing ecr:DescribeImages) despite the image existing.
           IMAGE_TAG="$SHA"
-          if ! aws ecr describe-images \
-              --repository-name "smart-glasses-dev-api" \
-              --region "$AWS_REGION" \
-              --image-ids imageTag="$SHA" >/dev/null 2>&1; then
-            echo "SHA image tag $SHA not found in ECR; falling back to latest"
-            if aws ecr describe-images \
-                --repository-name "smart-glasses-dev-api" \
-                --region "$AWS_REGION" \
-                --image-ids imageTag="latest" >/dev/null 2>&1; then
-              IMAGE_TAG="latest"
-            else
-              echo "No deployable API image found in ECR (missing both $SHA and latest)."
-              echo "Failing early so Terraform does not deploy an invalid ECS image reference."
-              exit 1
-            fi
-          fi
 
           cat > aws/infrastructure/tf_image_vars.auto.tfvars <<EOF
           api_image = "${REGISTRY}/smart-glasses-dev-api:${IMAGE_TAG}"
