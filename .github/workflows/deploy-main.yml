@@ -193,8 +193,11 @@ jobs:
           # non-fatal deletions
           set +e
 
-          # ECR repositories
-          aws ecr describe-repositories --repository-names "${PREFIX}-api" --region "$REGION" >/dev/null 2>&1 && aws ecr delete-repository --repository-name "${PREFIX}-api" --force --region "$REGION" || true
+          # NOTE: ECR repository is intentionally NOT deleted here.
+          # The build-api job pushes the deployment image before this job runs.
+          # Deleting the ECR repo would also destroy that image, leaving ECS with
+          # no image to pull after Terraform recreates the repository.
+          # Terraform will import or recreate the ECR repo as needed.
 
           # KMS aliases
           for a in "alias/${PREFIX}-ecr" "alias/${PREFIX}-rds" "alias/${PREFIX}-s3"; do
@@ -410,6 +413,11 @@ jobs:
             "aws_rds_cluster_instance.main[1]"; do
             terraform state rm "$OLD_RES" 2>/dev/null && echo "  Removed $OLD_RES from state" || true
           done
+
+          # ── ECR ───────────────────────────────────────────────────────────────
+          # Import the ECR repository so Terraform manages the existing one that
+          # holds the freshly-built deployment image rather than recreating it.
+          safe_import aws_ecr_repository.api "${PREFIX}-api"
 
           # ── S3 (data must never be destroyed) ─────────────────────────────────
           safe_import aws_s3_bucket.media     "${PREFIX}-media"
