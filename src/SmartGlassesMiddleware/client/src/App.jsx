@@ -20,8 +20,6 @@ export default function App() {
   const [transcript, setTranscript] = useState(null);
   const [aiResponse, setAiResponse] = useState(null);
   const [usedAdvancedModel, setUsedAdvancedModel] = useState(false);
-  const [backendReady, setBackendReady] = useState(false);
-  const [backendStatusText, setBackendStatusText] = useState("Checking server status…");
   const [wakeWordReady, setWakeWordReady] = useState(false);
   // Loading message received from the Whisper worker while it downloads / initialises.
   const [whisperLoadingMsg, setWhisperLoadingMsg] = useState("Initializing…");
@@ -249,13 +247,8 @@ export default function App() {
 
     const probeBackend = async () => {
       let attempts = 0;
-      let isReady = false;
 
       while (!cancelled) {
-        if (!isReady) {
-          setBackendStatusText(attempts === 0 ? "Checking server status…" : "Waking backend server…");
-        }
-
         try {
           const response = await fetch("/api/process/client-settings", {
             method: "GET",
@@ -279,19 +272,11 @@ export default function App() {
           setGroqCommandTranscriptionEnabled(groqEnabled);
           groqCommandTranscriptionEnabledRef.current = groqEnabled;
 
-          if (!cancelled && !isReady) {
-            setBackendReady(true);
-            setBackendStatusText("Backend is ready");
-            addLog("✅ Backend server is ready.", "info");
-            isReady = true;
-          }
-
           if (!cancelled) {
             await sleep(POLL_INTERVAL_MS);
           }
         } catch (_) {
           attempts += 1;
-          isReady = false; // if the server goes offline, we revert to waking
           if (!cancelled) {
             await sleep(Math.min(2000 + attempts * 1000, 10000));
           }
@@ -305,20 +290,6 @@ export default function App() {
       cancelled = true;
     };
   }, []);
-
-  // Track whether we've already shown the landing on first backend ready so
-  // the effect only fires once even if backendReady were to re-toggle.
-  const hasRestoredLandingRef = useRef(false);
-
-  // When the backend becomes ready (server finishes loading), restore the
-  // initial Smart Glasses Assistant landing screen so the user is always
-  // greeted by it after server wake-up.
-  useEffect(() => {
-    if (backendReady && !hasRestoredLandingRef.current) {
-      hasRestoredLandingRef.current = true;
-      setShowLanding(true);
-    }
-  }, [backendReady]);
 
   // VAD/Whisper removed: keep a harmless placeholder used by the UI so
   // existing button/label logic doesn't need widespread changes.
@@ -1226,10 +1197,6 @@ export default function App() {
   // ── Manual tap button ─────────────────────────────────────────────────────
   const handleMicButton = () => {
     if (status === "idle") {
-      if (!backendReady) {
-        addLog("⚠️ Backend is still waking up. Please wait.", "warn");
-        return;
-      }
       if (!wakeWordReady) {
         addLog("⚠️ Microphone not ready yet.", "warn");
         return;
@@ -1262,8 +1229,6 @@ export default function App() {
     ? "🤖 Sending to AI…"
     : isProcessing
       ? "⏳ Transcribing…"
-      : !backendReady
-        ? "⏳ Waking server…"
       : isListening
         ? "🗣️ Listening…"
         : !wakeWordReady
@@ -1271,12 +1236,11 @@ export default function App() {
           : `Say "${activationWord}"`;
   const dotColor = isSending    ? "#3498db"
     : isProcessing ? "#9b59b6"
-    : !backendReady ? "#f59e0b"
     : isListening  ? "#e67e22"
     : !wakeWordReady ? "#f97316"
     : "#00b894";
 
-  const shouldPulse = isProcessing || isSending || !wakeWordReady || !backendReady;
+  const shouldPulse = isProcessing || isSending || !wakeWordReady;
   const dotStyle = { ...styles.dot, background: dotColor, ...(shouldPulse ? { animation: "pulse 1s ease-in-out infinite" } : {}) };
 
   // Full command list shown as an overlay in the top-left only while listening.
@@ -1297,16 +1261,6 @@ export default function App() {
 
   return (
     <div style={styles.page}>
-      {!backendReady && (
-        <div style={styles.serverWakeOverlay}>
-          <div style={styles.serverWakeCard}>
-            <h2 style={styles.serverWakeTitle}>Starting Server</h2>
-            <p style={styles.serverWakeText}>{backendStatusText}</p>
-            <p style={styles.serverWakeSubtext}>The backend appears to be offline. This page will continue automatically once it wakes up.</p>
-          </div>
-        </div>
-      )}
-
       {/* ── Landing screen — shown until first activation ─────────────────────── */}
       {showLanding && (
         <div style={styles.landing}>
@@ -1588,41 +1542,6 @@ const styles = {
     fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
     position: "relative",
     overflow: "hidden",
-  },
-  serverWakeOverlay: {
-    position: "fixed",
-    inset: 0,
-    background: "rgba(0,0,0,0.86)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 120,
-    padding: 16,
-  },
-  serverWakeCard: {
-    width: "min(520px, 100%)",
-    background: "#121212",
-    border: "1px solid #2d2d2d",
-    borderRadius: 14,
-    padding: "20px 22px",
-    boxShadow: "0 20px 60px rgba(0,0,0,0.45)",
-  },
-  serverWakeTitle: {
-    margin: 0,
-    fontSize: 22,
-    color: "#f6f6f6",
-  },
-  serverWakeText: {
-    margin: "10px 0 0 0",
-    fontSize: 16,
-    color: "#f59e0b",
-    fontWeight: 600,
-  },
-  serverWakeSubtext: {
-    margin: "8px 0 0 0",
-    fontSize: 14,
-    color: "#b9b9b9",
-    lineHeight: 1.45,
   },
   // Landing screen overlay
   landing: {
