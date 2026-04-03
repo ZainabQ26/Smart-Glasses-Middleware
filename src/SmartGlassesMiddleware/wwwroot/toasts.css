@@ -10,6 +10,22 @@
     pointer-events: none; /* allow clicks through empty areas */
 }
 
+@media (max-width: 600px) {
+    .toast-container {
+        right: 10px !important;
+        bottom: 10px !important;
+        left: 10px !important;
+        max-width: none !important;
+        width: auto !important;
+    }
+
+    .toast {
+        width: 100% !important;
+        max-width: none !important;
+        min-width: 0 !important;
+    }
+}
+
 .toast {
     pointer-events: auto;
     display: inline-flex !important;
