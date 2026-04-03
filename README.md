@@ -78,6 +78,12 @@ gh run list --workflow deploy-main.yml --limit 5
 gh run watch <run-id> --exit-status
 ```
 
+After deploy completes, the workflow logs now print a notice line with the live site URL:
+
+- `Deployment URL: https://...`
+
+In GitHub Actions, open the `verify-deployment` job and check the `Print deployed website URL` step.
+
 Backend middleware and frontend for a smart glasses application. Provides a multi-modal API for AI interaction, document processing, audio transcription, and task management, deployed to AWS ECS Fargate with automatic scale-to-zero when idle.
 
 ## Stack
