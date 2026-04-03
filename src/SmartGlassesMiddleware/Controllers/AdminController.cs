@@ -1080,13 +1080,12 @@ public class AdminController : ControllerBase
 
     /// <returns>A file containing the abbreviations in CSV format.</returns>
     [HttpGet("abbreviations/download")]
-    public async Task<IActionResult> DownloadAbbreviationsCsv()
+    public IActionResult DownloadAbbreviationsCsv([FromServices] IAbbreviationService abbreviationService)
     {
-        var abbreviations = await _context.Abbreviations
-            .AsNoTracking()
+        var abbreviations = abbreviationService.GetAllCachedAbbreviations()
             .OrderBy(a => a.ShortForm)
             .ThenBy(a => a.ExpandedForm)
-            .ToListAsync(HttpContext.RequestAborted);
+            .ToList();
 
         static string EscapeCsv(string? value)
         {
