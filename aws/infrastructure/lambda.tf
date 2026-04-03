@@ -79,16 +79,25 @@ resource "aws_cloudwatch_log_group" "lambda_document_processor" {
 
 # Lambda Function
 resource "aws_lambda_function" "document_processor" {
-  filename      = "${path.module}/../lambda-document-processor/deployment.zip"
+  # The zip is uploaded to S3 by CI before terraform apply to work around the
+  # 50 MB direct-upload limit.  s3_bucket/s3_key support up to 250 MB unzipped.
+  # A fixed key is used so redeploys overwrite the same object with no accumulation.
+  s3_bucket        = var.lambda_deployment_s3_bucket
+  s3_key           = var.lambda_deployment_s3_key
+  source_code_hash = var.lambda_deployment_hash
   function_name = "${var.project_name}-${var.environment}-document-processor"
   role          = aws_iam_role.lambda_document_processor.arn
   handler       = "index.handler"
   runtime       = "python3.12"
   timeout       = 300 # 5 minutes
   memory_size   = 1024
-  # Guard with fileexists() so `terraform validate` passes before the artifact is built.
-  # In CI, the zip is created in the build job and placed here before terraform apply.
-  source_code_hash = fileexists("${path.module}/../lambda-document-processor/deployment.zip") ? filebase64sha256("${path.module}/../lambda-document-processor/deployment.zip") : null
+
+  lifecycle {
+    precondition {
+      condition     = var.lambda_deployment_s3_bucket != "" && var.lambda_deployment_s3_key != ""
+      error_message = "lambda_deployment_s3_bucket and lambda_deployment_s3_key must both be set. Upload the zip to S3 before running terraform apply."
+    }
+  }
 
   vpc_config {
     subnet_ids         = aws_subnet.private_app[*].id
