@@ -52,6 +52,7 @@ When deploying through GitHub Actions (`deploy-main.yml` or `deploy-fast.yml`),
 the `verify-deployment` job prints the website URL in logs as:
 
 - `Deployment URL: https://...`
+- Current dev URL: `https://d2vzlm78lj63v4.cloudfront.net`
 
 Look for the `Print deployed website URL` step in that job.
 
