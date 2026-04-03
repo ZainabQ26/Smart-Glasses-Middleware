@@ -207,11 +207,13 @@ variable "db_password" {
   description = "PostgreSQL database password"
   type        = string
   sensitive   = true
+  default     = ""
 }
 
 variable "db_host" {
   description = "PostgreSQL database host"
   type        = string
+  default     = ""
 }
 
 variable "db_port" {
