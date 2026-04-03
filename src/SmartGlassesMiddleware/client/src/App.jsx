@@ -405,6 +405,7 @@ export default function App() {
       }
 
       if (recentFiles.length === 0) {
+        addLog("ℹ️ No uploaded files were found.", "info");
         setPendingAction(null);
         showAiResponse("No uploaded files were found. Please upload a file first.");
         return;
