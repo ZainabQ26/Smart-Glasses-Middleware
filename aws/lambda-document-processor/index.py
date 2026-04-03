@@ -6,8 +6,7 @@ import fitz  # PyMuPDF — extracts text from searchable PDFs without OCR
 import logging
 from typing import List, Dict, Any
 from urllib.parse import unquote_plus
-import psycopg2
-from psycopg2.extras import execute_values
+import pg8000
 from datetime import datetime, timezone
 
 # Initialize AWS clients
@@ -23,6 +22,7 @@ DOCUMENTS_BUCKET = os.environ['DOCUMENTS_BUCKET']
 DB_SECRET_ARN = os.environ['DB_SECRET_ARN']
 MAX_CHUNK_SIZE = int(os.environ.get('MAX_CHUNK_SIZE', 1000))
 CHUNK_OVERLAP = int(os.environ.get('CHUNK_OVERLAP', 200))
+MIN_TEXTRACT_CONFIDENCE = 10  # minimum Textract word confidence (0-100) to include in output
 
 # Cache for DB connection
 db_connection = None
@@ -63,7 +63,7 @@ def get_db_connection():
     secret = json.loads(secret_value['SecretString'])
     
     # Create connection
-    db_connection = psycopg2.connect(
+    db_connection = pg8000.connect(
         host=secret['host'],
         port=secret['port'],
         database=secret['dbname'],
