@@ -85,6 +85,33 @@ if os.path.exists('/var/task/tesseract/tesseract'):
     os.environ['TESSDATA_PREFIX'] = '/var/task/tesseract/tessdata'
     os.environ['LD_LIBRARY_PATH'] = '/var/task/tesseract/lib:' + os.environ.get('LD_LIBRARY_PATH', '')
 
+def extract_text_from_pdf(bucket: str, key: str) -> str:
+    """Download a PDF from S3 and extract its embedded text using PyMuPDF.
+
+    For PDFs that already contain selectable/searchable text this avoids any
+    OCR step entirely.  If the PDF has no embedded text (e.g. a scanned
+    document stored as images) an empty string is returned.
+
+    Args:
+        bucket: S3 bucket name.
+        key: S3 object key of the PDF.
+
+    Returns:
+        All text found across every page, joined by newlines.  Empty string
+        when no embedded text is present.
+    """
+    obj = s3_client.get_object(Bucket=bucket, Key=key)
+    pdf_bytes = obj['Body'].read()
+
+    doc = fitz.open(stream=pdf_bytes, filetype='pdf')
+    pages_text = []
+    for page in doc:
+        pages_text.append(page.get_text())
+    doc.close()
+
+    return '\n'.join(pages_text).strip()
+
+
 def create_searchable_pdf_from_image(bucket: str, key: str) -> str:
     """Download an image from S3, extract text using pytesseract, and create a text-searchable PDF.
     Returns the extracted text, saves the generated PDF back to S3 with a .pdf extension, and deletes the original image."""
@@ -275,7 +302,11 @@ def handler(event, context):
                 # Change the file_name for DB insertion to .pdf since we uploaded a converted PDF
                 file_name = file_name.rsplit('.', 1)[0] + '.pdf'
             else:
-                logger.info(f"Document is already a PDF: s3://{bucket}/{key}")
+                text = extract_text_from_pdf(bucket, key)
+                if text:
+                    logger.info(f"Extracted {len(text)} characters from PDF embedded text (no OCR needed)")
+                else:
+                    logger.info(f"PDF has no embedded text (scanned document): s3://{bucket}/{key}")
             
             # Store in database
             update_document_metadata(document_id, file_name, f'uploads/{file_name}')
