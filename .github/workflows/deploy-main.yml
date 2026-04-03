@@ -289,6 +289,24 @@ jobs:
             exit 1
           fi
 
+      - name: Upload Lambda deployment zip to S3
+        run: |
+          set -euo pipefail
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          BUCKET_NAME="smart-glasses-terraform-state-${ACCOUNT_ID}-dev"
+          # Fixed key — every deploy overwrites the same object so the bucket never accumulates old zips.
+          S3_KEY="lambda-deployments/document-processor/deployment.zip"
+          echo "Uploading deployment.zip to s3://${BUCKET_NAME}/${S3_KEY}"
+          aws s3 cp aws/lambda-document-processor/deployment.zip "s3://${BUCKET_NAME}/${S3_KEY}"
+          # Compute base64-encoded SHA-256 so Terraform can detect code changes via source_code_hash.
+          HASH=$(openssl dgst -sha256 -binary aws/lambda-document-processor/deployment.zip | base64)
+          # Append S3 deployment vars so Terraform uses S3 instead of a local file.
+          cat >> aws/infrastructure/tf_image_vars.auto.tfvars <<EOF
+          lambda_deployment_s3_bucket = "${BUCKET_NAME}"
+          lambda_deployment_s3_key    = "${S3_KEY}"
+          lambda_deployment_hash      = "${HASH}"
+          EOF
+
       - name: Delete lambda-document-zip artifact (cleanup)
         if: ${{ success() }}
         env:
