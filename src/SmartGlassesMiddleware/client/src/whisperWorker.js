@@ -75,7 +75,7 @@ async function ensureTransformers() {
     env.allowRemoteModels = true;
     env.useBrowserCache   = true;
 
-    const gpuAvailable = await probeWebGPU();
+    const gpuAvailable = false; // Force false to prevent WebGPU crash on Safari, use WASM instead
     if (gpuAvailable) {
       resolvedDevice = 'webgpu';
       self.postMessage({ type: 'loading', message: 'Using WebGPU backend for Whisper' });

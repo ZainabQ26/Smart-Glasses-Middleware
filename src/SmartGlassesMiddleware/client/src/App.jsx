@@ -4,7 +4,7 @@ import PdfViewer from "./PdfViewer.jsx";
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 //
-// Voice pipeline: Whisper WebGPU (single multilingual whisper-base model)
+// Voice pipeline: Whisper WASM (single multilingual whisper-base model)
 //   - AudioContext + ScriptProcessorNode captures mic at 16 kHz
 //   - Amplitude VAD detects speech vs silence
 //   - Wake-word mode: each speech chunk sent to Whisper; "activate" triggers command mode
@@ -860,7 +860,7 @@ export default function App() {
   const transcribeCommandWithGroqRef = useRef(transcribeCommandWithGroq);
   useEffect(() => { transcribeCommandWithGroqRef.current = transcribeCommandWithGroq; }, [transcribeCommandWithGroq]);
 
-  // ── Voice pipeline: Whisper WebGPU + AudioContext mic capture ────────────
+  // ── Voice pipeline: Whisper WASM + AudioContext mic capture ────────────
   //
   // One multilingual whisper-base model handles all modes:
   //   'wake-word' — short bursts checked for the keyword "activate"
