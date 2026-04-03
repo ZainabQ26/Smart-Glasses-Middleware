@@ -1327,191 +1327,30 @@ async function loadFiles(reset = false) {
 // Prompts with lazy loading
 async function loadPrompts(reset = false) {
     if (state.prompts.loading) return;
-    if (!reset && !state.prompts.hasMore) return;
-
-    if (reset) {
-        state.prompts.page = 1;
-        state.prompts.hasMore = true;
-        state.prompts.data = [];
-        const listEl = document.getElementById('prompts-list');
-        if (listEl) listEl.innerHTML = '';
-    }
 
     state.prompts.loading = true;
     showLoading('prompts-list');
 
     try {
-        // Always load conversations (not groups)
-        const endpoint = `/api/conversations?page=${state.prompts.page}&pageSize=${state.prompts.pageSize}`;
-
-        const response = await fetchWithRetry(endpoint);
-        if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-
-        const result = await response.json();
-        const items = Array.isArray(result) ? result : (result.data || result.Data || []);
-        const pagination = Array.isArray(result) ? {} : (result.pagination || result.Pagination || {});
-
         hideLoading('prompts-list');
-
         const list = document.getElementById('prompts-list');
-        if (items && items.length > 0) {
-            state.prompts.data.push(...items);
-            const fragment = document.createDocumentFragment();
-            items.forEach(item => {
-                try {
-                    const div = document.createElement('div');
-                    div.className = 'sidebar-prompt-item';
-
-                    // These are always conversations (not groups)
-                    const isGroup = false;
-
-                    const id = getProp(item, 'id') || getProp(item, 'Id');
-                    const title = getProp(item, 'title') || getProp(item, 'Title') || getProp(item, 'name') || getProp(item, 'Name') || id;
-                    const updated = getProp(item, 'updatedAt') || getProp(item, 'UpdatedAt') || getProp(item, 'lastUpdated') || '';
-                    // derive messages info when present
-                    const messagesArr = getProp(item, 'messages') || getProp(item, 'Messages') || getProp(item, 'MessagesList') || [];
-                    const messageCount = Array.isArray(messagesArr) ? messagesArr.length : (getProp(item, 'messageCount') || getProp(item, 'MessageCount') || 0);
-                    const attachmentCountRaw = getProp(item, 'attachmentCount') || getProp(item, 'AttachmentCount');
-                    const attachmentCount = attachmentCountRaw !== undefined && attachmentCountRaw !== null
-                        ? Number(attachmentCountRaw)
-                        : null;
-                    let fileCount = Number.isFinite(attachmentCount) ? attachmentCount : 0;
-
-                    if (!Number.isFinite(attachmentCount) && Array.isArray(messagesArr)) {
-                        fileCount = messagesArr.reduce((sum, msg) => {
-                            const rawFiles = Array.isArray(msg.files) ? msg.files
-                                : (Array.isArray(msg.Files) ? msg.Files
-                                    : (Array.isArray(msg.Attachments)
-                                        ? msg.Attachments
-                                        : (Array.isArray(msg.attachments) ? msg.attachments : [])));
-                            return sum + normalizeFileList(rawFiles).length;
-                        }, 0);
-                    }
-                    const lastMsg = (Array.isArray(messagesArr) && messagesArr.length > 0)
-                        ? (messagesArr[messagesArr.length - 1].content || messagesArr[messagesArr.length - 1].text || messagesArr[messagesArr.length - 1].message || '')
-                        : (getProp(item, 'lastMessage') || getProp(item, 'snippet') || getProp(item, 'description') || '');
-
-                    div.dataset.conversationId = id;
-                    div.dataset.groupId = getProp(item, 'resourceGroupId') || getProp(item, 'ResourceGroupId') || '';
-
-                    // Don't show group badges in conversation list anymore
-                    
-                    const displayName = escapeHtml(title || 'Untitled');
-                    const timestamp = updated ? new Date(updated).toLocaleString(undefined, {
-                        month: 'short',
-                        day: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit'
-                    }) : '';
-                    
-                    div.innerHTML = `
-                        <div style="display:block;">
-                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;gap:6px;">
-                                <input class="prompt-name-input" value="${displayName}" data-conversation-id="${id}" readonly
-                                    style="font-weight:600;color:#2c3e50;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:65%;border:1px solid transparent;background:transparent;padding:0;margin:0;outline:none;" />
-                                <div style="display:flex;gap:6px;align-items:center;">
-                                    <button type="button" class="conversation-edit-btn" title="Rename conversation" aria-label="Rename conversation" style="border:none;background:#e0e0e0;color:#2c3e50;padding:2px 6px;border-radius:10px;cursor:pointer;font-size:11px;">Edit</button>
-                                    <span class="badge" data-conversation-files="${id}" title="${fileCount} file(s) attached" style="background:#0b63a6;color:white;padding:2px 6px;border-radius:10px;font-size:11px;min-width:20px;text-align:center;">${fileCount}</span>
-                                    <button type="button" class="conversation-delete-btn" title="Delete conversation" aria-label="Delete conversation" style="border:none;background:#e74c3c;color:white;width:20px;height:20px;border-radius:50%;cursor:pointer;font-size:14px;line-height:20px;padding:0;">×</button>
-                                </div>
-                            </div>
-                            <div style="font-size:11px;color:#2f3a3f;margin-bottom:4px;">${timestamp}</div>
-                            <div style="color:#444;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(String(lastMsg || 'No messages yet'))}</div>
-                        </div>
-                    `;
-
-                    div.addEventListener('click', async () => {
-                        document.querySelectorAll('.sidebar-prompt-item').forEach(i => i.classList.remove('active'));
-                        div.classList.add('active');
-                        activeConversationId = id;
-                        await syncActiveGroupFromConversation(id);
-                        await loadConversationIntoView(id, title);
-                        showMessage('Conversation selected');
-                    });
-
-                    const nameInput = div.querySelector('.prompt-name-input');
-                    const editBtn = div.querySelector('.conversation-edit-btn');
-
-                    const finishEdit = async (save) => {
-                        if (!nameInput) return;
-                        const original = nameInput.dataset.originalTitle || displayName;
-                        const next = nameInput.value.trim();
-                        nameInput.readOnly = true;
-                        nameInput.style.borderColor = 'transparent';
-                        nameInput.style.background = 'transparent';
-                        if (!save || next === '' || next === original) {
-                            nameInput.value = original;
-                            nameInput.dataset.originalTitle = original;
-                            return;
-                        }
-                        const ok = await updateConversationTitle(id, next, original);
-                        if (!ok) {
-                            nameInput.value = original;
-                        } else {
-                            nameInput.dataset.originalTitle = next;
-                            if (activeConversationId === id) {
-                                const promptTitle = document.getElementById('prompt-form-title');
-                                if (promptTitle) promptTitle.textContent = next;
-                            }
-                        }
-                    };
-
-                    editBtn?.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        if (!nameInput) return;
-                        nameInput.dataset.originalTitle = nameInput.value;
-                        nameInput.readOnly = false;
-                        nameInput.style.borderColor = '#0b63a6';
-                        nameInput.style.background = '#ffffff';
-                        nameInput.focus();
-                        nameInput.select();
-                    });
-
-                    nameInput?.addEventListener('click', (e) => {
-                        if (!nameInput.readOnly) e.stopPropagation();
-                    });
-
-                    nameInput?.addEventListener('keydown', async (e) => {
-                        if (e.key === 'Enter') {
-                            e.preventDefault();
-                            await finishEdit(true);
-                        } else if (e.key === 'Escape') {
-                            e.preventDefault();
-                            await finishEdit(false);
-                        }
-                    });
-
-                    nameInput?.addEventListener('blur', async () => {
-                        await finishEdit(true);
-                    });
-
-                    div.querySelector('.conversation-delete-btn')?.addEventListener('click', async (e) => {
-                        e.stopPropagation();
-                        await deleteConversation(id, title);
-                    });
-
-                    fragment.appendChild(div);
-                } catch (err) {
-                    console.error('Error creating sidebar item', err);
-                }
-            });
-            if (list) list.appendChild(fragment);
-
-            // Avoid per-conversation follow-up requests during list load; this can
-            // create request storms under load and trigger gateway timeouts.
-
-            state.prompts.hasMore = pagination.hasNext || pagination.HasNext || false;
-            state.prompts.page++;
-        } else if (reset && list) {
-            list.innerHTML = `<div class="empty-sidebar">No conversations yet</div>`;
+        if (list) {
+            list.innerHTML = '';
         }
 
-        state.prompts.loading = false;
+        // Just ensure there is an active conversation when the tab opens
+        if (!activeConversationId) {
+            await createNewConversation();
+        } else {
+            await loadConversationIntoView(activeConversationId, 'Current Conversation');
+        }
+
     } catch (error) {
-        hideLoading('prompts-list');
-        state.prompts.loading = false;
         console.error('Error loading prompts/conversations:', error);
-        showMessage('Error loading items: ' + (error.message || error), 'error');
+        showMessage('Failed to load conversation', 'error');
+    } finally {
+        state.prompts.loading = false;
+        hideLoading('prompts-list');
     }
 }
 

@@ -1469,7 +1469,7 @@
 
         <div class="tabs" data-testid="admin-tabs">
             <button class="tab active" data-tab="files" data-testid="tab-files" aria-controls="files">Files</button>
-            <button class="tab" data-tab="prompts" data-testid="tab-prompts" aria-controls="prompts">Conversations</button>
+            <button class="tab" data-tab="prompts" data-testid="tab-prompts" aria-controls="prompts">Conversation</button>
             <button class="tab" data-tab="reminders" data-testid="tab-reminders" aria-controls="reminders">Reminders</button>
             <button class="tab" data-tab="groups" data-testid="tab-groups" aria-controls="groups">Groups</button>
             <label id="keepawake-toggle-wrap" class="keepawake-toggle" title="Send periodic health checks from this admin tab to prevent idle scale-down" data-testid="keepawake-wrap">
@@ -1520,9 +1520,9 @@
         <!-- Prompts Tab -->
         <div id="prompts" class="tab-content">
             <section id="prompts-section" class="prompts-container">
-                <div class="prompt-sidebar">
+                <div class="prompt-sidebar" style="display: none;">
                     <div style="margin-bottom:10px;">
-                        <h3 style="margin:0;">Conversations</h3>
+                        <h3 style="margin:0;">Conversation</h3>
                     </div>
                     <div id="prompts-list"></div>
                 </div>
