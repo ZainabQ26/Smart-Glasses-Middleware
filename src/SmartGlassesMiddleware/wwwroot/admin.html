@@ -940,20 +940,75 @@
 
         /* Mobile tab bar: stack tabs and controls on narrow screens */
         @media (max-width: 600px) {
+            .tabs {
+                justify-content: center;
+            }
+
             .tab {
                 padding: 8px 14px;
                 font-size: 13px;
+                flex: 1 1 auto;
+                text-align: center;
             }
 
             .keepawake-toggle {
-                margin-left: 0;
+                margin-left: 0 !important;
                 font-size: 12px;
                 padding: 6px 10px;
                 flex-shrink: 0;
+                width: 100%;
+                justify-content: center;
+                box-sizing: border-box;
             }
 
             .theme-toggle {
-                margin-left: 0;
+                margin-left: 0 !important;
+                width: 100% !important;
+                box-sizing: border-box;
+            }
+
+            .header-nav {
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+                padding: 0 15px;
+            }
+            .header-nav > * {
+                margin: 0 !important;
+                width: 100%;
+                box-sizing: border-box;
+            }
+
+            .responsive-flex-row {
+                flex-direction: column !important;
+                align-items: stretch !important;
+                gap: 10px !important;
+            }
+
+            .responsive-flex-row > div:first-child {
+                width: 100% !important;
+                margin-left: 0 !important;
+                margin-right: 0 !important;
+            }
+
+            .responsive-btn-group {
+                display: flex;
+                width: 100%;
+                gap: 10px;
+            }
+
+            .responsive-btn-group > button {
+                flex: 1;
+            }
+
+            .responsive-grid {
+                grid-template-columns: 1fr !important;
+            }
+
+            .responsive-header {
+                flex-direction: column !important;
+                align-items: stretch !important;
+                gap: 10px !important;
             }
         }
 
@@ -993,6 +1048,23 @@
         @media (max-width: 968px) {
             .prompts-container {
                 grid-template-columns: 1fr;
+                gap: 15px;
+            }
+            .prompt-sidebar {
+                max-height: 250px !important;
+                overflow-y: auto;
+            }
+        }
+
+        @media (max-width: 600px) {
+            .responsive-header {
+                flex-direction: column !important;
+                align-items: stretch !important;
+                gap: 10px !important;
+            }
+
+            #new-chat-btn {
+                width: 100%;
             }
         }
 
@@ -1456,7 +1528,7 @@
                 </div>
                 
                 <div class="prompt-form-card">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <div class="responsive-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                         <h2 id="prompt-form-title" style="margin: 0;">Conversation</h2>
                         <button type="button" id="new-chat-btn" style="padding: 8px 16px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">New Conversation</button>
                     </div>
@@ -1464,20 +1536,22 @@
                         <input type="hidden" id="prompt-id">
                         <div class="form-group">
                             <label for="prompt-name">Message</label>
-                            <div style="display: flex; gap: 10px;">
+                            <div class="responsive-flex-row" style="display: flex; gap: 10px;">
                                 <div style="position: relative; flex: 1;">
                                     <input type="text" id="prompt-name" placeholder="Enter a message" required style="width: 100%; margin: 0; padding-right: 40px;">
                                     <span id="prompt-files-icon" onclick="window.showPromptFilesPanel && window.showPromptFilesPanel()" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 20px; color: #95a5a6; cursor: pointer;">📎</span>
                                 </div>
-                                <button type="button" id="prompt-show-file-btn" onclick="window.togglePromptFileSection && window.togglePromptFileSection()" style="padding: 8px 16px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Attach file</button>
-                                <button type="button" id="prompt-send-btn" style="padding: 8px 16px; background: #1b5e20; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Send</button>
+                                <div class="responsive-btn-group">
+                                    <button type="button" id="prompt-show-file-btn" onclick="window.togglePromptFileSection && window.togglePromptFileSection()" style="padding: 8px 16px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Attach file</button>
+                                    <button type="button" id="prompt-send-btn" style="padding: 8px 16px; background: #1b5e20; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Send</button>
+                                </div>
                             </div>
                         </div>
                     </form>
 
                     <!-- File Section (hidden by default) -->
                     <div id="prompt-file-section" style="display: none; margin-bottom: 20px;">
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                        <div class="responsive-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
                             <!-- Preview Panel -->
                             <div id="prompt-preview-panel" style="border: 2px solid #0b63a6; border-radius: 8px; padding: 15px; position: relative;">
                                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
@@ -1533,18 +1607,18 @@
                     <!-- Reminder Text Section -->
                     <div style="margin-bottom: 20px;">
                         <label style="display: block; margin-bottom: 8px; color: #2f3a3f; font-size: 14px;">Reminder Text</label>
-                        <div style="display: flex; gap: 10px;">
+                        <div class="responsive-flex-row" style="display: flex; gap: 10px;">
                             <div style="position: relative; flex: 1;">
                                 <input type="text" id="reminder-name" placeholder="Enter reminder text..." required style="width: 100%; margin: 0; padding-right: 40px;">
                                 <span id="reminder-files-icon" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 20px; color: #95a5a6; cursor: pointer;">📎</span>
                             </div>
-                            <button type="button" id="reminder-show-file-btn" style="padding: 8px 16px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">add file+</button>
+                            <button type="button" id="reminder-show-file-btn" style="padding: 8px 16px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; width: 100%;">add file+</button>
                         </div>
                     </div>
                     
                     <!-- Preview and Files Section (hidden by default) -->
                     <div id="reminder-file-section" style="display: none; margin-bottom: 20px;">
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                        <div class="responsive-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
                             <!-- Preview Panel -->
                             <div id="reminder-preview-panel" style="border: 2px solid #0b63a6; border-radius: 8px; padding: 15px; position: relative;">
                                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
@@ -1600,18 +1674,18 @@
                     <!-- Prompt Text Section -->
                     <div style="margin-bottom: 20px;">
                         <label style="display: block; margin-bottom: 8px; color: #2f3a3f; font-size: 14px;">Prompt Text</label>
-                        <div style="display: flex; gap: 10px;">
+                        <div class="responsive-flex-row" style="display: flex; gap: 10px;">
                             <div style="position: relative; flex: 1;">
                                 <input type="text" id="group-name" placeholder="Enter prompt text..." required style="width: 100%; margin: 0; padding-right: 40px;">
                                 <span id="group-files-icon" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 20px; color: #95a5a6; cursor: pointer;">📎</span>
                             </div>
-                            <button type="button" id="group-show-file-btn" style="padding: 8px 16px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">add file+</button>
+                            <button type="button" id="group-show-file-btn" style="padding: 8px 16px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; width: 100%;">add file+</button>
                         </div>
                     </div>
                     
                     <!-- PRVW and Files Section (hidden by default) -->
                     <div id="group-file-section" style="display: none; margin-bottom: 20px;">
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                        <div class="responsive-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
                             <!-- Preview Panel -->
                             <div id="group-preview-panel" style="border: 2px solid #0b63a6; border-radius: 8px; padding: 15px; position: relative;">
                                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
