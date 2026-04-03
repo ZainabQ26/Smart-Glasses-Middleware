@@ -84,7 +84,8 @@ jobs:
           set -euo pipefail
 
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          IMAGE="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/smart-glasses-dev-api:${GITHUB_SHA}"
+          REPOSITORY="smart-glasses-dev-api"
+          CANDIDATE_IMAGE="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${REPOSITORY}:${GITHUB_SHA}"
 
           CLUSTER="smart-glasses-dev-cluster"
           SERVICE="smart-glasses-dev-api-service"
@@ -116,6 +117,25 @@ jobs:
           if [ -z "$TASK_DEF_ARN" ] || [ "$TASK_DEF_ARN" = "None" ] || [ "$TASK_DEF_ARN" = "null" ]; then
             echo "Unable to resolve current task definition for $SERVICE."
             exit 1
+          fi
+
+          if aws ecr describe-images \
+            --repository-name "$REPOSITORY" \
+            --image-ids imageTag="$GITHUB_SHA" \
+            --region "$AWS_REGION" >/dev/null 2>&1; then
+            IMAGE="$CANDIDATE_IMAGE"
+          else
+            echo "::warning::Image tag $GITHUB_SHA not found in ECR; keeping currently running API image."
+            IMAGE=$(aws ecs describe-task-definition \
+              --task-definition "$TASK_DEF_ARN" \
+              --region "$AWS_REGION" \
+              --query 'taskDefinition.containerDefinitions[?name==`api`].image | [0]' \
+              --output text 2>/dev/null || true)
+
+            if [ -z "$IMAGE" ] || [ "$IMAGE" = "None" ] || [ "$IMAGE" = "null" ]; then
+              echo "Unable to resolve fallback API image from task definition $TASK_DEF_ARN."
+              exit 1
+            fi
           fi
 
           aws ecs describe-task-definition \
@@ -488,3 +508,54 @@ jobs:
 
           echo "Health endpoint did not return 200 after 5 minutes."
           exit 1
+
+      - name: Print deployed website URL
+        if: success()
+        run: |
+          set -euo pipefail
+
+          CLUSTER="${{ needs.deploy-api.outputs.cluster }}"
+          SERVICE="${{ needs.deploy-api.outputs.service }}"
+          CLUSTER=${CLUSTER:-smart-glasses-dev-cluster}
+          SERVICE=${SERVICE:-smart-glasses-dev-api-service}
+
+          TG_ARN=$(aws ecs describe-services \
+            --cluster "$CLUSTER" --services "$SERVICE" --region "$AWS_REGION" \
+            --query 'services[0].loadBalancers[0].targetGroupArn' \
+            --output text 2>/dev/null || true)
+
+          if [ -z "$TG_ARN" ] || [ "$TG_ARN" = "None" ] || [ "$TG_ARN" = "null" ]; then
+            echo "::warning::Deployment completed, but target group ARN could not be resolved for URL lookup."
+            exit 0
+          fi
+
+          LB_ARN=$(aws elbv2 describe-target-groups \
+            --target-group-arns "$TG_ARN" --region "$AWS_REGION" \
+            --query 'TargetGroups[0].LoadBalancerArns[0]' --output text 2>/dev/null || true)
+          ALB_DNS=$(aws elbv2 describe-load-balancers \
+            --load-balancer-arns "$LB_ARN" --region "$AWS_REGION" \
+            --query 'LoadBalancers[0].DNSName' --output text 2>/dev/null || true)
+
+          if [ -z "$ALB_DNS" ] || [ "$ALB_DNS" = "None" ] || [ "$ALB_DNS" = "null" ]; then
+            echo "::warning::Deployment completed, but ALB DNS could not be resolved for URL lookup."
+            exit 0
+          fi
+
+          CF_DOMAIN=$(aws cloudfront list-distributions \
+            --query "DistributionList.Items[?contains(Origins.Items[?Id=='ALB-API'].DomainName | [0], '$ALB_DNS')].DomainName | [0]" \
+            --output text 2>/dev/null || true)
+
+          if [ -z "$CF_DOMAIN" ] || [ "$CF_DOMAIN" = "None" ] || [ "$CF_DOMAIN" = "null" ]; then
+            CF_DOMAIN=$(aws cloudfront list-distributions \
+              --query 'DistributionList.Items[0].DomainName' \
+              --output text 2>/dev/null || true)
+          fi
+
+          if [ -z "$CF_DOMAIN" ] || [ "$CF_DOMAIN" = "None" ] || [ "$CF_DOMAIN" = "null" ]; then
+            echo "::warning::Deployment completed, but CloudFront URL could not be resolved."
+            exit 0
+          fi
+
+          WEBSITE_URL="https://${CF_DOMAIN}"
+          echo "Deployment URL: ${WEBSITE_URL}"
+          echo "::notice title=Deployment URL::${WEBSITE_URL}"

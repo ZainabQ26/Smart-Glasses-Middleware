@@ -257,18 +257,56 @@ jobs:
 
       - name: Write image variables for Terraform
         run: |
+          set -euo pipefail
+
           # Derive the ECR registry from STS (not from a secret, so values are never masked)
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          REPOSITORY="smart-glasses-dev-api"
           SHA="${{ github.sha }}"
+          IMAGE_URI="${REGISTRY}/${REPOSITORY}:${SHA}"
 
-          # The image is guaranteed to be pushed with the SHA tag by the build-api job.
-          # We use it directly since aws ecr describe-images may fail due to IAM permission
-          # constraints (e.g. missing ecr:DescribeImages) despite the image existing.
-          IMAGE_TAG="$SHA"
+          # Guard against stale/missing image tags so Terraform never updates ECS
+          # to a non-existent image (which would make the backend unavailable).
+          if aws ecr describe-images \
+            --repository-name "$REPOSITORY" \
+            --image-ids imageTag="$SHA" \
+            --region "$AWS_REGION" >/dev/null 2>&1; then
+            SELECTED_IMAGE="$IMAGE_URI"
+          else
+            echo "::warning::Image tag $SHA not found in ECR; falling back to currently running ECS image."
+
+            CLUSTER="smart-glasses-dev-cluster"
+            SERVICE="smart-glasses-dev-api-service"
+            TASK_DEF_ARN=$(aws ecs describe-services \
+              --cluster "$CLUSTER" \
+              --services "$SERVICE" \
+              --region "$AWS_REGION" \
+              --query 'services[0].taskDefinition' \
+              --output text 2>/dev/null || true)
+
+            if [ -z "$TASK_DEF_ARN" ] || [ "$TASK_DEF_ARN" = "None" ] || [ "$TASK_DEF_ARN" = "null" ]; then
+              echo "Unable to resolve running ECS task definition for fallback image."
+              exit 1
+            fi
+
+            FALLBACK_IMAGE=$(aws ecs describe-task-definition \
+              --task-definition "$TASK_DEF_ARN" \
+              --region "$AWS_REGION" \
+              --query 'taskDefinition.containerDefinitions[?name==`api`].image | [0]' \
+              --output text 2>/dev/null || true)
+
+            if [ -z "$FALLBACK_IMAGE" ] || [ "$FALLBACK_IMAGE" = "None" ] || [ "$FALLBACK_IMAGE" = "null" ]; then
+              echo "Unable to resolve fallback image from ECS task definition $TASK_DEF_ARN."
+              exit 1
+            fi
+
+            SELECTED_IMAGE="$FALLBACK_IMAGE"
+            echo "Using fallback image: $SELECTED_IMAGE"
+          fi
 
           cat > aws/infrastructure/tf_image_vars.auto.tfvars <<EOF
-          api_image = "${REGISTRY}/smart-glasses-dev-api:${IMAGE_TAG}"
+          api_image = "${SELECTED_IMAGE}"
           deployment_id = "${{ github.run_id }}"
           EOF
 
@@ -1288,3 +1326,32 @@ jobs:
           done
           echo "Health check did not return 200 after retries while desired count is $DESIRED."
           exit 1
+
+      - name: Print deployed website URL
+        if: success()
+        run: |
+          set -euo pipefail
+
+          WEBSITE_URL=$(jq -r '.website_url.value // empty' ./tf/tf_outputs.json 2>/dev/null || true)
+          if [ -z "$WEBSITE_URL" ] || [ "$WEBSITE_URL" = "None" ] || [ "$WEBSITE_URL" = "null" ]; then
+            CF_DOMAIN=$(aws cloudfront list-distributions \
+              --query 'DistributionList.Items[?contains(Comment, `smart-glasses dev frontend`)].DomainName | [0]' \
+              --output text 2>/dev/null || true)
+            if [ -z "$CF_DOMAIN" ] || [ "$CF_DOMAIN" = "None" ] || [ "$CF_DOMAIN" = "null" ]; then
+              CF_DOMAIN=$(aws cloudfront list-distributions \
+                --query 'DistributionList.Items[0].DomainName' \
+                --output text 2>/dev/null || true)
+            fi
+
+            if [ -n "$CF_DOMAIN" ] && [ "$CF_DOMAIN" != "None" ] && [ "$CF_DOMAIN" != "null" ]; then
+              WEBSITE_URL="https://${CF_DOMAIN}"
+            fi
+          fi
+
+          if [ -z "${WEBSITE_URL:-}" ]; then
+            echo "::warning::Deployment completed, but website URL could not be resolved."
+            exit 0
+          fi
+
+          echo "Deployment URL: ${WEBSITE_URL}"
+          echo "::notice title=Deployment URL::${WEBSITE_URL}"

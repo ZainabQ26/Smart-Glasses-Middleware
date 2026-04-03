@@ -48,6 +48,13 @@ For production deployment to real AWS (not LocalStack):
 3. Run `terraform apply` in the `infrastructure/` directory
 4. Deploy containers to ECS and Lambda functions
 
+When deploying through GitHub Actions (`deploy-main.yml` or `deploy-fast.yml`),
+the `verify-deployment` job prints the website URL in logs as:
+
+- `Deployment URL: https://...`
+
+Look for the `Print deployed website URL` step in that job.
+
 ### Cost-Optimized Non-Prod Defaults
 
 The Terraform in `aws/infrastructure` now defaults to lower idle cost for non-prod:
