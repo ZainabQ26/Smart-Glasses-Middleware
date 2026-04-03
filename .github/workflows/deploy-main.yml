@@ -152,6 +152,7 @@ jobs:
     env:
       AWS_REGION: ${{ secrets.AWS_REGION }}
       TF_VAR_groq_api_key: ${{ secrets.GROQ_API_KEY }}
+      TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -759,6 +760,7 @@ jobs:
             aws rds start-db-instance --db-instance-identifier "$DB_INSTANCE_ID" --region "$AWS_REGION"
             aws rds wait db-instance-available --db-instance-identifier "$DB_INSTANCE_ID" --region "$AWS_REGION"
           fi
+          DB_HOST=$(aws rds describe-db-instances --db-instance-identifier "$DB_INSTANCE_ID" --region "$AWS_REGION" --query 'DBInstances[0].Endpoint.Address' --output text 2>/dev/null || echo "")
           terraform apply -auto-approve -lock=false \
             -var "environment=dev" \
             -var "aws_region=${AWS_REGION}" \
@@ -781,7 +783,8 @@ jobs:
             -var "enable_ecs_idle_autoscaler=false" \
             -var "ecs_idle_timeout_minutes=5" \
             -var "domain_name=" \
-            -var "certificate_arn=${CERTIFICATE_ARN}"
+            -var "certificate_arn=${CERTIFICATE_ARN}" \
+            -var "db_host=${DB_HOST}"
 
       - name: Seed empty Secrets Manager secrets with placeholder values
         run: |
