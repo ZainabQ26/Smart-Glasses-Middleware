@@ -23,7 +23,13 @@ rm tesseract.zip
 
 echo "Creating deployment package..."
 cd package
-zip -r ../deployment.zip . -x "*.pyc" -x "*__pycache__*"
+zip -r ../deployment.zip . \
+  -x "*.pyc" \
+  -x "*__pycache__*" \
+  -x "*.dist-info/*" \
+  -x "*.egg-info/*" \
+  -x "bin/*" \
+  -x "pymupdf/mupdf-devel/*"
 cd ..
 
 echo "Cleaning up..."
