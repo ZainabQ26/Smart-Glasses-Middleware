@@ -266,7 +266,6 @@ jobs:
 
           cat > aws/infrastructure/tf_image_vars.auto.tfvars <<EOF
           api_image = "${REGISTRY}/smart-glasses-dev-api:${IMAGE_TAG}"
-          lambda_document_image = ""
           deployment_id = "${{ github.run_id }}"
           EOF
 

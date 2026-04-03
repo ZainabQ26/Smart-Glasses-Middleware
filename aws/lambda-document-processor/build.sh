@@ -13,14 +13,6 @@ pip install -r requirements.txt -t package/
 echo "Copying function code..."
 cp index.py package/
 
-echo "Downloading tesseract static binary..."
-
-# Download a lightweight compiled static tesseract for amazon linux (lambda environment)
-curl -sL https://github.com/felipedemacedo/tesseract-aws-lambda/raw/master/tesseract-standalone.zip -o tesseract.zip
-unzip -o -q tesseract.zip -d package/
-rm tesseract.zip
-
-
 echo "Creating deployment package..."
 cd package
 zip -r ../deployment.zip . \
