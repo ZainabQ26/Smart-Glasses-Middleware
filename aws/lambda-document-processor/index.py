@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 # Initialize AWS clients
 s3_client = boto3.client('s3')
 secrets_client = boto3.client('secretsmanager')
+textract_client = boto3.client('textract')
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -74,20 +75,15 @@ def get_db_connection():
 
 
 
-import os
-from PIL import Image
-import pytesseract
-import io
-
-# Setup tesseract path if in AWS Lambda (using the bundled binary from build.sh)
-if os.path.exists('/var/task/tesseract/tesseract'):
-    pytesseract.pytesseract.tesseract_cmd = '/var/task/tesseract/tesseract'
-    os.environ['TESSDATA_PREFIX'] = '/var/task/tesseract/tessdata'
-    os.environ['LD_LIBRARY_PATH'] = '/var/task/tesseract/lib:' + os.environ.get('LD_LIBRARY_PATH', '')
-
 def create_searchable_pdf_from_image(bucket: str, key: str) -> str:
-    """Download an image from S3, extract text using pytesseract, and create a text-searchable PDF.
+    """Download an image from S3, extract text using AWS Textract, and create a text-searchable PDF.
     Returns the extracted text, saves the generated PDF back to S3 with a .pdf extension, and deletes the original image."""
+    # Use Textract to detect text directly from S3 — no local OCR binary required.
+    textract_response = textract_client.detect_document_text(
+        Document={'S3Object': {'Bucket': bucket, 'Name': key}}
+    )
+
+    # Fetch image bytes for embedding into the PDF
     obj = s3_client.get_object(Bucket=bucket, Key=key)
     image_bytes = obj['Body'].read()
 
@@ -101,42 +97,32 @@ def create_searchable_pdf_from_image(bucket: str, key: str) -> str:
 
     # Insert a new page with the image dimensions
     page = doc.new_page(width=rect.width, height=rect.height)
-    
+
     # Insert the image
     page.insert_image(rect, stream=image_bytes)
-    
-    extracted_text = ""
-    # Call pytesseract to extract text
-    try:
-        image = Image.open(io.BytesIO(image_bytes))
 
-        # Get data with bounding boxes
-        data = pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT)
-        
-        extracted_text_parts = []
-        n_boxes = len(data['text'])
-        for i in range(n_boxes):
-            text = data['text'][i].strip()
-            if int(data['conf'][i]) > 10 and text:
-                extracted_text_parts.append(text)
+    extracted_text_parts = []
+    for block in textract_response.get('Blocks', []):
+        if block['BlockType'] == 'WORD' and block.get('Confidence', 0) > 10:
+            text = block['Text']
+            extracted_text_parts.append(text)
 
-                # Get bounding box coordinates
-                x, y, w, h = data['left'][i], data['top'][i], data['width'][i], data['height'][i]
+            # Textract returns normalized bounding box values in the range [0, 1]
+            bbox = block['Geometry']['BoundingBox']
+            x = bbox['Left'] * rect.width
+            y = bbox['Top'] * rect.height
+            w = bbox['Width'] * rect.width
+            h = bbox['Height'] * rect.height
 
-                # Using render_mode=3 (invisible text) to make it searchable
-                try:
-                    # Basic font size approximation
-                    fontsize = h * 0.8 if h > 0 else 12
-                    page.insert_text(fitz.Point(x, y + h), text, fontsize=fontsize, render_mode=3)
-                except Exception as e:
-                    logger.warning(f"Failed to insert text {text}: {e}")
+            fontsize = h * 0.8 if h > 0 else 12
+            try:
+                # render_mode=3 (invisible text) makes the PDF text-searchable
+                page.insert_text(fitz.Point(x, y + h), text, fontsize=fontsize, render_mode=3)
+            except Exception as e:
+                logger.warning(f"Failed to insert text {text}: {e}")
 
-        extracted_text = '\n'.join(extracted_text_parts).strip()
-    except Exception as e:
-        logger.error(f"Failed to extract text using pytesseract: {str(e)}")
-        # If tesseract fails, fallback to simple image embedded PDF
-        extracted_text = ""
-        
+    extracted_text = '\n'.join(extracted_text_parts).strip()
+
     # Save the new PDF to S3
     pdf_bytes = doc.tobytes()
     pdf_key = key.rsplit('.', 1)[0] + '.pdf'
@@ -152,7 +138,7 @@ def create_searchable_pdf_from_image(bucket: str, key: str) -> str:
     # Delete the original image file
     s3_client.delete_object(Bucket=bucket, Key=key)
     logger.info(f"Deleted original image file s3://{bucket}/{key}")
-    
+
     return extracted_text
 
 
@@ -271,7 +257,7 @@ def handler(event, context):
             # Extract text and process
             if is_image:
                 text = create_searchable_pdf_from_image(bucket, key)
-                logger.info(f"Extracted {len(text)} characters from image via pytesseract")
+                logger.info(f"Extracted {len(text)} characters from image via Textract")
                 # Change the file_name for DB insertion to .pdf since we uploaded a converted PDF
                 file_name = file_name.rsplit('.', 1)[0] + '.pdf'
             else:

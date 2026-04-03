@@ -46,6 +46,13 @@ resource "aws_iam_role_policy" "lambda_document_processor" {
       {
         Effect = "Allow"
         Action = [
+          "textract:DetectDocumentText"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
           "logs:CreateLogGroup",
           "logs:CreateLogStream",
           "logs:PutLogEvents"
