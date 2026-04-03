@@ -874,7 +874,7 @@ export default function App() {
   useEffect(() => {
     const SAMPLE_RATE          = 16_000;
     const BUFFER_SIZE          = 1024;       // 64 ms per ScriptProcessor callback
-    const RMS_THRESHOLD        = 0.022;      // RMS below this → silence (increased to filter background chatter)
+    const RMS_THRESHOLD        = 0.010;      // RMS below this → silence (increased to filter background chatter)
     const WAKE_SILENCE_MS      = 220;        // wake-word path: short silence for snappier activation
     const COMMAND_SILENCE_MS   = 650;        // command path: larger chunks for better transcription context
     const SENTENCE_END_MS      = 350;        // pause after sentence-end pattern → submit
@@ -891,6 +891,7 @@ export default function App() {
     let partialTexts  = [];   // Whisper partial transcriptions so far
     let isSpeaking    = false;
     let silenceSince  = 0;
+    let lastWakeCheckTime = 0;
 
     let forceSubmitTimer    = null;
     let sentenceEndTimer    = null;
@@ -1023,7 +1024,8 @@ export default function App() {
         ) {
           const rest = cleaned.replace(new RegExp(`\\b${wordEsc}\\b[\\s,:-]*`, "i"), "").trim();
           activatedRef.current = true;
-          commandChunks = [];
+          commandChunks = [...speechChunks];
+          speechChunks = [];
           partialTexts  = [];
           clearTimers();
           setStatus("listening");
@@ -1124,7 +1126,17 @@ export default function App() {
             isSpeaking  = true;
             silenceSince = 0;
             speechChunks.push(samples);
-            if (activatedRef.current) commandChunks.push(samples);
+            if (activatedRef.current) {
+              commandChunks.push(samples);
+            } else {
+              if (now - lastWakeCheckTime >= 500 && speechChunks.length > 0) {
+                lastWakeCheckTime = now;
+                const audio = concatF32(speechChunks);
+                if (audio.length >= SAMPLE_RATE * WAKE_MIN_CHUNK_SEC) {
+                  workerRef.current?.postMessage({ type: "transcribe", audio, mode: "wake-word" });
+                }
+              }
+            }
           } else if (isSpeaking) {
             if (!silenceSince) silenceSince = now;
             const silenceTargetMs = activatedRef.current ? COMMAND_SILENCE_MS : WAKE_SILENCE_MS;
