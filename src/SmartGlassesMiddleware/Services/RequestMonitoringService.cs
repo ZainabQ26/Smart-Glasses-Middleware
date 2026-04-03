@@ -193,8 +193,11 @@ public class RequestMonitoringService : IRequestMonitoringService
         {
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-            await db.RequestStatuses.ExecuteDeleteAsync();
-            await db.RequestHistories.ExecuteDeleteAsync();
+            var allStatuses = await db.RequestStatuses.ToListAsync();
+            var allHistories = await db.RequestHistories.ToListAsync();
+            db.RequestStatuses.RemoveRange(allStatuses);
+            db.RequestHistories.RemoveRange(allHistories);
+            await db.SaveChangesAsync();
             _logger.LogInformation("Cleared all request monitoring data from database");
         }
         catch (Exception ex)
