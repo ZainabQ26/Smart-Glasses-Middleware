@@ -194,8 +194,11 @@ jobs:
           # non-fatal deletions
           set +e
 
-          # ECR repositories
-          aws ecr describe-repositories --repository-names "${PREFIX}-api" --region "$REGION" >/dev/null 2>&1 && aws ecr delete-repository --repository-name "${PREFIX}-api" --force --region "$REGION" || true
+          # NOTE: ECR repository is intentionally NOT deleted here.
+          # The build-api job pushes the image before this job runs, so
+          # deleting the ECR repo would destroy the image and cause ECS to
+          # fail with CannotPullContainerError. Terraform will import and
+          # manage the existing repo in the subsequent import step.
 
           # KMS aliases
           for a in "alias/${PREFIX}-ecr" "alias/${PREFIX}-rds" "alias/${PREFIX}-s3"; do
@@ -745,6 +748,22 @@ jobs:
 
           echo "=== Import step complete ==="
           set -e
+
+      - name: Ensure ECR repository is in Terraform state
+        working-directory: aws/infrastructure
+        run: |
+          # Import the ECR repository unconditionally (even during force_recreate_dev).
+          # The build-api job has already pushed the image to this repo, so it must
+          # stay in Terraform state to prevent terraform apply from failing with
+          # "ECR repository already exists".
+          ECR_REPO_NAME="smart-glasses-dev-api"
+          if terraform state list -lock=false 2>/dev/null | grep -qxF "aws_ecr_repository.api"; then
+            echo "  ECR repository already in Terraform state"
+          else
+            aws ecr describe-repositories --repository-names "$ECR_REPO_NAME" --region "$AWS_REGION" >/dev/null 2>&1 \
+              && terraform import -lock=false aws_ecr_repository.api "$ECR_REPO_NAME" \
+              || echo "  ECR repository not found in AWS – will be created by Terraform"
+          fi
 
       - name: Remove stale domain/ACM state entries
         timeout-minutes: 5
