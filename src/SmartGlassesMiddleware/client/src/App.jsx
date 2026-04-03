@@ -28,15 +28,13 @@ export default function App() {
   const [pendingAction, _setPendingActionState] = useState(null); // { type: "SHOW_RECENT_FILES", files } | { type: "SELECT_DOCUMENT", id, name } | null
   // Reminders toast: null | { reminders: [], phase: 'visible'|'fading' }
   const [remindersToast, setRemindersToast] = useState(null);
-  // Show landing screen until the user says "activate" for the first time.
-  const [showLanding, setShowLanding] = useState(() => {
-    try { return !localStorage.getItem("sgm_activated"); } catch (_) { return true; }
-  });
+  // Show landing screen until the user says the activation word for the first time.
+  const [showLanding, setShowLanding] = useState(true);
   const [groqCommandTranscriptionEnabled, setGroqCommandTranscriptionEnabled] = useState(true);
   // Configurable activation word — stored in localStorage and updated live when
   // the admin panel changes it (via the storage event).
   const [activationWord, setActivationWord] = useState(() => {
-    try { return localStorage.getItem("sgm_activation_word")?.trim() || "activate"; } catch (_) { return "activate"; }
+    try { return localStorage.getItem("sgm_activation_word")?.trim() || "iris"; } catch (_) { return "iris"; }
   });
   // Ref copy so the async voice pipeline always reads the current value without
   // needing to restart the AudioContext effect.
@@ -559,7 +557,7 @@ export default function App() {
       // ── Require minimum command length (filter out single-word stray background noise) ─
       // ── Require minimum command length (but allow known single-word commands) ─
       const commandWords = commandText.trim().split(/\s+/);
-      const knownSingleWordCommands = ['activate', 'next', 'previous', 'back', 'help', 'menu', 'close'];
+      const knownSingleWordCommands = ['iris', 'activate', 'next', 'previous', 'back', 'help', 'menu', 'close'];
       const isSingleWordCommand = commandWords.length === 1 && knownSingleWordCommands.includes(commandWords[0].toLowerCase());
       const requiresTwoWords = !isSingleWordCommand && commandWords.length < 2;
       
@@ -863,7 +861,7 @@ export default function App() {
   // ── Voice pipeline: Whisper WASM + AudioContext mic capture ────────────
   //
   // One multilingual whisper-base model handles all modes:
-  //   'wake-word' — short bursts checked for the keyword "activate"
+  //   'wake-word' — short bursts checked for the keyword (e.g. "iris")
   //   'partial'   — each speech burst during a command; result streams to UI
   //   'command'   — full accumulated audio; final high-quality transcription
   //
@@ -1028,7 +1026,6 @@ export default function App() {
           clearTimers();
           setStatus("listening");
           setShowLanding(false);
-          try { localStorage.setItem("sgm_activated", "1"); } catch (_) {}
           addLog("🎤 Activated — speak your command", "info");
 
           if (rest.length >= 2) {
@@ -1329,7 +1326,6 @@ export default function App() {
                 </tbody>
               </table>
             </div>
-            <p style={styles.landingDismiss}>This screen will disappear after your first activation.</p>
           </div>
         </div>
       )}
@@ -1623,13 +1619,6 @@ const styles = {
     padding: "5px 0",
     color: "#bbb",
     verticalAlign: "top",
-  },
-  landingDismiss: {
-    margin: 0,
-    fontSize: "0.8rem",
-    color: "#555",
-    textAlign: "center",
-    fontStyle: "italic",
   },
   // Initialisation status block on the landing screen
   landingStatus: {
