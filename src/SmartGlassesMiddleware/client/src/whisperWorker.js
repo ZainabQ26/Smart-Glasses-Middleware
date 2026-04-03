@@ -153,7 +153,7 @@ async function getTranscriber() {
 // ── Message handler ──────────────────────────────────────────────────────────
 
 self.onmessage = async (event) => {
-  const { type, audio, mode, language } = event.data;
+  const { type, audio, mode, language, commandId } = event.data;
 
   if (type === 'preload') {
     // Warm the model in the background so the first real request is instant.
@@ -187,9 +187,9 @@ self.onmessage = async (event) => {
     const result = await model(audio, inferOpts);
     const text   = (result.text ?? '').trim();
 
-    self.postMessage({ type: 'result', text, mode: mode ?? 'wake-word' });
+    self.postMessage({ type: 'result', text, mode: mode ?? 'wake-word', commandId });
   } catch (err) {
-    self.postMessage({ type: 'error', message: err?.message ?? String(err), mode: mode ?? 'wake-word' });
+    self.postMessage({ type: 'error', message: err?.message ?? String(err), mode: mode ?? 'wake-word', commandId });
   }
 };
 
