@@ -31,6 +31,7 @@ export default function App() {
   // Show landing screen until the user says the activation word for the first time.
   const [showLanding, setShowLanding] = useState(true);
   const [groqCommandTranscriptionEnabled, setGroqCommandTranscriptionEnabled] = useState(true);
+  const pendingCommandsRef = useRef(new Map());
   // Configurable activation word — stored in localStorage and updated live when
   // the admin panel changes it (via the storage event).
   const [activationWord, setActivationWord] = useState(() => {
@@ -886,6 +887,8 @@ export default function App() {
 
     // Per-effect mutable state (local vars, no re-render on change)
     let speechChunks  = [];   // Float32Array chunks of the current speech burst
+    let preSpeechBuffer = []; // Rolling buffer of the last ~500ms of audio before speech
+    const MAX_PRE_SPEECH_CHUNKS = Math.ceil((SAMPLE_RATE * 0.5) / BUFFER_SIZE);
     let commandChunks = [];   // all audio accumulated since activation
     let partialTexts  = [];   // Whisper partial transcriptions so far
     let isSpeaking    = false;
@@ -958,20 +961,52 @@ export default function App() {
       if (partial) showTranscript(partial); // preview while final runs
       setStatus("processing");
 
-      // Primary path: Groq Whisper Turbo for the final command transcript.
-      // Fallback path: local Whisper worker command mode.
-      const groqText = await transcribeCommandWithGroqRef.current?.(audio);
-      if (groqText && groqText.length >= 2 && /[A-Za-z0-9]/.test(groqText)) {
-        addLog(`🗣️ Groq Whisper Turbo: "${groqText}"`, "voice");
-        showTranscript(groqText);
+      // Dispatch both Groq and Local Whisper concurrently
+      const commandId = Date.now().toString() + Math.random().toString();
+
+      const localWhisperPromise = new Promise((resolve) => {
+        pendingCommandsRef.current.set(commandId, resolve);
+        workerRef.current?.postMessage({ type: "transcribe", audio, mode: "command", commandId });
+      });
+
+      const groqPromise = (async () => {
+        const text = await transcribeCommandWithGroqRef.current?.(audio);
+        if (text && text.length >= 2 && /[A-Za-z0-9]/.test(text)) {
+           return { source: 'groq', text };
+        }
+        throw new Error("Groq failed or invalid result");
+      })();
+
+      const isValidResult = (text) => text && text.length >= 2 && /[A-Za-z0-9]/.test(text);
+
+      try {
+        // Try to get the first successful valid result
+        let result = await Promise.any([
+          groqPromise,
+          localWhisperPromise.then(text => {
+            if (isValidResult(text)) return { source: 'local', text };
+            throw new Error("Local Whisper failed or invalid result");
+          })
+        ]);
+
+        if (result.source === 'groq') {
+          addLog(`🗣️ Groq Whisper Turbo: "${result.text}"`, "voice");
+        } else {
+          addLog(`🗣️ Local Whisper: "${result.text}"`, "voice");
+        }
+
+        showTranscript(result.text);
         setAiResponse(null);
         setStatus("sending");
-        sendToAIRef.current?.(groqText);
-        return;
-      }
+        sendToAIRef.current?.(result.text);
 
-      addLog("⚠️ Falling back to local Whisper command transcription", "warn");
-      workerRef.current?.postMessage({ type: "transcribe", audio, mode: "command" });
+      } catch (err) {
+        // Both failed
+        addLog("(No speech detected in command)", "warn");
+        resumeListeningRef.current();
+      } finally {
+        pendingCommandsRef.current.delete(commandId);
+      }
     }
 
     // Worker message handler (set synchronously so it is ready before startMic)
@@ -1002,7 +1037,19 @@ export default function App() {
 
       if (type === "error") {
         addLog(`❌ Whisper: ${message}`, "error");
-        if (mode === "command") resumeListeningRef.current();
+        if (mode === "command") {
+          const commandId = e.data.commandId;
+          if (commandId) {
+            if (pendingCommandsRef.current.has(commandId)) {
+              const resolveFn = pendingCommandsRef.current.get(commandId);
+              resolveFn(""); // Resolve with empty to fail the isValidResult check and trigger throw
+              pendingCommandsRef.current.delete(commandId);
+            }
+            // If it's not pending, do nothing (Groq already handled it)
+          } else {
+            resumeListeningRef.current();
+          }
+        }
         return;
       }
 
@@ -1073,16 +1120,30 @@ export default function App() {
       }
 
       if (mode === "command") {
-        const meaningful = cleaned.length >= 2 && /[A-Za-z0-9]/.test(cleaned);
-        if (meaningful) {
-          addLog(`🗣️ Whisper: "${cleaned}"`, "voice");
-          showTranscript(cleaned);
-          setAiResponse(null);
-          setStatus("sending");
-          sendToAIRef.current?.(cleaned);
+        const commandId = e.data.commandId;
+        if (commandId) {
+          if (pendingCommandsRef.current.has(commandId)) {
+            const resolveFn = pendingCommandsRef.current.get(commandId);
+            resolveFn(cleaned);
+            pendingCommandsRef.current.delete(commandId);
+          } else {
+            // Promise was already settled (likely Groq won), so we ignore the local Whisper result
+            // to avoid sending a duplicate command.
+            try { console.debug("Local Whisper finished but command was already resolved by Groq"); } catch (_) {}
+          }
         } else {
-          addLog("(No speech detected in command)", "warn");
-          resumeListeningRef.current();
+          // Legacy/fallback fallback: handle directly if no commandId (shouldn't happen with our changes)
+          const meaningful = cleaned.length >= 2 && /[A-Za-z0-9]/.test(cleaned);
+          if (meaningful) {
+            addLog(`🗣️ Whisper: "${cleaned}"`, "voice");
+            showTranscript(cleaned);
+            setAiResponse(null);
+            setStatus("sending");
+            sendToAIRef.current?.(cleaned);
+          } else {
+            addLog("(No speech detected in command)", "warn");
+            resumeListeningRef.current();
+          }
         }
       }
     };
@@ -1121,6 +1182,14 @@ export default function App() {
           const now = Date.now();
 
           if (rms >= RMS_THRESHOLD) {
+            if (!isSpeaking) {
+              // Just started speaking, flush the pre-speech buffer into our active chunks
+              speechChunks.push(...preSpeechBuffer);
+              if (activatedRef.current) {
+                commandChunks.push(...preSpeechBuffer);
+              }
+              preSpeechBuffer = [];
+            }
             isSpeaking  = true;
             silenceSince = 0;
             speechChunks.push(samples);
@@ -1150,6 +1219,12 @@ export default function App() {
                   workerRef.current?.postMessage({ type: "transcribe", audio, mode });
                 }
               }
+            }
+          } else {
+            // Not speaking, maintain a rolling buffer of audio right before speech starts
+            preSpeechBuffer.push(samples);
+            if (preSpeechBuffer.length > MAX_PRE_SPEECH_CHUNKS) {
+              preSpeechBuffer.shift();
             }
           }
         };
