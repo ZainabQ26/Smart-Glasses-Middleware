@@ -1268,7 +1268,7 @@ export default function App() {
             src={glassesImg}
             alt="Smart Glasses"
             className="assistant-logo"
-            style={{ display: 'block', margin: '40px auto 24px auto', maxWidth: '340px', width: '100%', height: 'auto' }}
+            style={{ display: 'block', maxWidth: '280px', width: '100%', height: 'auto', flexShrink: 0 }}
           />
           <div style={styles.landingCard}>
             <h1 style={styles.landingTitle}>Hey, Eye-ris here. How can I help?</h1>
@@ -1549,11 +1549,13 @@ const styles = {
     inset: 0,
     background: "rgba(0,0,0,0.92)",
     display: "flex",
+    flexDirection: "column",
     alignItems: "center",
-    justifyContent: "center",
+    justifyContent: "flex-start",
     zIndex: 100,
-    padding: 16,
-    overflowY: "hidden",
+    padding: "max(16px, 3vh) 16px 24px",
+    gap: 20,
+    overflowY: "auto",
     overflowX: "hidden",
   },
   landingCard: {
@@ -1563,12 +1565,9 @@ const styles = {
     padding: "min(32px, 5vh) min(28px, 5vw)",
     maxWidth: 620,
     width: "100%",
-    // Keep the card within the visible overlay (overlay has 16px padding on each side = 32px total)
-    maxHeight: "calc(100dvh - 32px)",
     display: "flex",
     flexDirection: "column",
     gap: "min(20px, 3vh)",
-    overflowY: "auto",
   },
   landingTitle: {
     margin: 0,
@@ -1689,7 +1688,7 @@ const styles = {
     borderRadius: 10,
     padding: "10px 14px",
     zIndex: 50,
-    maxWidth: 320,
+    maxWidth: "min(320px, calc(100vw - 24px))",
     maxHeight: "calc(100vh - 80px)",
     overflowY: "auto",
   },
@@ -2069,6 +2068,12 @@ if (typeof document !== "undefined" && !document.getElementById("app-mobile-styl
     }
     @media (max-width: 500px), (max-height: 750px) {
       .sgm-landing-how { display: none !important; }
+    }
+    @media (max-width: 500px), (max-height: 600px) {
+      .assistant-logo { max-width: 160px !important; }
+    }
+    @media (max-height: 480px) {
+      .assistant-logo { display: none !important; }
     }
   `;
   document.head.appendChild(style);
