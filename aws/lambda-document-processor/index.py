@@ -112,6 +112,84 @@ def extract_text_from_pdf(bucket: str, key: str) -> str:
     return '\n'.join(pages_text).strip()
 
 
+def ocr_scanned_pdf(bucket: str, key: str) -> str:
+    """OCR a scanned PDF (image-only, no embedded text) using pytesseract.
+
+    Renders each page to a raster image via PyMuPDF, extracts text with
+    bounding boxes using pytesseract, overlays invisible (render_mode=3)
+    text on each page to make the PDF text-searchable, then saves the
+    result back to S3 at the same key.
+
+    Args:
+        bucket: S3 bucket name.
+        key: S3 object key of the scanned PDF.
+
+    Returns:
+        All OCR'd text across every page, joined by newlines.
+    """
+    obj = s3_client.get_object(Bucket=bucket, Key=key)
+    pdf_bytes = obj['Body'].read()
+
+    src_doc = fitz.open(stream=pdf_bytes, filetype='pdf')
+    out_doc = fitz.open()
+
+    DPI = 150
+    SCALE = 72.0 / DPI  # convert pixel coordinates to PDF points
+
+    all_text_parts = []
+
+    for page_num, src_page in enumerate(src_doc):
+        mat = fitz.Matrix(DPI / 72, DPI / 72)
+        pix = src_page.get_pixmap(matrix=mat, alpha=False)
+        png_bytes = pix.tobytes('png')
+
+        # Create output page matching original dimensions
+        out_page = out_doc.new_page(width=src_page.rect.width, height=src_page.rect.height)
+        # Embed the rendered page image so the PDF still looks correct
+        out_page.insert_image(src_page.rect, stream=png_bytes)
+
+        try:
+            image = Image.open(io.BytesIO(png_bytes))
+            data = pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT)
+
+            n_boxes = len(data['text'])
+            for i in range(n_boxes):
+                word = data['text'][i].strip()
+                if int(data['conf'][i]) > 10 and word:
+                    all_text_parts.append(word)
+
+                    # Map pixel coordinates back to PDF points
+                    x = data['left'][i] * SCALE
+                    y = data['top'][i] * SCALE
+                    h = data['height'][i] * SCALE
+                    fontsize = h * 0.8 if h > 0 else 12
+                    try:
+                        out_page.insert_text(
+                            fitz.Point(x, y + h), word,
+                            fontsize=fontsize, render_mode=3
+                        )
+                    except Exception as e:
+                        logger.warning(f"Page {page_num}: failed to insert text '{word}': {e}")
+
+        except Exception as e:
+            logger.error(f"Page {page_num}: pytesseract failed: {str(e)}")
+
+    src_doc.close()
+
+    searchable_bytes = out_doc.tobytes()
+    out_doc.close()
+
+    s3_client.put_object(
+        Bucket=bucket,
+        Key=key,
+        Body=searchable_bytes,
+        ContentType='application/pdf'
+    )
+    logger.info(f"Saved text-searchable PDF to s3://{bucket}/{key}")
+
+    return '\n'.join(all_text_parts).strip()
+
+
 def create_searchable_pdf_from_image(bucket: str, key: str) -> str:
     """Download an image from S3, extract text using pytesseract, and create a text-searchable PDF.
     Returns the extracted text, saves the generated PDF back to S3 with a .pdf extension, and deletes the original image."""
@@ -306,7 +384,9 @@ def handler(event, context):
                 if text:
                     logger.info(f"Extracted {len(text)} characters from PDF embedded text (no OCR needed)")
                 else:
-                    logger.info(f"PDF has no embedded text (scanned document): s3://{bucket}/{key}")
+                    logger.info(f"PDF has no embedded text, running OCR: s3://{bucket}/{key}")
+                    text = ocr_scanned_pdf(bucket, key)
+                    logger.info(f"Extracted {len(text)} characters from scanned PDF via pytesseract OCR")
             
             # Store in database
             update_document_metadata(document_id, file_name, f'uploads/{file_name}')
