@@ -227,3 +227,21 @@ variable "db_name" {
   type        = string
   default     = "smart_glasses"
 }
+
+variable "lambda_deployment_s3_bucket" {
+  description = "S3 bucket that holds the Lambda deployment zip (avoids the 50 MB direct-upload limit)."
+  type        = string
+  default     = ""
+}
+
+variable "lambda_deployment_s3_key" {
+  description = "S3 key (path) of the Lambda deployment zip inside lambda_deployment_s3_bucket."
+  type        = string
+  default     = ""
+}
+
+variable "lambda_deployment_hash" {
+  description = "Base64-encoded SHA-256 of the Lambda deployment zip. Used as source_code_hash so Terraform detects code changes when the S3 key is fixed."
+  type        = string
+  default     = ""
+}

@@ -29,6 +29,14 @@ zip -r ../deployment.zip . \
   -x "*.dist-info/*" \
   -x "*.egg-info/*" \
   -x "bin/*" \
+  -x "*.pyi" \
+  -x "*/tests/*" \
+  -x "*/test/*" \
+  -x "*.h" \
+  -x "*.c" \
+  -x "*.md" \
+  -x "*.rst" \
+  -x "*/docs/*" \
   -x "pymupdf/mupdf-devel/*"
 cd ..
 
