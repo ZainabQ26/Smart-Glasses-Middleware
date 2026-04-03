@@ -1,11 +1,11 @@
 
 resource "aws_secretsmanager_secret" "db_connection" {
-  name                    = "${local.app_name}-db-connection-${local.environment}"
+  name                    = "${var.project_name}-db-connection-${var.environment}"
   recovery_window_in_days = 0  # Allow immediate deletion in dev
 
   tags = {
-    environment = local.environment
-    app_name    = local.app_name
+    environment = var.environment
+    app_name    = var.project_name
   }
 }
 
