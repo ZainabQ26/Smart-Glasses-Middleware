@@ -81,6 +81,9 @@ public class HelpersTests
 
         var subSection = section.GetSection("Sub");
         Assert.That(subSection.Path, Is.EqualTo("Path:Sub"));
+
+        var subSubSection = subSection.GetSection("SubSub");
+        Assert.That(subSubSection.Path, Is.EqualTo("Path:Sub:SubSub"));
     }
 
     [Test]
