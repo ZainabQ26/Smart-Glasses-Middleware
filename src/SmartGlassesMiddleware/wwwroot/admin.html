@@ -1470,8 +1470,6 @@
         <div class="tabs" data-testid="admin-tabs">
             <button class="tab active" data-tab="files" data-testid="tab-files" aria-controls="files">Files</button>
             <button class="tab" data-tab="prompts" data-testid="tab-prompts" aria-controls="prompts">Conversation</button>
-            <button class="tab" data-tab="reminders" data-testid="tab-reminders" aria-controls="reminders">Reminders</button>
-            <button class="tab" data-tab="groups" data-testid="tab-groups" aria-controls="groups">Groups</button>
             <label id="keepawake-toggle-wrap" class="keepawake-toggle" title="Send periodic health checks from this admin tab to prevent idle scale-down" data-testid="keepawake-wrap">
                 <input type="checkbox" id="keepawake-toggle" data-testid="keepawake-toggle" aria-label="Prevent server sleep from admin tab">
                 <span id="keepawake-label">Prevent sleep</span>
@@ -1520,12 +1518,6 @@
         <!-- Prompts Tab -->
         <div id="prompts" class="tab-content">
             <section id="prompts-section" class="prompts-container">
-                <div class="prompt-sidebar" style="display: none;">
-                    <div style="margin-bottom:10px;">
-                        <h3 style="margin:0;">Conversation</h3>
-                    </div>
-                    <div id="prompts-list"></div>
-                </div>
                 
                 <div class="prompt-form-card">
                     <div class="responsive-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
@@ -1596,174 +1588,6 @@
                 </div>
             </section>
         </div>
-
-        <!-- Reminders Tab -->
-        <div id="reminders" class="tab-content">
-            <div class="section">
-                <h2>Set Reminder</h2>
-                <form id="reminder-form">
-                    <input type="hidden" id="reminder-id">
-                    
-                    <!-- Reminder Text Section -->
-                    <div style="margin-bottom: 20px;">
-                        <label style="display: block; margin-bottom: 8px; color: #2f3a3f; font-size: 14px;">Reminder Text</label>
-                        <div class="responsive-flex-row" style="display: flex; gap: 10px;">
-                            <div style="position: relative; flex: 1;">
-                                <input type="text" id="reminder-name" placeholder="Enter reminder text..." required style="width: 100%; margin: 0; padding-right: 40px;">
-                                <span id="reminder-files-icon" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 20px; color: #95a5a6; cursor: pointer;">📎</span>
-                            </div>
-                            <button type="button" id="reminder-show-file-btn" style="padding: 8px 16px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; width: 100%;">add file+</button>
-                        </div>
-                    </div>
-                    
-                    <!-- Preview and Files Section (hidden by default) -->
-                    <div id="reminder-file-section" style="display: none; margin-bottom: 20px;">
-                        <div class="responsive-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-                            <!-- Preview Panel -->
-                            <div id="reminder-preview-panel" style="border: 2px solid #0b63a6; border-radius: 8px; padding: 15px; position: relative;">
-                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                                    <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Preview</h3>
-                                    <button type="button" onclick="document.getElementById('reminder-preview-panel').style.display='none'" style="background: none; border: none; font-size: 20px; color: #95a5a6; cursor: pointer; padding: 0; line-height: 1;">×</button>
-                                </div>
-                                <div id="reminder-preview-content" style="min-height: 200px; background: #f8f9fa; border-radius: 4px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; overflow: hidden;">
-                                    <div style="font-size: 48px; color: #95a5a6; margin-bottom: 10px;">📄</div>
-                                </div>
-                                <div id="reminder-preview-filename" style="margin: 10px 0; text-align: center; color: #2c3e50; font-size: 14px; font-weight: 500;"></div>
-                                <div class="form-group">
-                                    <label for="reminder-file-input">Upload File (auto-upload on select)</label>
-                                    <input type="file" id="reminder-file-input" accept=".jpg,.jpeg,.png,.pdf,.docx,.txt,.xml,.md">
-                                </div>
-                            </div>
-                            
-                            <!-- Files Panel -->
-                            <div id="reminder-files-panel" data-context="reminders" style="border: 1px solid #e0e0e0; border-radius: 8px; padding: 15px; display: flex; flex-direction: column; position: relative;">
-                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                                    <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Attachments</h3>
-                                    <button type="button" onclick="document.getElementById('reminder-files-panel').style.display='none'" style="background: none; border: none; font-size: 20px; color: #95a5a6; cursor: pointer; padding: 0; line-height: 1;">×</button>
-                                </div>
-                                <div id="reminder-files-list" style="flex: 1; overflow-y: scroll; border: 1px solid #e0e0e0; border-radius: 4px; background: white; max-height: 300px;">
-                                    <!-- Files will appear here when added -->
-                                </div>
-                                <button type="button" id="reminder-delete-selected-btn" onclick="deleteSelectedReminderFiles()" style="margin-top: 12px; padding: 8px 20px; background: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 500; align-self: flex-end;">Delete</button>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <button type="submit" id="reminder-submit-btn">Create Reminder</button>
-                    <button type="button" id="reminder-cancel-btn" class="secondary" style="display: none;">Cancel</button>
-                </form>
-            </div>
-
-            <div class="section">
-                <h2>Reminders List</h2>
-                <div id="reminders-list"></div>
-            </div>
-        </div>
-
-        
-
-        <!-- Groups Tab -->
-        <div id="groups" class="tab-content">
-            <section id="groups-section" class="section">
-            <div class="section">
-                <h2>Create Group</h2>
-                <form id="group-form">
-                    <input type="hidden" id="group-id">
-                    <input type="hidden" id="group-description" value="Group">
-                    
-                    <!-- Prompt Text Section -->
-                    <div style="margin-bottom: 20px;">
-                        <label style="display: block; margin-bottom: 8px; color: #2f3a3f; font-size: 14px;">Prompt Text</label>
-                        <div class="responsive-flex-row" style="display: flex; gap: 10px;">
-                            <div style="position: relative; flex: 1;">
-                                <input type="text" id="group-name" placeholder="Enter prompt text..." required style="width: 100%; margin: 0; padding-right: 40px;">
-                                <span id="group-files-icon" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 20px; color: #95a5a6; cursor: pointer;">📎</span>
-                            </div>
-                            <button type="button" id="group-show-file-btn" style="padding: 8px 16px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; width: 100%;">add file+</button>
-                        </div>
-                    </div>
-                    
-                    <!-- PRVW and Files Section (hidden by default) -->
-                    <div id="group-file-section" style="display: none; margin-bottom: 20px;">
-                        <div class="responsive-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-                            <!-- Preview Panel -->
-                            <div id="group-preview-panel" style="border: 2px solid #0b63a6; border-radius: 8px; padding: 15px; position: relative;">
-                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                                    <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Preview</h3>
-                                    <button type="button" onclick="document.getElementById('group-preview-panel').style.display='none'" style="background: none; border: none; font-size: 20px; color: #95a5a6; cursor: pointer; padding: 0; line-height: 1;">×</button>
-                                </div>
-                                <div id="group-preview-content" style="min-height: 200px; background: #f8f9fa; border-radius: 4px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; overflow: hidden;">
-                                    <div style="font-size: 48px; color: #95a5a6; margin-bottom: 10px;">📄</div>
-                                </div>
-                                <div id="group-preview-filename" style="margin: 10px 0; text-align: center; color: #2c3e50; font-size: 14px; font-weight: 500;"></div>
-                                <div class="form-group">
-                                    <label for="group-file-input">Upload File (auto-upload on select)</label>
-                                    <input type="file" id="group-file-input" accept=".jpg,.jpeg,.png,.pdf,.docx,.txt,.xml,.md">
-                                </div>
-                            </div>
-                            
-                            <!-- Files Panel -->
-                            <div id="group-files-panel" data-context="reminders" style="border: 1px solid #e0e0e0; border-radius: 8px; padding: 15px; display: flex; flex-direction: column; position: relative;">
-                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                                    <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Attachments</h3>
-                                    <button type="button" onclick="document.getElementById('group-files-panel').style.display='none'" style="background: none; border: none; font-size: 20px; color: #95a5a6; cursor: pointer; padding: 0; line-height: 1;">×</button>
-                                </div>
-                                <div id="group-files-list" style="flex: 1; overflow-y: scroll; border: 1px solid #e0e0e0; border-radius: 4px; background: white; max-height: 300px;">
-                                    <!-- Files will appear here when added -->
-                                </div>
-                                <button type="button" id="group-delete-selected-btn" onclick="deleteSelectedGroupFiles()" style="margin-top: 12px; padding: 8px 20px; background: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 500; align-self: flex-end;">Delete</button>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <button type="submit" id="group-submit-btn">Create Group</button>
-                    <button type="button" id="group-cancel-btn" class="secondary" style="display: none;">Cancel</button>
-                </form>
-            </div>
-
-            <div class="section">
-                <h2>Groups List</h2>
-                <div id="groups-list"></div>
-            </div>
-            </section>
-        </div>
-
-    <!-- Manage Group Resources Modal -->
-    <!-- File Preview Modal for Groups -->
-    <div id="group-file-preview-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.7); z-index: 10000; justify-content: center; align-items: center; padding: 20px;">
-        <div style="background: white; border-radius: 8px; max-width: 700px; width: 90%; max-height: 80vh; display: flex; flex-direction: column; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);">
-            <div style="padding: 15px 20px; border-bottom: 1px solid #e0e0e0; display: flex; justify-content: space-between; align-items: center;">
-                <h3 id="group-file-preview-title" style="margin: 0; font-size: 16px; color: #2c3e50;">File Preview</h3>
-                <button onclick="document.getElementById('group-file-preview-modal').style.display='none'" style="background: none; border: none; font-size: 28px; color: #95a5a6; cursor: pointer; padding: 0; width: 32px; height: 32px; line-height: 28px;">&times;</button>
-            </div>
-            <div id="group-file-preview-content" style="padding: 15px; overflow: auto; flex: 1; text-align: center; display: flex; align-items: center; justify-content: center;">
-                <!-- Preview content will be inserted here -->
-            </div>
-        </div>
-    </div>
-
-    <!-- File Preview Modal for Reminder Files (from server) -->
-    <div id="reminder-file-preview-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.7); z-index: 10001; justify-content: center; align-items: center; padding: 20px;">
-        <div style="background: white; border-radius: 8px; max-width: 700px; width: 90%; max-height: 80vh; display: flex; flex-direction: column; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);">
-            <div style="padding: 15px 20px; border-bottom: 1px solid #e0e0e0; display: flex; justify-content: space-between; align-items: center;">
-                <h3 id="reminder-file-preview-title" style="margin: 0; font-size: 16px; color: #2c3e50;">File Preview</h3>
-                <button onclick="closeReminderFilePreviewModal()" style="background: none; border: none; font-size: 28px; color: #95a5a6; cursor: pointer; padding: 0; width: 32px; height: 32px; line-height: 28px;">&times;</button>
-            </div>
-            <div id="reminder-file-preview-content" style="padding: 15px; overflow: auto; flex: 1; text-align: center; display: flex; align-items: center; justify-content: center;">
-                <!-- Preview content will be inserted here -->
-            </div>
-        </div>
-    </div>
-
-    <div id="manage-group-modal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header" style="display: none;">
-                <h3>Manage Group Resources</h3>
-                <button class="close-modal" id="close-modal-btn">&times;</button>
-            </div>
-            <div id="modal-content-body"></div>
-        </div>
-    </div>
 
     <script>
         // Early shims to ensure tests can access these functions immediately on page load

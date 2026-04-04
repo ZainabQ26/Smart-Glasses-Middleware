@@ -1,3 +1,16 @@
+async function loadPrompts(reset = false) {
+    if (state.prompts.loading) return;
+    state.prompts.loading = true;
+    showLoading('prompts-list');
+    try {
+        hideLoading('prompts-list');
+        const list = document.getElementById('prompts-list');
+        if (list) list.innerHTML = '';
+    } finally {
+        state.prompts.loading = false;
+        hideLoading('prompts-list');
+    }
+}
 const API_BASE = '/api/admin';
 const ADMIN_DEBUG = !!window.__ADMIN_DEBUG__;
 const themeStorageKey = 'uiTheme';
@@ -789,7 +802,7 @@ async function initResourceHub() {
             resourceHubConnection.on('groupsChanged', async () => {
                 apiCache.invalidate('groups');
                 apiCache.invalidate('batch');
-                await loadGroups(true);
+                await Promise.resolve();
                 state.allGroups = [];
             });
 
@@ -1187,7 +1200,7 @@ document.querySelectorAll('.tab').forEach(tab => {
         } else if (tabName === 'reminders') {
             loadReminders(true);
         } else if (tabName === 'groups') {
-            loadGroups(true);
+            Promise.resolve();
         }
     });
 });
@@ -1325,34 +1338,7 @@ async function loadFiles(reset = false) {
 }
 
 // Prompts with lazy loading
-async function loadPrompts(reset = false) {
-    if (state.prompts.loading) return;
 
-    state.prompts.loading = true;
-    showLoading('prompts-list');
-
-    try {
-        hideLoading('prompts-list');
-        const list = document.getElementById('prompts-list');
-        if (list) {
-            list.innerHTML = '';
-        }
-
-        // Just ensure there is an active conversation when the tab opens
-        if (!activeConversationId) {
-            await createNewConversation();
-        } else {
-            await loadConversationIntoView(activeConversationId, 'Current Conversation');
-        }
-
-    } catch (error) {
-        console.error('Error loading prompts/conversations:', error);
-        showMessage('Failed to load conversation', 'error');
-    } finally {
-        state.prompts.loading = false;
-        hideLoading('prompts-list');
-    }
-}
 
 function createFileCard(file) {
     const div = document.createElement('div');
@@ -1500,7 +1486,7 @@ if (mainFileInput) {
         mainFileInput.value = '';
         showMessage('File uploaded — processing…', 'success');
         await loadFiles(true);
-        await loadAllGroups(true);
+
 
         // Poll for background processing completion (up to ~30 s).
         if (uploadedFileId) {
@@ -1560,7 +1546,7 @@ async function deleteFile(id) {
         if (response.ok || response.status === 204) {
             showMessage('File deleted successfully');
             await loadFiles(true);
-            await loadAllGroups(true);
+
         } else {
             const error = await response.json().catch(() => null);
             showMessage(error?.detail || 'Error deleting file', 'error');
@@ -2620,321 +2606,28 @@ async function previewFile(id, fileName) {
     }
 }
 
-function createPromptCard(prompt) {
-    const div = document.createElement('div');
-    div.className = 'sidebar-prompt-item';
-    
-    const id = getProp(prompt, 'id');
-    const name = getProp(prompt, 'name') || 'Untitled';
-    const promptText = getProp(prompt, 'promptText') || '';
-    
-    // Truncate name for sidebar
-    const displayName = name.length > 25 ? name.substring(0, 25) + '...' : name;
 
-    div.dataset.promptId = id;
-    div.dataset.promptName = name;
-    div.dataset.promptText = promptText;
-    
-    div.innerHTML = `
-        <span class="prompt-name">${escapeHtml(displayName)}</span>
-        <button type="button" class="prompt-delete-btn" title="Delete" aria-label="Delete">×</button>
-    `;
-    
-    // Click to load prompt
-    div.addEventListener('click', () => {
-        // Don't auto-save when viewing a conversation (read-only operation)
-        // Auto-save will happen via input, send, new_chat, or unload events
-        document.querySelectorAll('.sidebar-prompt-item').forEach(item => item.classList.remove('active'));
-        div.classList.add('active');
-        loadPromptIntoForm(id, name, promptText);
-    });
-
-    // Delete prompt button
-    div.querySelector('.prompt-delete-btn').addEventListener('click', (e) => {
-        e.stopPropagation();
-        deletePrompt(id);
-    });
-    
-    return div;
-}
 
 // Auto Groups are view-only - no form submission needed
 // Removed form submission handler as Auto Groups display conversation history and files
 
-function loadPromptIntoForm(id, name, text) {
-    document.getElementById('prompt-form-title').textContent = 'Conversation';
-    
-    // Parse conversation history and files from the prompt text
-    // Assuming text is stored as JSON string with {messages: [], files: []}
-    let messages = [];
-    let files = [];
-    try {
-        const data = JSON.parse(text);
-        messages = data.messages || [];
-        files = data.files || [];
-    } catch {
-        // Fallback to old format
-        messages = [
-            {role: 'user', content: name},
-            {role: 'bot', content: text}
-        ];
-    }
-    
-    // Show the conversation history in a scrollable box
-    const conversationHTML = messages.map(msg => {
-        const msgFiles = Array.isArray(msg.files) ? msg.files : [];
-        const filesData = encodeFilesData(msgFiles);
-        const filesTitle = msgFiles.length > 0
-            ? `${msgFiles.length} file(s) attached: ${msgFiles.map(f => (typeof f === 'string' ? f : f.name || f.fileName || f.FileName || 'Document')).join(', ')}`
-            : '';
-        const msgSources = Array.isArray(msg.sources) ? msg.sources : [];
-        const msgSourcesHtml = msgSources.length > 0 ? `
-            <div style="margin-top: 8px; padding: 8px; background: #fff; border: 1px solid #dee2e6; border-radius: 4px;">
-                <div style="font-weight: 600; color: #2c3e50; margin-bottom: 6px; font-size: 0.8rem;">Sources Used:</div>
-                ${msgSources.map(source => {
-                    const documentId = source.documentId || source.DocumentId;
-                    const fileName = source.fileName || source.FileName || 'Document';
-                    const page = source.pageNumber || source.PageNumber;
-                    const label = page ? `${fileName} (p.${page})` : fileName;
-                    const href = documentId ? `/api/documents/${documentId}/download` : '#';
-                    const linkStyle = documentId ? 'color: #0b63a6; text-decoration: underline;' : 'color: #2f3a3f; text-decoration: none;';
-                    return `
-                        <div style="display: flex; align-items: center; gap: 8px; font-size: 12px;">
-                            <a href="${href}" target="_blank" style="${linkStyle}" onclick="${documentId ? '' : 'return false;'}">${escapeHtml(label)}</a>
-                            ${documentId ? `<button type=\"button\" onclick=\"previewDocumentFile('${documentId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')\" style=\"padding: 2px 6px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 11px;\">Preview</button>` : ''}
-                        </div>
-                    `;
-                }).join('')}
-            </div>
-        ` : '';
-
-        return `
-            <div style="margin-bottom: 12px;">
-                <div style="color: ${msg.role === 'user' ? '#0b63a6' : '#27ae60'}; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
-                    <span>${msg.role === 'user' ? 'User' : 'Bot'}:</span>
-                    ${msgFiles.length > 0 ? `<button type="button" onclick="showAttachedFilesModal('${filesData}')" style="background: none; border: none; font-size: 16px; color: #0b63a6; cursor: pointer; padding: 0;" title="${escapeHtml(filesTitle)}">📎</button>` : ''}
-                </div>
-                <div style="color: #444; padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
-                ${msg.role === 'bot' ? msgSourcesHtml : ''}
-            </div>
-        `;
-    }).join('');
-    
-    // Show attached files in a scrollable box
-    const normalizedFiles = files.map(f => {
-        if (typeof f === 'string') {
-            return { name: f };
-        }
-        return { name: f.name || f.fileName || f.FileName || 'Document', id: f.id || f.documentId };
-    });
-
-    const filesFromMessages = messages.flatMap(msg => {
-        if (!Array.isArray(msg.files)) return [];
-        return msg.files.map(f => {
-            if (typeof f === 'string') {
-                return { name: f };
-            }
-            return { name: f.name || f.fileName || f.FileName || 'Document', id: f.id || f.documentId };
-        });
-    });
-
-    const mergedFiles = [...normalizedFiles, ...filesFromMessages].reduce((acc, file) => {
-        const key = `${(file.name || '').toLowerCase()}::${file.id || ''}`;
-        if (!acc.seen.has(key)) {
-            acc.seen.add(key);
-            acc.items.push(file);
-        }
-        return acc;
-    }, { seen: new Set(), items: [] }).items;
-
-    const filesHTML = mergedFiles.length > 0 ? `
-        <div style="margin-top: 15px; padding: 15px; background: #f8f9fa; border-radius: 8px;">
-            <div style="font-weight: 600; color: #2c3e50; margin-bottom: 10px;">Attached Files</div>
-            <div style="max-height: 150px; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; padding: 10px; background: white;">
-                ${mergedFiles.map(f => {
-                    const fileId = f.id || '';
-                    const fileName = f.name || 'Document';
-                    return `
-                        <div style="padding: 4px 0; color: #444; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
-                            <span>📎 ${escapeHtml(fileName)}</span>
-                            <button type="button" onclick="previewDocumentFile('${fileId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')" style="padding: 2px 8px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">Preview</button>
-                        </div>
-                    `;
-                }).join('')}
-            </div>
-        </div>
-    ` : '';
-    
-    const responseContent = document.getElementById('response-content');
-    responseContent.innerHTML = `
-        <div style="margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #e0e0e0; display: flex; align-items: center; justify-content: space-between;">
-            <div style="color: #2c3e50; font-weight: 600;">Auto Group: ${escapeHtml(name)}</div>
-            <button type="button" onclick="closeAutoGroupView()" style="background: none; border: none; font-size: 20px; color: #95a5a6; cursor: pointer; padding: 0; line-height: 1;">×</button>
-        </div>
-        <div style="max-height: 400px; overflow-y: auto; padding: 10px; border: 1px solid #e0e0e0; border-radius: 4px; background: #fafafa;">
-            ${conversationHTML}
-        </div>
-        ${filesHTML}
-    `;
-}
-
-function createNewPrompt() {
-    document.querySelectorAll('.sidebar-prompt-item').forEach(item => item.classList.remove('active'));
-    document.getElementById('prompt-form-title').textContent = 'Conversation';
-    
-    // Reset conversation history
-    currentConversationHistory = [];
-    activePromptGroupId = null;
-    updateActiveGroupStyles();
-    
-    // Reset response section
-    const responseContent = document.getElementById('response-content');
-    if (responseContent) {
-        responseContent.innerHTML = '<span style="color: #2f3a3f;">Enter a message and click Send to get a response</span>';
-    }
-    
-    // Clear input
-    const promptInput = document.getElementById('prompt-name');
-    if (promptInput) {
-        promptInput.value = '';
-    }
-}
-
-async function loadConversationIntoView(conversationId, title) {
-    if (!conversationId) return;
-    try {
-        await joinConversationHubGroup(conversationId);
-        const responseContent = document.getElementById('response-content');
-        if (responseContent) {
-            responseContent.innerHTML = '<span style="color: #2f3a3f;">Loading conversation...</span>';
-        }
-
-        const res = await fetchWithRetry(`/api/conversations/${conversationId}`);
-        if (!res.ok) {
-            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-        }
-
-        const conversation = await res.json().catch(() => null);
-        const messages = (conversation && (conversation.messages || conversation.Messages)) || [];
-
-        currentConversationHistory = Array.isArray(messages)
-            ? messages.map(m => {
-                const rawFiles = Array.isArray(m.files)
-                    ? m.files
-                    : (Array.isArray(m.Files)
-                        ? m.Files
-                        : (Array.isArray(m.Attachments)
-                            ? m.Attachments
-                            : (Array.isArray(m.attachments) ? m.attachments : [])));
-
-                return {
-                    role: (m.role || m.Role || '').toLowerCase() === 'assistant' ? 'bot' : (m.role || m.Role || 'user').toLowerCase(),
-                    content: m.content || m.Content || '',
-                    files: normalizeFileList(rawFiles),
-                    sources: Array.isArray(m.sources) ? m.sources : (Array.isArray(m.Sources) ? m.Sources : [])
-                };
-            })
-            : [];
-
-        const promptIdInput = document.getElementById('prompt-id');
-        if (promptIdInput) promptIdInput.value = '';
-        const promptTitle = document.getElementById('prompt-form-title');
-        if (promptTitle) promptTitle.textContent = title || 'Conversation';
-
-        if (currentConversationHistory.length === 0) {
-            if (responseContent) {
-                responseContent.innerHTML = '<span style="color: #2f3a3f;">No messages yet</span>';
-            }
-            return;
-        }
-
-        const conversationHTML = currentConversationHistory.map((msg, index) => {
-            const closeBtn = (index === 0 && msg.role === 'user')
-                ? `<button type="button" onclick="closeAutoGroupView()" title="Close" aria-label="Close" style="border:none;background:#95a5a6;color:white;width:20px;height:20px;border-radius:50%;cursor:pointer;font-size:14px;line-height:20px;padding:0;">×</button>`
-                : '';
-
-            return `
-                <div style="margin-bottom: 12px;">
-                    <div style="color: ${msg.role === 'user' ? '#0b63a6' : '#27ae60'}; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
-                        <span>${msg.role === 'user' ? 'User' : 'Bot'}:</span>
-                        ${closeBtn}
-                    </div>
-                    <div style="color: #444; padding-left: 12px; white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
-                </div>
-            `;
-        }).join('');
 
 
-        // Build list of files used in this conversation (attachments + sources)
-        const filesFromMessages = currentConversationHistory.flatMap(msg => {
-            const list = [];
-            normalizeFileList(msg.files).forEach(f => list.push(f));
-            if (Array.isArray(msg.sources)) {
-                msg.sources.forEach(s => {
-                    if (!s) return;
-                    const name = s.fileName || s.FileName || s.name || 'Document';
-                    const id = s.documentId || s.DocumentId || s.id;
-                    const page = s.pageNumber || s.PageNumber;
-                    list.push({ name: page ? `${name} (p.${page})` : name, id });
-                });
-            }
-            return list;
-        });
 
-        const mergedFiles = filesFromMessages.reduce((acc, file) => {
-            const key = `${(file.name || '').toLowerCase()}::${file.id || ''}`;
-            if (!acc.seen.has(key)) {
-                acc.seen.add(key);
-                acc.items.push(file);
-            }
-            return acc;
-        }, { seen: new Set(), items: [] }).items;
 
-        const filesHTML = mergedFiles.length > 0 ? `
-            <div style="margin-top: 12px; padding: 12px; background: #f8f9fa; border-radius: 8px;">
-                <div style="font-weight: 600; color: #2c3e50; margin-bottom: 8px;">Files used in this conversation</div>
-                <div style="max-height: 200px; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; padding: 8px; background: white;">
-                    ${mergedFiles.map(f => {
-                        const fileId = f.id || '';
-                        const fileName = f.name || 'Document';
-                        return `
-                            <div style="padding: 6px 0; display:flex; align-items:center; justify-content:space-between; gap:8px;">
-                                <span>📎 ${escapeHtml(fileName)}</span>
-                                <button type="button" onclick="previewDocumentFile('${fileId}', '${escapeHtml(fileName).replace(/'/g, "\\'")}')" style="padding:2px 8px; background:#0b63a6; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px;">Preview</button>
-                            </div>
-                        `;
-                    }).join('')}
-                </div>
-            </div>
-        ` : '';
 
-        if (responseContent) {
-            responseContent.innerHTML = `
-                <div style="max-height: 500px; overflow-y: auto; padding: 15px; background: #f8f9fa; border-radius: 8px;">
-                    ${conversationHTML}
-                </div>
-                ${filesHTML}
-            `;
-        }
-    } catch (error) {
-        console.error('[CONVERSATION] Failed to load conversation:', error);
-        showMessage('Failed to load conversation: ' + error.message, 'error');
-    }
-}
 
 // Handle file attachments for prompts
 let promptPreviewFile = null;
 let promptSelectedFiles = [];
-let reminderSelectedFiles = []; // Reminder file attachments (separate from prompts)
+ // Reminder file attachments (separate from prompts)
 let currentConversationHistory = []; // Track conversation messages
-let activePromptGroupId = null;
 // conversation mapping is now server-side; frontend will not persist ConversationId
-let activeConversationId = null;
 let pendingRecentFileChoices = null;
 let pendingRecentFileChoicesExpiresAt = 0;
 const RECENT_FILE_SELECTION_WINDOW_MS = 180000;
 window.promptSelectedFiles = promptSelectedFiles;
-window.reminderSelectedFiles = reminderSelectedFiles;
+
 let lastAutoSavedSnapshot = null;
 let autoSaveInFlight = false;
 const draftStorageKey = 'adminPromptDraft';
@@ -2942,124 +2635,13 @@ const draftStorageKey = 'adminPromptDraft';
 // NOTE: enable to restore autosave for groups and drafts
 const AUTO_SAVE_ENABLED = true;
 
-function buildConversationSnapshot() {
-    const files = promptSelectedFiles.map(f => ({
-        name: f.name || f.file?.name || 'Document',
-        id: f.documentId || f.id
-    }));
 
-    return {
-        messages: currentConversationHistory,
-        files: files
-    };
-}
 
-function hasConversationContent() {
-    return currentConversationHistory.length > 0 || promptSelectedFiles.length > 0;
-}
 
-async function autoSaveCurrentConversation(reason) {
-    if (!AUTO_SAVE_ENABLED || autoSaveInFlight || !hasConversationContent()) return null;
 
-    const snapshot = buildConversationSnapshot();
-    const snapshotText = JSON.stringify(snapshot);
-    if (snapshotText === lastAutoSavedSnapshot) return null;
 
-    // Don't auto-save if there are no messages (only files is not enough to save)
-    if (snapshot.messages.length === 0) {
-        console.log('[AUTO SAVE] Skipping save - no messages in conversation');
-        return null;
-    }
 
-    autoSaveInFlight = true;
-    try {
-        const firstMessage = snapshot.messages.find(m => m.role === 'user');
-        // If no user message exists, skip auto-save to prevent "Untitled Chat"
-        if (!firstMessage) {
-            console.log('[AUTO SAVE] Skipping save - no user message found');
-            autoSaveInFlight = false;
-            return null;
-        }
-        const chatName = firstMessage.content.substring(0, 50);
-        const payload = { name: chatName, promptText: snapshotText };
 
-        const existingId = document.getElementById('prompt-id')?.value;
-        const url = existingId ? `${API_BASE}/prompts/${existingId}` : `${API_BASE}/prompts`;
-        const method = existingId ? 'PUT' : 'POST';
-
-        const response = await fetch(url, {
-            method,
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-
-        if (!response.ok) {
-            console.warn('[AUTO SAVE] Failed to save conversation to server:', response.status);
-            return null;
-        }
-
-        const result = await response.json().catch(() => null);
-        const savedId = result?.id || result?.Id || null;
-        if (savedId) {
-            const promptIdInput = document.getElementById('prompt-id');
-            if (promptIdInput) promptIdInput.value = savedId;
-
-            // Fetch canonical saved record from server and load into UI
-            try {
-                // Try direct GET by id first (some APIs may not expose GET /prompts/{id})
-                let savedPrompt = null;
-                let savedRes = await fetchWithRetry(`${API_BASE}/prompts/${savedId}`);
-                if (savedRes.ok) {
-                    const savedJson = await savedRes.json().catch(() => null);
-                    savedPrompt = (savedJson && (savedJson.data || savedJson)) || savedJson || null;
-                } else if (savedRes.status === 405 || savedRes.status === 404) {
-                    // Fallback: fetch the prompts list and find the saved item
-                    const listRes = await fetchWithRetry(`${API_BASE}/prompts?page=1&pageSize=100`);
-                    if (listRes.ok) {
-                        const listJson = await listRes.json().catch(() => null);
-                        const prompts = (listJson && (listJson.data || listJson.Data)) || listJson || [];
-                        savedPrompt = prompts.find(p => (p.id === savedId || p.Id === savedId || p.Id === (savedId + '')) ) || null;
-                    }
-                }
-
-                if (savedPrompt) {
-                    const promptText = savedPrompt.PromptText || savedPrompt.promptText || '';
-                    try {
-                        loadPromptIntoForm(savedId, savedPrompt.name || chatName, promptText);
-                    } catch (e) {
-                        console.warn('[AUTO SAVE] loadPromptIntoForm failed:', e);
-                    }
-
-                    // Refresh sidebar lists so other clients / tabs see the new entry
-                    try {
-                        await loadPrompts(true);
-                        await loadAllGroups(true);
-                    } catch (e) {
-                        console.warn('[AUTO SAVE] Failed to refresh lists:', e);
-                    }
-                } else {
-                    console.warn('[AUTO SAVE] Canonical prompt not found after save');
-                }
-            } catch (fetchErr) {
-                console.warn('[AUTO SAVE] Error fetching canonical prompt:', fetchErr);
-            }
-        }
-
-        lastAutoSavedSnapshot = snapshotText;
-        console.log(`[AUTO SAVE] Conversation saved to server (${reason})`);
-        return savedId;
-    } catch (error) {
-        console.warn('[AUTO SAVE] Error saving conversation to server:', error);
-        return null;
-    } finally {
-        autoSaveInFlight = false;
-    }
-}
-
-function restoreDraftConversation() {
-    // Browser storage draft restoration removed.
-    return false;
-}
 
 function closeAutoGroupView() {
     document.querySelectorAll('.sidebar-prompt-item').forEach(item => item.classList.remove('active'));
@@ -3140,7 +2722,7 @@ function scheduleFileNameRefresh(fileObj, documentId, originalName) {
                     // Refresh groups silently so the card counter and modal reflect the
                     // evicted duplicate ManagedFile (server removes it when doc is linked)
                     if (typeof loadGroups === 'function') {
-                        loadGroups(true).catch(() => {});
+                        Promise.resolve().catch(() => {});
                     }
                     return; // Name updated — stop polling
                 }
@@ -3165,62 +2747,13 @@ window.deleteSelectedPromptFiles = function() {
 };
 
 
-function updateActiveGroupStyles() {
-    document.querySelectorAll('[data-group-card="true"]').forEach(card => {
-        const groupId = card.dataset.groupId;
-        const isActive = !!activePromptGroupId && groupId === String(activePromptGroupId);
-        const badge = card.querySelector('[data-group-active-badge="true"]');
-        const input = card.querySelector('input[data-group-id]');
 
-        card.style.background = isActive ? '#eaf4ff' : '#f5f5f5';
-        card.style.border = isActive ? '2px solid #0b63a6' : '2px solid transparent';
-        if (input) {
-            input.style.background = isActive ? '#ffffff' : 'white';
-            input.style.borderColor = isActive ? '#0b63a6' : '#ddd';
-        }
-        if (badge) {
-            badge.style.display = isActive ? 'inline-flex' : 'none';
-        }
-    });
-}
 
-function getConversationGroupKey() {
-    return activePromptGroupId ? String(activePromptGroupId) : 'ungrouped';
-}
 
-function setActivePromptGroup(groupId, groupName) {
-    activePromptGroupId = groupId || null;
-    updateActiveGroupStyles();
-    if (groupName) {
-        showMessage(`Active group set to: ${groupName}`);
-    }
-}
 
-async function syncActiveGroupFromConversation(conversationId) {
-    if (!conversationId) return;
-    try {
-        const res = await fetchWithRetry(`/api/conversations/${conversationId}`);
-        if (!res.ok) return;
-        const conversation = await res.json().catch(() => null);
-        if (!conversation) return;
 
-        const groupId = getProp(conversation, 'resourceGroupId')
-            || getProp(conversation, 'ResourceGroupId')
-            || getProp(getProp(conversation, 'resourceGroup'), 'id')
-            || getProp(getProp(conversation, 'ResourceGroup'), 'id');
-        const groupName = getProp(getProp(conversation, 'resourceGroup'), 'name')
-            || getProp(getProp(conversation, 'ResourceGroup'), 'name');
 
-        if (groupId) {
-            activePromptGroupId = groupId;
-            updateActiveGroupStyles();
-            await loadGroups(true);
-            await loadAllGroups(true);
-        }
-    } catch (error) {
-        console.warn('[AUTO GROUP] Failed to sync active group:', error);
-    }
-}
+
 
 async function restoreDraftConversation() {
     try {
@@ -3318,7 +2851,7 @@ async function deletePrompt(id) {
         if (response.ok || response.status === 204) {
             showMessage('Prompt deleted successfully');
             await loadPrompts(true);
-            await loadAllGroups(true);
+
         } else {
             const error = await response.json().catch(() => null);
             showMessage((error && (error.detail || error.error)) || 'Error deleting prompt', 'error');
@@ -3337,7 +2870,7 @@ async function deleteConversation(id, title) {
         const response = await fetch(`/api/conversations/${id}`, { method: 'DELETE' });
         if (response.ok || response.status === 204) {
             if (activeConversationId && String(activeConversationId) === String(id)) {
-                activeConversationId = null;
+
                 closeAutoGroupView();
             }
             removeConversationFromUI(id);
@@ -3345,8 +2878,8 @@ async function deleteConversation(id, title) {
             apiCache.invalidate('/api/conversations');
             apiCache.invalidate('/api/admin/groups');
             await loadPrompts(true);
-            await loadGroups(true);
-            await loadAllGroups(true);
+            await Promise.resolve();
+
         } else {
             const error = await response.json().catch(() => null);
             showMessage((error && (error.detail || error.error)) || 'Error deleting conversation', 'error');
@@ -3477,286 +3010,13 @@ window.viewConversation = async function(conversationId, title) {
 };
 
 // Groups with lazy loading
-async function loadGroups(reset = false) {
-    if (state.groups.loading) return;
-    if (!reset && !state.groups.hasMore) return;
-    
-    if (reset) {
-        state.groups.page = 1;
-        state.groups.hasMore = true;
-        state.groups.data = [];
-        document.getElementById('groups-list').innerHTML = '';
-    }
-    
-    state.groups.loading = true;
-    showLoading('groups-list');
-    
-    try {
-        const cacheBust = reset ? `&cb=${Date.now()}` : '';
-        const response = await fetchWithRetry(`${API_BASE}/groups?page=${state.groups.page}&pageSize=${state.groups.pageSize}${cacheBust}`);
-        const list = document.getElementById('groups-list');
-        
-        if (!response.ok) {
-            if (isTransientGatewayStatus(response.status)) {
-                hideLoading('groups-list');
 
-                if (reset && state.groups.data.length === 0) {
-                    list.innerHTML = '<div class="empty-state"><p>Server is temporarily unavailable. Group list will refresh automatically.</p></div>';
-                }
 
-                groupsDegradedRetryCount += 1;
-                noteServiceOutage('groups endpoint transient failure', 30);
-                const retryDelayMs = getDegradedRetryDelayMs(groupsDegradedRetryCount, 30);
 
-                if (!groupsDegradedRefreshTimer) {
-                    groupsDegradedRefreshTimer = setTimeout(() => {
-                        groupsDegradedRefreshTimer = null;
-                        loadGroups(true).catch(err => {
-                            console.warn('Automatic groups refresh after transient failure failed', err);
-                        });
-                    }, retryDelayMs);
-                }
 
-                state.groups.loading = false;
-                return;
-            }
 
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        
-        const result = await response.json();
-        console.log('Groups API response:', result);
-        const degraded = isDegradedPagedResult(result);
-        // Handle both lowercase and uppercase from API
-        const groupsData = result.data || result.Data || [];
-        const pagination = result.pagination || result.Pagination || {};
-        console.log('Groups data length:', groupsData.length);
-        
-        hideLoading('groups-list');
 
-        if (degraded) {
-            if (reset && state.groups.data.length === 0) {
-                list.innerHTML = '<div class="empty-state"><p>Server is busy. Group list will refresh automatically.</p></div>';
-            }
 
-            groupsDegradedRetryCount += 1;
-            const retryAfterSeconds = Number(result.retryAfterSeconds || result.RetryAfterSeconds || 0);
-            const retryDelayMs = getDegradedRetryDelayMs(groupsDegradedRetryCount, retryAfterSeconds);
-
-            if (!groupsDegradedRefreshTimer) {
-                groupsDegradedRefreshTimer = setTimeout(() => {
-                    groupsDegradedRefreshTimer = null;
-                    loadGroups(true).catch(err => {
-                        console.warn('Automatic groups refresh after degraded response failed', err);
-                    });
-                }, retryDelayMs);
-            }
-
-            state.groups.loading = false;
-            return;
-        }
-
-        groupsDegradedRetryCount = 0;
-        
-        if (groupsData && groupsData.length > 0) {
-            state.groups.data.push(...groupsData);
-            
-            const fragment = document.createDocumentFragment();
-            groupsData.forEach(group => {
-                const div = createGroupCard(group);
-                // Skip null returns (reminders are filtered out)
-                if (div) {
-                    fragment.appendChild(div);
-                }
-            });
-            list.appendChild(fragment);
-            
-            state.groups.hasMore = pagination.hasNext || pagination.HasNext;
-            state.groups.page++;
-        } else if (reset) {
-            list.innerHTML = '<div class="empty-state"><p>No groups created yet</p></div>';
-        }
-        
-        state.groups.loading = false;
-    } catch (error) {
-        hideLoading('groups-list');
-        state.groups.loading = false;
-        showMessage('Error loading groups: ' + error.message, 'error');
-    }
-}
-
-async function loadReminders(reset = false) {
-    if (state.reminders.loading) return;
-    if (!reset && !state.reminders.hasMore) return;
-    
-    if (reset) {
-        state.reminders.page = 1;
-        state.reminders.hasMore = true;
-        state.reminders.data = [];
-        document.getElementById('reminders-list').innerHTML = '';
-    }
-    
-    state.reminders.loading = true;
-    showLoading('reminders-list');
-    
-    try {
-        // Load all groups and filter for those with description "Reminder"
-        const response = await fetchWithRetry(`${API_BASE}/groups?page=${state.reminders.page}&pageSize=${state.reminders.pageSize}`);
-        
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        
-        const result = await response.json();
-        const groupsData = result.data || result.Data || [];
-        const pagination = result.pagination || result.Pagination || {};
-        
-        // Filter for reminders (groups with description "Reminder" - case insensitive)
-        const remindersData = groupsData.filter(g => {
-            const desc = getProp(g, 'description') || getProp(g, 'Description') || '';
-            return desc.toLowerCase() === 'reminder';
-        });
-        
-        // NOTE: Reminders can exist without files, so we don't auto-delete empty reminders
-        // This is different from groups which require at least one resource
-        
-        const list = document.getElementById('reminders-list');
-        hideLoading('reminders-list');
-        
-        if (remindersData && remindersData.length > 0) {
-            state.reminders.data.push(...remindersData);
-            
-            const fragment = document.createDocumentFragment();
-            remindersData.forEach(reminder => {
-                const div = createReminderCard(reminder);
-                fragment.appendChild(div);
-            });
-            list.appendChild(fragment);
-            
-            state.reminders.hasMore = pagination.hasNext || pagination.HasNext;
-            state.reminders.page++;
-        } else if (reset) {
-            list.innerHTML = '<div class="empty-state"><p>No reminders created yet</p></div>';
-        }
-        
-        state.reminders.loading = false;
-    } catch (error) {
-        hideLoading('reminders-list');
-        state.reminders.loading = false;
-        showMessage('Error loading reminders: ' + error.message, 'error');
-    }
-}
-
-function createReminderCard(reminder) {
-    const div = document.createElement('div');
-    const id = getProp(reminder, 'id');
-    const name = getProp(reminder, 'name') || 'Untitled';
-    
-    const files = getProp(reminder, 'files') || [];
-    const documents = getProp(reminder, 'documents') || getProp(reminder, 'Documents') || [];
-    const fileCount = (Array.isArray(files) ? files.length : 0) + (Array.isArray(documents) ? documents.length : 0);
-
-    div.dataset.reminderId = id;
-    div.style.cssText = 'background: #f5f5f5; padding: 12px; border-radius: 6px; margin-bottom: 10px; position: relative; border: 2px solid transparent;';
-    
-    div.innerHTML = `
-        <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 8px;">
-            <div style="position: relative; flex: 1;">
-                <input type="text" value="${escapeHtml(name)}" readonly data-reminder-id="${id}" style="width: 100%; padding: 12px 50px 12px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; background: white; cursor: pointer;">
-                <span class="reminder-item-paperclip" data-reminder-id="${id}" data-reminder-name="${escapeHtml(name)}" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 24px; color: #95a5a6; cursor: pointer;">📎</span>
-            </div>
-            <button type="button" class="reminder-item-delete" data-reminder-id="${id}" style="padding: 8px 16px; background: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-size: 14px;">Delete</button>
-        </div>
-        <div style="display: flex; gap: 8px; padding-left: 12px; font-size: 12px; color: #666;">
-            <span title="${fileCount} file(s)"><span aria-hidden="true">📄</span> <span aria-label="${fileCount} files">${fileCount} files</span></span>
-        </div>
-    `;
-
-    // Attach event listener to delete button
-    div.querySelector('.reminder-item-delete').addEventListener('click', async (e) => {
-        if (!confirm('Are you sure you want to delete this reminder?')) return;
-        try {
-            const response = await fetch(`${API_BASE}/groups/${id}`, { method: 'DELETE' });
-            if (response.ok) {
-                showMessage('Reminder deleted successfully');
-                await loadReminders(true);
-            } else {
-                showMessage('Error deleting reminder', 'error');
-            }
-        } catch (error) {
-            showMessage('Error deleting reminder: ' + error.message, 'error');
-        }
-    });
-
-    // Attach event listener to paperclip to open preview modal
-    div.querySelector('.reminder-item-paperclip').addEventListener('click', () => {
-        manageGroupResources(id, name);
-    });
-    
-    return div;
-}
-
-function createGroupCard(group) {
-    const div = document.createElement('div');
-    const id = getProp(group, 'id');
-    const rawName = getProp(group, 'name') || '';
-    const name = String(rawName).trim() || 'Untitled';
-    const description = getProp(group, 'description') || getProp(group, 'Description') || '';
-    const isActive = !!activePromptGroupId && String(activePromptGroupId) === String(id);
-    
-    // Skip if this is a reminder (will be shown in Reminders tab)
-    if (description && description.toLowerCase() === 'reminder') {
-        return null;
-    }
-    
-    // Get counts for files, conversations, and reminders
-    const files = getProp(group, 'files') || [];
-    const documents = getProp(group, 'documents') || getProp(group, 'Documents') || [];
-    const conversations = getProp(group, 'conversations') || [];
-    const reminders = getProp(group, 'reminders') || [];
-    const fileCount = (Array.isArray(files) ? files.length : 0) + (Array.isArray(documents) ? documents.length : 0);
-    const conversationCount = Array.isArray(conversations) ? conversations.length : 0;
-    const reminderCount = Array.isArray(reminders) ? reminders.length : 0;
-
-    div.dataset.groupCard = 'true';
-    div.dataset.groupId = id;
-    div.className = `group-card ${isActive ? 'group-card-active' : ''}`;
-    
-    div.innerHTML = `
-        <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 8px;">
-            <div style="position: relative; flex: 1;">
-                <input type="text" value="${escapeHtml(name)}" readonly data-group-id="${id}" class="group-card-input ${isActive ? 'group-card-input-active' : ''}" style="width: 100%; padding: 12px 90px 12px 12px; border-radius: 4px; font-size: 14px; cursor: pointer;">
-                <span data-group-active-badge="true" class="group-badge group-badge-active" style="display: ${isActive ? 'inline-flex' : 'none'};">Active</span>
-                <span class="group-item-paperclip" data-group-id="${id}" data-group-name="${escapeHtml(name)}" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 24px; color: #95a5a6; cursor: pointer;">📎</span>
-            </div>
-            <button type="button" class="group-item-delete" data-group-id="${id}" style="padding: 8px 16px; background: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-size: 14px;">Delete</button>
-        </div>
-        <div class="group-card-meta" style="display: flex; gap: 8px; padding-left: 12px; font-size: 12px;">
-            <span title="${fileCount} file(s)" data-group-file-count-title="${id}"><span aria-hidden="true">📄</span> <span aria-label="${fileCount} files" data-group-file-count="${id}">${fileCount} files</span></span>
-            <span title="${conversationCount} conversation(s)"><span aria-hidden="true">🗨️</span> <span aria-label="${conversationCount} conversations">${conversationCount} conversations</span></span>
-            <span title="${reminderCount} reminder(s)"><span aria-hidden="true">⏰</span> <span aria-label="${reminderCount} reminders">${reminderCount} reminders</span></span>
-        </div>
-    `;
-
-    // Click group name to set active prompt group and show contents
-    const input = div.querySelector('input[data-group-id]');
-    input?.addEventListener('click', () => {
-        setActivePromptGroup(id, name);
-        manageGroupResources(id, name);
-    });
-    
-    // Attach event listener to paperclip
-    div.querySelector('.group-item-paperclip').addEventListener('click', (e) => {
-        manageGroupResources(e.target.dataset.groupId, e.target.dataset.groupName);
-    });
-    
-    // Attach event listener to delete button
-    div.querySelector('.group-item-delete').addEventListener('click', (e) => {
-        deleteGroup(e.target.dataset.groupId);
-    });
-    
-    return div;
-}
 
 let isEditingGroup = false;
 
@@ -3831,7 +3091,7 @@ document.getElementById('group-form').addEventListener('submit', async (e) => {
                 console.log('[CREATE GROUP] All files processed, clearing local list');
                 // Clear files after successful upload - need to use splice to modify the actual array
                 groupSelectedFiles.length = 0; // Clear the array in place
-                window.groupSelectedFiles = groupSelectedFiles;
+
                 if (typeof window.updateGroupFilesList === 'function') {
                     window.updateGroupFilesList();
                 }
@@ -3845,8 +3105,8 @@ document.getElementById('group-form').addEventListener('submit', async (e) => {
             
             showMessage(isEditingGroup ? 'Reminder updated successfully' : 'Reminder created successfully');
             cancelEditGroup();
-            await loadGroups(true);
-            await loadAllGroups(true); // Force refresh groups cache
+            await Promise.resolve();
+             // Force refresh groups cache
         } else {
             const error = await response.json().catch(() => null);
             showMessage(error?.detail || 'Error saving reminder', 'error');
@@ -4025,80 +3285,13 @@ document.getElementById('reminder-name')?.addEventListener('keypress', (e) => {
     }
 });
 
-function editGroup(id, name, description) {
-    isEditingGroup = true;
-    document.getElementById('group-id').value = id;
-    document.getElementById('group-name').value = name;
-    document.getElementById('group-description').value = description;
-    document.getElementById('group-submit-btn').textContent = 'Update Group';
-    document.getElementById('group-cancel-btn').style.display = 'inline-block';
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-}
 
-function cancelEditGroup() {
-    isEditingGroup = false;
-    document.getElementById('group-form').reset();
-    document.getElementById('group-id').value = '';
-    document.getElementById('group-submit-btn').textContent = 'Create Group';
-    document.getElementById('group-cancel-btn').style.display = 'none';
-}
+
+
 
 document.getElementById('group-cancel-btn').addEventListener('click', cancelEditGroup);
 
-async function deleteGroup(id) {
-    if (!confirm('Are you sure you want to permanently delete this group and all its conversations? This cannot be undone.')) return;
 
-    try {
-        // 1) Fetch all conversations for this group (includes active conversations)
-        const convRes = await fetch(`/api/conversations?groupId=${encodeURIComponent(id)}`);
-        if (!convRes.ok) {
-            showMessage('Failed to load conversations for group', 'error');
-            return;
-        }
-
-        const convJson = await convRes.json();
-        const conversations = Array.isArray(convJson)
-            ? convJson
-            : (convJson?.data || convJson?.Data || []);
-
-        // 2) Permanently delete each conversation via the permanent delete API
-        if (conversations.length > 0) {
-            showMessage(`Deleting ${conversations.length} conversations...`);
-            const deletePromises = conversations
-                .map(c => c?.id || c?.Id)
-                .filter(Boolean)
-                .map(conversationId =>
-                    fetch(`/api/conversations/${conversationId}`, { method: 'DELETE' })
-                        .then(r => ({ ok: r.ok, status: r.status, id: conversationId }))
-                        .catch(e => ({ ok: false, error: e.message, id: conversationId }))
-                );
-
-            const results = await Promise.all(deletePromises);
-            const failed = results.filter(r => !r.ok);
-            if (failed.length > 0) {
-                console.warn('Failed to delete some conversations', failed);
-                showMessage(`Failed to delete ${failed.length} conversations. Aborting group delete.`, 'error');
-                return;
-            }
-        }
-
-        // 3) Delete the group itself via admin API
-        const response = await fetch(`${API_BASE}/groups/${id}`, { method: 'DELETE' });
-        if (response.ok || response.status === 204) {
-            showMessage('Group and its conversations deleted successfully');
-            if (activePromptGroupId === id) {
-                activePromptGroupId = null;
-            }
-            await loadGroups(true);
-            await loadAllGroups(true); // Force refresh groups cache
-        } else {
-            const error = await response.json().catch(() => null);
-            showMessage(error?.detail || 'Error deleting group', 'error');
-        }
-    } catch (error) {
-        showMessage('Error deleting group: ' + (error?.message || error), 'error');
-    }
-}
 
 async function loadPromptById(promptId, promptName) {
     if (!promptId) return;
@@ -4133,700 +3326,21 @@ async function loadPromptById(promptId, promptName) {
 }
 
 // Manage Group Resources (existing modal functionality)
-async function manageGroupResources(groupId, groupName) {
-    try {
-        console.log('[MANAGE] Looking for group ID:', groupId);
-        
-        // ALWAYS fetch fresh group data to avoid stale cache
-        console.log('[MANAGE] Fetching fresh group data...');
-        const groupRes = await fetchWithRetry(`${API_BASE}/groups?page=1&pageSize=100`);
-        if (!groupRes.ok) {
-            throw new Error(`Failed to fetch groups: ${groupRes.status}`);
-        }
-        const groupsResult = await groupRes.json();
-        // Handle both lowercase and uppercase from API
-        const groups = groupsResult.data || groupsResult.Data || [];
-        console.log('[MANAGE] Groups fetched:', groups.length);
-        
-        // Find group using case-insensitive property access
-        const currentGroup = groups.find(g => getProp(g, 'id') === groupId);
-        
-        if (!currentGroup) {
-            console.error('[MANAGE] Group not found. Looking for:', groupId);
-            console.error('[MANAGE] Available groups:', groups.map(g => getProp(g, 'id')));
-            throw new Error('Group not found');
-        }
-        
-        console.log('[MANAGE] Using fresh group data:', currentGroup);
-        
-        // ALWAYS fetch files and prompts fresh - don't rely on state cache
-        let allFiles = [];
-        let allPrompts = [];
-        
-        try {
-            console.log('[MANAGE] Fetching batch data for manage resources...');
-            
-            // Use new batch endpoint - single call instead of 2 separate calls
-            const batchRes = await fetchWithRetry(`${API_BASE}/batch?includeFiles=true&includePrompts=true&includeGroups=false&maxItems=1000`);
-            
-            console.log('[MANAGE] Batch response status:', batchRes.status);
-            
-            if (batchRes.ok) {
-                const batchResult = await batchRes.json();
-                console.log('[MANAGE] Batch response:', batchResult);
-                
-                // Handle files
-                if (batchResult.files) {
-                    allFiles = batchResult.files.data || batchResult.files.Data || [];
-                    console.log('[MANAGE] Fetched files count:', allFiles.length);
-                }
-                
-                // Handle prompts
-                if (batchResult.prompts) {
-                    allPrompts = batchResult.prompts.data || batchResult.prompts.Data || [];
-                    console.log('[MANAGE] Fetched prompts count:', allPrompts.length);
-                }
-                
-                if (allFiles.length > 0) {
-                    console.log('[MANAGE] Sample file:', allFiles[0]);
-                }
-                if (allPrompts.length > 0) {
-                    console.log('[MANAGE] Sample prompt:', allPrompts[0]);
-                }
-            } else {
-                console.error('[MANAGE] Batch request failed:', batchRes.status);
-                showMessage('Failed to load resources', 'error');
-                return;
-            }
-        } catch (fetchError) {
-            console.error('[MANAGE] Error fetching resources:', fetchError);
-            showMessage('Error loading resources: ' + fetchError.message, 'error');
-            return;
-        }
-        
-        console.log('[MANAGE] Final counts - Files:', allFiles.length, 'Prompts:', allPrompts.length);
-        
-        if (allFiles.length === 0 && allPrompts.length === 0) {
-            console.warn('[MANAGE] WARNING: No files or prompts returned from API');
-        }
-        
-        // Use getProp to access files and prompts arrays with case-insensitive fallback
-        const groupFiles = getProp(currentGroup, 'files') || [];
-        const groupDocuments = getProp(currentGroup, 'documents') || getProp(currentGroup, 'Documents') || [];
-        const groupPrompts = getProp(currentGroup, 'prompts') || [];
-        const groupConversations = getProp(currentGroup, 'conversations') || [];
-        const groupReminders = getProp(currentGroup, 'reminders') || [];
-        const groupFileIds = new Set(groupFiles.map(f => getProp(f, 'id')));
-        const groupDocumentIds = new Set(groupDocuments.map(d => getProp(d, 'id')));
-        const groupPromptIds = new Set(groupPrompts.map(p => getProp(p, 'id')));
-        
-        console.log('[MANAGE] Group files:', groupFiles);
-        console.log('[MANAGE] Group conversations:', groupConversations);
-        console.log('[MANAGE] Group reminders:', groupReminders);
-        
-        const modalBody = document.getElementById('modal-content-body');
 
-        // Build files list HTML - include files attached to the group AND files referenced by conversations in the group
-        let filesListHTML = '';
-
-        // Gather files referenced by conversations under this group
-        let convReferencedFiles = [];
-        try {
-            console.log('[MANAGE] Fetching conversations for group to collect referenced files...');
-            const convsRes = await fetchWithRetry(`/api/conversations?groupId=${groupId}&page=1&pageSize=100`);
-            if (convsRes.ok) {
-                const convsJson = await convsRes.json().catch(() => null);
-                const convs = convsJson?.data || convsJson || [];
-                console.log('[MANAGE] Conversations fetched for file extraction:', convs.length);
-                // For each conversation, try to load messages (if provided inline) or fetch details
-                for (const c of convs) {
-                    const convoId = getProp(c, 'id');
-                    let messages = null;
-                    try {
-                        const det = await fetchWithRetry(`/api/conversations/${convoId}`);
-                        if (det.ok) {
-                            const detJson = await det.json().catch(() => null);
-                            messages = detJson?.messages || detJson?.Messages || detJson || [];
-                        }
-                    } catch (e) {
-                        console.warn('[MANAGE] Failed to fetch conversation details for', convoId, e);
-                    }
-
-                    if (Array.isArray(messages)) {
-                        messages.forEach(m => {
-                            const msgFiles = Array.isArray(m.files)
-                                ? m.files
-                                : (Array.isArray(m.Attachments)
-                                    ? m.Attachments
-                                    : (Array.isArray(m.attachments) ? m.attachments : []));
-
-                            msgFiles.forEach(f => {
-                                if (!f) return;
-                                if (typeof f === 'string') {
-                                    convReferencedFiles.push({ name: f });
-                                } else {
-                                    const name = f.name || f.fileName || f.FileName || f.OriginalFileName || 'Document';
-                                    const id = f.id || f.documentId || f.DocumentId || f.DocumentMetadataId;
-                                    convReferencedFiles.push({ name, id });
-                                }
-                            });
-
-                            if (Array.isArray(m.sources)) {
-                                m.sources.forEach(s => {
-                                    if (!s) return;
-                                    const name = s.fileName || s.FileName || s.name || 'Document';
-                                    const id = s.documentId || s.DocumentId || s.id;
-                                    const page = s.pageNumber || s.PageNumber;
-                                    convReferencedFiles.push({ name: page ? `${name} (p.${page})` : name, id });
-                                });
-                            }
-                        });
-                    }
-                }
-            } else {
-                console.warn('[MANAGE] Failed to fetch conversations list for group file extraction', convsRes.status);
-            }
-        } catch (err) {
-            console.warn('[MANAGE] Error fetching convs for files:', err);
-        }
-
-        // Merge groupFiles with convReferencedFiles, dedupe by name+id
-        const combinedFiles = [];
-        const seen = new Set();
-        const pushFile = (f) => {
-            const name = getProp(f, 'originalFileName') || getProp(f, 'fileName') || f.name || 'Document';
-            const id = getProp(f, 'id') || f.id || f.documentId || '';
-            const isDocument = !!f.isDocument;
-            const key = `${String(name).toLowerCase()}::${id}::${isDocument ? 'doc' : 'file'}`;
-            if (!seen.has(key)) {
-                seen.add(key);
-                combinedFiles.push({ name, id, isDocument });
-            }
-        };
-
-        (groupFiles || []).forEach(f => pushFile({
-            id: getProp(f, 'id'),
-            name: getProp(f, 'originalFileName') || getProp(f, 'fileName') || 'Document',
-            isDocument: false
-        }));
-
-        (groupDocuments || []).forEach(d => pushFile({
-            id: getProp(d, 'id'),
-            name: getProp(d, 'originalFileName') || getProp(d, 'fileName') || 'Document',
-            isDocument: true
-        }));
-
-        convReferencedFiles.forEach(f => pushFile({
-            id: f.id || f.documentId || '',
-            name: f.name || 'Document',
-            isDocument: true
-        }));
-
-        // Sync group card file count with the modal's combined list
-        const groupIdKey = String(groupId);
-        const countEl = document.querySelector(`[data-group-file-count="${groupIdKey}"]`);
-        const countTitleEl = document.querySelector(`[data-group-file-count-title="${groupIdKey}"]`);
-        if (countEl) {
-            countEl.textContent = `${combinedFiles.length} files`;
-            countEl.setAttribute('aria-label', `${combinedFiles.length} files`);
-        }
-        if (countTitleEl) {
-            countTitleEl.setAttribute('title', `${combinedFiles.length} file(s)`);
-        }
-
-        if (combinedFiles.length === 0) {
-            filesListHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No attachments yet</div>';
-        } else {
-            filesListHTML = combinedFiles.map(file => {
-                const fileName = file.name || 'Unknown';
-                const fileId = file.id || '';
-                const previewFn = file.isDocument ? 'previewDocumentFile' : 'previewReminderFile';
-                return `
-                    <div style="padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0;">
-                        <span style="font-size: 14px; color: #333; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                            ${escapeHtml(String(fileName))}
-                        </span>
-                        <button type="button" onclick="${previewFn}('${fileId}', '${escapeHtml(String(fileName)).replace(/'/g, "\\'")}')"
-                            style="padding: 4px 12px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">
-                            Preview
-                        </button>
-                    </div>
-                `;
-            }).join('');
-        }
-        
-        // Build conversations list HTML
-        let conversationsListHTML = '';
-        if (groupConversations.length === 0) {
-            conversationsListHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No conversations yet</div>';
-        } else {
-            conversationsListHTML = groupConversations.map(convo => {
-                const convoId = getProp(convo, 'id');
-                const convoTitle = getProp(convo, 'title') || 'Untitled';
-                const messageCount = getProp(convo, 'messageCount') || 0;
-                const isActive = getProp(convo, 'isActive') || false;
-                const statusColor = isActive ? '#27ae60' : '#95a5a6';
-                const statusText = isActive ? 'Active' : 'Archived';
-                
-                // Validate conversation ID is a valid GUID format for security
-                const guidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
-                if (!guidRegex.test(convoId)) {
-                    console.warn('[MANAGE] Invalid conversation ID format:', convoId);
-                    return '';
-                }
-                
-                return `
-                    <div data-modal-conversation-id="${convoId}" style="padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0;">
-                        <div style="flex: 1; overflow: hidden;">
-                            <div style="font-size: 14px; color: #333; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                                ${escapeHtml(convoTitle)}
-                            </div>
-                            <div style="font-size: 11px; color: #666; margin-top: 2px;">
-                                <span style="color: ${statusColor};">● ${statusText}</span> · ${messageCount} message${messageCount !== 1 ? 's' : ''}
-                            </div>
-                        </div>
-                        <button type="button" onclick="viewConversation('${convoId}', '${escapeHtml(convoTitle).replace(/'/g, "\\'")}')"
-                            style="padding: 4px 12px; background: #9b59b6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">
-                            View
-                        </button>
-                    </div>
-                `;
-            }).join('');
-        }
-        
-        // Build reminders list HTML
-        let remindersListHTML = '';
-        if (groupReminders.length === 0) {
-            remindersListHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No reminders yet</div>';
-        } else {
-            remindersListHTML = groupReminders.map(reminder => {
-                const reminderId = getProp(reminder, 'id');
-                const reminderName = getProp(reminder, 'name') || 'Untitled';
-                const fileCount = getProp(reminder, 'fileCount') || 0;
-                const conversationCount = getProp(reminder, 'conversationCount') || 0;
-                
-                return `
-                    <div style="padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0;">
-                        <div style="flex: 1; overflow: hidden;">
-                            <div style="font-size: 14px; color: #333; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                                ${escapeHtml(reminderName)}
-                            </div>
-                            <div style="font-size: 11px; color: #666; margin-top: 2px;">
-                                📄 ${fileCount} file${fileCount !== 1 ? 's' : ''} · 🗨️ ${conversationCount} conversation${conversationCount !== 1 ? 's' : ''}
-                            </div>
-                        </div>
-                        <button type="button" onclick="manageGroupResources('${reminderId}', '${escapeHtml(reminderName).replace(/'/g, "\\'")}')"
-                            style="padding: 4px 12px; background: #e67e22; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">
-                            View
-                        </button>
-                    </div>
-                `;
-            }).join('');
-        }
-        
-        // Attempt to fetch existing mapping for this group and include mapping UI
-        let existingMapping = null;
-        try {
-            const mapRes = await fetchWithRetry(`/api/conversations/mapping?groupId=${groupId}`);
-            if (mapRes.ok) {
-                const mapJson = await mapRes.json().catch(() => null);
-                existingMapping = mapJson?.conversationId || mapJson?.ConversationId || null;
-            }
-        } catch (mapErr) {
-            console.warn('[MANAGE] Failed to fetch group->conversation mapping:', mapErr);
-        }
-
-        modalBody.innerHTML = `
-            <div style="display: flex; flex-direction: column; gap: 12px;">
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Group Contents</h3>
-                    <button type="button" onclick="closeManageGroupModal()" style="background: none; border: none; font-size: 20px; color: #95a5a6; cursor: pointer; padding: 0; line-height: 1;">×</button>
-                </div>
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
-                    <div style="border: 2px solid #0b63a6; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; position: relative;">
-                        <div style="font-weight: 600; color: #2c3e50; margin-bottom: 8px; font-size: 14px;">Files</div>
-                        <div id="modal-files-list" style="flex: 1; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; background: white; max-height: 360px; min-height: 160px;">
-                            ${filesListHTML}
-                        </div>
-                    </div>
-                    <div style="border: 2px solid #9b59b6; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; position: relative;">
-                        <div style="font-weight: 600; color: #2c3e50; margin-bottom: 8px; font-size: 14px;">Conversations</div>
-                        <div id="modal-conversations-list" style="flex: 1; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; background: white; max-height: 360px; min-height: 160px;">
-                            ${conversationsListHTML}
-                        </div>
-                    </div>
-                    <div style="border: 2px solid #e67e22; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; position: relative;">
-                        <div style="font-weight: 600; color: #2c3e50; margin-bottom: 8px; font-size: 14px;">Reminders</div>
-                        <div id="modal-reminders-list" style="flex: 1; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; background: white; max-height: 360px; min-height: 160px;">
-                            ${remindersListHTML}
-                        </div>
-                    </div>
-                </div>
-                <div style="border-top: 1px dashed #e0e0e0; padding-top: 12px; margin-top: 8px;">
-                    <div style="font-weight: 600; color: #2c3e50; margin-bottom: 8px; font-size: 14px;">Group Conversation Mapping</div>
-                        <div style="font-size: 13px; color: #666; margin-bottom: 8px;">This is a global server-side mapping from this group to an active conversation. Use it to force which conversation continues when queries target this group.</div>
-                        <div id="mapping-prompt-area" style="display:flex; flex-direction:column; gap:8px;">
-                            <div style="display:flex; gap:8px; align-items:center;">
-                                <select id="mapping-conversation-select" style="flex:1; padding:8px; border:1px solid #ddd; border-radius:4px;"></select>
-                                <button id="mapping-bind-btn" class="btn-gradient">Bind</button>
-                                <button id="mapping-clear-btn" class="secondary">Clear</button>
-                            </div>
-                            <div style="display:flex; gap:8px; align-items:center;">
-                                <input id="mapping-conversation-id" type="text" placeholder="Or paste ConversationId (GUID)" value="${existingMapping || ''}" style="flex:1; padding:8px; border:1px solid #ddd; border-radius:4px;" />
-                                <button id="mapping-paste-save-btn" class="btn-gradient">Save Paste</button>
-                            </div>
-                            <div style="margin-top:6px; font-size:12px; color:#95a5a6;">Tip: pick a recent conversation or paste a ConversationId, then click Bind/Save. Clear removes the server-side mapping.</div>
-                        </div>
-                </div>
-            </div>
-        `;
-
-        // Populate conversation picker
-        try {
-            const convSel = document.getElementById('mapping-conversation-select');
-            if (convSel) {
-                convSel.innerHTML = '<option value="">Loading...</option>';
-                const convRes = await fetchWithRetry(`/api/conversations?groupId=${groupId}`);
-                if (convRes.ok) {
-                    const convJson = await convRes.json().catch(() => null);
-                    const convs = convJson?.data || convJson?.Data || convJson || [];
-                    if (convs && convs.length > 0) {
-                        convSel.innerHTML = '';
-                        convs.forEach(c => {
-                            const id = getProp(c, 'id') || getProp(c, 'Id');
-                            const title = getProp(c, 'title') || getProp(c, 'Title') || (getProp(c, 'messages') && getProp(c, 'messages')[0]?.content?.slice(0,50)) || id;
-                            const updated = getProp(c, 'updatedAt') || getProp(c, 'UpdatedAt') || '';
-                            const label = `${title}${updated ? ' — ' + new Date(updated).toLocaleString() : ''}`;
-                            const opt = document.createElement('option');
-                            opt.value = id;
-                            opt.textContent = label;
-                            convSel.appendChild(opt);
-                        });
-                        if (existingMapping) convSel.value = existingMapping;
-                    } else {
-                        convSel.innerHTML = '<option value="">No recent conversations</option>';
-                    }
-                } else {
-                    convSel.innerHTML = '<option value="">Failed to load</option>';
-                }
-            }
-        } catch (err) {
-            console.warn('[MANAGE] Failed to load conversations for picker', err);
-        }
-
-        // Bind button
-        const bindBtn = document.getElementById('mapping-bind-btn');
-        bindBtn?.addEventListener('click', async () => {
-            const convSel = document.getElementById('mapping-conversation-select');
-            const selected = convSel?.value;
-            if (!selected) { showMessage('Please choose a conversation to bind', 'error'); return; }
-            try {
-                const payload = { ResourceGroupId: groupId, ConversationId: selected };
-                const res = await fetch('/api/conversations/mapping', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-                if (res.ok || res.status === 204) showMessage('Mapping bound successfully', 'success'); else showMessage('Failed to bind mapping', 'error');
-            } catch (err) { console.error(err); showMessage('Failed to bind mapping', 'error'); }
-        });
-
-        // Paste-save button (manual GUID)
-        const pasteSaveBtn = document.getElementById('mapping-paste-save-btn');
-        pasteSaveBtn?.addEventListener('click', async () => {
-            const input = document.getElementById('mapping-conversation-id');
-            const val = input?.value.trim();
-            if (!val) { showMessage('Please paste a ConversationId to save', 'error'); return; }
-            try {
-                const payload = { ResourceGroupId: groupId, ConversationId: val };
-                const res = await fetch('/api/conversations/mapping', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-                if (res.ok || res.status === 204) showMessage('Mapping saved successfully', 'success'); else showMessage('Failed to save mapping', 'error');
-            } catch (err) { console.error(err); showMessage('Failed to save mapping', 'error'); }
-        });
-
-        // Clear mapping button
-        const clearBtn = document.getElementById('mapping-clear-btn');
-        clearBtn?.addEventListener('click', async () => {
-            try {
-                const res = await fetch(`/api/conversations/mapping?groupId=${groupId}`, { method: 'DELETE' });
-                if (res.ok || res.status === 204) {
-                    showMessage('Mapping cleared', 'success');
-                    const convSel = document.getElementById('mapping-conversation-select'); if (convSel) convSel.value = '';
-                    const input = document.getElementById('mapping-conversation-id'); if (input) input.value = '';
-                } else {
-                    showMessage('Failed to clear mapping', 'error');
-                }
-            } catch (err) { console.error(err); showMessage('Failed to clear mapping', 'error'); }
-        });
-        
-        document.getElementById('manage-group-modal').classList.add('active');
-    } catch (error) {
-        showMessage('Error loading group resources: ' + error.message, 'error');
-    }
-}
 
 // Quick add to group functionality
-async function loadAllGroups(force = false) {
-    try {
-        console.log('[LOAD ALL GROUPS] Force refresh:', force);
-        const pageSize = 20;
-        const maxPages = 10;
-        let page = 1;
-        const allGroups = [];
 
-        while (page <= maxPages) {
-            const response = await fetchWithRetry(`${API_BASE}/groups?page=${page}&pageSize=${pageSize}`);
 
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
 
-            const result = await response.json();
-            if (isDegradedPagedResult(result)) {
-                console.warn('[LOAD ALL GROUPS] Received degraded response; preserving cached groups');
-                break;
-            }
 
-            const groupsPage = result.data || result.Data || [];
-            const pagination = result.pagination || result.Pagination || {};
-            const hasNext = !!(pagination.hasNext || pagination.HasNext);
 
-            allGroups.push(...groupsPage);
 
-            if (!hasNext || groupsPage.length === 0) {
-                break;
-            }
 
-            page++;
-        }
 
-        state.allGroups = allGroups;
-        console.log('[LOAD ALL GROUPS] Loaded', state.allGroups.length, 'groups');
-    } catch (error) {
-        console.error('Error loading all groups:', error);
-        state.allGroups = [];
-    }
-}
 
-async function showQuickAddToGroup(resourceId, resourceType, resourceName) {
-    // Always refresh groups to ensure we have the latest
-    console.log('[QUICK ADD] Refreshing groups list...');
-    await loadAllGroups(true);
-    
-    if (state.allGroups.length === 0) {
-        showMessage('No groups available. Create a group first.', 'error');
-        return;
-    }
-    
-    const modalBody = document.getElementById('modal-content-body');
-    modalBody.innerHTML = `
-        <h4 style="margin-bottom: 15px;">Add ${resourceType === 'file' ? 'File' : 'Prompt'} to Group</h4>
-        <p style="margin-bottom: 15px; color: #555;">${escapeHtml(resourceName)}</p>
-        
-        <div class="section">
-            <h5 style="margin-bottom: 10px;">Select Groups:</h5>
-            <div class="checkbox-group">
-                ${state.allGroups.map(group => `
-                    <div class="checkbox-item">
-                        <label>
-                            <input type="checkbox" 
-                                value="${group.id}" 
-                                data-action="quick-toggle-${resourceType}"
-                                data-group-id="${group.id}"
-                                data-resource-id="${resourceId}">
-                            ${escapeHtml(group.name)}
-                        </label>
-                    </div>
-                `).join('')}
-            </div>
-        </div>
-        <div style="margin-top: 20px; text-align: right;">
-            <button id="quick-add-submit" class="secondary">Done</button>
-        </div>
-    `;
-    
-    // Attach event listeners for checkboxes
-    modalBody.querySelectorAll(`[data-action="quick-toggle-${resourceType}"]`).forEach(checkbox => {
-        checkbox.addEventListener('change', async (e) => {
-            if (resourceType === 'file') {
-                await toggleFileInGroup(e.target.dataset.groupId, e.target.dataset.resourceId, e.target.checked);
-            } else {
-                await togglePromptInGroup(e.target.dataset.groupId, e.target.dataset.resourceId, e.target.checked);
-            }
-        });
-    });
-    
-    modalBody.querySelector('#quick-add-submit').addEventListener('click', () => {
-        closeManageGroupModal();
-        // Refresh only the relevant data based on resource type
-        if (resourceType === 'file') {
-            loadFiles(true);
-        } else {
-            loadPrompts(true);
-        }
-        loadGroups(true); // Always refresh groups to show updated counts
-    });
-    
-    document.getElementById('manage-group-modal').classList.add('active');
-}
-
-async function toggleFileInGroup(groupId, fileId, add) {
-    try {
-        const url = `${API_BASE}/groups/${groupId}/files/${fileId}`;
-        const method = add ? 'POST' : 'DELETE';
-        
-        const response = await fetch(url, { method });
-        
-        if (response.ok || response.status === 204) {
-            showMessage(add ? 'File added to group' : 'File removed from group');
-            
-            // Update the group in state cache
-            const groupInState = state.groups.data.find(g => g.id === groupId);
-            if (groupInState) {
-                if (!groupInState.files) groupInState.files = [];
-                if (add) {
-                    // Add file to cache if not already there
-                    if (!groupInState.files.find(f => f.id === fileId)) {
-                        const allFiles = state.files.data;
-                        const fileToAdd = allFiles.find(f => f.id === fileId);
-                        if (fileToAdd) groupInState.files.push(fileToAdd);
-                    }
-                } else {
-                    // Remove file from cache
-                    groupInState.files = groupInState.files.filter(f => f.id !== fileId);
-                }
-            }
-            
-            // Refresh groups display to show updated counts
-            loadGroups(true);
-            await loadAllGroups();
-        } else {
-            const error = await response.json();
-            showMessage(error.detail || 'Error updating group', 'error');
-            throw new Error(error.detail || 'Error updating group');
-        }
-    } catch (error) {
-        showMessage('Error updating group: ' + error.message, 'error');
-        throw error;
-    }
-}
-
-async function togglePromptInGroup(groupId, promptId, add) {
-    try {
-        const url = `${API_BASE}/groups/${groupId}/prompts/${promptId}`;
-        const method = add ? 'POST' : 'DELETE';
-        
-        const response = await fetch(url, { method });
-        
-        if (response.ok || response.status === 204) {
-            showMessage(add ? 'Prompt added to group' : 'Prompt removed from group');
-            
-            // Update the group in state cache
-            const groupInState = state.groups.data.find(g => g.id === groupId);
-            if (groupInState) {
-                if (!groupInState.prompts) groupInState.prompts = [];
-                if (add) {
-                    // Add prompt to cache if not already there
-                    if (!groupInState.prompts.find(p => p.id === promptId)) {
-                        const allPrompts = state.prompts.data;
-                        const promptToAdd = allPrompts.find(p => p.id === promptId);
-                        if (promptToAdd) groupInState.prompts.push(promptToAdd);
-                    }
-                } else {
-                    // Remove prompt from cache
-                    groupInState.prompts = groupInState.prompts.filter(p => p.id !== promptId);
-                }
-            }
-            
-            // Refresh groups display to show updated counts
-            loadGroups(true);
-            await loadAllGroups();
-        } else {
-            const error = await response.json();
-            showMessage(error.detail || 'Error updating group', 'error');
-            throw new Error(error.detail || 'Error updating group');
-        }
-    } catch (error) {
-        showMessage('Error updating group: ' + error.message, 'error');
-        throw error;
-    }
-}
-
-function closeManageGroupModal() {
-    document.getElementById('manage-group-modal').classList.remove('active');
-}
 
 // Preview file from reminder modal
-async function previewReminderFile(fileId, fileName) {
-    const modal = document.getElementById('reminder-file-preview-modal');
-    const modalContent = document.getElementById('reminder-file-preview-content');
-    const modalTitle = document.getElementById('reminder-file-preview-title');
-    
-    modalTitle.textContent = fileName;
-    modalContent.innerHTML = '<p style="color: #95a5a6; text-align: center; padding: 20px;">Loading preview...</p>';
-    modal.style.display = 'flex';
-    
-    const cacheBuster = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
-    const previewUrl = `${API_BASE}/files/${fileId}/preview?v=${cacheBuster}`;
-    const ext = fileName.split('.').pop().toLowerCase();
-    
-    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) {
-        const img = new Image();
-        img.onload = function() {
-            modalContent.innerHTML = `<img src="${previewUrl}" alt="${escapeHtml(fileName)}" style="max-width: 100%; max-height: 55vh; width: auto; height: auto; border-radius: 4px; object-fit: contain; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">`;
-        };
-        img.onerror = function() {
-            modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load image. The file may not exist or there was an error.</p>';
-        };
-        img.src = previewUrl;
-    } else if (ext === 'pdf') {
-        try {
-            const response = await fetch(previewUrl);
-            if (!response.ok) throw new Error('Failed to load PDF');
-            const buffer = await response.arrayBuffer();
-            const header = new TextDecoder().decode(new Uint8Array(buffer.slice(0, 4)));
-            if (header !== '%PDF') {
-                const text = new TextDecoder().decode(buffer);
-                modalContent.innerHTML = `<pre style="text-align: left; max-height: 55vh; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(text)}</pre>`;
-            } else {
-                const blobUrl = URL.createObjectURL(new Blob([buffer], { type: 'application/pdf' }));
-                modalContent.dataset.blobUrl = blobUrl;
-                modalContent.innerHTML = `<div style="text-align:center;"><iframe src="${blobUrl}" title="${escapeHtml(safeName || fileName || 'Document')}" style="width:100%; height:55vh; min-height:400px; border:none; border-radius:4px; background:#fff;"></iframe><div style="margin-top:8px;"><a href="${blobUrl}" target="_blank" rel="noopener" style="font-size:12px; color:#3498db;">Open in new tab ↗</a></div></div>`;
-            }
-        } catch (error) {
-            modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load file.</p>';
-        }
-    } else if (['txt', 'json', 'xml', 'csv'].includes(ext)) {
-        try {
-            const response = await fetch(previewUrl);
-            if (response.ok) {
-                const text = await response.text();
-                modalContent.innerHTML = `<pre style="text-align: left; max-height: 55vh; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(text)}</pre>`;
-            } else {
-                modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load file.</p>';
-            }
-        } catch (error) {
-            modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load file.</p>';
-        }
-    } else if (ext === 'md') {
-        try {
-            const response = await fetch(previewUrl);
-            if (response.ok) {
-                const text = await response.text();
-                const renderedHtml = renderMarkdown(text);
-                modalContent.innerHTML = `<div style="text-align: left; max-height: 55vh; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 14px;">${renderedHtml}</div>`;
-            } else {
-                modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load file.</p>';
-            }
-        } catch (error) {
-            modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load file.</p>';
-        }
-    } else {
-        modalContent.innerHTML = `
-            <div style="text-align: center; padding: 40px;">
-                <div style="font-size: 64px; margin-bottom: 20px;">📄</div>
-                <p style="color: #2f3a3f; font-size: 14px;">Preview not available for this file type.</p>
-                <p style="color: #95a5a6; font-size: 12px; margin-top: 10px;">File: ${escapeHtml(fileName)}</p>
-            </div>
-        `;
-    }
-}
+
 
 async function resolveDocumentIdByName(fileName) {
     if (!fileName) return null;
@@ -4968,19 +3482,7 @@ function showAttachedFilesModal(encodedFiles) {
     document.getElementById('manage-group-modal').classList.add('active');
 }
 
-function closeReminderFilePreviewModal() {
-    try {
-        const modalContent = document.getElementById('reminder-file-preview-content');
-        const blobUrl = modalContent?.dataset?.blobUrl;
-        if (blobUrl) {
-            URL.revokeObjectURL(blobUrl);
-            delete modalContent.dataset.blobUrl;
-        }
-    } catch (e) {
-        console.warn('Failed to revoke preview blob URL', e);
-    }
-    document.getElementById('reminder-file-preview-modal').style.display = 'none';
-}
+
 
 // Utility functions
 function escapeHtml(text) {
@@ -5823,12 +4325,8 @@ async function init() {
                 if (documentIds.length > 0) {
                     payload.DocumentIds = documentIds;
                 }
-                if (activePromptGroupId && !includeAllGroups) {
-                    payload.GroupIds = [activePromptGroupId];
-                }
-                if (activeConversationId) {
-                    payload.ConversationId = activeConversationId;
-                }
+
+
                 // Never upload files during Send. Attachments must already be registered by the
                 // auto-upload flow so sending a prompt cannot trigger a second heavy upload request.
                 if (promptSelectedFiles && promptSelectedFiles.length > 0) {
@@ -5912,61 +4410,6 @@ async function init() {
                     throw new Error('Empty response from server');
                 }
 
-                const responseConversationId = result.conversationId || result.ConversationId;
-                if (responseConversationId) {
-                    activeConversationId = responseConversationId;
-                    await joinConversationHubGroup(responseConversationId);
-                    // Server will persist group->conversation mapping. If we don't have an active group,
-                    // ask the server for the conversation to determine the associated group and activate it.
-                    if (!activePromptGroupId) {
-                        await syncActiveGroupFromConversation(responseConversationId);
-                    }
-
-                    // Attach documents to the conversation's group for persistence and RAG scoping.
-                    // Uses POST /api/documents/{id}/move which operates on DocumentGroups (DocumentMetadata
-                    // system). The old /api/admin/groups/{groupId}/files/{fileId} endpoint operates on
-                    // ManagedFiles (different table/IDs) and would always return 404 here.
-                    if (documentIdsAfterUpload && documentIdsAfterUpload.length > 0) {
-                        try {
-                            const convRes = await fetch(`/api/conversations/${responseConversationId}`);
-                            const convJson = convRes.ok ? await convRes.json().catch(() => null) : null;
-                            const convGroupId = convJson?.resourceGroupId || convJson?.ResourceGroupId || null;
-                            if (convGroupId) {
-                                for (const fileId of documentIdsAfterUpload) {
-                                    try {
-                                        await fetch(`/api/documents/${fileId}/move`, {
-                                            method: 'POST',
-                                            headers: { 'Content-Type': 'application/json' },
-                                            body: JSON.stringify({ groupIds: [convGroupId], regenerateEmbeddings: false })
-                                        });
-                                    } catch (attachErr) {
-                                        console.warn('[SEND PROMPT] Failed to attach document to group:', attachErr);
-                                    }
-                                }
-                            }
-                        } catch (err) {
-                            console.warn('[SEND PROMPT] Failed to attach documents to conversation group:', err);
-                        }
-                    }
-
-                    // Ensure the conversation stays linked to the active group (for group history)
-                    if (activePromptGroupId) {
-                        try {
-                            const convRes = await fetch(`/api/conversations/${responseConversationId}`);
-                            const convJson = convRes.ok ? await convRes.json().catch(() => null) : null;
-                            const convGroupId = convJson?.resourceGroupId || convJson?.ResourceGroupId || null;
-                            if (!convGroupId || String(convGroupId) !== String(activePromptGroupId)) {
-                                await fetch(`/api/conversations/${responseConversationId}/group`, {
-                                    method: 'PUT',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ resourceGroupId: activePromptGroupId })
-                                });
-                            }
-                        } catch (err) {
-                            console.warn('[SEND PROMPT] Failed to link conversation to active group:', err);
-                        }
-                    }
-                }
 
                 const answer = result.answer || result.Answer || result.AnswerText || result?.AnswerHtml || result?.answerText || 'No response received';
                 const normalizedAnswer = String(answer || '').trim();
@@ -6123,8 +4566,8 @@ async function init() {
 
                 apiCache.invalidate('/api/conversations');
                 await loadPrompts(true);
-                await loadGroups(true);
-                await loadAllGroups(true);
+                await Promise.resolve();
+
 
                 // Conversations are already persisted server-side via ConversationService
                 // No need to auto-save to ManagedPrompts (which are for reusable templates)
@@ -6235,7 +4678,7 @@ async function init() {
                 promptSelectedFiles = [];
                 window.promptSelectedFiles = promptSelectedFiles;
                 updatePromptFilesList();
-                activePromptGroupId = null;
+
                 updateActiveGroupStyles();
                 
                 const promptIdInput = document.getElementById('prompt-id');
@@ -6253,9 +4696,9 @@ async function init() {
         });
         
         // Setup reminders file management
-        let groupSelectedFiles = [];
-        window.groupSelectedFiles = groupSelectedFiles; // Expose to global scope
-        let groupPreviewFile = null;
+
+         // Expose to global scope
+
         const groupFileInput = document.getElementById('group-file-input');
         const groupFilesList = document.getElementById('group-files-list');
         const groupFilesIcon = document.getElementById('group-files-icon');
@@ -6266,50 +4709,7 @@ async function init() {
         const groupPreviewFilename = document.getElementById('group-preview-filename');
         
         // Initialize updateGroupFilesList function first
-        function updateGroupFilesList() {
-            // Update paperclip icon color
-            if (groupFilesIcon) {
-                if (groupSelectedFiles.length === 0) {
-                    groupFilesIcon.style.color = '#95a5a6'; // Gray when no files
-                } else {
-                    groupFilesIcon.style.color = '#0b63a6'; // Blue when files present
-                }
-            }
-            
-            // Update files list in Files section with checkboxes (only show if files exist)
-            if (groupFilesList) {
-                if (groupSelectedFiles.length === 0) {
-                    groupFilesList.innerHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No attachments yet</div>';
-                } else {
-                    groupFilesList.innerHTML = groupSelectedFiles.map((fileObj, index) => `
-                        <div style="padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0; ${fileObj.selected ? 'background: #f0f0f0;' : ''}">
-                            <input type="checkbox" ${fileObj.selected ? 'checked' : ''} style="width: 16px; height: 16px; cursor: pointer; margin: 0;" onclick="toggleGroupFileSelection(${index})">
-                            <span onclick="toggleGroupFileSelection(${index})" style="font-size: 14px; color: #333; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; user-select: none;">
-                                ${escapeHtml(fileObj.name)}
-                            </span>
-                            <button type="button" onclick="event.stopPropagation(); previewGroupFile(${index})" style="padding: 4px 12px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">Preview</button>
-                        </div>
-                    `).join('');
-                }
-            }
-            
-            // Sync window.groupSelectedFiles
-            window.groupSelectedFiles = groupSelectedFiles;
-            
-            // Update dropdown list
-            if (groupFilesListDropdown) {
-                if (groupSelectedFiles.length === 0) {
-                    groupFilesListDropdown.innerHTML = '<div style="color: #95a5a6; text-align: center; padding: 10px;">No attachments</div>';
-                } else {
-                    groupFilesListDropdown.innerHTML = groupSelectedFiles.map((fileObj, index) => `
-                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                            <span style="font-size: 12px; color: #2c3e50;">${escapeHtml(fileObj.name)}</span>
-                            <button type="button" onclick="removeGroupFile(${index})" style="padding: 2px 8px; background: #e74c3c; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 11px;">Delete</button>
-                        </div>
-                    `).join('');
-                }
-            }
-        }
+
         window.updateGroupFilesList = updateGroupFilesList;
         
         // Initialize files list display (after elements are defined)
@@ -6399,7 +4799,7 @@ async function init() {
                     // Auto-upload the file to the list
                     if (!groupSelectedFiles.find(f => f.name === file.name)) {
                         groupSelectedFiles.push({file: file, name: file.name, selected: false});
-                        window.groupSelectedFiles = groupSelectedFiles;
+
                         updateGroupFilesList();
                         showMessage('File added to list', 'success');
                     }
@@ -6415,7 +4815,7 @@ async function init() {
             if (groupPreviewFile) {
                 if (!groupSelectedFiles.find(f => f.name === groupPreviewFile.name)) {
                     groupSelectedFiles.push({file: groupPreviewFile, name: groupPreviewFile.name, selected: false});
-                    window.groupSelectedFiles = groupSelectedFiles;
+
                     updateGroupFilesList();
                 }
                 // Clear preview
@@ -6429,7 +4829,7 @@ async function init() {
         // Delete selected files
         document.getElementById('group-delete-selected-btn')?.addEventListener('click', () => {
             groupSelectedFiles = groupSelectedFiles.filter(f => !f.selected);
-            window.groupSelectedFiles = groupSelectedFiles;
+
             updateGroupFilesList();
         });
         
@@ -6452,70 +4852,10 @@ async function init() {
         }
         
         // Toggle file selection
-        window.toggleGroupFileSelection = function(index) {
-            groupSelectedFiles[index].selected = !groupSelectedFiles[index].selected;
-            window.groupSelectedFiles = groupSelectedFiles;
-            updateGroupFilesList();
-        };
+        ;
         
         // Preview group file
-        window.previewGroupFile = function(index) {
-            const fileObj = groupSelectedFiles[index];
-            if (!fileObj || !fileObj.file) {
-                showMessage('File not available for preview', 'error');
-                return;
-            }
-            
-            const file = fileObj.file;
-            const modal = document.getElementById('group-file-preview-modal');
-            const modalContent = document.getElementById('group-file-preview-content');
-            const modalTitle = document.getElementById('group-file-preview-title');
-            
-            modalTitle.textContent = file.name;
-            modalContent.innerHTML = '<p style="color: #95a5a6; text-align: center; padding: 20px;">Loading preview...</p>';
-            modal.style.display = 'flex';
-            
-            const ext = file.name.split('.').pop().toLowerCase();
-            
-            if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) {
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    modalContent.innerHTML = `<img src="${e.target.result}" style="max-width: 100%; max-height: 55vh; width: auto; height: auto; border-radius: 4px; object-fit: contain;">`;
-                };
-                reader.onerror = function() {
-                    modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load image.</p>';
-                };
-                reader.readAsDataURL(file);
-            } else if (ext === 'pdf') {
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    modalContent.innerHTML = `<div style="text-align:center;"><iframe src="${e.target.result}" title="${escapeHtml(file.name || 'Document')}" style="width:100%; height:55vh; min-height:400px; border:none; border-radius:4px; background:#fff;"></iframe><div style="margin-top:8px; font-size:12px; color:#95a5a6;">PDF preview</div></div>`;
-                };
-                reader.onerror = function() {
-                    modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load PDF.</p>';
-                };
-                reader.readAsDataURL(file);
-            } else if (['txt', 'json', 'xml', 'csv', 'md'].includes(ext)) {
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    const text = e.target.result;
-                    modalContent.innerHTML = `<pre style="text-align: left; max-height: 55vh; overflow: auto; padding: 15px; background: #f8f9fa; border-radius: 4px; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(text)}</pre>`;
-                };
-                reader.onerror = function() {
-                    modalContent.innerHTML = '<p style="color: #e74c3c; text-align: center; padding: 20px;">Failed to load text file.</p>';
-                };
-                reader.readAsText(file);
-            } else {
-                modalContent.innerHTML = `
-                    <div style="text-align: center; padding: 40px;">
-                        <div style="font-size: 64px; margin-bottom: 20px;">📄</div>
-                        <p style="color: #2f3a3f; font-size: 14px;">Preview not available for this file type.</p>
-                        <p style="color: #95a5a6; font-size: 12px; margin-top: 10px;">File: ${escapeHtml(file.name)}</p>
-                        <p style="color: #95a5a6; font-size: 12px;">Size: ${formatFileSize(file.size)}</p>
-                    </div>
-                `;
-            }
-        };
+        ;
         
         // Close modal when clicking outside
         document.getElementById('group-file-preview-modal')?.addEventListener('click', function(e) {
@@ -6532,26 +4872,15 @@ async function init() {
         });
         
         // Remove file from dropdown
-        window.removeGroupFile = function(index) {
-            groupSelectedFiles.splice(index, 1);
-            window.groupSelectedFiles = groupSelectedFiles;
-            updateGroupFilesList();
-        };
+        ;
         
         // Delete selected files from Files panel
-        window.deleteSelectedGroupFiles = function() {
-            const selectedCount = groupSelectedFiles.filter(f => f.selected).length;
-            if (selectedCount === 0) {
-                return; // Nothing to delete
-            }
-            groupSelectedFiles = groupSelectedFiles.filter(fileObj => !fileObj.selected);
-            updateGroupFilesList();
-        };
+        ;
         
         // Setup reminder file management (separate from groups)
         // reminderSelectedFiles is now declared at top level (line 673)
-        let reminderPreviewFile = null;
-        let reminderPreviewToken = 0;
+
+
         const reminderFileInput = document.getElementById('reminder-file-input');
         const reminderFilesList = document.getElementById('reminder-files-list');
         const reminderFilesIcon = document.getElementById('reminder-files-icon');
@@ -6560,32 +4889,7 @@ async function init() {
         const reminderPreviewFilename = document.getElementById('reminder-preview-filename');
         
         // Initialize updateReminderFilesList function
-        function updateReminderFilesList() {
-            if (reminderFilesIcon) {
-                if (reminderSelectedFiles.length === 0) {
-                    reminderFilesIcon.style.color = '#95a5a6';
-                } else {
-                    reminderFilesIcon.style.color = '#0b63a6';
-                }
-            }
-            
-            if (reminderFilesList) {
-                if (reminderSelectedFiles.length === 0) {
-                    reminderFilesList.innerHTML = '<div style="color: #95a5a6; text-align: center; padding: 20px; font-size: 14px;">No attachments yet</div>';
-                } else {
-                    reminderFilesList.innerHTML = reminderSelectedFiles.map((fileObj, index) => `
-                        <div style="padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0; ${fileObj.selected ? 'background: #f0f0f0;' : ''}">
-                            <input type="checkbox" ${fileObj.selected ? 'checked' : ''} style="width: 16px; height: 16px; cursor: pointer; margin: 0;" onclick="toggleReminderFileSelection(${index})">
-                            <span onclick="toggleReminderFileSelection(${index})" style="font-size: 14px; color: #333; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; user-select: none;">
-                                ${escapeHtml(fileObj.name)}
-                            </span>
-                        </div>
-                    `).join('');
-                }
-            }
 
-            window.reminderSelectedFiles = reminderSelectedFiles;
-        }
         window.updateReminderFilesList = updateReminderFilesList;
         
         // Initialize files list display
@@ -6700,36 +5004,17 @@ async function init() {
         });
         
         // Toggle file selection
-        window.toggleReminderFileSelection = function(index) {
-            if (reminderSelectedFiles[index]) {
-                reminderSelectedFiles[index].selected = !reminderSelectedFiles[index].selected;
-                updateReminderFilesList();
-            }
-        };
+        ;
         
         // Delete selected files
-        window.deleteSelectedReminderFiles = function() {
-            const selectedCount = reminderSelectedFiles.filter(f => f.selected).length;
-            if (selectedCount === 0) {
-                return;
-            }
-            reminderSelectedFiles = reminderSelectedFiles.filter(fileObj => !fileObj.selected);
-            updateReminderFilesList();
-
-            if (reminderSelectedFiles.length === 0) {
-                reminderPreviewFile = null;
-                reminderPreviewToken = 0;
-                if (reminderPreviewFilename) reminderPreviewFilename.textContent = '';
-                if (reminderPreviewContent) reminderPreviewContent.innerHTML = '<div style="font-size: 48px; color: #95a5a6; margin-bottom: 10px;">📄</div>';
-            }
-        };
+        ;
         
         // Load initial data with reset=true to ensure fresh load
         console.log('[INIT] Loading initial data...');
         const results = await Promise.allSettled([
             loadFiles(true),
             loadPrompts(true),
-            loadGroups(true)
+            Promise.resolve()
         ]);
         
         // Check for failures
@@ -6816,8 +5101,8 @@ async function init() {
                     }
                     showMessage('All history cleared successfully.', 'success');
                     // Reset active group/conversation state
-                    activePromptGroupId = null;
-                    activeConversationId = null;
+
+
                     currentConversationHistory = [];
                     promptSelectedFiles = [];
                     window.promptSelectedFiles = [];
@@ -6855,8 +5140,8 @@ async function init() {
                     await Promise.all([
                         loadFiles(true),
                         loadPrompts(true),
-                        loadGroups(true),
-                        loadReminders(true),
+                        Promise.resolve(),
+
                     ]).catch(() => {});
                     updatePromptFilesList();
                 } catch (err) {
