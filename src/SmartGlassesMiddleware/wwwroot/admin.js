@@ -11,6 +11,66 @@ async function loadPrompts(reset = false) {
         hideLoading('prompts-list');
     }
 }
+
+// Stub implementations for features not present in the current admin UI.
+// These functions are referenced by shared code paths (tab handlers, form
+// handlers, infinite-scroll setup, etc.) that were written to support a
+// richer admin UI.  The stubs prevent ReferenceErrors from halting script
+// execution — without them line 2986 throws before init() is ever called,
+// which means the conversation Send button and all file-upload listeners
+// inside init() are never attached.
+
+function createNewPrompt() {
+    // Prompt creation UI not present in this view; no-op stub.
+}
+
+function cancelEditGroup() {
+    // Groups UI not present in this view; no-op stub.
+    const form = document.getElementById('group-form');
+    if (form) form.reset();
+    const idField = document.getElementById('group-id');
+    if (idField) idField.value = '';
+    isEditingGroup = false;
+}
+
+function closeManageGroupModal() {
+    // Manage-group modal not present in this view; no-op stub.
+    const modal = document.getElementById('manage-group-modal');
+    if (modal) modal.classList.remove('active');
+}
+
+function closeReminderFilePreviewModal() {
+    // Reminder file-preview modal not present in this view; no-op stub.
+    const modal = document.getElementById('reminder-file-preview-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+async function loadReminders() {
+    // Reminders UI not present in this view; no-op stub.
+}
+
+async function loadGroups() {
+    // Groups UI not present in this view; no-op stub.
+}
+
+function updateGroupFilesList() {
+    // Groups file list UI not present in this view; no-op stub.
+    const list = document.getElementById('group-files-list');
+    if (!list) return;
+    // Render whatever is in groupSelectedFiles if the element exists.
+    list.innerHTML = (window.groupSelectedFiles || []).map(f =>
+        `<div class="file-item">${f.name || (f.file && f.file.name) || 'File'}</div>`
+    ).join('');
+}
+
+function updateReminderFilesList() {
+    // Reminders file list UI not present in this view; no-op stub.
+    const list = document.getElementById('reminder-files-list');
+    if (!list) return;
+    list.innerHTML = (window.reminderSelectedFiles || []).map(f =>
+        `<div class="file-item">${f.name || (f.file && f.file.name) || 'File'}</div>`
+    ).join('');
+}
 const API_BASE = '/api/admin';
 const ADMIN_DEBUG = !!window.__ADMIN_DEBUG__;
 const themeStorageKey = 'uiTheme';
@@ -1218,7 +1278,7 @@ function applyTheme(theme) {
 // Loading indicator
 function showLoading(listId) {
     const list = document.getElementById(listId);
-    if (!list) return;
+    if (!list) return; // element may not exist in the current admin view
     const loading = document.createElement('div');
     loading.className = 'loading-indicator';
     loading.id = `${listId}-loading`;
@@ -3289,7 +3349,7 @@ document.getElementById('reminder-name')?.addEventListener('keypress', (e) => {
 
 
 
-document.getElementById('group-cancel-btn').addEventListener('click', cancelEditGroup);
+document.getElementById('group-cancel-btn')?.addEventListener('click', cancelEditGroup);
 
 
 
@@ -3500,7 +3560,7 @@ function formatFileSize(bytes) {
 }
 
 // Close modal event listener
-document.getElementById('close-modal-btn').addEventListener('click', closeManageGroupModal);
+document.getElementById('close-modal-btn')?.addEventListener('click', closeManageGroupModal);
 
 // Close modal when clicking outside the modal content (overlay click)
 function attachOverlayClose(modalId, closeFn) {

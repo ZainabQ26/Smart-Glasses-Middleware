@@ -491,8 +491,8 @@ export default function App() {
 
     const trimmed = text.trim().toLowerCase();
     
-    // Very short fragments are likely noise
-    if (trimmed.length <= 2) return true;
+    // Very short fragments are likely noise, unless they are digits (e.g. file numbers)
+    if (trimmed.length <= 2 && !/^\d+$/.test(trimmed)) return true;
 
     // Common background noise interjections and filler words
     // (patterns that appear repeatedly or alone with no meaningful content)
@@ -559,8 +559,8 @@ export default function App() {
       // ── Require minimum command length (filter out single-word stray background noise) ─
       // ── Require minimum command length (but allow known single-word commands) ─
       const commandWords = commandText.trim().split(/\s+/);
-      const knownSingleWordCommands = ['iris', 'activate', 'next', 'previous', 'back', 'help', 'menu', 'close'];
-      const isSingleWordCommand = commandWords.length === 1 && knownSingleWordCommands.includes(commandWords[0].toLowerCase());
+      const knownSingleWordCommands = ['iris', 'activate', 'next', 'previous', 'back', 'help', 'menu', 'close', 'print', 'time', 'reminders', 'summary', 'admin', 'summarize'];
+      const isSingleWordCommand = commandWords.length === 1 && (knownSingleWordCommands.includes(commandWords[0].toLowerCase()) || /^\d+$/.test(commandWords[0]));
       const requiresTwoWords = !isSingleWordCommand && commandWords.length < 2;
       
       if (requiresTwoWords) {
