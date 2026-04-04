@@ -54,7 +54,7 @@ public class ProcessController : ControllerBase
 
     [HttpGet]
     [Route("client-settings")]
-    public IActionResult GetClientSettings()
+    public async Task<IActionResult> GetClientSettings(CancellationToken cancellationToken)
     {
         var configuredMode = _configuration["AI:SpeechTranscriptionMode"]?.Trim().ToLowerInvariant();
         var mode = configuredMode switch
@@ -71,10 +71,8 @@ public class ProcessController : ControllerBase
         var groqEnabled = true;
         if (_serverSettingsService is not null)
         {
-            groqEnabled = _serverSettingsService.GetGroqCommandTranscriptionSettingAsync(HttpContext?.RequestAborted ?? CancellationToken.None)
-                .GetAwaiter()
-                .GetResult()
-                .Enabled;
+            var groqSetting = await _serverSettingsService.GetGroqCommandTranscriptionSettingAsync(cancellationToken);
+            groqEnabled = groqSetting.Enabled;
         }
 
         return Ok(new { speechTranscriptionMode = mode, activationWord, groqCommandTranscriptionEnabled = groqEnabled });

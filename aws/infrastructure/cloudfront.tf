@@ -286,6 +286,40 @@ resource "aws_cloudfront_distribution" "frontend" {
     compress               = false
   }
 
+  # File upload behavior — placed before /api/* so it takes priority.
+  # File uploads are multipart/form-data binary POSTs; disabling CloudFront
+  # response compression avoids any interference with binary response bodies
+  # (e.g. JSON with embedded base64) and keeps the Content-Encoding header
+  # clean for the browser.  All request headers are forwarded so the origin
+  # receives the full multipart headers intact.
+  ordered_cache_behavior {
+    path_pattern     = "/api/admin/files*"
+    allowed_methods  = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
+    cached_methods   = ["GET", "HEAD"]
+    target_origin_id = "ALB-API"
+
+    forwarded_values {
+      query_string = true
+      headers      = ["Authorization", "Accept", "Content-Type", "Origin", "Content-Length", "Content-Disposition"]
+
+      cookies {
+        forward = "all"
+      }
+    }
+
+    viewer_protocol_policy = "redirect-to-https"
+    min_ttl                = 0
+    default_ttl            = 0
+    max_ttl                = 0
+    compress               = false
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.coop_coep.id
+
+    function_association {
+      event_type   = "viewer-response"
+      function_arn = aws_cloudfront_function.secure_cookies.arn
+    }
+  }
+
   # Cache behavior for API
   ordered_cache_behavior {
     path_pattern     = "/api/*"
