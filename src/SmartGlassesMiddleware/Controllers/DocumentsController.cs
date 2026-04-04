@@ -32,11 +32,10 @@ public class DocumentsController : ControllerBase
     private static readonly TimeSpan QueryExecutionTimeout = TimeSpan.FromSeconds(35);
     private static readonly TimeSpan QueryHistorySaveTimeout = TimeSpan.FromSeconds(3);
 
+    private readonly IAIService _aiService;
+
     public DocumentsController(
         ILogger<DocumentsController> logger,
-
-
-
         ApplicationDbContext context,
         IConfiguration configuration,
         IRequestMonitoringService monitoringService,
@@ -44,6 +43,7 @@ public class DocumentsController : ControllerBase
         IMediaStorageService mediaStorageService,
         IConversationService conversationService,
         IServiceScopeFactory scopeFactory,
+        IAIService aiService,
         IGroupConversationMappingService? groupConversationMappingService = null,
         ICacheService? cacheService = null,
         IHubContext<ResourceHub>? resourceHub = null)
@@ -56,6 +56,7 @@ public class DocumentsController : ControllerBase
         _mediaStorageService = mediaStorageService;
         _conversationService = conversationService;
         _scopeFactory = scopeFactory;
+        _aiService = aiService;
         _ragEnabled = configuration.GetValue<bool?>("RAG:Enabled") ?? true;
         _groupConversationMappingService = groupConversationMappingService;
         _cacheService = cacheService ?? new InMemoryCacheService(LoggerFactory.Create(b => b.AddConsole()).CreateLogger<InMemoryCacheService>());
@@ -524,13 +525,30 @@ public class DocumentsController : ControllerBase
             QueryResult result;
             if (conversation != null)
             {
-                _logger.LogInformation("Calling RAG service QueryDocumentsWithConversationAsync...");
-                result = new QueryResult { Answer = "RAG queries are disabled." };
+                _logger.LogInformation("Calling RAG service ProcessRequestAsync with conversation context...");
+                var processContext = new ProcessDocumentContext
+                {
+                    ConversationContext = conversation
+                };
+                var (task, aiResponse, usedAdvanced) = await _aiService.ProcessRequestAsync(request.Query, HttpContext.RequestAborted, processContext);
+                result = new QueryResult
+                {
+                    Answer = aiResponse,
+                    UsedAdvancedModel = usedAdvanced,
+                    Sources = new List<DocumentSource>()
+                };
             }
             else
             {
-                _logger.LogInformation("Falling back to stateless QueryDocumentsAsync (no conversation context)...");
-                result = new QueryResult { Answer = "RAG queries are disabled." };
+                _logger.LogInformation("Falling back to stateless ProcessRequestAsync (no conversation context)...");
+                var processContext = new ProcessDocumentContext();
+                var (task, aiResponse, usedAdvanced) = await _aiService.ProcessRequestAsync(request.Query, HttpContext.RequestAborted, processContext);
+                result = new QueryResult
+                {
+                    Answer = aiResponse,
+                    UsedAdvancedModel = usedAdvanced,
+                    Sources = new List<DocumentSource>()
+                };
             }
 
             _logger.LogInformation("RAG service returned result. Answer length: {Length}", result.Answer?.Length ?? 0);

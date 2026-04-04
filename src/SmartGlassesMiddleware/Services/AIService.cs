@@ -492,6 +492,17 @@ Task:";
         }
 
         var builder = new StringBuilder();
+
+        if (documentContext.ConversationContext != null && documentContext.ConversationContext.Messages.Any())
+        {
+            builder.AppendLine("Previous conversation context:");
+            foreach (var message in documentContext.ConversationContext.Messages.OrderBy(m => m.Timestamp))
+            {
+                builder.AppendLine($"[{message.Role.ToUpper()}]: {message.Content}");
+            }
+            builder.AppendLine();
+        }
+
         builder.AppendLine("User request:");
         builder.AppendLine(input);
         builder.AppendLine();
