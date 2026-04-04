@@ -447,8 +447,25 @@ public class DocumentsController : ControllerBase
 
             QueryResult result;
             _logger.LogInformation("Running stateless ProcessRequestAsync (no conversation context)...");
+
+            // Build conversation-aware query if history was supplied by the client.
+            string effectiveQuery = request.Query;
+            if (request.ConversationHistory?.Any() == true)
+            {
+                var historyBuilder = new System.Text.StringBuilder();
+                historyBuilder.AppendLine("Previous conversation:");
+                foreach (var msg in request.ConversationHistory.TakeLast(10))
+                {
+                    var role = string.Equals(msg.Role, "user", StringComparison.OrdinalIgnoreCase) ? "USER" : "ASSISTANT";
+                    historyBuilder.AppendLine($"[{role}]: {msg.Content}");
+                }
+                historyBuilder.AppendLine();
+                historyBuilder.AppendLine($"Current question: {request.Query}");
+                effectiveQuery = historyBuilder.ToString();
+            }
+
             var processContext = new ProcessDocumentContext();
-            var (task, aiResponse, usedAdvanced) = await _aiService.ProcessRequestAsync(request.Query, HttpContext.RequestAborted, processContext);
+            var (task, aiResponse, usedAdvanced) = await _aiService.ProcessRequestAsync(effectiveQuery, HttpContext.RequestAborted, processContext);
             result = new QueryResult
             {
                 Answer = aiResponse,
@@ -1020,6 +1037,14 @@ public class QueryRequest
     public Guid? ConversationId { get; set; }
     /// <summary>Optional client-provided request ID used for progress tracking via SignalR.</summary>
     public string? RequestId { get; set; }
+    /// <summary>Optional prior conversation turns for multi-turn context.</summary>
+    public List<ConversationHistoryMessage>? ConversationHistory { get; set; }
+}
+
+public class ConversationHistoryMessage
+{
+    public string Role { get; set; } = string.Empty;
+    public string Content { get; set; } = string.Empty;
 }
 
 public class MoveDocumentRequest
