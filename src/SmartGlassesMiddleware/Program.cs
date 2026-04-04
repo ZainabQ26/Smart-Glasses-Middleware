@@ -282,7 +282,6 @@ builder.Services.AddScoped<IEmbeddingClient, SmartGlassesMiddleware.Services.Bed
 builder.Services.AddScoped<IConversationService, ConversationService>();
 builder.Services.AddScoped<IPageSummaryService, BedrockPageSummaryService>();
 // Global mapping service for ResourceGroup -> Conversation
-builder.Services.AddScoped<IGroupConversationMappingService, GroupConversationMappingService>();
 builder.Services.AddScoped<IServerSettingsService, ServerSettingsService>();
 
 // Audio transcription service removed: transcription now handled entirely in-browser via Whisper worker
