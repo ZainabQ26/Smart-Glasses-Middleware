@@ -589,6 +589,7 @@ public class AdminController : ControllerBase
 
     [HttpPost("files")]
     [IgnoreAntiforgeryToken]
+    [RequestSizeLimit(MaxAdminUploadBytes)]
     [ProducesResponseType(StatusCodes.Status202Accepted)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult> UploadFile([FromForm] FileUploadRequest request)
@@ -686,7 +687,7 @@ public class AdminController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error uploading file");
-            await _monitoringService.CompleteRequest(requestId, false, error: ex.Message);
+            try { await _monitoringService.CompleteRequest(requestId, false, error: ex.Message); } catch { /* best-effort */ }
             return StatusCode(500, new ProblemDetails
             {
                 Title = "Internal Server Error",
