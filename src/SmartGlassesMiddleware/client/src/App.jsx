@@ -502,7 +502,7 @@ export default function App() {
       /^(?:yeah|yep|yup|nope|nah|mmm|huh|eh|shh)+\s*$/,       // common interjections alone
       /^[aeiou]{3,}$/,                                         // long vowel sounds (aaaa, uuuu)
       /^([a-z])\1{2,}\s*$/,                                    // repeated character (aaa, bbb)
-      /^(?:[a-z]\s*){2,}$/,                                    // just single letters separated
+      /^[a-z](\s+[a-z])+\s*$/,                                  // just single letters separated by whitespace (e.g. "a b c")
       /^(?:ggs|pfft|tsk|shhh|brr|shh)+\s*$/,                  // exclamations/sound effects
     ];
 
