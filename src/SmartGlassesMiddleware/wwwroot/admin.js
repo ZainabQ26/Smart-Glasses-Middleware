@@ -4638,11 +4638,17 @@ async function init() {
         });
         
         // Enter key handler for prompt text input
-        document.getElementById('prompt-name')?.addEventListener('keypress', (e) => {
+        document.getElementById('prompt-name')?.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
                 sendPrompt();
             }
+        });
+
+        // Form submit handler - prevent default and call sendPrompt
+        document.getElementById('prompt-form')?.addEventListener('submit', (e) => {
+            e.preventDefault();
+            sendPrompt();
         });
 
         // Conversations are already persisted server-side

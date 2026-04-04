@@ -914,48 +914,62 @@
             }
         }
 
-        /* Better responsive design */
+        /* Mobile view: compact header/tabs so content is immediately visible without scrolling */
         @media (max-width: 768px) {
-            .container {
-                padding: 10px;
+            header {
+                padding: 8px 0;
+                margin-bottom: 8px;
             }
 
             header h1 {
-                font-size: 1.5rem;
-                padding: 0 10px;
+                font-size: 1.1rem;
+                padding: 0 8px;
             }
 
             .header-nav {
                 display: flex;
+                flex-direction: row;
                 flex-wrap: wrap;
                 justify-content: center;
-                gap: 6px;
-                padding: 8px 10px 0;
+                gap: 4px;
+                padding: 4px 8px 0;
+                margin-top: 4px;
             }
 
-            .tab {
-                padding: 10px 16px;
-                font-size: 14px;
+            .header-nav > * {
+                width: auto !important;
+                margin: 0 !important;
+                font-size: 0.8rem !important;
+                padding: 4px 8px !important;
             }
 
             .tabs {
-                flex-wrap: wrap;
+                margin-bottom: 8px;
+                gap: 4px;
+                padding-bottom: 0;
             }
 
-            .card-actions {
-                flex-direction: column;
+            .tab {
+                padding: 8px 12px;
+                font-size: 13px;
             }
 
-            .card-actions button {
-                width: 100%;
+            .keepawake-toggle {
+                font-size: 11px;
+                padding: 4px 8px;
             }
 
-            .prompt-form-card {
-                padding: 16px;
+            .theme-toggle {
+                width: 32px;
+                height: 32px;
+            }
+
+            .container {
+                padding: 8px;
             }
         }
 
-        /* Mobile tab bar: stack tabs and controls on narrow screens */
+        /* Mobile tab bar: keep controls compact on narrow screens */
         @media (max-width: 600px) {
             body {
                 overflow-x: hidden;
@@ -970,12 +984,12 @@
             .tabs {
                 justify-content: flex-start;
                 flex-wrap: wrap;
-                gap: 6px;
-                padding-bottom: 6px;
+                gap: 4px;
+                padding-bottom: 4px;
             }
 
             .tab {
-                padding: 8px 14px;
+                padding: 6px 12px;
                 font-size: 13px;
                 flex-shrink: 0;
                 text-align: center;
@@ -983,8 +997,8 @@
 
             .keepawake-toggle {
                 margin-left: 0 !important;
-                font-size: 12px;
-                padding: 6px 10px;
+                font-size: 11px;
+                padding: 4px 8px;
                 flex-shrink: 0;
                 box-sizing: border-box;
             }
@@ -992,20 +1006,26 @@
             .theme-toggle {
                 margin-left: 0 !important;
                 box-sizing: border-box;
+                width: 32px;
+                height: 32px;
             }
 
             .header-nav {
                 display: flex;
-                flex-direction: column;
-                gap: 6px;
-                padding: 6px 10px 0;
-                align-items: stretch;
+                flex-direction: row;
+                flex-wrap: wrap;
+                gap: 4px;
+                padding: 4px 8px 0;
+                justify-content: center;
+                align-items: center;
             }
             .header-nav > * {
                 margin: 0 !important;
-                width: 100%;
+                width: auto !important;
                 box-sizing: border-box;
                 text-align: center;
+                font-size: 0.75rem !important;
+                padding: 3px 7px !important;
             }
 
             .responsive-flex-row {
@@ -1575,7 +1595,7 @@
                         <h2 id="prompt-form-title" style="margin: 0;">Conversation</h2>
                         <button type="button" id="new-chat-btn" style="padding: 8px 16px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500; white-space: nowrap;">New Conversation</button>
                     </div>
-                    <form id="prompt-form">
+                    <form id="prompt-form" onsubmit="return false;">
                         <input type="hidden" id="prompt-id">
                         <div class="form-group">
                             <label for="prompt-name">Message</label>
