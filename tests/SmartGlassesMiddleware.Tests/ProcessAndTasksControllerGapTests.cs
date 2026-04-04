@@ -91,7 +91,7 @@ public class ProcessAndTasksControllerGapTests
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["AI:SpeechTranscriptionMode"] = "whisper-only",
-                ["AI:ActivationWord"] = "Iris"
+                ["AI:ActivationWord"] = "Hi Iris"
             })
             .Build();
 

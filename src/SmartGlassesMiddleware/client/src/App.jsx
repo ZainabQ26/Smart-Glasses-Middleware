@@ -35,7 +35,7 @@ export default function App() {
   // Configurable activation word — stored in localStorage and updated live when
   // the admin panel changes it (via the storage event).
   const [activationWord, setActivationWord] = useState(() => {
-    try { return localStorage.getItem("sgm_activation_word")?.trim() || "iris"; } catch (_) { return "iris"; }
+    try { return localStorage.getItem("sgm_activation_word")?.trim() || "Hi Iris"; } catch (_) { return "Hi Iris"; }
   });
   // Ref copy so the async voice pipeline always reads the current value without
   // needing to restart the AudioContext effect.

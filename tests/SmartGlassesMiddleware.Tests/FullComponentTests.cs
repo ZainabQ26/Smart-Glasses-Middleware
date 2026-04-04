@@ -27,7 +27,7 @@ namespace SmartGlassesMiddleware.Tests
             mockConfig.Setup(x => x.GetSection("AI:SpeechTranscriptionMode")).Returns(mockConfigSection.Object);
 
             var mockWakeWordSection = new Mock<IConfigurationSection>();
-            mockWakeWordSection.Setup(x => x.Value).Returns("Iris");
+            mockWakeWordSection.Setup(x => x.Value).Returns("Hi Iris");
             mockConfig.Setup(x => x.GetSection("AI:ActivationWord")).Returns(mockWakeWordSection.Object);
 
             var mockLogger = new Mock<ILogger<ProcessController>>();
