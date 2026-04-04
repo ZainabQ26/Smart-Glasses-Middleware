@@ -51,12 +51,12 @@ public class ProcessControllerTests
     }
 
     [Test]
-    public void GetClientSettings_ReturnsOkWithConfiguredValues()
+    public async Task GetClientSettings_ReturnsOkWithConfiguredValues()
     {
         _configMock.Setup(x => x["AI:SpeechTranscriptionMode"]).Returns("webspeech-only");
         _configMock.Setup(x => x["AI:ActivationWord"]).Returns("TestWord");
 
-        var result = _controller.GetClientSettings() as OkObjectResult;
+        var result = await _controller.GetClientSettings(CancellationToken.None) as OkObjectResult;
 
         Assert.That(result, Is.Not.Null);
         Assert.That(result!.Value!.ToString(), Contains.Substring("speechTranscriptionMode = webspeech-only"));
