@@ -1218,6 +1218,7 @@ function applyTheme(theme) {
 // Loading indicator
 function showLoading(listId) {
     const list = document.getElementById(listId);
+    if (!list) return;
     const loading = document.createElement('div');
     loading.className = 'loading-indicator';
     loading.id = `${listId}-loading`;
@@ -2983,7 +2984,6 @@ function trackPrompt() {
 
 // Make functions globally available
 window.trackPrompt = trackPrompt;
-window.createNewPrompt = createNewPrompt;
 window.viewConversation = async function(conversationId, title) {
     try {
         // Close the modal
