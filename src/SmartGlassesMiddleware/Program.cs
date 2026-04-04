@@ -1200,15 +1200,15 @@ app.MapGet("/debug/resolve-components", async (IServiceProvider sp, ILoggerFacto
         {
             logger.LogWarning("Component resolution timed out");
             // attempt to read partial results
-            kernelResolved = kTask.IsCompletedSuccessfully ? kTask.Result : null;
-            dispatcherResolved = dTask.IsCompletedSuccessfully ? dTask.Result : null;
-            httpFactoryResolved = hTask.IsCompletedSuccessfully ? hTask.Result : null;
+            kernelResolved = kTask.IsCompletedSuccessfully ? await kTask : null;
+            dispatcherResolved = dTask.IsCompletedSuccessfully ? await dTask : null;
+            httpFactoryResolved = hTask.IsCompletedSuccessfully ? await hTask : null;
             return Results.StatusCode(504);
         }
 
-        kernelResolved = kTask.Result;
-        dispatcherResolved = dTask.Result;
-        httpFactoryResolved = hTask.Result;
+        kernelResolved = await kTask;
+        dispatcherResolved = await dTask;
+        httpFactoryResolved = await hTask;
 
         return Results.Ok(new
         {
