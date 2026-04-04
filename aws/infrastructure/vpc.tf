@@ -84,14 +84,19 @@ resource "aws_route_table" "public" {
   }
 }
 
-# Private Route Tables
+# Private Route Tables - always created so the S3 Gateway VPC Endpoint is
+# reachable from private app subnets regardless of NAT Gateway availability.
 resource "aws_route_table" "private" {
-  count  = var.enable_nat_gateway ? length(var.availability_zones) : 0
+  count  = length(var.availability_zones)
   vpc_id = aws_vpc.main.id
 
-  route {
-    cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = aws_nat_gateway.main[count.index].id
+  # Only add a default internet route when a NAT Gateway is available.
+  dynamic "route" {
+    for_each = var.enable_nat_gateway ? [1] : []
+    content {
+      cidr_block     = "0.0.0.0/0"
+      nat_gateway_id = aws_nat_gateway.main[count.index].id
+    }
   }
 
   tags = {
@@ -106,9 +111,10 @@ resource "aws_route_table_association" "public" {
   route_table_id = aws_route_table.public.id
 }
 
-# Route Table Associations - Private App
+# Route Table Associations - Private App - always associate so that
+# the S3 Gateway VPC Endpoint route is present for ECS tasks.
 resource "aws_route_table_association" "private_app" {
-  count          = var.enable_nat_gateway ? length(var.availability_zones) : 0
+  count          = length(var.availability_zones)
   subnet_id      = aws_subnet.private_app[count.index].id
   route_table_id = aws_route_table.private[count.index].id
 }
