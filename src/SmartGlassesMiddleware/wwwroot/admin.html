@@ -562,7 +562,7 @@
         }
 
         input[type="file"]::after {
-            content: ' (img pdf docx or txt) )';
+            content: ' (img pdf docx txt xml)';
             color: #2f3a3f;
             font-size: 13px;
         }
@@ -922,11 +922,24 @@
 
             header h1 {
                 font-size: 1.5rem;
+                padding: 0 10px;
+            }
+
+            .header-nav {
+                display: flex;
+                flex-wrap: wrap;
+                justify-content: center;
+                gap: 6px;
+                padding: 8px 10px 0;
             }
 
             .tab {
                 padding: 10px 16px;
                 font-size: 14px;
+            }
+
+            .tabs {
+                flex-wrap: wrap;
             }
 
             .card-actions {
@@ -936,18 +949,35 @@
             .card-actions button {
                 width: 100%;
             }
+
+            .prompt-form-card {
+                padding: 16px;
+            }
         }
 
         /* Mobile tab bar: stack tabs and controls on narrow screens */
         @media (max-width: 600px) {
+            body {
+                overflow-x: hidden;
+            }
+
+            .container {
+                padding: 8px;
+                overflow-x: hidden;
+                box-sizing: border-box;
+            }
+
             .tabs {
-                justify-content: center;
+                justify-content: flex-start;
+                flex-wrap: wrap;
+                gap: 6px;
+                padding-bottom: 6px;
             }
 
             .tab {
                 padding: 8px 14px;
                 font-size: 13px;
-                flex: 1 1 auto;
+                flex-shrink: 0;
                 text-align: center;
             }
 
@@ -956,27 +986,26 @@
                 font-size: 12px;
                 padding: 6px 10px;
                 flex-shrink: 0;
-                width: 100%;
-                justify-content: center;
                 box-sizing: border-box;
             }
 
             .theme-toggle {
                 margin-left: 0 !important;
-                width: 100% !important;
                 box-sizing: border-box;
             }
 
             .header-nav {
                 display: flex;
                 flex-direction: column;
-                gap: 8px;
-                padding: 0 15px;
+                gap: 6px;
+                padding: 6px 10px 0;
+                align-items: stretch;
             }
             .header-nav > * {
                 margin: 0 !important;
                 width: 100%;
                 box-sizing: border-box;
+                text-align: center;
             }
 
             .responsive-flex-row {
@@ -994,11 +1023,13 @@
             .responsive-btn-group {
                 display: flex;
                 width: 100%;
-                gap: 10px;
+                gap: 8px;
+                flex-wrap: wrap;
             }
 
             .responsive-btn-group > button {
                 flex: 1;
+                min-width: 70px;
             }
 
             .responsive-grid {
@@ -1009,6 +1040,34 @@
                 flex-direction: column !important;
                 align-items: stretch !important;
                 gap: 10px !important;
+            }
+
+            .tab-content {
+                overflow-x: hidden;
+                word-break: break-word;
+                box-sizing: border-box;
+            }
+
+            .prompt-form-card {
+                padding: 14px;
+                box-sizing: border-box;
+            }
+
+            .card {
+                padding: 12px;
+                box-sizing: border-box;
+            }
+
+            #new-chat-btn {
+                width: 100%;
+            }
+
+            input[type="text"],
+            input[type="file"],
+            textarea,
+            select {
+                max-width: 100%;
+                box-sizing: border-box;
             }
         }
 
@@ -1040,7 +1099,7 @@
         /* Modern Prompts Layout */
         .prompts-container {
             display: grid;
-            grid-template-columns: 250px 1fr;
+            grid-template-columns: 1fr;
             gap: 20px;
             align-items: start;
         }
@@ -1057,15 +1116,7 @@
         }
 
         @media (max-width: 600px) {
-            .responsive-header {
-                flex-direction: column !important;
-                align-items: stretch !important;
-                gap: 10px !important;
-            }
-
-            #new-chat-btn {
-                width: 100%;
-            }
+            /* duplicate mobile rules already covered above */
         }
 
         .prompt-sidebar {
@@ -1489,7 +1540,7 @@
                 <form id="upload-form">
                     <div class="form-group">
                         <label for="file-input">Select File (auto-upload on select)</label>
-                        <input type="file" id="file-input" accept="image/*,.pdf,.xml" required>
+                        <input type="file" id="file-input" accept="image/*,.pdf,.docx,.txt,.xml" required>
                     </div>
                 </form>
             </div>
@@ -1520,22 +1571,23 @@
             <section id="prompts-section" class="prompts-container">
                 
                 <div class="prompt-form-card">
-                    <div class="responsive-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <div class="responsive-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px;">
                         <h2 id="prompt-form-title" style="margin: 0;">Conversation</h2>
-                        <button type="button" id="new-chat-btn" style="padding: 8px 16px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">New Conversation</button>
+                        <button type="button" id="new-chat-btn" style="padding: 8px 16px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500; white-space: nowrap;">New Conversation</button>
                     </div>
                     <form id="prompt-form">
                         <input type="hidden" id="prompt-id">
                         <div class="form-group">
                             <label for="prompt-name">Message</label>
-                            <div class="responsive-flex-row" style="display: flex; gap: 10px;">
-                                <div style="position: relative; flex: 1;">
-                                    <input type="text" id="prompt-name" placeholder="Enter a message" required style="width: 100%; margin: 0; padding-right: 40px;">
+                            <div class="responsive-flex-row" style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                                <div style="position: relative; flex: 1; min-width: 0;">
+                                    <input type="text" id="prompt-name" placeholder="Enter a message" required style="width: 100%; margin: 0; padding-right: 40px; box-sizing: border-box;">
                                     <span id="prompt-files-icon" onclick="window.showPromptFilesPanel && window.showPromptFilesPanel()" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 20px; color: #95a5a6; cursor: pointer;">📎</span>
                                 </div>
-                                <div class="responsive-btn-group">
-                                    <button type="button" id="prompt-show-file-btn" onclick="window.togglePromptFileSection && window.togglePromptFileSection()" style="padding: 8px 16px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Attach file</button>
+                                <div class="responsive-btn-group" style="display: flex; gap: 8px; flex-shrink: 0;">
+                                    <button type="button" id="prompt-show-file-btn" onclick="window.togglePromptFileSection && window.togglePromptFileSection()" style="padding: 8px 14px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Attach file</button>
                                     <button type="button" id="prompt-send-btn" style="padding: 8px 16px; background: #1b5e20; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Send</button>
+                                    <button type="button" id="prompt-cancel-btn" style="display: none; padding: 8px 14px; background: #e67e22; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Cancel</button>
                                 </div>
                             </div>
                         </div>
