@@ -36,5 +36,19 @@ namespace SmartGlassesMiddleware.Tests
             // Assert
             Assert.That(client1, Is.Not.SameAs(client2));
         }
+
+        [Test]
+        [TestCase(null)]
+        [TestCase("")]
+        [TestCase("   ")]
+        public void CreateClient_WithVariousNames_ShouldStillReturnClient(string? name)
+        {
+            // Act
+            var client = _factory.CreateClient(name!);
+
+            // Assert
+            Assert.That(client, Is.Not.Null);
+            Assert.That(client, Is.InstanceOf<HttpClient>());
+        }
     }
 }
