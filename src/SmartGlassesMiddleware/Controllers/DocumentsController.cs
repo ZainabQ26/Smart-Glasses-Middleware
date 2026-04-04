@@ -19,8 +19,8 @@ public class DocumentsController : ControllerBase
     private readonly IRequestMonitoringService _monitoringService;
     private readonly IHistoryService _historyService;
     private readonly IMediaStorageService _mediaStorageService;
-    private readonly IConversationService _conversationService;
-    private readonly IGroupConversationMappingService? _groupConversationMappingService;
+
+
     private readonly ICacheService _cacheService;
     private readonly IHubContext<ResourceHub>? _resourceHub;
     private readonly IServiceScopeFactory _scopeFactory;
@@ -41,10 +41,10 @@ public class DocumentsController : ControllerBase
         IRequestMonitoringService monitoringService,
         IHistoryService historyService,
         IMediaStorageService mediaStorageService,
-        IConversationService conversationService,
+
         IServiceScopeFactory scopeFactory,
         IAIService aiService,
-        IGroupConversationMappingService? groupConversationMappingService = null,
+
         ICacheService? cacheService = null,
         IHubContext<ResourceHub>? resourceHub = null)
     {
@@ -54,11 +54,11 @@ public class DocumentsController : ControllerBase
         _monitoringService = monitoringService;
         _historyService = historyService;
         _mediaStorageService = mediaStorageService;
-        _conversationService = conversationService;
+
         _scopeFactory = scopeFactory;
         _aiService = aiService;
         _ragEnabled = configuration.GetValue<bool?>("RAG:Enabled") ?? true;
-        _groupConversationMappingService = groupConversationMappingService;
+
         _cacheService = cacheService ?? new InMemoryCacheService(LoggerFactory.Create(b => b.AddConsole()).CreateLogger<InMemoryCacheService>());
         _resourceHub = resourceHub;
     }
@@ -344,7 +344,7 @@ public class DocumentsController : ControllerBase
 
         string? requestId = null;
         var groupId = request.GroupIds?.FirstOrDefault();
-        Conversation? conversation = null;
+
 
         try
         {
@@ -355,63 +355,6 @@ public class DocumentsController : ControllerBase
                 clientRequestId);
 
             await TryUpdateMonitoringStatusAsync(requestId, "Searching documents...");
-
-            var enableConversationTracking = _configuration.GetValue<bool?>("RAG:EnableConversationTrackingInQuery") ?? false;
-            if (enableConversationTracking)
-            {
-                try
-                {
-                    if (request.ConversationId.HasValue)
-                    {
-                        conversation = await _conversationService.GetConversationAsync(request.ConversationId.Value);
-                        if (conversation == null)
-                        {
-                            _logger.LogWarning("Conversation {ConversationId} not found, falling back to detection", request.ConversationId);
-                        }
-                    }
-
-                    if (conversation == null && groupId.HasValue && groupId != Guid.Empty && _groupConversationMappingService != null)
-                    {
-                        var mapped = await _groupConversationMappingService.GetConversationIdForGroupAsync(groupId.Value);
-                        if (mapped.HasValue)
-                        {
-                            conversation = await _conversationService.GetConversationAsync(mapped.Value);
-                            if (conversation == null)
-                            {
-                                _logger.LogWarning("Mapped conversation {ConversationId} for group {GroupId} not found", mapped, groupId);
-                            }
-                        }
-                    }
-
-                    conversation ??= await _conversationService.DetectOrCreateConversationAsync(request.Query, groupId);
-                    _logger.LogInformation("Using conversation {ConversationId} for query", conversation.Id);
-
-                    try
-                    {
-                        var (topicChanged, newConversation) = await _conversationService.DetectTopicChangeAsync(conversation.Id, request.Query);
-                        if (topicChanged && newConversation != null)
-                        {
-                            _logger.LogInformation("Auto-switching conversation due to topic change: {NewId}", newConversation.Id);
-                            conversation = newConversation;
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Topic change detection threw an exception for conversation {ConversationId}", conversation.Id);
-                    }
-
-                    await _conversationService.AddMessageAsync(conversation.Id, "user", request.Query, null, request.DocumentIds);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Conversation tracking unavailable (possibly pending DB migrations). Proceeding with stateless RAG query.");
-                    conversation = null;
-                }
-            }
-            else
-            {
-                _logger.LogInformation("Conversation tracking disabled for query endpoint. Running stateless document query.");
-            }
 
             List<Guid>? effectiveDocumentIds = request.DocumentIds;
             if (request.DocumentIds != null && request.DocumentIds.Any())
@@ -450,7 +393,7 @@ public class DocumentsController : ControllerBase
                         Answer = failedDocuments.Count == 1
                             ? $"{failedDocuments[0].DisplayName} could not be processed yet. {failedDocuments[0].ProcessingError}"
                             : "One or more selected documents could not be processed yet. Re-upload them or try again later.",
-                        ConversationId = conversation?.Id,
+                        ConversationId = null,
                         Sources = new List<DocumentSource>(),
                         ReferencedSources = new List<DocumentSource>(),
                         ConversationSources = new List<ConversationSource>(),
@@ -459,17 +402,7 @@ public class DocumentsController : ControllerBase
                         TokenCount = 0
                     };
 
-                    if (conversation != null)
-                    {
-                        try
-                        {
-                            await _conversationService.AddMessageAsync(conversation.Id, "assistant", failureResult.Answer);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex, "Failed to save processing-error assistant message to conversation {ConversationId}", conversation.Id);
-                        }
-                    }
+
 
                     await TryCompleteMonitoringRequestAsync(requestId, true, result: "Document processing error returned to client");
                     return Ok(failureResult);
@@ -491,7 +424,7 @@ public class DocumentsController : ControllerBase
                         Answer = pendingDocuments.Count == 1
                             ? $"{pendingDocuments[0].DisplayName} is still being processed. Try again in a few seconds."
                             : $"{pendingDocuments.Count} selected documents are still being processed. Try again in a few seconds.",
-                        ConversationId = conversation?.Id,
+                        ConversationId = null,
                         Sources = new List<DocumentSource>(),
                         ReferencedSources = new List<DocumentSource>(),
                         ConversationSources = new List<ConversationSource>(),
@@ -500,17 +433,7 @@ public class DocumentsController : ControllerBase
                         TokenCount = 0
                     };
 
-                    if (conversation != null)
-                    {
-                        try
-                        {
-                            await _conversationService.AddMessageAsync(conversation.Id, "assistant", pendingResult.Answer);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex, "Failed to save pending assistant message to conversation {ConversationId}", conversation.Id);
-                        }
-                    }
+
 
                     await TryCompleteMonitoringRequestAsync(requestId, true, result: "Documents still processing");
                     return Ok(pendingResult);
@@ -523,60 +446,17 @@ public class DocumentsController : ControllerBase
             }
 
             QueryResult result;
-            if (conversation != null)
+            _logger.LogInformation("Running stateless ProcessRequestAsync (no conversation context)...");
+            var processContext = new ProcessDocumentContext();
+            var (task, aiResponse, usedAdvanced) = await _aiService.ProcessRequestAsync(request.Query, HttpContext.RequestAborted, processContext);
+            result = new QueryResult
             {
-                _logger.LogInformation("Calling RAG service ProcessRequestAsync with conversation context...");
-                var processContext = new ProcessDocumentContext
-                {
-                    ConversationContext = conversation
-                };
-                var (task, aiResponse, usedAdvanced) = await _aiService.ProcessRequestAsync(request.Query, HttpContext.RequestAborted, processContext);
-                result = new QueryResult
-                {
-                    Answer = aiResponse,
-                    UsedAdvancedModel = usedAdvanced,
-                    Sources = new List<DocumentSource>()
-                };
-            }
-            else
-            {
-                _logger.LogInformation("Falling back to stateless ProcessRequestAsync (no conversation context)...");
-                var processContext = new ProcessDocumentContext();
-                var (task, aiResponse, usedAdvanced) = await _aiService.ProcessRequestAsync(request.Query, HttpContext.RequestAborted, processContext);
-                result = new QueryResult
-                {
-                    Answer = aiResponse,
-                    UsedAdvancedModel = usedAdvanced,
-                    Sources = new List<DocumentSource>()
-                };
-            }
+                Answer = aiResponse,
+                UsedAdvancedModel = usedAdvanced,
+                Sources = new List<DocumentSource>()
+            };
 
             _logger.LogInformation("RAG service returned result. Answer length: {Length}", result.Answer?.Length ?? 0);
-
-            if (conversation != null)
-            {
-                try
-                {
-                    await _conversationService.AddMessageAsync(conversation.Id, "assistant", result.Answer ?? string.Empty);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to save assistant message to conversation {ConversationId}", conversation.Id);
-                }
-
-                try
-                {
-                    var mappingGroupId = conversation.ResourceGroupId ?? groupId;
-                    if (_groupConversationMappingService != null && mappingGroupId.HasValue && mappingGroupId != Guid.Empty)
-                    {
-                        await _groupConversationMappingService.UpsertMappingAsync(mappingGroupId.Value, conversation.Id);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to upsert group->conversation mapping");
-                }
-            }
 
             await TryCompleteMonitoringRequestAsync(requestId, true,
                 result: $"Found {result.Sources?.Count ?? 0} sources");
@@ -584,7 +464,7 @@ public class DocumentsController : ControllerBase
 
             QueueDocumentQueryHistorySave(request.Query, result.Sources?.Count ?? 0, requestId);
 
-            result.ConversationId = conversation?.Id;
+            result.ConversationId = null;
             return Ok(result);
         }
         catch (TimeoutException ex)
