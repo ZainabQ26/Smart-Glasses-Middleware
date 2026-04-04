@@ -1251,7 +1251,7 @@ async function loadFiles(reset = false) {
         const list = document.getElementById('files-list');
         
         if (!response.ok) {
-            if (isTransientGatewayStatus(response.status)) {
+            if (isTransientGatewayStatus(response.status) || response.status === 500) {
                 hideLoading('files-list');
 
                 if (reset && state.files.data.length === 0) {
@@ -4324,6 +4324,14 @@ async function init() {
                 const payload = { Query: promptText, TopK: 5, RequestId: requestId };
                 if (documentIds.length > 0) {
                     payload.DocumentIds = documentIds;
+                }
+
+                // Include prior conversation turns so the AI can maintain context.
+                if (currentConversationHistory.length > 0) {
+                    payload.ConversationHistory = currentConversationHistory.slice(-10).map(msg => ({
+                        Role: msg.role === 'user' ? 'user' : 'assistant',
+                        Content: msg.content
+                    }));
                 }
 
 
