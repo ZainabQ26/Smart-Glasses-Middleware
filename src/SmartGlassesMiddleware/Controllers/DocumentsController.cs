@@ -449,15 +449,21 @@ public class DocumentsController : ControllerBase
             _logger.LogInformation("Running stateless ProcessRequestAsync (no conversation context)...");
 
             // Build conversation-aware query if history was supplied by the client.
+            // Allowed roles are enforced by the model setter; content is stripped of control
+            // characters to reduce prompt-injection risk before being sent to the AI.
+            const int MaxHistoryTurns = 10;
             string effectiveQuery = request.Query;
             if (request.ConversationHistory?.Any() == true)
             {
                 var historyBuilder = new System.Text.StringBuilder();
                 historyBuilder.AppendLine("Previous conversation:");
-                foreach (var msg in request.ConversationHistory.TakeLast(10))
+                foreach (var msg in request.ConversationHistory.TakeLast(MaxHistoryTurns))
                 {
+                    if (string.IsNullOrWhiteSpace(msg.Content)) continue;
                     var role = string.Equals(msg.Role, "user", StringComparison.OrdinalIgnoreCase) ? "USER" : "ASSISTANT";
-                    historyBuilder.AppendLine($"[{role}]: {msg.Content}");
+                    // Strip control characters that could be used for prompt injection.
+                    var safeContent = System.Text.RegularExpressions.Regex.Replace(msg.Content, @"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", string.Empty);
+                    historyBuilder.AppendLine($"[{role}]: {safeContent}");
                 }
                 historyBuilder.AppendLine();
                 historyBuilder.AppendLine($"Current question: {request.Query}");
@@ -1043,8 +1049,28 @@ public class QueryRequest
 
 public class ConversationHistoryMessage
 {
-    public string Role { get; set; } = string.Empty;
-    public string Content { get; set; } = string.Empty;
+    private static readonly HashSet<string> AllowedRoles = new(StringComparer.OrdinalIgnoreCase) { "user", "assistant" };
+    private const int MaxContentLength = 4000;
+
+    private string _role = string.Empty;
+    private string _content = string.Empty;
+
+    public string Role
+    {
+        get => _role;
+        set => _role = AllowedRoles.Contains(value ?? string.Empty) ? value! : "user";
+    }
+
+    public string Content
+    {
+        get => _content;
+        set
+        {
+            var raw = value ?? string.Empty;
+            // Truncate overly long messages to prevent prompt inflation.
+            _content = raw.Length > MaxContentLength ? raw[..MaxContentLength] : raw;
+        }
+    }
 }
 
 public class MoveDocumentRequest

@@ -4327,8 +4327,10 @@ async function init() {
                 }
 
                 // Include prior conversation turns so the AI can maintain context.
+                // Keep in sync with MaxHistoryTurns on the backend (DocumentsController.cs).
+                const MAX_HISTORY_TURNS = 10;
                 if (currentConversationHistory.length > 0) {
-                    payload.ConversationHistory = currentConversationHistory.slice(-10).map(msg => ({
+                    payload.ConversationHistory = currentConversationHistory.slice(-MAX_HISTORY_TURNS).map(msg => ({
                         Role: msg.role === 'user' ? 'user' : 'assistant',
                         Content: msg.content
                     }));
