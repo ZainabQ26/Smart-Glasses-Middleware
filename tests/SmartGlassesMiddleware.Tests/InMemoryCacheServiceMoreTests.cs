@@ -80,4 +80,23 @@ public class InMemoryCacheServiceMoreTests
         var result = await _service.GetAsync<string>("fresh");
         Assert.That(result, Is.EqualTo("still-here"));
     }
+
+    [Test]
+    public async Task RemoveAsync_NullKey_CatchesException()
+    {
+        Assert.DoesNotThrowAsync(async () => await _service.RemoveAsync(null!));
+    }
+
+    [Test]
+    public async Task GetAsync_NullKey_CatchesException()
+    {
+        var result = await _service.GetAsync<string>(null!);
+        Assert.That(result, Is.Null);
+    }
+
+    [Test]
+    public async Task SetAsync_NullKey_CatchesException()
+    {
+        Assert.DoesNotThrowAsync(async () => await _service.SetAsync(null!, "val"));
+    }
 }
