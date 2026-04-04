@@ -3044,7 +3044,6 @@ function trackPrompt() {
 
 // Make functions globally available
 window.trackPrompt = trackPrompt;
-window.createNewPrompt = createNewPrompt;
 window.viewConversation = async function(conversationId, title) {
     try {
         // Close the modal

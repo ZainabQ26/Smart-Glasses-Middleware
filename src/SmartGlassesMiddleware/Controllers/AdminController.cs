@@ -590,11 +590,12 @@ public class AdminController : ControllerBase
     [HttpPost("files")]
     [IgnoreAntiforgeryToken]
     [RequestSizeLimit(MaxAdminUploadBytes)]
+    [RequestFormLimits(MultipartBodyLengthLimit = MaxAdminUploadBytes, ValueLengthLimit = int.MaxValue)]
     [ProducesResponseType(StatusCodes.Status202Accepted)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult> UploadFile([FromForm] FileUploadRequest request)
     {
-        if (request.File == null || request.File.Length == 0)
+        if (request?.File == null || request.File.Length == 0)
         {
             return BadRequest(new ProblemDetails
             {
