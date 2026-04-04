@@ -687,7 +687,7 @@ public class AdminController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error uploading file");
-            try { await _monitoringService.CompleteRequest(requestId, false, error: ex.Message); } catch { /* best-effort */ }
+            try { await _monitoringService.CompleteRequest(requestId, false, error: ex.Message); } catch (Exception monitorEx) { _logger.LogWarning(monitorEx, "Failed to complete monitoring request {RequestId}", requestId); }
             return StatusCode(500, new ProblemDetails
             {
                 Title = "Internal Server Error",
