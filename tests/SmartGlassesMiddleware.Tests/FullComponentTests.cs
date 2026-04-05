@@ -23,7 +23,7 @@ namespace SmartGlassesMiddleware.Tests
 
             var mockConfig = new Mock<IConfiguration>();
             var mockConfigSection = new Mock<IConfigurationSection>();
-            mockConfigSection.Setup(x => x.Value).Returns("whisper-only");
+            mockConfigSection.Setup(x => x.Value).Returns("groq-only");
             mockConfig.Setup(x => x.GetSection("AI:SpeechTranscriptionMode")).Returns(mockConfigSection.Object);
 
             var mockWakeWordSection = new Mock<IConfigurationSection>();

@@ -217,7 +217,7 @@ public class ProcessController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Groq command transcription unavailable; caller should fallback to local Whisper.");
+            _logger.LogWarning(ex, "Groq command transcription unavailable.");
             return StatusCode(503, new { error = "Groq transcription unavailable" });
         }
     }
