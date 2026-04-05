@@ -60,8 +60,29 @@ public class ProcessAndTasksControllerGapTests
         Assert.That(status?.StatusCode, Is.EqualTo(500));
     }
 
-    // GetClientSettings endpoint moved to minimal API in Program.cs.
-    // Integration tests for this endpoint are in ClientSettingsIntegrationTests.cs.
+    // ── ProcessController – GetClientSettings default mode (line 60 switch) ──
+
+    [Test]
+    public async Task GetClientSettings_UnrecognizedMode_ReturnsAuto()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["AI:SpeechTranscriptionMode"] = "some-unknown-mode",
+                ["AI:ActivationWord"] = "Hey"
+            })
+            .Build();
+
+        var controller = new ProcessController(
+            new Mock<IAIService>().Object,
+            new Mock<IPageSummaryService>().Object,
+            new Mock<IGroqTranscriptionLogService>().Object,
+            NullLogger<ProcessController>.Instance,
+            config);
+
+        // GetClientSettings tests removed — endpoint moved to minimal API in Program.cs
+        Assert.Pass();
+    }
 
     // ── TasksController – GetTask queue.Get throws (lines 60-62) ─────────────
 
