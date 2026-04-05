@@ -1,16 +1,15 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import WhisperWorker from "./whisperWorker?worker";
 import PdfViewer from "./PdfViewer.jsx";
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 //
-// Voice pipeline: Whisper WASM (single multilingual whisper-base model)
-//   - AudioContext + ScriptProcessorNode captures mic at 16 kHz
+// Voice pipeline: Groq API (server-side Whisper transcription)
+//   - AudioContext + AudioWorklet captures mic at 16 kHz
 //   - Amplitude VAD detects speech vs silence
-//   - Wake-word mode: each speech chunk sent to Whisper; "activate" triggers command mode
+//   - Wake-word mode: each speech chunk sent to server Groq; "Hi Iris" triggers command mode
 //   - Command mode: chunks sent as partial results; sentence-end pattern or 2.5 s
 //     silence submits the full accumulated audio for final transcription via
-//     Groq Whisper Turbo, with local Whisper fallback if Groq is unavailable
+//     Groq Whisper Turbo on the server
 //
 import glassesImg from "./pdf/image/Gemini_Generated_Image_8mwak58mwak58mwa.png";
 
@@ -21,17 +20,11 @@ export default function App() {
   const [aiResponse, setAiResponse] = useState(null);
   const [usedAdvancedModel, setUsedAdvancedModel] = useState(false);
   const [wakeWordReady, setWakeWordReady] = useState(false);
-  // Loading message received from the Whisper worker while it downloads / initialises.
-  const [whisperLoadingMsg, setWhisperLoadingMsg] = useState("Initializing…");
-  // Whisper model readiness flag (shows loading UI until model is ready)
-  const [whisperReady, setWhisperReady] = useState(false);
   const [pendingAction, _setPendingActionState] = useState(null); // { type: "SHOW_RECENT_FILES", files } | { type: "SELECT_DOCUMENT", id, name } | null
   // Reminders toast: null | { reminders: [], phase: 'visible'|'fading' }
   const [remindersToast, setRemindersToast] = useState(null);
   // Show landing screen until the user says the activation word for the first time.
   const [showLanding, setShowLanding] = useState(true);
-  const [groqCommandTranscriptionEnabled, setGroqCommandTranscriptionEnabled] = useState(true);
-  const pendingCommandsRef = useRef(new Map());
   // Configurable activation word — stored in localStorage and updated live when
   // the admin panel changes it (via the storage event).
   const [activationWord, setActivationWord] = useState(() => {
@@ -40,7 +33,6 @@ export default function App() {
   // Ref copy so the async voice pipeline always reads the current value without
   // needing to restart the AudioContext effect.
   const activationWordRef = useRef(activationWord);
-  const groqCommandTranscriptionEnabledRef = useRef(groqCommandTranscriptionEnabled);
   // Wrapper keeps the ref in sync so async callbacks always read the current value.
   const setPendingAction = useCallback((val) => {
     pendingActionRef.current = typeof val === "function" ? val(pendingActionRef.current) : val;
@@ -56,7 +48,6 @@ export default function App() {
   const activatedRef        = useRef(false);
   const vadRef              = useRef(null);   // VAD removed; kept so optional calls are no-ops
   const listeningTimeoutRef = useRef(null);
-  const workerRef           = useRef(null);
   const sendToAIRef         = useRef(null);
   const commandSubmitTimeoutRef = useRef(null); // sentence-end short timer
   // Audio pipeline refs
@@ -196,11 +187,6 @@ export default function App() {
   }, []);
 
   const transcribeCommandWithGroq = useCallback(async (audio) => {
-    if (!groqCommandTranscriptionEnabledRef.current) {
-      addLog("ℹ️ Groq command transcription is disabled in admin settings", "info");
-      return null;
-    }
-
     try {
       const formData = new FormData();
       formData.append("audio", float32ToWavBlob(audio), "command.wav");
@@ -218,10 +204,33 @@ export default function App() {
       const text = (payload?.text || "").trim();
       return text || null;
     } catch (err) {
-      addLog(`⚠️ Groq Whisper Turbo unavailable (${err?.message || "unknown error"}) — using local Whisper fallback`, "warn");
+      addLog(`⚠️ Groq transcription error: ${err?.message || "unknown error"}`, "warn");
       return null;
     }
   }, [API_TIMEOUT_MS, addLog, fetchJsonWithTimeout, float32ToWavBlob]);
+
+  const transcribeWakewordWithGroq = useCallback(async (audio) => {
+    try {
+      const formData = new FormData();
+      formData.append("audio", float32ToWavBlob(audio), "wakeword.wav");
+      formData.append("language", "en");
+
+      const payload = await fetchJsonWithTimeout(
+        "/api/process/transcribe-wakeword",
+        {
+          method: "POST",
+          body: formData,
+        },
+        5000,
+      );
+
+      const text = (payload?.text || "").trim();
+      return text || null;
+    } catch (err) {
+      // Silently fail for wake-word — don't spam logs
+      return null;
+    }
+  }, [addLog, fetchJsonWithTimeout, float32ToWavBlob]);
 
   useEffect(() => {
     return () => {
@@ -232,7 +241,6 @@ export default function App() {
 
   // Keep activationWordRef in sync with the state value.
   useEffect(() => { activationWordRef.current = activationWord; }, [activationWord]);
-  useEffect(() => { groqCommandTranscriptionEnabledRef.current = groqCommandTranscriptionEnabled; }, [groqCommandTranscriptionEnabled]);
 
 
 
@@ -264,12 +272,6 @@ export default function App() {
             setActivationWord(w);
             activationWordRef.current = w;
           }
-
-          const groqEnabled = typeof data?.groqCommandTranscriptionEnabled === "boolean"
-            ? data.groqCommandTranscriptionEnabled
-            : true;
-          setGroqCommandTranscriptionEnabled(groqEnabled);
-          groqCommandTranscriptionEnabledRef.current = groqEnabled;
 
           if (!cancelled) {
             await sleep(POLL_INTERVAL_MS);
@@ -860,21 +862,24 @@ export default function App() {
   const transcribeCommandWithGroqRef = useRef(transcribeCommandWithGroq);
   useEffect(() => { transcribeCommandWithGroqRef.current = transcribeCommandWithGroq; }, [transcribeCommandWithGroq]);
 
-  // ── Voice pipeline: Whisper WASM + AudioContext mic capture ────────────
+  const transcribeWakewordWithGroqRef = useRef(transcribeWakewordWithGroq);
+  useEffect(() => { transcribeWakewordWithGroqRef.current = transcribeWakewordWithGroq; }, [transcribeWakewordWithGroq]);
+
+  // ── Voice pipeline: Groq API + AudioContext mic capture ────────────────
   //
-  // One multilingual whisper-base model handles all modes:
-  //   'wake-word' — short bursts checked for the keyword (e.g. "iris")
-  //   'partial'   — each speech burst during a command; result streams to UI
-  //   'command'   — full accumulated audio; final high-quality transcription
+  // All transcription goes through the server-side Groq Whisper API.
+  //   'wake-word' — short bursts sent to /api/process/transcribe-wakeword; checked for keyword
+  //   'partial'   — each speech burst during a command; transcribed via Groq for streaming UI
+  //   'command'   — full accumulated audio; final transcription via Groq
   //
-  // Sentence-end detection: Whisper naturally adds `.` `?` `!` when it hears
-  // a complete thought.  We detect these patterns and submit the command after
-  // a short pause (SENTENCE_END_SILENCE_MS) rather than waiting for the full
-  // force-submit timeout — this gives a much more natural end-of-utterance feel.
+  // Sentence-end detection: Groq Whisper naturally adds `.` `?` `!` when it
+  // hears a complete thought.  We detect these patterns and submit the command
+  // after a short pause (SENTENCE_END_MS) rather than waiting for the full
+  // force-submit timeout.
   useEffect(() => {
     const SAMPLE_RATE          = 16_000;
-    const BUFFER_SIZE          = 1024;       // 64 ms per ScriptProcessor callback
-    const RMS_THRESHOLD        = 0.010;      // RMS below this → silence (increased to filter background chatter)
+    const BUFFER_SIZE          = 1024;       // 64 ms per AudioWorklet callback
+    const RMS_THRESHOLD        = 0.010;      // RMS below this → silence
     const WAKE_SILENCE_MS      = 220;        // wake-word path: short silence for snappier activation
     const COMMAND_SILENCE_MS   = 650;        // command path: larger chunks for better transcription context
     const SENTENCE_END_MS      = 350;        // pause after sentence-end pattern → submit
@@ -890,10 +895,11 @@ export default function App() {
     let preSpeechBuffer = []; // Rolling buffer of the last ~500ms of audio before speech
     const MAX_PRE_SPEECH_CHUNKS = Math.ceil((SAMPLE_RATE * 0.5) / BUFFER_SIZE);
     let commandChunks = [];   // all audio accumulated since activation
-    let partialTexts  = [];   // Whisper partial transcriptions so far
+    let partialTexts  = [];   // Groq partial transcriptions so far
     let isSpeaking    = false;
     let silenceSince  = 0;
     let lastWakeCheckTime = 0;
+    let wakewordInFlight = false; // prevent overlapping wake-word API calls
 
     let forceSubmitTimer    = null;
     let sentenceEndTimer    = null;
@@ -906,9 +912,6 @@ export default function App() {
       return out;
     }
 
-    // Detect whether Whisper thinks the utterance is a complete sentence.
-    // Whisper adds punctuation naturally; we also match common short commands
-    // that may not get punctuation but are clearly self-contained.
     function isSentenceComplete(text) {
       if (!text) return false;
       const t = text.trim();
@@ -943,218 +946,98 @@ export default function App() {
 
       if (audio.length < SAMPLE_RATE * MIN_COMMAND_SEC) {
         if (partial) {
-          // Wake-word + inline command detected; audio window was too short but the
-          // text from the wake-word utterance is reliable — send it directly to AI.
           activatedRef.current = false;
           showTranscript(partial);
           setAiResponse(null);
           setStatus("sending");
           sendToAIRef.current?.(partial);
         } else {
-          // Too short — almost certainly noise or misfire
           resumeListeningRef.current();
         }
         return;
       }
 
       activatedRef.current = false;
-      if (partial) showTranscript(partial); // preview while final runs
+      if (partial) showTranscript(partial);
       setStatus("processing");
 
-      // Dispatch both Groq and Local Whisper concurrently
-      const commandId = Date.now().toString() + Math.random().toString();
-
-      const localWhisperPromise = new Promise((resolve) => {
-        pendingCommandsRef.current.set(commandId, resolve);
-        workerRef.current?.postMessage({ type: "transcribe", audio, mode: "command", commandId });
-      });
-
-      const groqPromise = (async () => {
+      // Send to Groq for final transcription
+      try {
         const text = await transcribeCommandWithGroqRef.current?.(audio);
         if (text && text.length >= 2 && /[A-Za-z0-9]/.test(text)) {
-           return { source: 'groq', text };
-        }
-        throw new Error("Groq failed or invalid result");
-      })();
-
-      const isValidResult = (text) => text && text.length >= 2 && /[A-Za-z0-9]/.test(text);
-
-      try {
-        // Try to get the first successful valid result
-        let result = await Promise.any([
-          groqPromise,
-          localWhisperPromise.then(text => {
-            if (isValidResult(text)) return { source: 'local', text };
-            throw new Error("Local Whisper failed or invalid result");
-          })
-        ]);
-
-        if (result.source === 'groq') {
-          addLog(`🗣️ Groq Whisper Turbo: "${result.text}"`, "voice");
+          addLog(`🗣️ Groq: "${text}"`, "voice");
+          showTranscript(text);
+          setAiResponse(null);
+          setStatus("sending");
+          sendToAIRef.current?.(text);
         } else {
-          addLog(`🗣️ Local Whisper: "${result.text}"`, "voice");
+          addLog("(No speech detected in command)", "warn");
+          resumeListeningRef.current();
         }
-
-        showTranscript(result.text);
-        setAiResponse(null);
-        setStatus("sending");
-        sendToAIRef.current?.(result.text);
-
       } catch (err) {
-        // Both failed
-        addLog("(No speech detected in command)", "warn");
+        addLog(`❌ Transcription error: ${err?.message || "unknown"}`, "error");
         resumeListeningRef.current();
-      } finally {
-        pendingCommandsRef.current.delete(commandId);
       }
     }
 
-    // Worker message handler (set synchronously so it is ready before startMic)
-    const worker = new WhisperWorker();
-    workerRef.current = worker;
-
-    worker.onmessage = (e) => {
+    // Handle wake-word transcription result from Groq
+    function handleWakeWordResult(cleaned) {
       if (disposed) return;
-      const { type, text, message, mode } = e.data;
+      const word    = activationWordRef.current;
+      const wordEsc = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const wakeRx  = new RegExp(`\\b${wordEsc}\\b`, "i");
+      if (
+        wakeRx.test(cleaned) &&
+        !activatedRef.current &&
+        statusRef.current !== "sending" &&
+        statusRef.current !== "processing"
+      ) {
+        const rest = cleaned.replace(new RegExp(`\\b${wordEsc}\\b[\\s,:-]*`, "i"), "").trim();
+        activatedRef.current = true;
+        commandChunks = [...speechChunks];
+        speechChunks = [];
+        partialTexts  = [];
+        clearTimers();
+        setStatus("listening");
+        setShowLanding(false);
+        addLog("🎤 Activated — speak your command", "info");
 
-      if (type === "loading") {
-        addLog(`⏳ ${message}`, "info");
-        setWhisperLoadingMsg(message);
-        return;
-      }
-
-      if (type === "ready") {
-        // Explicit readiness signal from the worker
-        addLog(`✅ ${message}`, "info");
-        setWhisperLoadingMsg(message);
-        // Debug hook: helpful for manual dev verification and tests
-        try { console.debug("Whisper worker ready:", message); } catch (_) {}
-        // Expose a small test hook so automated tests can detect readiness.
-        try { window.__whisper_ready_received = true; } catch (_) {}
-        setWhisperReady(true);
-        return;
-      }
-
-      if (type === "error") {
-        addLog(`❌ Whisper: ${message}`, "error");
-        if (mode === "command") {
-          const commandId = e.data.commandId;
-          if (commandId) {
-            if (pendingCommandsRef.current.has(commandId)) {
-              const resolveFn = pendingCommandsRef.current.get(commandId);
-              resolveFn(""); // Resolve with empty to fail the isValidResult check and trigger throw
-              pendingCommandsRef.current.delete(commandId);
-            }
-            // If it's not pending, do nothing (Groq already handled it)
-          } else {
-            resumeListeningRef.current();
-          }
-        }
-        return;
-      }
-
-      if (type !== "result") return;
-
-      const cleaned = (text || "").trim();
-
-      if (mode === "wake-word") {
-        // Only act on the configured activation word when not already active and not mid-request.
-        const word    = activationWordRef.current;
-        const wordEsc = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        const wakeRx  = new RegExp(`\\b${wordEsc}\\b`, "i");
-        if (
-          wakeRx.test(cleaned) &&
-          !activatedRef.current &&
-          statusRef.current !== "sending" &&
-          statusRef.current !== "processing"
-        ) {
-          const rest = cleaned.replace(new RegExp(`\\b${wordEsc}\\b[\\s,:-]*`, "i"), "").trim();
-          activatedRef.current = true;
-          commandChunks = [...speechChunks];
-          speechChunks = [];
-          partialTexts  = [];
-          clearTimers();
-          setStatus("listening");
-          setShowLanding(false);
-          addLog("🎤 Activated — speak your command", "info");
-
-          if (rest.length >= 2) {
-            // Wake word + command in the same utterance
-            partialTexts.push(rest);
-            showTranscript(rest);
-            if (isSentenceComplete(rest)) {
-              sentenceEndTimer = setTimeout(submitCommand, SENTENCE_END_MS);
-            } else {
-              forceSubmitTimer = setTimeout(submitCommand, FORCE_SUBMIT_MS);
-            }
-          } else {
-            // Start idle timeout (no command heard yet)
-            if (listeningTimeoutRef.current) clearTimeout(listeningTimeoutRef.current);
-            listeningTimeoutRef.current = setTimeout(() => {
-              if (activatedRef.current && commandChunks.length === 0) {
-                addLog("⏱️ No command heard — resetting.", "warn");
-                resumeListeningRef.current();
-              }
-            }, LISTENING_IDLE_TIMEOUT_MS);
-          }
-        }
-        return;
-      }
-
-      if (mode === "partial" && activatedRef.current) {
-        if (cleaned.length >= 2) {
-          partialTexts.push(cleaned);
-          setTranscript(partialTexts.join(" ")); // stream to UI
-
-          if (isSentenceComplete(cleaned)) {
-            // Sentence complete — schedule a short-pause submit
-            clearTimers();
+        if (rest.length >= 2) {
+          partialTexts.push(rest);
+          showTranscript(rest);
+          if (isSentenceComplete(rest)) {
             sentenceEndTimer = setTimeout(submitCommand, SENTENCE_END_MS);
           } else {
-            // Reset force-submit (user is still mid-sentence)
-            if (forceSubmitTimer) clearTimeout(forceSubmitTimer);
             forceSubmitTimer = setTimeout(submitCommand, FORCE_SUBMIT_MS);
           }
-        }
-        return;
-      }
-
-      if (mode === "command") {
-        const commandId = e.data.commandId;
-        if (commandId) {
-          if (pendingCommandsRef.current.has(commandId)) {
-            const resolveFn = pendingCommandsRef.current.get(commandId);
-            resolveFn(cleaned);
-            pendingCommandsRef.current.delete(commandId);
-          } else {
-            // Promise was already settled (likely Groq won), so we ignore the local Whisper result
-            // to avoid sending a duplicate command.
-            try { console.debug("Local Whisper finished but command was already resolved by Groq"); } catch (_) {}
-          }
         } else {
-          // Legacy/fallback fallback: handle directly if no commandId (shouldn't happen with our changes)
-          const meaningful = cleaned.length >= 2 && /[A-Za-z0-9]/.test(cleaned);
-          if (meaningful) {
-            addLog(`🗣️ Whisper: "${cleaned}"`, "voice");
-            showTranscript(cleaned);
-            setAiResponse(null);
-            setStatus("sending");
-            sendToAIRef.current?.(cleaned);
-          } else {
-            addLog("(No speech detected in command)", "warn");
-            resumeListeningRef.current();
-          }
+          if (listeningTimeoutRef.current) clearTimeout(listeningTimeoutRef.current);
+          listeningTimeoutRef.current = setTimeout(() => {
+            if (activatedRef.current && commandChunks.length === 0) {
+              addLog("⏱️ No command heard — resetting.", "warn");
+              resumeListeningRef.current();
+            }
+          }, LISTENING_IDLE_TIMEOUT_MS);
         }
       }
-    };
+    }
 
-    worker.onerror = (err) => {
-      if (disposed) return;
-      const msg = err.message || String(err.type) || "unknown";
-      addLog(`❌ Whisper worker crashed: ${msg}`, "error");
-      setWhisperReady(false);
-      resumeListeningRef.current();
-    };
+    // Handle partial transcription result from Groq
+    function handlePartialResult(cleaned) {
+      if (disposed || !activatedRef.current) return;
+      if (cleaned.length >= 2) {
+        partialTexts.push(cleaned);
+        setTranscript(partialTexts.join(" "));
+
+        if (isSentenceComplete(cleaned)) {
+          clearTimers();
+          sentenceEndTimer = setTimeout(submitCommand, SENTENCE_END_MS);
+        } else {
+          if (forceSubmitTimer) clearTimeout(forceSubmitTimer);
+          forceSubmitTimer = setTimeout(submitCommand, FORCE_SUBMIT_MS);
+        }
+      }
+    }
 
     // Start the mic capture loop
     async function startMic() {
@@ -1183,7 +1066,6 @@ export default function App() {
 
           if (rms >= RMS_THRESHOLD) {
             if (!isSpeaking) {
-              // Just started speaking, flush the pre-speech buffer into our active chunks
               speechChunks.push(...preSpeechBuffer);
               if (activatedRef.current) {
                 commandChunks.push(...preSpeechBuffer);
@@ -1195,14 +1077,6 @@ export default function App() {
             speechChunks.push(samples);
             if (activatedRef.current) {
               commandChunks.push(samples);
-            } else {
-              if (now - lastWakeCheckTime >= 500 && speechChunks.length > 0) {
-                lastWakeCheckTime = now;
-                const audio = concatF32(speechChunks);
-                if (audio.length >= SAMPLE_RATE * WAKE_MIN_CHUNK_SEC) {
-                  workerRef.current?.postMessage({ type: "transcribe", audio, mode: "wake-word" });
-                }
-              }
             }
           } else if (isSpeaking) {
             if (!silenceSince) silenceSince = now;
@@ -1215,13 +1089,31 @@ export default function App() {
                 silenceSince = 0;
                 const minChunkSec = activatedRef.current ? COMMAND_MIN_CHUNK_SEC : WAKE_MIN_CHUNK_SEC;
                 if (audio.length >= SAMPLE_RATE * minChunkSec) {
-                  const mode = activatedRef.current ? "partial" : "wake-word";
-                  workerRef.current?.postMessage({ type: "transcribe", audio, mode });
+                  if (activatedRef.current) {
+                    // Partial transcription during command — send to Groq
+                    (async () => {
+                      try {
+                        const text = await transcribeCommandWithGroqRef.current?.(audio);
+                        if (text && !disposed) handlePartialResult(text.trim());
+                      } catch (_) {}
+                    })();
+                  } else {
+                    // Wake-word check — send to Groq (debounced)
+                    if (!wakewordInFlight) {
+                      wakewordInFlight = true;
+                      (async () => {
+                        try {
+                          const text = await transcribeWakewordWithGroqRef.current?.(audio);
+                          if (text && !disposed) handleWakeWordResult(text.trim());
+                        } catch (_) {}
+                        finally { wakewordInFlight = false; }
+                      })();
+                    }
+                  }
                 }
               }
             }
           } else {
-            // Not speaking, maintain a rolling buffer of audio right before speech starts
             preSpeechBuffer.push(samples);
             if (preSpeechBuffer.length > MAX_PRE_SPEECH_CHUNKS) {
               preSpeechBuffer.shift();
@@ -1232,8 +1124,6 @@ export default function App() {
         if (!disposed) {
           setWakeWordReady(true);
           addLog(`🎤 Microphone ready — say "${activationWordRef.current}"`, "info");
-          // Warm the model so the first activation is instant
-          worker.postMessage({ type: "preload" });
         }
       } catch (err) {
         if (!disposed) {
@@ -1261,10 +1151,7 @@ export default function App() {
       }
       audioCtxRef.current  = null;
       processorRef.current = null;
-      worker.terminate();
-      workerRef.current = null;
       setWakeWordReady(false);
-      setWhisperReady(false);
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1317,7 +1204,7 @@ export default function App() {
       : isListening
         ? "🗣️ Listening…"
         : !wakeWordReady
-          ? "⏳ Loading Whisper…"
+          ? "⏳ Connecting mic…"
           : `Say "${activationWord}"`;
   const dotColor = isSending    ? "#3498db"
     : isProcessing ? "#9b59b6"
@@ -1363,10 +1250,10 @@ export default function App() {
 
             {/* ── Initialization status ─────────────────────────────────── */}
             <div style={styles.landingStatus}>
-              {(!wakeWordReady || !whisperReady) ? (
+              {!wakeWordReady ? (
                 <div style={styles.landingLoadingRow}>
                   <div style={styles.landingSpinner} />
-                  <span style={styles.landingLoadingText}>{whisperLoadingMsg}</span>
+                  <span style={styles.landingLoadingText}>Connecting microphone…</span>
                 </div>
               ) : (
                 <div style={styles.landingReadyRow}>

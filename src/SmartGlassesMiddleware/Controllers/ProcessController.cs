@@ -61,7 +61,8 @@ public class ProcessController : ControllerBase
         {
             "webspeech-only" => "webspeech-only",
             "whisper-only" => "whisper-only",
-            _ => "auto"
+            "groq-only" => "groq-only",
+            _ => "groq-only"
         };
 
         var activationWord = _configuration["AI:ActivationWord"]?.Trim().ToLowerInvariant();
@@ -76,6 +77,72 @@ public class ProcessController : ControllerBase
         }
 
         return Ok(new { speechTranscriptionMode = mode, activationWord, groqCommandTranscriptionEnabled = groqEnabled });
+    }
+
+    [HttpPost]
+    [Route("transcribe-wakeword")]
+    [RequestSizeLimit(2 * 1024 * 1024)]
+    public async Task<IActionResult> TranscribeWakeword([FromForm] IFormFile? audio, [FromForm] string? language, CancellationToken cancellationToken)
+    {
+        if (audio is null || audio.Length == 0)
+            return BadRequest(new { error = "Audio is required" });
+
+        var apiKey = _configuration["AI:Groq:ApiKey"]?.Trim();
+        if (string.IsNullOrWhiteSpace(apiKey))
+            return StatusCode(503, new { error = "Groq transcription is not configured" });
+
+        var endpoint = _configuration["AI:Groq:WhisperEndpoint"]?.Trim();
+        if (string.IsNullOrWhiteSpace(endpoint))
+            endpoint = "https://api.groq.com/openai/v1/audio/transcriptions";
+
+        var model = _configuration["AI:Groq:WhisperModel"]?.Trim();
+        if (string.IsNullOrWhiteSpace(model))
+            model = "whisper-large-v3-turbo";
+
+        try
+        {
+            var factory = HttpContext.RequestServices.GetService<IHttpClientFactory>();
+            using var http = factory?.CreateClient() ?? new HttpClient();
+
+            http.Timeout = TimeSpan.FromSeconds(5);
+            http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+
+            using var content = new MultipartFormDataContent();
+            await using var stream = audio.OpenReadStream();
+            using var streamContent = new StreamContent(stream);
+            streamContent.Headers.ContentType = new MediaTypeHeaderValue(audio.ContentType ?? "audio/wav");
+            content.Add(streamContent, "file", string.IsNullOrWhiteSpace(audio.FileName) ? "wakeword.wav" : audio.FileName);
+            content.Add(new StringContent(model), "model");
+
+            if (!string.IsNullOrWhiteSpace(language))
+                content.Add(new StringContent(language), "language");
+
+            content.Add(new StringContent("json"), "response_format");
+
+            using var response = await http.PostAsync(endpoint, content, cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Groq wakeword transcription failed ({StatusCode}): {Body}", (int)response.StatusCode, body);
+                return StatusCode(502, new { error = "Groq transcription failed" });
+            }
+
+            using var jsonDoc = JsonDocument.Parse(body);
+            var text = jsonDoc.RootElement.TryGetProperty("text", out var textElement)
+                ? (textElement.GetString() ?? string.Empty).Trim()
+                : string.Empty;
+
+            return Ok(new { text });
+        }
+        catch (OperationCanceledException)
+        {
+            return StatusCode(408, new { error = "Groq wakeword transcription timed out" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Groq wakeword transcription failed");
+            return StatusCode(503, new { error = "Groq transcription unavailable" });
+        }
     }
 
     [HttpPost]
