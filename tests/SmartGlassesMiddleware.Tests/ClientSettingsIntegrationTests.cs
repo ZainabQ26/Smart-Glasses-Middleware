@@ -1,6 +1,9 @@
 using System.Net;
 using System.Text.Json;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using NUnit.Framework;
 
 namespace SmartGlassesMiddleware.Tests;
@@ -22,7 +25,18 @@ public class ClientSettingsIntegrationTests
         _factory = new WebApplicationFactory<Program>()
             .WithWebHostBuilder(builder =>
             {
-                builder.UseSetting("ASPNETCORE_ENVIRONMENT", "Testing");
+                builder.UseEnvironment("Testing");
+                builder.ConfigureServices(services =>
+                {
+                    // Remove all IHostedService registrations so background services
+                    // (S3FileIndexService, AbbreviationSyncBackgroundService, etc.)
+                    // don't try to reach external systems during tests.
+                    var hostedServices = services
+                        .Where(d => d.ServiceType == typeof(IHostedService))
+                        .ToList();
+                    foreach (var svc in hostedServices)
+                        services.Remove(svc);
+                });
             });
         _client = _factory.CreateClient();
     }

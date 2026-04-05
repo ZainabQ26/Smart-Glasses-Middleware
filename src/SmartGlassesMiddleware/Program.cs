@@ -441,7 +441,7 @@ if (e2eMode)
 {
     builder.Services.AddSingleton<IBackgroundTaskQueue, SynchronousBackgroundTaskQueue>();
 }
-else if (!builder.Environment.IsEnvironment("Testing") && !string.IsNullOrWhiteSpace(redisConnection))
+else if (!builder.Environment.IsEnvironment("Testing") && redisAvailable)
 {
     builder.Services.AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();
 }
@@ -459,7 +459,7 @@ if (!e2eMode)
     builder.Services.AddHostedService<BackgroundTaskHostedService>();
 }
 
-if (!builder.Environment.IsEnvironment("Testing") && !string.IsNullOrWhiteSpace(redisConnection) && !e2eMode)
+if (!builder.Environment.IsEnvironment("Testing") && redisAvailable && !e2eMode)
 {
     builder.Services.AddHostedService<BackgroundTaskCleanupService>();
 }
@@ -488,8 +488,8 @@ builder.Services.AddSignalR(options =>
     options.MaximumParallelInvocationsPerClient = 10;
 });
 
-// Add Redis pub/sub bridge to forward messages to SignalR clients (only if Redis is configured)
-if (!builder.Environment.IsEnvironment("Testing") && !string.IsNullOrWhiteSpace(redisConnection))
+// Add Redis pub/sub bridge to forward messages to SignalR clients (only if Redis is connected)
+if (!builder.Environment.IsEnvironment("Testing") && redisAvailable)
 {
     builder.Services.AddSingleton<RedisPubSubBridge>();
     builder.Services.AddHostedService(sp => sp.GetRequiredService<RedisPubSubBridge>());
