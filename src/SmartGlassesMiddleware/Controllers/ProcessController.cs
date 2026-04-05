@@ -17,7 +17,6 @@ public class ProcessController : ControllerBase
     private readonly ILogger<ProcessController> _logger;
     private readonly IConfiguration _configuration;
 
-    [ActivatorUtilitiesConstructor]
     public ProcessController(
         IAIService aiService,
         IPageSummaryService pageSummaryService,
