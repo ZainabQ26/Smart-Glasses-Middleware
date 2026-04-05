@@ -294,7 +294,7 @@ locals {
         secrets = [
           {
             name      = "ConnectionStrings__DefaultConnection"
-            valueFrom = "${aws_secretsmanager_secret.db_connection.arn}:username::"
+            valueFrom = "${aws_secretsmanager_secret.db_connection.arn}:connection_string::"
           }
         ]
     }
