@@ -22,14 +22,14 @@ public class AwsS3MediaStorageService : IMediaStorageService
         _logger = logger;
     }
 
-    public async Task<string> UploadMediaAsync(Stream fileStream, string fileName, string contentType)
+    public async Task<string> UploadMediaAsync(Stream fileStream, string fileName, string contentType, IReadOnlyDictionary<string, string>? metadata = null)
     {
         if (fileStream.CanSeek) fileStream.Position = 0;
         var key = $"{Guid.NewGuid()}/{fileName}";
-        return await UploadFileAsync(key, fileStream, contentType);
+        return await UploadFileAsync(key, fileStream, contentType, metadata);
     }
 
-    public async Task<string> UploadFileAsync(string key, Stream fileStream, string contentType)
+    public async Task<string> UploadFileAsync(string key, Stream fileStream, string contentType, IReadOnlyDictionary<string, string>? metadata = null)
     {
         try
         {
@@ -68,6 +68,15 @@ public class AwsS3MediaStorageService : IMediaStorageService
                 ContentType = contentType,
                 AutoCloseStream = false
             };
+
+            // Store user-defined metadata (used on boot to reconstruct ManagedFile records)
+            if (metadata != null)
+            {
+                foreach (var kv in metadata)
+                {
+                    request.Metadata[kv.Key] = kv.Value;
+                }
+            }
 
             await _s3Client.PutObjectAsync(request);
             _logger.LogInformation("Uploaded file to S3: {Bucket}/{Key} ({Bytes} bytes)", _bucketName, key, ms.Length);
@@ -137,6 +146,81 @@ public class AwsS3MediaStorageService : IMediaStorageService
         var hash = sha256.ComputeHash(fileStream);
         fileStream.Position = originalPosition;
         return Convert.ToHexString(hash);
+    }
+
+    public async Task<IReadOnlyList<StoredFileInfo>> ListFilesAsync(CancellationToken ct = default)
+    {
+        var results = new List<StoredFileInfo>();
+        try
+        {
+            string? continuationToken = null;
+            do
+            {
+                var listRequest = new ListObjectsV2Request
+                {
+                    BucketName = _bucketName,
+                    ContinuationToken = continuationToken
+                };
+
+                var listResponse = await _s3Client.ListObjectsV2Async(listRequest, ct);
+
+                // Fetch HEAD metadata for all objects in parallel, capped at 10 concurrent calls
+                var semaphore = new System.Threading.SemaphoreSlim(10, 10);
+                var tasks = listResponse.S3Objects.Select(async obj =>
+                {
+                    await semaphore.WaitAsync(ct);
+                    try
+                    {
+                        var headRequest = new GetObjectMetadataRequest
+                        {
+                            BucketName = _bucketName,
+                            Key = obj.Key
+                        };
+                        var head = await _s3Client.GetObjectMetadataAsync(headRequest, ct);
+
+                        // S3 user-defined metadata keys are returned WITHOUT the "x-amz-meta-" prefix
+                        var userMeta = head.Metadata.Keys
+                            .Cast<string>()
+                            .ToDictionary(
+                                k => k,
+                                k => head.Metadata[k],
+                                StringComparer.OrdinalIgnoreCase);
+
+                        var fileName = userMeta.TryGetValue("sgm-filename", out var fn) && !string.IsNullOrWhiteSpace(fn)
+                            ? fn
+                            : System.IO.Path.GetFileName(obj.Key);
+
+                        return new StoredFileInfo(
+                            Key: obj.Key,
+                            FileName: fileName,
+                            ContentType: head.Headers.ContentType ?? "application/octet-stream",
+                            Size: head.ContentLength,
+                            LastModified: obj.LastModified,
+                            UserMetadata: userMeta);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to head S3 object {Key}; skipping", obj.Key);
+                        return null;
+                    }
+                    finally
+                    {
+                        semaphore.Release();
+                    }
+                });
+
+                var batch = await System.Threading.Tasks.Task.WhenAll(tasks);
+                results.AddRange(batch.OfType<StoredFileInfo>());
+
+                continuationToken = listResponse.IsTruncated ? listResponse.NextContinuationToken : null;
+            }
+            while (continuationToken != null);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error listing files from S3 bucket {Bucket}", _bucketName);
+        }
+        return results;
     }
 
     public Task<(string PresignedUrl, string Key)?> GetPresignedUploadUrlAsync(string fileName, string contentType, TimeSpan expiry)
