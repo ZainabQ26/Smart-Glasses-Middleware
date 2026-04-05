@@ -667,6 +667,33 @@ app.UseResponseCompression();
 // Enable built-in HTTP logging so we can see headers and bodies
 app.UseHttpLogging();
 
+// Global exception handler returning RFC7807 ProblemDetails.
+// Placed early so exceptions from ANY downstream middleware (CORS, routing,
+// rate-limiter, metrics, security-headers, etc.) are caught and surfaced as
+// a proper JSON error instead of a bare 500 from Kestrel.
+app.UseExceptionHandler(errorApp =>
+{
+    errorApp.Run(async context =>
+    {
+        var exFeature = context.Features.Get<IExceptionHandlerFeature>();
+        var ex = exFeature?.Error;
+        var traceId = Activity.Current?.Id ?? context.TraceIdentifier;
+
+        var pd = new ProblemDetails
+        {
+            Title = "An unexpected error occurred",
+            Detail = ex?.Message,
+            Status = StatusCodes.Status500InternalServerError,
+            Instance = context.Request.Path
+        };
+        pd.Extensions["requestId"] = traceId;
+
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        context.Response.ContentType = "application/problem+json";
+        await JsonSerializer.SerializeAsync(context.Response.Body, pd, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+    });
+});
+
 static string GetFrameOptionsForPath(PathString path)
 {
     var value = path.Value ?? string.Empty;
@@ -847,29 +874,6 @@ app.Use(async (context, next) =>
     await next();
 });
 
-// Global exception handler returning RFC7807 ProblemDetails
-app.UseExceptionHandler(errorApp =>
-{
-    errorApp.Run(async context =>
-    {
-        var exFeature = context.Features.Get<IExceptionHandlerFeature>();
-        var ex = exFeature?.Error;
-        var traceId = Activity.Current?.Id ?? context.TraceIdentifier;
-
-        var pd = new ProblemDetails
-        {
-            Title = "An unexpected error occurred",
-            Detail = ex?.Message,
-            Status = StatusCodes.Status500InternalServerError,
-            Instance = context.Request.Path
-        };
-        pd.Extensions["requestId"] = traceId;
-
-        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-        context.Response.ContentType = "application/problem+json";
-        await JsonSerializer.SerializeAsync(context.Response.Body, pd, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
-    });
-});
 
 app.MapControllers();
 
@@ -909,22 +913,37 @@ app.MapGet("/health", async (IServiceProvider services, HttpContext context) =>
 });
 
 // Minimal API client-settings endpoint — bypasses ProcessController DI.
-app.MapGet("/api/process/client-settings", (IConfiguration configuration) =>
+app.MapGet("/api/process/client-settings", (IConfiguration configuration, HttpContext context) =>
 {
-    var configuredMode = configuration["AI:SpeechTranscriptionMode"]?.Trim().ToLowerInvariant();
-    var mode = configuredMode switch
+    // Prevent CloudFront / browser / proxy caching — matches /health and /ready.
+    context.Response.Headers.CacheControl = "no-store, no-cache, must-revalidate";
+    context.Response.Headers.Pragma = "no-cache";
+
+    try
     {
-        "webspeech-only" => "webspeech-only",
-        "whisper-only" => "whisper-only",
-        "groq-only" => "groq-only",
-        _ => "groq-only"
-    };
+        var configuredMode = configuration["AI:SpeechTranscriptionMode"]?.Trim().ToLowerInvariant();
+        var mode = configuredMode switch
+        {
+            "webspeech-only" => "webspeech-only",
+            "whisper-only" => "whisper-only",
+            "groq-only" => "groq-only",
+            _ => "groq-only"
+        };
 
-    var activationWord = configuration["AI:ActivationWord"]?.Trim().ToLowerInvariant();
-    if (string.IsNullOrWhiteSpace(activationWord))
-        activationWord = "iris";
+        var activationWord = configuration["AI:ActivationWord"]?.Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(activationWord))
+            activationWord = "iris";
 
-    return Results.Ok(new { speechTranscriptionMode = mode, activationWord, groqCommandTranscriptionEnabled = true });
+        return Results.Ok(new { speechTranscriptionMode = mode, activationWord, groqCommandTranscriptionEnabled = true });
+    }
+    catch (Exception ex)
+    {
+        var logger = context.RequestServices.GetService<ILogger<Program>>();
+        logger?.LogError(ex, "client-settings endpoint failed");
+
+        // Return safe defaults so the frontend can still function.
+        return Results.Ok(new { speechTranscriptionMode = "groq-only", activationWord = "iris", groqCommandTranscriptionEnabled = true });
+    }
 });
 
 // DB + Redis readiness endpoint.
