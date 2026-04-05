@@ -538,6 +538,21 @@ const state = {
     allGroups: [] // Cache of all groups for quick-add
 };
 
+var conversationHubConnection = null;
+var resourceHubConnection = null;
+var taskHubConnection = null;
+let activeConversationId = null;
+const HUB_RECONNECT_DELAYS_MS = [10000, 20000, 40000, 80000, 120000];
+let conversationHubConnectInProgress = false;
+let resourceHubConnectInProgress = false;
+let taskHubConnectInProgress = false;
+let conversationHubReconnectTimer = null;
+let conversationHubReconnectAttempt = 0;
+let resourceHubReconnectTimer = null;
+let resourceHubReconnectAttempt = 0;
+let taskHubReconnectTimer = null;
+let taskHubReconnectAttempt = 0;
+
 // Track individual hub connection states; banner shows if either hub is disconnected
 // Default to `true` so the banner is hidden until a hub explicitly reports disconnected.
 let resourceHubConnected = true;
@@ -3157,6 +3172,7 @@ function setupInfiniteScroll() {
     
     containers.forEach(({ id, loadFn }) => {
         const container = document.getElementById(id);
+        if (!container) return; // element may not exist in the current admin view
         
         // Create sentinel element at the bottom of each list
         const sentinel = document.createElement('div');
