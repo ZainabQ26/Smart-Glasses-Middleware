@@ -210,12 +210,29 @@ function renderGroqLiveEntry(entry) {
     const time = entry.timestampUtc
         ? new Date(entry.timestampUtc).toLocaleTimeString()
         : '';
-    const badge = isCommand
-        ? '<span style="font-size:11px;padding:2px 7px;border-radius:10px;background:#0b63a6;color:#fff;font-weight:600;flex-shrink:0;">command</span>'
-        : '<span style="font-size:11px;padding:2px 7px;border-radius:10px;background:#7f8c8d;color:#fff;font-weight:600;flex-shrink:0;">wakeword</span>';
+
     const el = document.createElement('div');
     el.style.cssText = 'display:flex;align-items:flex-start;gap:10px;padding:8px 10px;background:#fff;border:1px solid #e0e0e0;border-radius:6px;font-size:14px;';
-    el.innerHTML = `${badge}<span style="flex:1;word-break:break-word;">${escapeHtml(entry.text || '(empty)')}</span><span style="font-size:11px;color:#aaa;flex-shrink:0;white-space:nowrap;">${time}</span>`;
+
+    // Badge — type is always "command" or "wakeword" (server-controlled), built safely
+    const badge = document.createElement('span');
+    badge.textContent = entry.type || 'unknown';
+    badge.style.cssText = 'font-size:11px;padding:2px 7px;border-radius:10px;color:#fff;font-weight:600;flex-shrink:0;background:' +
+        (isCommand ? '#0b63a6' : '#7f8c8d');
+
+    // Text — user-provided transcription content, set via textContent to prevent XSS
+    const text = document.createElement('span');
+    text.style.cssText = 'flex:1;word-break:break-word;';
+    text.textContent = entry.text || '(empty)';
+
+    // Timestamp
+    const ts = document.createElement('span');
+    ts.style.cssText = 'font-size:11px;color:#aaa;flex-shrink:0;white-space:nowrap;';
+    ts.textContent = time;
+
+    el.appendChild(badge);
+    el.appendChild(text);
+    el.appendChild(ts);
     return el;
 }
 
