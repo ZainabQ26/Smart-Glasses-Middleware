@@ -28,6 +28,7 @@ public class ProcessAndTasksControllerGapTests
         var controller = new ProcessController(
             aiMock.Object,
             new Mock<IPageSummaryService>().Object,
+            new Mock<IServerSettingsService>().Object,
             NullLogger<ProcessController>.Instance,
             new ConfigurationBuilder().Build());
 
@@ -49,6 +50,7 @@ public class ProcessAndTasksControllerGapTests
         var controller = new ProcessController(
             aiMock.Object,
             new Mock<IPageSummaryService>().Object,
+            new Mock<IServerSettingsService>().Object,
             NullLogger<ProcessController>.Instance,
             new ConfigurationBuilder().Build());
 
@@ -74,6 +76,7 @@ public class ProcessAndTasksControllerGapTests
         var controller = new ProcessController(
             new Mock<IAIService>().Object,
             new Mock<IPageSummaryService>().Object,
+            new Mock<IServerSettingsService>().Object,
             NullLogger<ProcessController>.Instance,
             config);
 
@@ -98,6 +101,7 @@ public class ProcessAndTasksControllerGapTests
         var controller = new ProcessController(
             new Mock<IAIService>().Object,
             new Mock<IPageSummaryService>().Object,
+            new Mock<IServerSettingsService>().Object,
             NullLogger<ProcessController>.Instance,
             config);
 
@@ -155,6 +159,7 @@ public class ProcessAndTasksControllerGapTests
         var controller = new ProcessController(
             new Mock<IAIService>().Object,
             summaryMock.Object,
+            new Mock<IServerSettingsService>().Object,
             NullLogger<ProcessController>.Instance,
             new ConfigurationBuilder().Build());
 
@@ -174,6 +179,7 @@ public class ProcessAndTasksControllerGapTests
         var controller = new ProcessController(
             new Mock<IAIService>().Object,
             summaryMock.Object,
+            new Mock<IServerSettingsService>().Object,
             NullLogger<ProcessController>.Instance,
             new ConfigurationBuilder().Build());
 
@@ -194,6 +200,7 @@ public class ProcessAndTasksControllerGapTests
         var controller = new ProcessController(
             new Mock<IAIService>().Object,
             summaryMock.Object,
+            new Mock<IServerSettingsService>().Object,
             NullLogger<ProcessController>.Instance,
             new ConfigurationBuilder().Build());
 
@@ -214,6 +221,7 @@ public class ProcessAndTasksControllerGapTests
         var controller = new ProcessController(
             new Mock<IAIService>().Object,
             summaryMock.Object,
+            new Mock<IServerSettingsService>().Object,
             NullLogger<ProcessController>.Instance,
             new ConfigurationBuilder().Build());
 

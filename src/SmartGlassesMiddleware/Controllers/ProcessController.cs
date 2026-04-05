@@ -16,18 +16,13 @@ public class ProcessController : ControllerBase
     private readonly ILogger<ProcessController> _logger;
     private readonly IConfiguration _configuration;
 
-    public ProcessController(IAIService aiService, IPageSummaryService pageSummaryService, ILogger<ProcessController> logger, IConfiguration configuration)
+    public ProcessController(IAIService aiService, IPageSummaryService pageSummaryService, IServerSettingsService serverSettingsService, ILogger<ProcessController> logger, IConfiguration configuration)
     {
         _aiService = aiService;
         _pageSummaryService = pageSummaryService;
+        _serverSettingsService = serverSettingsService;
         _logger = logger;
         _configuration = configuration;
-    }
-
-    public ProcessController(IAIService aiService, IPageSummaryService pageSummaryService, IServerSettingsService serverSettingsService, ILogger<ProcessController> logger, IConfiguration configuration)
-        : this(aiService, pageSummaryService, logger, configuration)
-    {
-        _serverSettingsService = serverSettingsService;
     }
 
     /// <summary>
