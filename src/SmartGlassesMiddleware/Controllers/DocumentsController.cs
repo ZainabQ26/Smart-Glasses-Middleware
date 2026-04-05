@@ -207,7 +207,8 @@ public class DocumentsController : ControllerBase
 
             var ext = Path.GetExtension(originalFileName).ToLowerInvariant();
             var uploadKey = $"uploads/{documentId}{ext}";
-            await mediaStorageService.UploadFileAsync(uploadKey, pdfStream, originalContentType);
+            var uploadMeta = S3FileIndexService.BuildUploadMetadata(documentId, pdfFileName, pdfFileName);
+            await mediaStorageService.UploadFileAsync(uploadKey, pdfStream, originalContentType, uploadMeta);
 
             var metadata = await db.DocumentMetadatas.FirstOrDefaultAsync(d => d.Id == documentId);
             var managedFile = await db.ManagedFiles.FirstOrDefaultAsync(f => f.Id == documentId);
