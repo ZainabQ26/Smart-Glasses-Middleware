@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
 using SmartGlassesMiddleware.Models;
 using SmartGlassesMiddleware.Services;
 using System.Net.Http.Headers;
@@ -16,6 +17,7 @@ public class ProcessController : ControllerBase
     private readonly ILogger<ProcessController> _logger;
     private readonly IConfiguration _configuration;
 
+    [ActivatorUtilitiesConstructor]
     public ProcessController(
         IAIService aiService,
         IPageSummaryService pageSummaryService,
