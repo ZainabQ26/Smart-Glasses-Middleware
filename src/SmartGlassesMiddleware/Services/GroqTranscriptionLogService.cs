@@ -16,7 +16,7 @@ public interface IGroqTranscriptionLogService
 
 public sealed class GroqTranscriptionLogService : IGroqTranscriptionLogService
 {
-    private readonly object _lock = new();
+    private readonly object _lock = new object();
     private const int MaxEntries = 200;
     private readonly LinkedList<GroqTranscriptionEntry> _entries = new();
 
