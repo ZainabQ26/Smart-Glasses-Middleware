@@ -18,9 +18,6 @@ RUN npm run build
 FROM mcr.microsoft.com/dotnet/sdk:10.0.102 AS build
 WORKDIR /src
 
-# Cache-bust: force layer rebuild to pick up ProcessController single-constructor fix
-ARG CACHE_BUST=2026-04-05
-
 # Restore dependencies as a distinct cached layer
 COPY ["src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj", "src/SmartGlassesMiddleware/"]
 RUN dotnet restore "src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj"
