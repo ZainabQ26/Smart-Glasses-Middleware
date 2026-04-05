@@ -54,8 +54,7 @@ jobs:
             ${{ steps.ecr-login.outputs.registry }}/smart-glasses-dev-api:${{ github.sha }}
             ${{ steps.ecr-login.outputs.registry }}/smart-glasses-dev-api:latest
           platforms: linux/amd64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          no-cache: true
 
   deploy-api:
     name: Roll out API on ECS

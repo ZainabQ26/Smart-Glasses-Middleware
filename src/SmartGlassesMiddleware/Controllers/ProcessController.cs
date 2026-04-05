@@ -12,11 +12,16 @@ public class ProcessController : ControllerBase
 {
     private readonly IAIService _aiService;
     private readonly IPageSummaryService _pageSummaryService;
-    private readonly IServerSettingsService? _serverSettingsService;
+    private readonly IServerSettingsService _serverSettingsService;
     private readonly ILogger<ProcessController> _logger;
     private readonly IConfiguration _configuration;
 
-    public ProcessController(IAIService aiService, IPageSummaryService pageSummaryService, IServerSettingsService serverSettingsService, ILogger<ProcessController> logger, IConfiguration configuration)
+    public ProcessController(
+        IAIService aiService,
+        IPageSummaryService pageSummaryService,
+        IServerSettingsService serverSettingsService,
+        ILogger<ProcessController> logger,
+        IConfiguration configuration)
     {
         _aiService = aiService;
         _pageSummaryService = pageSummaryService;
@@ -65,17 +70,14 @@ public class ProcessController : ControllerBase
             activationWord = "iris";
 
         var groqEnabled = true;
-        if (_serverSettingsService is not null)
+        try
         {
-            try
-            {
-                var groqSetting = await _serverSettingsService.GetGroqCommandTranscriptionSettingAsync(cancellationToken);
-                groqEnabled = groqSetting.Enabled;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to read Groq setting from cache — defaulting to enabled");
-            }
+            var groqSetting = await _serverSettingsService.GetGroqCommandTranscriptionSettingAsync(cancellationToken);
+            groqEnabled = groqSetting.Enabled;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to read Groq setting from cache — defaulting to enabled");
         }
 
         return Ok(new { speechTranscriptionMode = mode, activationWord, groqCommandTranscriptionEnabled = groqEnabled });
@@ -160,12 +162,9 @@ public class ProcessController : ControllerBase
         if (audio is null || audio.Length == 0)
             return BadRequest(new { error = "Audio is required" });
 
-        if (_serverSettingsService is not null)
-        {
-            var groqSetting = await _serverSettingsService.GetGroqCommandTranscriptionSettingAsync(cancellationToken);
-            if (!groqSetting.Enabled)
-                return StatusCode(503, new { error = "Groq transcription is disabled" });
-        }
+        var groqSetting = await _serverSettingsService.GetGroqCommandTranscriptionSettingAsync(cancellationToken);
+        if (!groqSetting.Enabled)
+            return StatusCode(503, new { error = "Groq transcription is disabled" });
 
         var configuredGroqEnabled = _configuration["AI:Groq:Enabled"]?.Trim();
         if (bool.TryParse(configuredGroqEnabled, out var configEnabled) && !configEnabled)
