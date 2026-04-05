@@ -14,9 +14,10 @@ import PdfViewer from "./PdfViewer.jsx";
 //
 import glassesImg from "./pdf/image/Gemini_Generated_Image_8mwak58mwak58mwa.png";
 
-export default function App() {
+export default function App({ mode = "voice" }) {
   const [status, setStatus]       = useState("idle"); // idle | listening | processing | sending
   const [logs, setLogs]           = useState([]);
+  const [inputText, setInputText] = useState("");
   const [transcript, setTranscript] = useState(null);
   const [aiResponse, setAiResponse] = useState(null);
   const [usedAdvancedModel, setUsedAdvancedModel] = useState(false);
@@ -1306,6 +1307,18 @@ export default function App() {
     }
   };
 
+  const handleTextSubmit = (e) => {
+    e.preventDefault();
+    const text = inputText.trim();
+    if (!text) return;
+    setInputText("");
+    setStatus("sending");
+    setTranscript(null);
+    setAiResponse(null);
+    showTranscript(text);
+    sendToAI(text);
+  };
+
   // ── Render ────────────────────────────────────────────────────────────────
   const isListening  = status === "listening";
   const isProcessing = status === "processing";
@@ -1345,9 +1358,9 @@ export default function App() {
   ];
 
   return (
-    <div style={styles.page}>
+    <div style={{ ...styles.page, ...(mode === "admin" ? styles.adminMode : {}) }}>
       {/* ── Landing screen — shown until first activation ─────────────────────── */}
-      {showLanding && (
+      {mode === "voice" && showLanding && (
         <div style={styles.landing}>
           <img
             src={glassesImg}
@@ -1433,15 +1446,17 @@ export default function App() {
         </div>
       )}
 
-      <div style={styles.indicator} onClick={handleMicButton}>
-        <span style={dotStyle} />
-        <span style={styles.indicatorText}>{btnLabel}</span>
-        {usedAdvancedModel && (
-          <div title="Advanced model selected" style={{display:'inline-flex', alignItems:'center', gap:6, marginLeft:6}}>
-            <span style={{fontSize:14, color:'#7ec8e3'}}>⚡</span>
-          </div>
-        )}
-      </div>
+      {mode === "voice" && (
+        <div style={styles.indicator} onClick={handleMicButton}>
+          <span style={dotStyle} />
+          <span style={styles.indicatorText}>{btnLabel}</span>
+          {usedAdvancedModel && (
+            <div title="Advanced model selected" style={{display:'inline-flex', alignItems:'center', gap:6, marginLeft:6}}>
+              <span style={{fontSize:14, color:'#7ec8e3'}}>⚡</span>
+            </div>
+          )}
+        </div>
+      )}
 
       <main style={styles.main}>
 
@@ -1550,14 +1565,34 @@ export default function App() {
         )}
       </main>
 
-      <button
-        style={styles.logToggleBtn}
-        onClick={() => setLogOpen(prev => !prev)}
-      >
-        {logOpen ? "✕ Close Log" : "📋 Activity Log"}
-      </button>
+      {mode === "admin" && (
+        <div style={styles.textInputArea}>
+          <form onSubmit={handleTextSubmit} style={{ display: 'flex', gap: '10px', width: '100%', maxWidth: '680px', margin: '0 auto' }}>
+            <input
+              type="text"
+              value={inputText}
+              onChange={e => setInputText(e.target.value)}
+              placeholder="Type a command (e.g. search recent files, next page)"
+              style={styles.textInput}
+              disabled={isSending || isProcessing}
+            />
+            <button type="submit" disabled={isSending || isProcessing || !inputText.trim()} style={styles.textSubmitBtn}>
+              Send
+            </button>
+          </form>
+        </div>
+      )}
 
-      {logOpen && (
+      {mode === "voice" && (
+        <button
+          style={styles.logToggleBtn}
+          onClick={() => setLogOpen(prev => !prev)}
+        >
+          {logOpen ? "✕ Close Log" : "📋 Activity Log"}
+        </button>
+      )}
+
+      {mode === "voice" && logOpen && (
         <div style={styles.logPanel}>
           <h2 style={styles.sectionTitle}>Activity Log</h2>
           {logs.length === 0 ? (
@@ -1626,6 +1661,10 @@ const styles = {
     fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
     position: "relative",
     overflow: "hidden",
+  },
+  adminMode: {
+    background: "transparent", // Admin page will provide its own background
+    color: "#333", // Match admin panel text color
   },
   // Landing screen overlay
   landing: {
@@ -1820,6 +1859,32 @@ const styles = {
     flexDirection: "column",
     gap: 24,
     overflowY: "auto",
+  },
+  textInputArea: {
+    padding: "16px",
+    background: "rgba(255,255,255,0.05)",
+    borderTop: "1px solid rgba(255,255,255,0.1)",
+    display: "flex",
+    justifyContent: "center",
+  },
+  textInput: {
+    flex: 1,
+    padding: "12px 16px",
+    borderRadius: "8px",
+    border: "1px solid rgba(255,255,255,0.2)",
+    background: "rgba(0,0,0,0.5)",
+    color: "#fff",
+    fontSize: "1rem",
+    outline: "none",
+  },
+  textSubmitBtn: {
+    padding: "0 20px",
+    borderRadius: "8px",
+    background: "#0b63a6",
+    color: "#fff",
+    border: "none",
+    fontWeight: "bold",
+    cursor: "pointer",
   },
   btnWrap: {
     display: "flex",
