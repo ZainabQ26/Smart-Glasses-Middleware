@@ -226,6 +226,7 @@ export default function App() {
       );
 
       const text = (payload?.text || "").trim();
+      console.log(`[Voice Debug], within transcribe Wake Word with Groq: ${text}`);
       if (text) {
         addLog(`👂 Wake-word heard: "${text}"`, "info");
       }
@@ -1000,6 +1001,7 @@ export default function App() {
       const coreWord = normalizedWord.split(" ").pop();
       const matched = normalizedText.includes(normalizedWord) || normalizedText.includes(coreWord);
       addLog(`🔍 Wake check: "${normalizedText}" vs "${coreWord}" → ${matched ? "MATCH ✅" : "no match"}`, "info");
+      console.log(`[Debug Voice]: handle wake word result: normalizedText: ${coreWord}, normalizedWord: ${normalizedWord}`);
 
       if (
         matched &&
