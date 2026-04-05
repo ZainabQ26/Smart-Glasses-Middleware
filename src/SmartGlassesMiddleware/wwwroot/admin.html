@@ -1605,15 +1605,9 @@
                         }
                     });
 
-                    const links = doc.querySelectorAll('link[rel="stylesheet"]');
-                    links.forEach(link => {
-                        if (link.href && link.href.includes('assets/')) {
-                            const newLink = document.createElement('link');
-                            newLink.rel = 'stylesheet';
-                            newLink.href = new URL(link.href).pathname;
-                            document.head.appendChild(newLink);
-                        }
-                    });
+                    // Do not inject React app stylesheets into admin.html — the React
+                    // app's CSS resets body { background: #000000 } which would override
+                    // the admin page's own light-theme background (#f5f5f5).
                 }
             } catch (e) {
                 console.warn('Failed to load React app scripts', e);
