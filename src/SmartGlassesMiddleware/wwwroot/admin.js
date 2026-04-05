@@ -3080,7 +3080,7 @@ window.viewConversation = async function(conversationId, title) {
 
 let isEditingGroup = false;
 
-document.getElementById('group-form').addEventListener('submit', async (e) => {
+document.getElementById('group-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const id = document.getElementById('group-id').value;
     const name = document.getElementById('group-name').value;
@@ -3690,10 +3690,10 @@ async function init() {
         // Other initialization assumes API is available
 
         // Setup preview modal event listeners
-        document.getElementById('close-preview').addEventListener('click', () => {
+        document.getElementById('close-preview')?.addEventListener('click', () => {
             document.getElementById('file-preview').style.display = 'none';
         });
-        document.getElementById('download-file').addEventListener('click', () => {
+        document.getElementById('download-file')?.addEventListener('click', () => {
             if (currentPreviewFile.id) {
                 const downloadUrl = `${API_BASE}/files/${currentPreviewFile.id}/download`;
                 window.location.href = downloadUrl;
