@@ -54,36 +54,7 @@ public class ProcessController : ControllerBase
         }
     }
 
-    [HttpGet]
-    [Route("client-settings")]
-    public async Task<IActionResult> GetClientSettings(CancellationToken cancellationToken)
-    {
-        var configuredMode = _configuration["AI:SpeechTranscriptionMode"]?.Trim().ToLowerInvariant();
-        var mode = configuredMode switch
-        {
-            "webspeech-only" => "webspeech-only",
-            "whisper-only" => "whisper-only",
-            "groq-only" => "groq-only",
-            _ => "groq-only"
-        };
-
-        var activationWord = _configuration["AI:ActivationWord"]?.Trim().ToLowerInvariant();
-        if (string.IsNullOrWhiteSpace(activationWord))
-            activationWord = "iris";
-
-        var groqEnabled = true;
-        try
-        {
-            var groqSetting = await _serverSettingsService.GetGroqCommandTranscriptionSettingAsync(cancellationToken);
-            groqEnabled = groqSetting.Enabled;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to read Groq setting from cache — defaulting to enabled");
-        }
-
-        return Ok(new { speechTranscriptionMode = mode, activationWord, groqCommandTranscriptionEnabled = groqEnabled });
-    }
+    // client-settings endpoint moved to minimal API in Program.cs to avoid DI issues
 
     [HttpPost]
     [Route("transcribe-wakeword")]
