@@ -469,8 +469,8 @@ if (!builder.Environment.IsEnvironment("Testing") && !string.IsNullOrWhiteSpace(
 builder.Services.AddHostedService<AbbreviationSyncBackgroundService>();
 builder.Services.AddHostedService<PreventSleepResetBackgroundService>();
 
-// Database state loading/saving using S3
-builder.Services.AddHostedService<StatePersistenceService>();
+// On startup, scan S3 and rebuild the in-memory ManagedFile index — no separate persistence needed.
+builder.Services.AddHostedService<S3FileIndexService>();
 
 // Add SignalR for real-time notifications with WebSocket optimizations
 builder.Services.AddSignalR(options =>
