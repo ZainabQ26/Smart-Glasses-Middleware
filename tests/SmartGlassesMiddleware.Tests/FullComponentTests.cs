@@ -36,6 +36,7 @@ namespace SmartGlassesMiddleware.Tests
             var controller = new ProcessController(
                 mockAiService.Object,
                 mockPageSummary.Object,
+                new Mock<IServerSettingsService>().Object,
                 mockLogger.Object,
                 mockConfig.Object
             );
@@ -70,6 +71,7 @@ namespace SmartGlassesMiddleware.Tests
             var controller = new ProcessController(
                 mockAiService.Object,
                 mockPageSummary.Object,
+                new Mock<IServerSettingsService>().Object,
                 mockLogger.Object,
                 mockConfig.Object
             );
