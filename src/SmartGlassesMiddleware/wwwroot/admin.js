@@ -4288,8 +4288,31 @@ async function init() {
             }
         };
 
+        // Helper to normalize the command text (strips wake-word if accidentally provided)
+        const normalizeCommandText = (value) => {
+            const raw = (value || '').trim();
+            if (!raw) return '';
+            // Since admin chat doesn't enforce a keyword, if the user explicitly types it,
+            // we should try to strip it if we know the configured keyword.
+            // We strip common patterns (e.g. "iris", "hi iris") so it behaves identically
+            // to the homepage when users habitually type the keyword.
+            const wakeWords = ["hi iris", "iris", "hey iris"];
+            let cleaned = raw;
+            for (const word of wakeWords) {
+                const wordEsc = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+                const rx = new RegExp(`^${wordEsc}[\\s,:-]*`, "i");
+                if (rx.test(cleaned)) {
+                    cleaned = cleaned.replace(rx, "").trim();
+                    break;
+                }
+            }
+            return cleaned || raw;
+        };
+
         const sendPrompt = async () => {
-            const promptText = document.getElementById('prompt-name')?.value;
+            const rawPromptText = document.getElementById('prompt-name')?.value;
+            const promptText = normalizeCommandText(rawPromptText);
+
             const responseContent = document.getElementById('response-content');
             const sendBtn = document.getElementById('prompt-send-btn');
             const cancelBtn = document.getElementById('prompt-cancel-btn');
@@ -4320,6 +4343,54 @@ async function init() {
 
             if (isDirectRecentDocumentPreviewCommand(promptText)) {
                 await openMostRecentDocumentPreview(responseContent);
+                document.getElementById('prompt-name').value = '';
+                return;
+            }
+
+            // Local PDF navigation commands matching App.jsx
+            const lowered = promptText.toLowerCase().trim();
+            if (/\b(?:next page|go to next page|page down)\b/.test(lowered)) {
+                responseContent.innerHTML = '<div style="padding: 15px; white-space: pre-wrap;">Next page</div>';
+                if (window.pdfViewer && window.pdfViewer.pdfDocument) {
+                    const currentPage = window.pdfViewer.currentPageNumber || 1;
+                    const totalPages = window.pdfViewer.pagesCount || 1;
+                    if (currentPage < totalPages) {
+                        window.pdfViewer.currentPageNumber = currentPage + 1;
+                    }
+                }
+                document.getElementById('prompt-name').value = '';
+                return;
+            }
+
+            if (/\b(?:previous page|prev page|go to previous page|back page)\b/.test(lowered)) {
+                responseContent.innerHTML = '<div style="padding: 15px; white-space: pre-wrap;">Previous page</div>';
+                if (window.pdfViewer && window.pdfViewer.pdfDocument) {
+                    const currentPage = window.pdfViewer.currentPageNumber || 1;
+                    if (currentPage > 1) {
+                        window.pdfViewer.currentPageNumber = currentPage - 1;
+                    }
+                }
+                document.getElementById('prompt-name').value = '';
+                return;
+            }
+
+            const goToPageMatch = lowered.match(/\b(?:go to|goto|open)?\s*page\s+(\d{1,4})\b/);
+            if (goToPageMatch) {
+                const pageNumber = parseInt(goToPageMatch[1], 10);
+                if (!Number.isNaN(pageNumber)) {
+                    responseContent.innerHTML = `<div style="padding: 15px; white-space: pre-wrap;">Go to page ${pageNumber}</div>`;
+                    if (window.pdfViewer && window.pdfViewer.pdfDocument) {
+                        window.pdfViewer.currentPageNumber = pageNumber;
+                    }
+                    document.getElementById('prompt-name').value = '';
+                    return;
+                }
+            }
+
+            if (/\bclose\s+(?:the\s+)?(?:document|pdf)\b/.test(lowered)) {
+                if (document.getElementById('file-preview')) document.getElementById('file-preview').style.display = 'none';
+                if (document.getElementById('reminder-file-preview-modal')) document.getElementById('reminder-file-preview-modal').style.display = 'none';
+                responseContent.innerHTML = '<div style="padding: 15px; white-space: pre-wrap;">Closed document preview</div>';
                 document.getElementById('prompt-name').value = '';
                 return;
             }
@@ -4542,6 +4613,36 @@ async function init() {
                         if (currentPage > 1) {
                             window.pdfViewer.currentPageNumber = currentPage - 1;
                         }
+                    }
+                    return;
+                }
+
+                if (normalizedAnswer.includes('__ACTION:CLOSE_DOCUMENT__')) {
+                    if (document.getElementById('file-preview')) document.getElementById('file-preview').style.display = 'none';
+                    if (document.getElementById('reminder-file-preview-modal')) document.getElementById('reminder-file-preview-modal').style.display = 'none';
+                    responseContent.innerHTML = '<div style="padding: 15px; white-space: pre-wrap;">Closed document</div>';
+                    return;
+                }
+
+                if (normalizedAnswer.startsWith('__ACTION:GO_TO_PAGE:')) {
+                    const rawPage = normalizedAnswer.replace("__ACTION:GO_TO_PAGE:", "").replace(/__$/, "").trim();
+                    const pageNumber = parseInt(rawPage, 10);
+                    responseContent.innerHTML = `<div style="padding: 15px; white-space: pre-wrap;">Go to page ${pageNumber}</div>`;
+                    if (window.pdfViewer && window.pdfViewer.pdfDocument && !Number.isNaN(pageNumber)) {
+                        window.pdfViewer.currentPageNumber = pageNumber;
+                    }
+                    return;
+                }
+
+                if (normalizedAnswer.startsWith('__ACTION:SHOW_REMINDERS:')) {
+                    const jsonStr = normalizedAnswer.replace("__ACTION:SHOW_REMINDERS:", "").replace(/__$/, "").trim();
+                    try {
+                        const reminders = JSON.parse(jsonStr);
+                        const listHtml = (Array.isArray(reminders) ? reminders : [])
+                            .map((r, idx) => `<li>${escapeHtml(r.text)}</li>`).join('');
+                        responseContent.innerHTML = `<div style="padding: 15px; white-space: pre-wrap;"><strong>Your Reminders:</strong><ul style="margin-left: 20px; margin-top: 10px;">${listHtml || '<li>No reminders yet.</li>'}</ul></div>`;
+                    } catch (_) {
+                        responseContent.innerHTML = '<div style="padding: 15px; white-space: pre-wrap;">Couldn\'t parse reminders. Please try again.</div>';
                     }
                     return;
                 }
