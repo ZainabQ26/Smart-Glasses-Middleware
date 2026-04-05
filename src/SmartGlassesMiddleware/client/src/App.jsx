@@ -6,7 +6,7 @@ import PdfViewer from "./PdfViewer.jsx";
 // Voice pipeline: Groq API (server-side Whisper transcription)
 //   - AudioContext + AudioWorklet captures mic at 16 kHz
 //   - Amplitude VAD detects speech vs silence
-//   - Wake-word mode: each speech chunk sent to server Groq; "Hi Iris" triggers command mode
+//   - Wake-word mode: each speech chunk sent to server Groq; "Iris" triggers command mode
 //   - Command mode: chunks sent as partial results; sentence-end pattern or 2.5 s
 //     silence submits the full accumulated audio for final transcription via
 //     Groq Whisper Turbo on the server
@@ -28,7 +28,7 @@ export default function App() {
   // Configurable activation word — stored in localStorage and updated live when
   // the admin panel changes it (via the storage event).
   const [activationWord, setActivationWord] = useState(() => {
-    try { return localStorage.getItem("sgm_activation_word")?.trim() || "Hi Iris"; } catch (_) { return "Hi Iris"; }
+    try { return localStorage.getItem("sgm_activation_word")?.trim() || "Iris"; } catch (_) { return "Iris"; }
   });
   // Ref copy so the async voice pipeline always reads the current value without
   // needing to restart the AudioContext effect.
@@ -202,6 +202,7 @@ export default function App() {
       );
 
       const text = (payload?.text || "").trim();
+      console.log("[Voice Debug] Heard command transcription (raw):", text);
       return text || null;
     } catch (err) {
       addLog(`⚠️ Groq transcription error: ${err?.message || "unknown error"}`, "warn");
@@ -225,6 +226,7 @@ export default function App() {
       );
 
       const text = (payload?.text || "").trim();
+      console.log("[Voice Debug] Heard wake-word transcription (raw):", text);
       return text || null;
     } catch (err) {
       // Silently fail for wake-word — don't spam logs
@@ -540,7 +542,9 @@ export default function App() {
     // the user can say a number without repeating "activate".
     let keepMicActive = false;
     try {
+      console.log("[Voice Debug] Heard input before interpretation:", text);
       const commandText = normalizeCommandText(text);
+      console.log("[Voice Debug] Interpreted command:", commandText);
       if (!commandText) {
         addLog("⚠️ Command was empty after wake-word cleanup.", "warn");
         setPendingAction(null);
@@ -986,8 +990,15 @@ export default function App() {
       const word    = activationWordRef.current;
       const wordEsc = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const wakeRx  = new RegExp(`\\b${wordEsc}\\b`, "i");
+      const wakeWordMatched = wakeRx.test(cleaned);
+      console.log("[Voice Debug] Wake-word check:", {
+        heardText: cleaned,
+        activationWord: word,
+        wakeRegex: wakeRx.toString(),
+        matched: wakeWordMatched,
+      });
       if (
-        wakeRx.test(cleaned) &&
+        wakeWordMatched &&
         !activatedRef.current &&
         statusRef.current !== "sending" &&
         statusRef.current !== "processing"
