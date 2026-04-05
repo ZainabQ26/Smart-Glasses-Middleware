@@ -67,7 +67,7 @@ public class ProcessController : ControllerBase
 
         var activationWord = _configuration["AI:ActivationWord"]?.Trim().ToLowerInvariant();
         if (string.IsNullOrWhiteSpace(activationWord))
-            activationWord = "Hi Iris";
+            activationWord = "iris";
 
         var groqEnabled = true;
         if (_serverSettingsService is not null)
