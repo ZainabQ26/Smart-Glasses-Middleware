@@ -561,6 +561,7 @@ const state = {
 var conversationHubConnection = null;
 var resourceHubConnection = null;
 var taskHubConnection = null;
+let activeConversationId = null;
 const HUB_RECONNECT_DELAYS_MS = [10000, 20000, 40000, 80000, 120000];
 let conversationHubConnectInProgress = false;
 let resourceHubConnectInProgress = false;
@@ -3594,6 +3595,7 @@ function setupInfiniteScroll() {
     
     containers.forEach(({ id, loadFn }) => {
         const container = document.getElementById(id);
+        if (!container) return; // element may not exist in the current admin view
         
         // Create sentinel element at the bottom of each list
         const sentinel = document.createElement('div');
