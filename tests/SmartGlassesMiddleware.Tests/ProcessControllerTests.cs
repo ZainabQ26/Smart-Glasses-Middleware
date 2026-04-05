@@ -53,18 +53,7 @@ public class ProcessControllerTests
         Assert.That(result!.Value!.ToString(), Contains.Substring("willUseAdvanced = True"));
     }
 
-    [Test]
-    public async Task GetClientSettings_ReturnsOkWithConfiguredValues()
-    {
-        _configMock.Setup(x => x["AI:SpeechTranscriptionMode"]).Returns("webspeech-only");
-        _configMock.Setup(x => x["AI:ActivationWord"]).Returns("TestWord");
-
-        var result = await _controller.GetClientSettings(CancellationToken.None) as OkObjectResult;
-
-        Assert.That(result, Is.Not.Null);
-        Assert.That(result!.Value!.ToString(), Contains.Substring("speechTranscriptionMode = webspeech-only"));
-        Assert.That(result.Value.ToString(), Contains.Substring("activationWord = testword"));
-    }
+    // GetClientSettings tests removed — endpoint moved to minimal API in Program.cs
 
     [Test]
     public async Task Process_NullInput_ReturnsBadRequest()

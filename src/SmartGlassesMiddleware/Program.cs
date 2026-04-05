@@ -909,6 +909,41 @@ app.MapGet("/health", async (IServiceProvider services, HttpContext context) =>
     return Results.Ok(new { status = "Healthy", timestamp = DateTime.UtcNow });
 });
 
+// Minimal API client-settings endpoint — bypasses ProcessController DI.
+app.MapGet("/api/process/client-settings", async (
+    IConfiguration configuration,
+    IServiceProvider services,
+    CancellationToken cancellationToken) =>
+{
+    var configuredMode = configuration["AI:SpeechTranscriptionMode"]?.Trim().ToLowerInvariant();
+    var mode = configuredMode switch
+    {
+        "webspeech-only" => "webspeech-only",
+        "whisper-only" => "whisper-only",
+        "groq-only" => "groq-only",
+        _ => "groq-only"
+    };
+
+    var activationWord = configuration["AI:ActivationWord"]?.Trim().ToLowerInvariant();
+    if (string.IsNullOrWhiteSpace(activationWord))
+        activationWord = "iris";
+
+    var groqEnabled = true;
+    try
+    {
+        using var scope = services.CreateScope();
+        var settingsService = scope.ServiceProvider.GetService<IServerSettingsService>();
+        if (settingsService is not null)
+        {
+            var groqSetting = await settingsService.GetGroqCommandTranscriptionSettingAsync(cancellationToken);
+            groqEnabled = groqSetting.Enabled;
+        }
+    }
+    catch { /* default to enabled */ }
+
+    return Results.Ok(new { speechTranscriptionMode = mode, activationWord, groqCommandTranscriptionEnabled = groqEnabled });
+});
+
 // DB + Redis readiness endpoint.
 // The admin page's waitForAPI() polls this before loading data so it waits out
 // the full cold-start without showing 500 errors to the user.
