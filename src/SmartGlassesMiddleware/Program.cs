@@ -938,8 +938,8 @@ app.MapGet("/api/process/client-settings", (IConfiguration configuration, HttpCo
     }
     catch (Exception ex)
     {
-        var logger = context.RequestServices.GetService<ILogger<Program>>();
-        logger?.LogError(ex, "client-settings endpoint failed");
+        var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+        logger.LogError(ex, "client-settings endpoint failed");
 
         // Return safe defaults so the frontend can still function.
         return Results.Ok(new { speechTranscriptionMode = "groq-only", activationWord = "iris", groqCommandTranscriptionEnabled = true });
