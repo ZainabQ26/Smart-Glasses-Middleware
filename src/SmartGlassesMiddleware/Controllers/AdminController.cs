@@ -733,9 +733,11 @@ public class AdminController : ControllerBase
                     await monitoringService.UpdateRequestStatus(requestId, "Uploading", "Uploading file to storage...");
                 }
 
-                // Upload to storage
+                // Upload to storage — include metadata so S3FileIndexService can reconstruct the
+                // ManagedFile record on next boot without a separate database save.
                 using var stream = new MemoryStream(uploadedBytes);
-                var storageKey = await mediaStorageService.UploadMediaAsync(stream, fileName, contentType);
+                var uploadMeta = S3FileIndexService.BuildUploadMetadata(fileId, fileName, label);
+                var storageKey = await mediaStorageService.UploadMediaAsync(stream, fileName, contentType, uploadMeta);
 
                 // Update existing record if present, otherwise create it here.
                 var managedFile = await db.ManagedFiles.FirstOrDefaultAsync(f => f.Id == fileId);
