@@ -23,7 +23,7 @@ public class AdminController : ControllerBase
     private readonly ICacheService _cacheService;
     private readonly ILogger<AdminController> _logger;
     private readonly IRequestMonitoringService _monitoringService;
-    private readonly IServerSettingsService _serverSettingsService;
+    private readonly IGroqTranscriptionLogService _groqTranscriptionLog;
     private readonly IHubContext<ResourceHub>? _resourceHub;
     private readonly IServiceScopeFactory _scopeFactory;
     private static readonly TimeSpan InitEndpointTimeout = TimeSpan.FromSeconds(8);
@@ -139,7 +139,7 @@ public class AdminController : ControllerBase
 
         ILogger<AdminController> logger,
         IRequestMonitoringService monitoringService,
-        IServerSettingsService serverSettingsService,
+        IGroqTranscriptionLogService groqTranscriptionLog,
         IServiceScopeFactory scopeFactory,
         IHubContext<ResourceHub>? resourceHub = null)
     {
@@ -148,7 +148,7 @@ public class AdminController : ControllerBase
         _cacheService = cacheService;
         _logger = logger;
         _monitoringService = monitoringService;
-        _serverSettingsService = serverSettingsService;
+        _groqTranscriptionLog = groqTranscriptionLog;
         _resourceHub = resourceHub;
         _scopeFactory = scopeFactory;
     }
@@ -1464,126 +1464,23 @@ public class AdminController : ControllerBase
     }
 
     /// <summary>
-    /// Get server-side prevent-sleep setting for admin keepalive behavior.
+    /// Return recent Groq transcription entries (wakeword + command) for the live viewer.
     /// </summary>
-
-
-    /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>The current prevent-sleep setting state.</returns>
-    [HttpGet("settings/prevent-sleep")]
-    public async Task<ActionResult<object>> GetPreventSleepSetting(CancellationToken cancellationToken)
+    [HttpGet("groq-transcriptions")]
+    public ActionResult<object> GetGroqTranscriptions([FromQuery] int maxCount = 200)
     {
-        try
-        {
-            var state = await _serverSettingsService.GetPreventSleepStateAsync(cancellationToken);
-            return Ok(new
-            {
-                enabled = state.Enabled,
-                autoDisabledAt2AmEt = state.AutoDisabledAt2AmEt,
-                evaluatedAtUtc = state.RetrievedAtUtc
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to read prevent-sleep setting");
-            return StatusCode(500, new ProblemDetails
-            {
-                Title = "Internal Server Error",
-                Detail = "Failed to read prevent-sleep setting",
-                Status = StatusCodes.Status500InternalServerError
-            });
-        }
+        var entries = _groqTranscriptionLog.GetRecent(Math.Clamp(maxCount, 1, 500));
+        return Ok(new { entries, count = entries.Count });
     }
 
     /// <summary>
-    /// Update server-side prevent-sleep setting for admin keepalive behavior.
+    /// Clear all stored Groq transcription log entries.
     /// </summary>
-
-
-    /// <param name="request">The request body containing the desired prevent-sleep state.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>The updated setting state.</returns>
-    [HttpPut("settings/prevent-sleep")]
-    public async Task<ActionResult<object>> SetPreventSleepSetting(
-        [FromBody] PreventSleepSettingRequest request,
-        CancellationToken cancellationToken)
+    [HttpDelete("groq-transcriptions")]
+    public IActionResult ClearGroqTranscriptions()
     {
-        try
-        {
-            var state = await _serverSettingsService.SetPreventSleepEnabledAsync(request.Enabled, cancellationToken);
-            return Ok(new
-            {
-                enabled = state.Enabled,
-                autoDisabledAt2AmEt = state.AutoDisabledAt2AmEt,
-                evaluatedAtUtc = state.RetrievedAtUtc
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to update prevent-sleep setting to {Enabled}", request.Enabled);
-            return StatusCode(500, new ProblemDetails
-            {
-                Title = "Internal Server Error",
-                Detail = "Failed to update prevent-sleep setting",
-                Status = StatusCodes.Status500InternalServerError
-            });
-        }
-    }
-
-    /// <summary>
-    /// Get runtime Groq command transcription setting.
-    /// </summary>
-    [HttpGet("settings/groq-command-transcription")]
-    public async Task<ActionResult<object>> GetGroqCommandTranscriptionSetting(CancellationToken cancellationToken)
-    {
-        try
-        {
-            var state = await _serverSettingsService.GetGroqCommandTranscriptionSettingAsync(cancellationToken);
-            return Ok(new
-            {
-                enabled = state.Enabled,
-                evaluatedAtUtc = state.RetrievedAtUtc
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to read Groq command transcription setting");
-            return StatusCode(500, new ProblemDetails
-            {
-                Title = "Internal Server Error",
-                Detail = "Failed to read Groq command transcription setting",
-                Status = StatusCodes.Status500InternalServerError
-            });
-        }
-    }
-
-    /// <summary>
-    /// Update runtime Groq command transcription setting.
-    /// </summary>
-    [HttpPut("settings/groq-command-transcription")]
-    public async Task<ActionResult<object>> SetGroqCommandTranscriptionSetting(
-        [FromBody] GroqCommandTranscriptionSettingRequest request,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var state = await _serverSettingsService.SetGroqCommandTranscriptionEnabledAsync(request.Enabled, cancellationToken);
-            return Ok(new
-            {
-                enabled = state.Enabled,
-                evaluatedAtUtc = state.RetrievedAtUtc
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to update Groq command transcription setting to {Enabled}", request.Enabled);
-            return StatusCode(500, new ProblemDetails
-            {
-                Title = "Internal Server Error",
-                Detail = "Failed to update Groq command transcription setting",
-                Status = StatusCodes.Status500InternalServerError
-            });
-        }
+        _groqTranscriptionLog.Clear();
+        return Ok(new { cleared = true });
     }
 
     /// <summary>

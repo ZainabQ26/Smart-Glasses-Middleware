@@ -24,7 +24,7 @@ public class MoreAdminControllerTests3
     private Mock<ICacheService> _cacheMock = null!;
     private Mock<ILogger<AdminController>> _loggerMock = null!;
     private Mock<IRequestMonitoringService> _monitoringMock = null!;
-    private Mock<IServerSettingsService> _settingsMock = null!;
+    private Mock<IGroqTranscriptionLogService> _groqLogMock = null!;
     private Mock<IServiceScopeFactory> _scopeFactoryMock = null!;
 
     [SetUp]
@@ -39,7 +39,7 @@ public class MoreAdminControllerTests3
         _cacheMock = new Mock<ICacheService>();
         _loggerMock = new Mock<ILogger<AdminController>>();
         _monitoringMock = new Mock<IRequestMonitoringService>();
-        _settingsMock = new Mock<IServerSettingsService>();
+        _groqLogMock = new Mock<IGroqTranscriptionLogService>();
         _scopeFactoryMock = new Mock<IServiceScopeFactory>();
 
         _cacheMock.Setup(c => c.GetAsync<object>(It.IsAny<string>())).ReturnsAsync((object?)null);
@@ -65,7 +65,7 @@ public class MoreAdminControllerTests3
             _cacheMock.Object,
             _loggerMock.Object,
             _monitoringMock.Object,
-            _settingsMock.Object,
+            _groqLogMock.Object,
             _scopeFactoryMock.Object);
 
         controller.ControllerContext = new ControllerContext
