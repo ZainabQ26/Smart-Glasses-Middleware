@@ -12,11 +12,12 @@ resource "aws_secretsmanager_secret" "db_connection" {
 resource "aws_secretsmanager_secret_version" "db_connection" {
   secret_id = aws_secretsmanager_secret.db_connection.id
   secret_string = jsonencode({
-    username = var.db_username
-    password = var.db_password
-    host     = var.db_host
-    port     = var.db_port
-    dbname   = var.db_name
+    username          = var.db_username
+    password          = var.db_password
+    host              = var.db_host
+    port              = var.db_port
+    dbname            = var.db_name
+    connection_string = "Host=${var.db_host};Port=${var.db_port};Database=${var.db_name};Username=${var.db_username};Password=${var.db_password}"
   })
 }
 # Application Secrets
