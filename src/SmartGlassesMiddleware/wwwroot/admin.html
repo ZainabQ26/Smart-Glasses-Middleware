@@ -1586,79 +1586,9 @@
             </section>
         </div>
 
-        <!-- Prompts Tab -->
-        <div id="prompts" class="tab-content">
-            <section id="prompts-section" class="prompts-container">
-                
-                <div class="prompt-form-card">
-                    <div class="responsive-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px;">
-                        <h2 id="prompt-form-title" style="margin: 0;">Conversation</h2>
-                        <button type="button" id="new-chat-btn" style="padding: 8px 16px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500; white-space: nowrap;">New Conversation</button>
-                    </div>
-                    <form id="prompt-form" onsubmit="return false;">
-                        <input type="hidden" id="prompt-id">
-                        <div class="form-group">
-                            <label for="prompt-name">Message</label>
-                            <div class="responsive-flex-row" style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
-                                <div style="position: relative; flex: 1; min-width: 0;">
-                                    <input type="text" id="prompt-name" placeholder="Enter a message" required style="width: 100%; margin: 0; padding-right: 40px; box-sizing: border-box;">
-                                    <span id="prompt-files-icon" onclick="window.showPromptFilesPanel && window.showPromptFilesPanel()" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 20px; color: #95a5a6; cursor: pointer;">📎</span>
-                                </div>
-                                <div class="responsive-btn-group" style="display: flex; gap: 8px; flex-shrink: 0;">
-                                    <button type="button" id="prompt-show-file-btn" onclick="window.togglePromptFileSection && window.togglePromptFileSection()" style="padding: 8px 14px; background: #0b63a6; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Attach file</button>
-                                    <button type="button" id="prompt-send-btn" style="padding: 8px 16px; background: #1b5e20; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Send</button>
-                                    <button type="button" id="prompt-cancel-btn" style="display: none; padding: 8px 14px; background: #e67e22; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Cancel</button>
-                                </div>
-                            </div>
-                        </div>
-                    </form>
-
-                    <!-- File Section (hidden by default) -->
-                    <div id="prompt-file-section" style="display: none; margin-bottom: 20px;">
-                        <div class="responsive-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-                            <!-- Preview Panel -->
-                            <div id="prompt-preview-panel" style="border: 2px solid #0b63a6; border-radius: 8px; padding: 15px; position: relative;">
-                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                                    <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Preview</h3>
-                                    <button type="button" onclick="document.getElementById('prompt-preview-panel').style.display='none'" style="background: none; border: none; font-size: 20px; color: #95a5a6; cursor: pointer; padding: 0; line-height: 1;">×</button>
-                                </div>
-                                <div id="prompt-preview-content" style="min-height: 200px; background: #f8f9fa; border-radius: 4px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; overflow: hidden;">
-                                    <div style="font-size: 48px; color: #95a5a6; margin-bottom: 10px;">📄</div>
-                                </div>
-                                <div id="prompt-preview-filename" style="margin: 10px 0; text-align: center; color: #2c3e50; font-size: 14px; font-weight: 500;"></div>
-                                <div id="prompt-upload-progress" style="display: none; margin: 6px 0 12px 0; height: 6px; background: #e0e0e0; border-radius: 999px; overflow: hidden;">
-                                    <div id="prompt-upload-progress-bar" style="width: 40%; height: 100%; background: linear-gradient(90deg, #0b63a6, #6bb9f0, #0b63a6); animation: promptUploadMove 1.2s linear infinite;"></div>
-                                </div>
-                                <div class="form-group">
-                                    <label for="prompt-file-input">Upload File (auto-upload on select)</label>
-                                    <input type="file" id="prompt-file-input" accept=".jpg,.jpeg,.png,.pdf,.docx,.txt,.xml,.wav,.mp3,.m4a,.ogg,.webm,.md">
-                                </div>
-                            </div>
-                            
-                            <!-- Files Panel -->
-                            <div id="prompt-files-panel" data-context="prompts" style="border: 1px solid #e0e0e0; border-radius: 8px; padding: 15px; display: flex; flex-direction: column; position: relative;">
-                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                                    <h3 style="margin: 0; font-size: 16px; color: #2c3e50;">Attachments</h3>
-                                    <button type="button" onclick="document.getElementById('prompt-files-panel').style.display='none'" style="background: none; border: none; font-size: 20px; color: #95a5a6; cursor: pointer; padding: 0; line-height: 1;">×</button>
-                                </div>
-                                <div id="prompt-files-list" style="flex: 1; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; background: white; max-height: 300px;">
-                                    <!-- Files will appear here when added -->
-                                </div>
-                                <button type="button" id="prompt-delete-selected-btn" onclick="deleteSelectedPromptFiles()" style="margin-top: 12px; padding: 8px 20px; background: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 500; align-self: flex-end;">Delete</button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div id="prompt-response-section" class="response-section" style="margin-top: 20px;">
-                        <div class="response-header">
-                            <h3>Response</h3>
-                        </div>
-                        <div id="response-content" class="response-content">
-                            <span style="color: #2f3a3f;">Enter a prompt and click Send to get a response</span>
-                        </div>
-                    </div>
-                </div>
-            </section>
+        <!-- Prompts Tab (React App mounted here) -->
+        <div id="prompts" class="tab-content" style="padding: 0; min-height: 600px;">
+            <div id="admin-chat-root" style="width: 100%; height: 100%; min-height: 600px;"></div>
         </div>
 
     <script>
@@ -1681,54 +1611,6 @@
                 }
             } catch (e) { /* ignore */ }
         };
-        // Ensure prompt file section can be toggled reliably before admin.js loads
-        window.togglePromptFileSection = window.togglePromptFileSection || function() {
-            try {
-                const section = document.getElementById('prompt-file-section');
-                const preview = document.getElementById('prompt-preview-panel');
-                const files = document.getElementById('prompt-files-panel');
-                const showBtn = document.getElementById('prompt-show-file-btn');
-                const computed = window.getComputedStyle(section || document.createElement('div'));
-                const isHidden = computed.display === 'none' || computed.visibility === 'hidden' || computed.opacity === '0';
-                if (isHidden) {
-                    if (section) {
-                        section.style.setProperty('display', 'block', 'important');
-                        section.style.setProperty('visibility', 'visible', 'important');
-                        section.style.setProperty('opacity', '1', 'important');
-                    }
-                    if (preview) preview.style.setProperty('display', 'block', 'important');
-                    if (files) files.style.setProperty('display', 'flex', 'important');
-                    if (showBtn) showBtn.textContent = '✕ Close';
-                    try { if (section && typeof section._markShown === 'function') section._markShown(); } catch(e){}
-                } else {
-                    if (section) {
-                        section.style.setProperty('display', 'none', 'important');
-                        section.style.setProperty('visibility', 'hidden', 'important');
-                        section.style.setProperty('opacity', '0', 'important');
-                    }
-                    if (showBtn) showBtn.textContent = 'Attach file';
-                }
-            } catch (e) {
-                // noop
-            }
-        };
-        window.showPromptFilesPanel = window.showPromptFilesPanel || function() {
-            try {
-                const section = document.getElementById('prompt-file-section');
-                const preview = document.getElementById('prompt-preview-panel');
-                const files = document.getElementById('prompt-files-panel');
-                const showBtn = document.getElementById('prompt-show-file-btn');
-                if (section) {
-                    section.style.setProperty('display', 'block', 'important');
-                    section.style.setProperty('visibility', 'visible', 'important');
-                    section.style.setProperty('opacity', '1', 'important');
-                }
-                if (preview) preview.style.setProperty('display', 'none', 'important');
-                if (files) files.style.setProperty('display', 'flex', 'important');
-                if (showBtn) showBtn.textContent = '✕ Close';
-                try { if (section && typeof section._markShown === 'function') section._markShown(); } catch(e){}
-            } catch (e) { /* noop */ }
-        };
         // Lightweight tab switching shim so tests can switch tabs before admin.js initializes
         (function() {
             try {
@@ -1743,6 +1625,62 @@
                 });
             } catch (e) { /* noop */ }
         })();
+        // Inject React bundle
+        const reactScript = document.createElement('script');
+        reactScript.type = 'module';
+        // Note: the built react app is served from the root of wwwroot as assets/*.js
+        // We will need to locate the main entry point, but Vite automatically injects it into index.html
+        // For admin.html, we can use the same approach by looking up the manifest or just
+        // relying on the browser to load it if we inject it properly.
+        // Actually, we can load the development script if we're in dev mode, otherwise
+        // we'd need the built asset path. Let's just point to the client entry script for dev,
+        // and rely on the build process to inject it in production if necessary.
+        // Since Vite builds it, let's just inject the module entry point for development.
+        // In production, the build outputs to wwwroot/assets/.
+        // To make it easy, we'll try to fetch the Vite manifest or just use a module script that imports it.
+        const importReactApp = async () => {
+            try {
+                // In production, Vite generates an index.html with the correct script tags.
+                // We can parse it and inject the scripts into admin.html.
+                const response = await fetch('/');
+                if (response.ok) {
+                    const text = await response.text();
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(text, 'text/html');
+                    const scripts = doc.querySelectorAll('script[type="module"]');
+                    scripts.forEach(script => {
+                        if (script.src && script.src.includes('assets/')) {
+                            const newScript = document.createElement('script');
+                            newScript.type = 'module';
+                            // Convert absolute path from / to relative or absolute correctly
+                            const src = new URL(script.src).pathname;
+                            newScript.src = src;
+                            document.head.appendChild(newScript);
+                        } else if (script.src && script.src.includes('src/main.jsx')) {
+                             // Development mode
+                            const newScript = document.createElement('script');
+                            newScript.type = 'module';
+                            newScript.src = '/src/main.jsx';
+                            document.head.appendChild(newScript);
+                        }
+                    });
+
+                    const links = doc.querySelectorAll('link[rel="stylesheet"]');
+                    links.forEach(link => {
+                        if (link.href && link.href.includes('assets/')) {
+                            const newLink = document.createElement('link');
+                            newLink.rel = 'stylesheet';
+                            newLink.href = new URL(link.href).pathname;
+                            document.head.appendChild(newLink);
+                        }
+                    });
+                }
+            } catch (e) {
+                console.warn('Failed to load React app scripts', e);
+            }
+        };
+        importReactApp();
+
         // Force reload with timestamp
         const timestamp = new Date().getTime();
         const SIGNALR_VERSION = '8.0.7';
