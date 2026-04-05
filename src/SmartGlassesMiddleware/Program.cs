@@ -282,7 +282,7 @@ builder.Services.AddScoped<IEmbeddingClient, SmartGlassesMiddleware.Services.Bed
 builder.Services.AddScoped<IConversationService, ConversationService>();
 builder.Services.AddScoped<IPageSummaryService, BedrockPageSummaryService>();
 // Global mapping service for ResourceGroup -> Conversation
-builder.Services.AddScoped<IServerSettingsService, ServerSettingsService>();
+builder.Services.AddSingleton<IGroqTranscriptionLogService, GroqTranscriptionLogService>();
 
 // Audio transcription service removed: transcription now handled entirely in-browser via Whisper worker
 
@@ -467,7 +467,6 @@ if (!builder.Environment.IsEnvironment("Testing") && !string.IsNullOrWhiteSpace(
 
 // Monthly FDA abbreviation sync background service
 builder.Services.AddHostedService<AbbreviationSyncBackgroundService>();
-builder.Services.AddHostedService<PreventSleepResetBackgroundService>();
 
 // On startup, scan S3 and rebuild the in-memory ManagedFile index — no separate persistence needed.
 builder.Services.AddHostedService<S3FileIndexService>();
@@ -910,10 +909,7 @@ app.MapGet("/health", async (IServiceProvider services, HttpContext context) =>
 });
 
 // Minimal API client-settings endpoint — bypasses ProcessController DI.
-app.MapGet("/api/process/client-settings", async (
-    IConfiguration configuration,
-    IServiceProvider services,
-    CancellationToken cancellationToken) =>
+app.MapGet("/api/process/client-settings", (IConfiguration configuration) =>
 {
     var configuredMode = configuration["AI:SpeechTranscriptionMode"]?.Trim().ToLowerInvariant();
     var mode = configuredMode switch
@@ -928,20 +924,7 @@ app.MapGet("/api/process/client-settings", async (
     if (string.IsNullOrWhiteSpace(activationWord))
         activationWord = "iris";
 
-    var groqEnabled = true;
-    try
-    {
-        using var scope = services.CreateScope();
-        var settingsService = scope.ServiceProvider.GetService<IServerSettingsService>();
-        if (settingsService is not null)
-        {
-            var groqSetting = await settingsService.GetGroqCommandTranscriptionSettingAsync(cancellationToken);
-            groqEnabled = groqSetting.Enabled;
-        }
-    }
-    catch { /* default to enabled */ }
-
-    return Results.Ok(new { speechTranscriptionMode = mode, activationWord, groqCommandTranscriptionEnabled = groqEnabled });
+    return Results.Ok(new { speechTranscriptionMode = mode, activationWord, groqCommandTranscriptionEnabled = true });
 });
 
 // DB + Redis readiness endpoint.

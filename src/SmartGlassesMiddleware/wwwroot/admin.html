@@ -56,24 +56,6 @@
             display: inline-block;
         }
 
-        .signalr-status {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            margin-left: 12px;
-            font-size: 12px;
-            color: #ecf0f1;
-        }
-
-        .signalr-dot {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            background: #e74c3c;
-            border: 1px solid rgba(255,255,255,0.6);
-            display: inline-block;
-        }
-
         .header-nav a:hover {
             background: #ecf0f1;
         }
@@ -146,32 +128,6 @@
             background: #dfe6e9;
         }
 
-        .keepawake-toggle {
-            margin-left: auto;
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 8px 12px;
-            border: 1px solid #dcdcdc;
-            border-radius: 8px;
-            background: #ecf0f1;
-            color: #2c3e50;
-            font-size: 13px;
-            font-weight: 600;
-            cursor: pointer;
-            user-select: none;
-        }
-
-        .keepawake-toggle input {
-            width: 16px;
-            height: 16px;
-            cursor: pointer;
-        }
-
-        .keepawake-toggle:hover {
-            background: #dfe6e9;
-        }
-
         body.dark {
             background-color: #1a1f2e !important;
             color: #d7e6f6 !important;
@@ -191,10 +147,6 @@
             background: #2d3750 !important;
             color: #d7e6f6 !important;
             border: 1px solid rgba(255,255,255,0.04) !important;
-        }
-
-        body.dark .signalr-status {
-            color: #d7e6f6 !important;
         }
 
         body.dark .header-nav a:hover {
@@ -354,17 +306,6 @@
         }
 
         body.dark #theme-toggle:hover {
-            background: #36425b !important;
-            color: #e8eef5 !important;
-        }
-
-        body.dark .keepawake-toggle {
-            background: #2d3750 !important;
-            color: #d7e6f6 !important;
-            border: 1px solid rgba(255,255,255,0.04) !important;
-        }
-
-        body.dark .keepawake-toggle:hover {
             background: #36425b !important;
             color: #e8eef5 !important;
         }
@@ -954,11 +895,6 @@
                 font-size: 13px;
             }
 
-            .keepawake-toggle {
-                font-size: 11px;
-                padding: 4px 8px;
-            }
-
             .theme-toggle {
                 width: 32px;
                 height: 32px;
@@ -993,14 +929,6 @@
                 font-size: 13px;
                 flex-shrink: 0;
                 text-align: center;
-            }
-
-            .keepawake-toggle {
-                margin-left: 0 !important;
-                font-size: 11px;
-                padding: 4px 8px;
-                flex-shrink: 0;
-                box-sizing: border-box;
             }
 
             .theme-toggle {
@@ -1513,8 +1441,8 @@
     <link rel="stylesheet" href="toasts.css">
 </head>
 <body>
-    <!-- SignalR warning bar (hidden by default). Sticky/fixed at top when visible. -->
-    <div id="signalr-warning" role="status" aria-live="polite" style="display: none; position: fixed; top: 0; left: 0; width: 100%; background: #e74c3c; color: white; padding: 10px 16px; text-align: center; font-weight: 600; z-index: 20000; box-shadow: 0 2px 6px rgba(0,0,0,0.15);">Reconnecting to server...</div>
+    <!-- Server connectivity warning bar (hidden by default). Sticky/fixed at top when visible. -->
+    <div id="signalr-warning" role="status" aria-live="polite" style="display: none; position: fixed; top: 0; left: 0; width: 100%; background: #e74c3c; color: white; padding: 10px 16px; text-align: center; font-weight: 600; z-index: 20000; box-shadow: 0 2px 6px rgba(0,0,0,0.15);">Server unreachable. Retrying...</div>
     <header>
         <h1>Smart Glasses - Admin Panel</h1>
         <div class="header-nav">
@@ -1541,14 +1469,7 @@
         <div class="tabs" data-testid="admin-tabs">
             <button class="tab active" data-tab="files" data-testid="tab-files" aria-controls="files">Files</button>
             <button class="tab" data-tab="prompts" data-testid="tab-prompts" aria-controls="prompts">Conversation</button>
-            <label id="keepawake-toggle-wrap" class="keepawake-toggle" title="Send periodic health checks from this admin tab to prevent idle scale-down" data-testid="keepawake-wrap">
-                <input type="checkbox" id="keepawake-toggle" data-testid="keepawake-toggle" aria-label="Prevent server sleep from admin tab">
-                <span id="keepawake-label">Prevent sleep</span>
-            </label>
-            <label id="groq-toggle-wrap" class="keepawake-toggle" title="Use Groq Whisper Turbo for all voice transcription (wake-word and commands)" data-testid="groq-wrap">
-                <input type="checkbox" id="groq-toggle" data-testid="groq-toggle" aria-label="Enable Groq command transcription">
-                <span id="groq-label">Groq command transcription</span>
-            </label>
+            <button class="tab" data-tab="groq-live" data-testid="tab-groq-live" aria-controls="groq-live">🎙 Groq Live</button>
             <button id="theme-toggle" class="theme-toggle" type="button" title="Toggle dark mode" aria-label="Toggle dark mode" data-testid="theme-toggle">🌙</button>
         </div>
 
@@ -1591,6 +1512,25 @@
             <div id="admin-chat-root" style="width: 100%; height: 100%; min-height: 600px;"></div>
         </div>
 
+        <!-- Groq Live Transcription Tab -->
+        <div id="groq-live" class="tab-content">
+            <div class="section">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; flex-wrap: wrap; gap: 10px;">
+                    <h2 style="margin: 0;">🎙 Groq Live Transcription</h2>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <span id="groq-live-status" style="font-size: 12px; color: #7f8c8d; padding: 4px 10px; border-radius: 12px; background: #ecf0f1;">Inactive</span>
+                        <button id="groq-live-clear" class="secondary" style="padding: 6px 14px; font-size: 13px;">Clear</button>
+                    </div>
+                </div>
+                <p style="font-size: 13px; color: #7f8c8d; margin-top: 0; margin-bottom: 16px;">
+                    Shows every result Groq Whisper returns — wakeword checks and full commands — in real time, regardless of whether the activation keyword was heard.
+                </p>
+                <div id="groq-live-list" style="display: flex; flex-direction: column; gap: 6px; max-height: 600px; overflow-y: auto; background: #f8f9fa; border: 1px solid #e0e0e0; border-radius: 8px; padding: 12px;">
+                    <div class="empty-state" id="groq-live-empty"><p>No transcriptions yet. Groq results will appear here when a device is active.</p></div>
+                </div>
+            </div>
+        </div>
+
     <script>
         // Early shims to ensure tests can access these functions immediately on page load
         // The real implementations in admin.js will overwrite these when loaded.
@@ -1604,7 +1544,7 @@
                     warning.style.visibility = 'hidden';
                     warning.style.opacity = '0';
                 } else {
-                    warning.textContent = 'Reconnecting to server...';
+                    warning.textContent = 'Server unreachable. Retrying...';
                     warning.style.display = 'block';
                     warning.style.visibility = 'visible';
                     warning.style.opacity = '1';
@@ -1683,7 +1623,6 @@
 
         // Force reload with timestamp
         const timestamp = new Date().getTime();
-        const SIGNALR_VERSION = '8.0.7';
         let adminScriptLoaded = false;
 
         function ensureShowMessageFallback() {
@@ -1706,14 +1645,8 @@
         }
 
         function loadSignalRThenAdmin() {
-            const signalRScript = document.createElement('script');
-            signalRScript.src = `https://cdn.jsdelivr.net/npm/@microsoft/signalr@${SIGNALR_VERSION}/dist/browser/signalr.min.js`;
-            signalRScript.onload = appendAdminScript;
-            signalRScript.onerror = () => {
-                console.warn('Failed to load SignalR from CDN; continuing without realtime updates until refresh.');
-                appendAdminScript();
-            };
-            document.body.appendChild(signalRScript);
+            // SignalR/WebSockets removed — load admin.js directly using HTTP polling instead.
+            appendAdminScript();
         }
 
         function loadMarkedThenSignalR() {

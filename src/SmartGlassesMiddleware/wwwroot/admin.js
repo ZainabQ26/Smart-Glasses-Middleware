@@ -75,16 +75,34 @@ const API_BASE = '/api/admin';
 const ADMIN_DEBUG = !!window.__ADMIN_DEBUG__;
 const themeStorageKey = 'uiTheme';
 const ADMIN_SESSION_KEEPALIVE_INTERVAL_MS = 2.5 * 60 * 1000;
-const ADMIN_KEEPALIVE_INTERVAL_MS = 60 * 1000;
 const MAX_UPLOAD_STATUS_TRANSIENTS_BEFORE_DEFER = 5;
 const MIN_UPLOAD_STATUS_DEFER_RETRY_MS = 60000;
 const MAX_UPLOAD_STATUS_DEFER_RETRY_MS = 300000;
 // After this many deferred retries the upload is presumed permanently stuck; the user is told to re-upload.
 const MAX_POLL_DEFERRED_BEFORE_ABANDON = 8;
 const ADMIN_WAKE_RETRY_MS = 15000;
-let adminKeepAliveTimer = null;
 let adminSessionKeepAliveTimer = null;
 let lastAdminWakeAttempt = 0;
+
+// ── HTTP Polling (replaces SignalR hubs) ────────────────────────────────────
+
+// Health polling — drives the connectivity banner.
+const HEALTH_POLL_INTERVAL_MS = 15000;
+const MAX_CONSECUTIVE_HEALTH_FAILURES = 3;
+let healthPollTimer = null;
+let consecutiveHealthFailures = 0;
+let healthPollingActive = false;
+
+// Resource polling — periodically invalidates cached files so fresh data
+// is picked up the next time the Files tab is loaded.
+const RESOURCE_POLL_INTERVAL_MS = 30000;
+let resourcePollTimer = null;
+
+// Groq live-transcription polling — only active when the Groq Live tab is open.
+const GROQ_LIVE_POLL_INTERVAL_MS = 3000;
+let groqLivePollTimer = null;
+let groqLiveLastCount = 0;
+let groqLiveEntries = [];
 
 function triggerAdminWake() {
     const now = Date.now();
@@ -125,198 +143,143 @@ function startAdminSessionKeepAlive() {
     adminSessionKeepAliveTimer = setInterval(sendAdminSessionKeepAlivePing, ADMIN_SESSION_KEEPALIVE_INTERVAL_MS);
 }
 
-async function fetchPreventSleepState() {
-    const response = await fetch(`${API_BASE}/settings/prevent-sleep`, {
-        method: 'GET',
-        cache: 'no-store'
-    });
+// ── Health polling — banner ─────────────────────────────────────────────────
 
-    if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-    }
-
-    return await response.json();
-}
-
-async function fetchGroqCommandTranscriptionState() {
-    const response = await fetch(`${API_BASE}/settings/groq-command-transcription`, {
-        method: 'GET',
-        cache: 'no-store'
-    });
-
-    if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-    }
-
-    return await response.json();
-}
-
-async function sendAdminKeepAlivePing() {
+async function runHealthPoll() {
     try {
-        const state = await fetchPreventSleepState();
-        if (!state?.enabled) {
-            const wasEnabled = !!document.getElementById('keepawake-toggle')?.checked;
-            applyKeepAwakeToggle(false, false, false);
-
-            if (wasEnabled && state?.autoDisabledAt2AmEt && typeof showMessage === 'function') {
-                showMessage('Sleep prevention was turned off at 2:00 AM Eastern.', 'info');
+        const res = await fetch('/health', { cache: 'no-store' });
+        if (res.ok) {
+            if (consecutiveHealthFailures >= MAX_CONSECUTIVE_HEALTH_FAILURES) {
+                setSignalRIndicatorState(true);
             }
+            consecutiveHealthFailures = 0;
+        } else {
+            consecutiveHealthFailures++;
+            if (consecutiveHealthFailures >= MAX_CONSECUTIVE_HEALTH_FAILURES) {
+                setSignalRIndicatorState(false);
+            }
+        }
+    } catch (_) {
+        consecutiveHealthFailures++;
+        if (consecutiveHealthFailures >= MAX_CONSECUTIVE_HEALTH_FAILURES) {
+            setSignalRIndicatorState(false);
+        }
+    }
+}
+
+function startHealthPolling() {
+    if (healthPollTimer) return;
+    healthPollingActive = true;
+    runHealthPoll();
+    healthPollTimer = setInterval(runHealthPoll, HEALTH_POLL_INTERVAL_MS);
+}
+
+function stopHealthPolling() {
+    healthPollingActive = false;
+    if (healthPollTimer) {
+        clearInterval(healthPollTimer);
+        healthPollTimer = null;
+    }
+}
+
+// ── Resource polling — invalidate caches periodically ──────────────────────
+
+function runResourcePoll() {
+    // Quietly invalidate caches so the next tab-switch or manual refresh picks
+    // up fresh data without showing any toast notification.
+    apiCache.invalidate('files');
+    apiCache.invalidate('batch');
+}
+
+function startResourcePolling() {
+    if (resourcePollTimer) return;
+    resourcePollTimer = setInterval(runResourcePoll, RESOURCE_POLL_INTERVAL_MS);
+}
+
+function stopResourcePolling() {
+    if (resourcePollTimer) {
+        clearInterval(resourcePollTimer);
+        resourcePollTimer = null;
+    }
+}
+
+// ── Groq live-transcription polling ────────────────────────────────────────
+
+function renderGroqLiveEntry(entry) {
+    const isCommand = entry.type === 'command';
+    const time = entry.timestampUtc
+        ? new Date(entry.timestampUtc).toLocaleTimeString()
+        : '';
+    const badge = isCommand
+        ? '<span style="font-size:11px;padding:2px 7px;border-radius:10px;background:#0b63a6;color:#fff;font-weight:600;flex-shrink:0;">command</span>'
+        : '<span style="font-size:11px;padding:2px 7px;border-radius:10px;background:#7f8c8d;color:#fff;font-weight:600;flex-shrink:0;">wakeword</span>';
+    const el = document.createElement('div');
+    el.style.cssText = 'display:flex;align-items:flex-start;gap:10px;padding:8px 10px;background:#fff;border:1px solid #e0e0e0;border-radius:6px;font-size:14px;';
+    el.innerHTML = `${badge}<span style="flex:1;word-break:break-word;">${escapeHtml(entry.text || '(empty)')}</span><span style="font-size:11px;color:#aaa;flex-shrink:0;white-space:nowrap;">${time}</span>`;
+    return el;
+}
+
+async function runGroqLivePoll() {
+    try {
+        const res = await fetch(`${API_BASE}/groq-transcriptions?maxCount=200`, { cache: 'no-store' });
+        if (!res.ok) return;
+        const data = await res.json();
+        const entries = data.entries || [];
+        if (entries.length === groqLiveLastCount) return; // nothing new
+
+        groqLiveEntries = entries;
+        groqLiveLastCount = entries.length;
+
+        const list = document.getElementById('groq-live-list');
+        const empty = document.getElementById('groq-live-empty');
+        if (!list) return;
+
+        if (entries.length === 0) {
+            if (empty) empty.style.display = '';
+            // Remove any rendered rows but keep the empty placeholder
+            [...list.children].forEach(c => { if (c !== empty) c.remove(); });
             return;
         }
 
-        await fetch('/health', { method: 'GET', cache: 'no-store' });
-    } catch (_) {
-        // Keepalive is best-effort; wait for next interval.
-    }
-}
+        if (empty) empty.style.display = 'none';
 
-function stopAdminKeepAlive() {
-    if (adminKeepAliveTimer) {
-        clearInterval(adminKeepAliveTimer);
-        adminKeepAliveTimer = null;
-    }
-}
-
-function startAdminKeepAlive() {
-    if (adminKeepAliveTimer) {
-        return;
-    }
-
-    sendAdminKeepAlivePing();
-    adminKeepAliveTimer = setInterval(sendAdminKeepAlivePing, ADMIN_KEEPALIVE_INTERVAL_MS);
-}
-
-function applyKeepAwakeToggle(enabled, showToast = false, persist = false) {
-    const normalized = !!enabled;
-
-    const toggle = document.getElementById('keepawake-toggle');
-    const label = document.getElementById('keepawake-label');
-    if (toggle) toggle.checked = normalized;
-    if (label) label.textContent = normalized ? 'Prevent sleep: On' : 'Prevent sleep';
-
-    if (normalized) {
-        startAdminKeepAlive();
-    } else {
-        stopAdminKeepAlive();
-    }
-
-    if (showToast && typeof showMessage === 'function') {
-        showMessage(
-            normalized
-                ? 'Sleep prevention enabled. This admin tab will ping the server every minute.'
-                : 'Sleep prevention disabled.',
-            'info'
-        );
-    }
-
-    if (persist) {
-        fetch(`${API_BASE}/settings/prevent-sleep`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ enabled: normalized })
-        })
-            .then(async (res) => {
-                if (!res.ok) {
-                    throw new Error(`HTTP ${res.status}`);
-                }
-
-                const payload = await res.json().catch(() => null);
-                const serverEnabled = payload?.enabled;
-                if (typeof serverEnabled === 'boolean' && serverEnabled !== normalized) {
-                    applyKeepAwakeToggle(serverEnabled, false, false);
-                }
-            })
-            .catch((err) => {
-                console.warn('[KEEPAWAKE] Failed to persist server setting:', err);
-                if (typeof showMessage === 'function') {
-                    showMessage('Failed to update prevent-sleep setting on server.', 'error');
-                }
-            });
-    }
-}
-
-function applyGroqToggle(enabled, showToast = false, persist = false) {
-    const normalized = !!enabled;
-
-    const toggle = document.getElementById('groq-toggle');
-    const label = document.getElementById('groq-label');
-    if (toggle) toggle.checked = normalized;
-    if (label) label.textContent = normalized ? 'Groq command transcription: On' : 'Groq command transcription';
-
-    if (showToast && typeof showMessage === 'function') {
-        showMessage(
-            normalized
-                ? 'Groq Whisper Turbo enabled for final command transcription.'
-                : 'Groq Whisper Turbo disabled. Local Whisper command transcription will be used.',
-            'info'
-        );
-    }
-
-    if (persist) {
-        fetch(`${API_BASE}/settings/groq-command-transcription`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ enabled: normalized })
-        })
-            .then(async (res) => {
-                if (!res.ok) {
-                    throw new Error(`HTTP ${res.status}`);
-                }
-
-                const payload = await res.json().catch(() => null);
-                const serverEnabled = payload?.enabled;
-                if (typeof serverEnabled === 'boolean' && serverEnabled !== normalized) {
-                    applyGroqToggle(serverEnabled, false, false);
-                }
-            })
-            .catch((err) => {
-                console.warn('[GROQ] Failed to persist server setting:', err);
-                if (typeof showMessage === 'function') {
-                    showMessage('Failed to update Groq transcription setting on server.', 'error');
-                }
-            });
-    }
-}
-
-async function initializeKeepAwakeToggle() {
-    const toggle = document.getElementById('keepawake-toggle');
-    if (!toggle) {
-        return;
-    }
-
-    try {
-        const state = await fetchPreventSleepState();
-        applyKeepAwakeToggle(!!state?.enabled, false, false);
-        if (state?.autoDisabledAt2AmEt && typeof showMessage === 'function') {
-            showMessage('Sleep prevention defaults to off at 2:00 AM Eastern.', 'info');
+        // Rebuild from scratch (simple — list is bounded to 200 entries)
+        [...list.children].forEach(c => { if (c !== empty) c.remove(); });
+        const frag = document.createDocumentFragment();
+        // Show newest-first
+        for (let i = entries.length - 1; i >= 0; i--) {
+            frag.appendChild(renderGroqLiveEntry(entries[i]));
         }
+        list.insertBefore(frag, empty || null);
     } catch (err) {
-        console.warn('[KEEPAWAKE] Failed to fetch initial server setting:', err);
-        applyKeepAwakeToggle(false, false, false);
+        console.warn('[GroqLive] poll error:', err);
     }
-
-    toggle.addEventListener('change', () => {
-        applyKeepAwakeToggle(toggle.checked, true, true);
-    });
 }
 
-async function initializeGroqToggle() {
-    const toggle = document.getElementById('groq-toggle');
-    if (!toggle) {
-        return;
+function startGroqLivePolling() {
+    if (groqLivePollTimer) return;
+    // Update status indicator
+    const status = document.getElementById('groq-live-status');
+    if (status) {
+        status.textContent = 'Live';
+        status.style.background = '#27ae60';
+        status.style.color = '#fff';
     }
+    runGroqLivePoll();
+    groqLivePollTimer = setInterval(runGroqLivePoll, GROQ_LIVE_POLL_INTERVAL_MS);
+}
 
-    try {
-        const state = await fetchGroqCommandTranscriptionState();
-        applyGroqToggle(!!state?.enabled, false, false);
-    } catch (err) {
-        console.warn('[GROQ] Failed to fetch initial server setting:', err);
-        applyGroqToggle(true, false, false);
+function stopGroqLivePolling() {
+    if (groqLivePollTimer) {
+        clearInterval(groqLivePollTimer);
+        groqLivePollTimer = null;
     }
-
-    toggle.addEventListener('change', () => {
-        applyGroqToggle(toggle.checked, true, true);
-    });
+    const status = document.getElementById('groq-live-status');
+    if (status) {
+        status.textContent = 'Inactive';
+        status.style.background = '#ecf0f1';
+        status.style.color = '#7f8c8d';
+    }
 }
 
 // In-memory cache for API responses (no browser storage)
@@ -558,184 +521,21 @@ const state = {
     allGroups: [] // Cache of all groups for quick-add
 };
 
-var conversationHubConnection = null;
-var resourceHubConnection = null;
-var taskHubConnection = null;
-const HUB_RECONNECT_DELAYS_MS = [10000, 20000, 40000, 80000, 120000];
-let conversationHubConnectInProgress = false;
-let resourceHubConnectInProgress = false;
-let taskHubConnectInProgress = false;
-let conversationHubReconnectTimer = null;
-let conversationHubReconnectAttempt = 0;
-let resourceHubReconnectTimer = null;
-let resourceHubReconnectAttempt = 0;
-let taskHubReconnectTimer = null;
-let taskHubReconnectAttempt = 0;
-
 // Track individual hub connection states; banner shows if either hub is disconnected
 // Default to `true` so the banner is hidden until a hub explicitly reports disconnected.
 let resourceHubConnected = true;
 let conversationHubConnected = true;
 
-function createHubReconnectDelaysMs() {
-    return HUB_RECONNECT_DELAYS_MS.map(ms => ms + Math.floor(Math.random() * 2000));
-}
-
-function getHubReconnectDelayMs(retryAttempt) {
-    const maxIdx = HUB_RECONNECT_DELAYS_MS.length - 1;
-    const delayIdx = Math.min(Math.max(0, Number(retryAttempt) || 0), maxIdx);
-    const baseDelayMs = HUB_RECONNECT_DELAYS_MS[delayIdx] || 10000;
-    const jitterMs = Math.floor(Math.random() * Math.max(1000, Math.round(baseDelayMs * 0.2)));
-    const outageCooldownMs = getServiceOutageCooldownMs();
-    return Math.max(baseDelayMs + jitterMs, outageCooldownMs);
-}
-
-function clearConversationHubReconnectTimer() {
-    if (conversationHubReconnectTimer) {
-        clearTimeout(conversationHubReconnectTimer);
-        conversationHubReconnectTimer = null;
-    }
-}
-
-function scheduleConversationHubReconnect(reason = '') {
-    if (conversationHubReconnectTimer) {
-        return;
-    }
-
-    const maxIdx = HUB_RECONNECT_DELAYS_MS.length - 1;
-    const delayMs = getHubReconnectDelayMs(conversationHubReconnectAttempt);
-    conversationHubReconnectAttempt = Math.min(conversationHubReconnectAttempt + 1, maxIdx);
-
-    console.warn(`[SignalR] Scheduling ConversationHub reconnect in ${delayMs}ms${reason ? ` (${reason})` : ''}`);
-
-    conversationHubReconnectTimer = setTimeout(() => {
-        conversationHubReconnectTimer = null;
-        initConversationHub().catch((err) => {
-            console.warn('[SignalR] Conversation hub reconnect attempt failed:', err);
-            scheduleConversationHubReconnect('retry failed');
-        });
-    }, delayMs);
-}
-
-function clearResourceHubReconnectTimer() {
-    if (resourceHubReconnectTimer) {
-        clearTimeout(resourceHubReconnectTimer);
-        resourceHubReconnectTimer = null;
-    }
-}
-
-function scheduleResourceHubReconnect(reason = '') {
-    if (resourceHubReconnectTimer) {
-        return;
-    }
-
-    const maxIdx = HUB_RECONNECT_DELAYS_MS.length - 1;
-    const delayMs = getHubReconnectDelayMs(resourceHubReconnectAttempt);
-    resourceHubReconnectAttempt = Math.min(resourceHubReconnectAttempt + 1, maxIdx);
-
-    console.warn(`[SignalR] Scheduling ResourceHub reconnect in ${delayMs}ms${reason ? ` (${reason})` : ''}`);
-
-    resourceHubReconnectTimer = setTimeout(() => {
-        resourceHubReconnectTimer = null;
-        initResourceHub().catch((err) => {
-            console.warn('[SignalR] Resource hub reconnect attempt failed:', err);
-            scheduleResourceHubReconnect('retry failed');
-        });
-    }, delayMs);
-}
-
-async function initConversationHub() {
-    if (!window.signalR) {
-        console.warn('[SignalR] signalR client not loaded');
-        scheduleConversationHubReconnect('signalR client not loaded');
-        return;
-    }
-
-    const outageCooldownMs = getServiceOutageCooldownMs();
-    if (outageCooldownMs > 0) {
-        scheduleConversationHubReconnect('service unavailable cooldown');
-        return;
-    }
-
-    const hubState = signalR.HubConnectionState;
-    if (conversationHubConnection && hubState && (
-        conversationHubConnection.state === hubState.Connected
-        || conversationHubConnection.state === hubState.Connecting
-        || conversationHubConnection.state === hubState.Reconnecting
-    )) {
-        return;
-    }
-
-    if (conversationHubConnectInProgress) {
-        return;
-    }
-
-    conversationHubConnectInProgress = true;
-
-    try {
-        if (!conversationHubConnection) {
-            conversationHubConnection = new signalR.HubConnectionBuilder()
-                .withUrl('/hubs/conversations')
-                .withAutomaticReconnect(createHubReconnectDelaysMs())
-                .build();
-
-            conversationHubConnection.on('conversationUpdated', async (payload) => {
-                const convoId = payload?.conversationId || payload?.ConversationId;
-                if (convoId && activeConversationId && String(convoId) === String(activeConversationId)) {
-                    await loadConversationIntoView(activeConversationId);
-                }
-            });
-
-            // Track reconnect events for the conversation hub and update banner state
-            conversationHubConnection.onreconnecting(() => setConversationHubState(false));
-            conversationHubConnection.onreconnected(() => {
-                setConversationHubState(true);
-                clearServiceOutage('conversation hub reconnected');
-                conversationHubReconnectAttempt = 0;
-                clearConversationHubReconnectTimer();
-            });
-            conversationHubConnection.onclose((err) => {
-                setConversationHubState(false);
-                if (isServiceUnavailableError(err)) {
-                    noteServiceOutage('conversation hub closed');
-                }
-                scheduleConversationHubReconnect('connection closed');
-            });
-        }
-
-        await conversationHubConnection.start();
-        setConversationHubState(true);
-        clearServiceOutage('conversation hub connected');
-        conversationHubReconnectAttempt = 0;
-        clearConversationHubReconnectTimer();
-        console.log('[SignalR] Conversation hub connected');
-
-        if (activeConversationId) {
-            await joinConversationHubGroup(activeConversationId);
-        }
-    } catch (err) {
-        console.warn('[SignalR] Failed to connect conversation hub:', err);
-        if (isServiceUnavailableError(err)) {
-            noteServiceOutage('conversation hub start failed');
-        }
-        setConversationHubState(false);
-        scheduleConversationHubReconnect('start failed');
-    } finally {
-        conversationHubConnectInProgress = false;
-    }
-}
-
 function updateSignalRBanner() {
     const warning = document.getElementById('signalr-warning');
     if (!warning) return;
     try {
-        // Show banner if either hub is disconnected
         if (resourceHubConnected && conversationHubConnected) {
             warning.style.setProperty('display', 'none', 'important');
             warning.style.setProperty('visibility', 'hidden', 'important');
             warning.style.setProperty('opacity', '0', 'important');
         } else {
-            warning.textContent = 'Reconnecting to server...';
+            warning.textContent = 'Server unreachable. Retrying...';
             warning.style.setProperty('display', 'block', 'important');
             warning.style.setProperty('visibility', 'visible', 'important');
             warning.style.setProperty('opacity', '1', 'important');
@@ -746,7 +546,7 @@ function updateSignalRBanner() {
             warning.style.setProperty('z-index', '20000', 'important');
         }
     } catch (e) {
-        console.warn('[SignalR] Unable to toggle warning bar', e);
+        console.warn('[Admin] Unable to toggle warning bar', e);
     }
 }
 
@@ -760,37 +560,8 @@ function setConversationHubState(connected) {
     updateSignalRBanner();
 }
 
-function clearTaskHubReconnectTimer() {
-    if (taskHubReconnectTimer) {
-        clearTimeout(taskHubReconnectTimer);
-        taskHubReconnectTimer = null;
-    }
-}
-
-function scheduleTaskHubReconnect(reason = '') {
-    if (taskHubReconnectTimer) {
-        return;
-    }
-
-    const maxIdx = HUB_RECONNECT_DELAYS_MS.length - 1;
-    const delayMs = getHubReconnectDelayMs(taskHubReconnectAttempt);
-    taskHubReconnectAttempt = Math.min(taskHubReconnectAttempt + 1, maxIdx);
-
-    console.warn(`[SignalR] Scheduling TaskHub reconnect in ${delayMs}ms${reason ? ` (${reason})` : ''}`);
-
-    taskHubReconnectTimer = setTimeout(() => {
-        taskHubReconnectTimer = null;
-        initTaskHub().catch((err) => {
-            console.warn('[SignalR] Task hub reconnect attempt failed:', err);
-            scheduleTaskHubReconnect('retry failed');
-        });
-    }, delayMs);
-}
-
 // Backwards-compatible wrapper used by tests and any callers that expect the old API
 function setSignalRIndicatorState(connected) {
-    // Backwards-compatible API used by tests and external callers.
-    // Toggle the banner immediately for deterministic behavior and update internal flags.
     const warning = document.getElementById('signalr-warning');
     try {
         if (!warning) return;
@@ -803,7 +574,7 @@ function setSignalRIndicatorState(connected) {
         } else {
             resourceHubConnected = false;
             conversationHubConnected = false;
-            warning.textContent = 'Reconnecting to server...';
+            warning.textContent = 'Server unreachable. Retrying...';
             warning.style.display = 'block';
             warning.style.visibility = 'visible';
             warning.style.opacity = '1';
@@ -814,95 +585,7 @@ function setSignalRIndicatorState(connected) {
             warning.style.zIndex = '20000';
         }
     } catch (e) {
-        console.warn('[SignalR] Unable to toggle warning bar (compat wrapper)', e);
-    }
-}
-
-async function initResourceHub() {
-    if (!window.signalR) {
-        console.warn('[SignalR] signalR client not loaded');
-        scheduleResourceHubReconnect('signalR client not loaded');
-        return;
-    }
-
-    const outageCooldownMs = getServiceOutageCooldownMs();
-    if (outageCooldownMs > 0) {
-        scheduleResourceHubReconnect('service unavailable cooldown');
-        return;
-    }
-
-    const hubState = signalR.HubConnectionState;
-    if (resourceHubConnection && hubState && (
-        resourceHubConnection.state === hubState.Connected
-        || resourceHubConnection.state === hubState.Connecting
-        || resourceHubConnection.state === hubState.Reconnecting
-    )) {
-        return;
-    }
-
-    if (resourceHubConnectInProgress) {
-        return;
-    }
-
-    resourceHubConnectInProgress = true;
-
-    try {
-        if (!resourceHubConnection) {
-            resourceHubConnection = new signalR.HubConnectionBuilder()
-                .withUrl('/hubs/resources')
-                .withAutomaticReconnect(createHubReconnectDelaysMs())
-                .build();
-
-            resourceHubConnection.on('filesChanged', async () => {
-                apiCache.invalidate('files');
-                apiCache.invalidate('batch');
-                await loadFiles(true);
-            });
-
-            resourceHubConnection.on('groupsChanged', async () => {
-                apiCache.invalidate('groups');
-                apiCache.invalidate('batch');
-                await Promise.resolve();
-                state.allGroups = [];
-            });
-
-            resourceHubConnection.on('conversationsChanged', async () => {
-                apiCache.invalidate('prompts');
-                apiCache.invalidate('batch');
-                await loadPrompts(true);
-            });
-
-            resourceHubConnection.onreconnecting(() => setResourceHubState(false));
-            resourceHubConnection.onreconnected(() => {
-                setResourceHubState(true);
-                clearServiceOutage('resource hub reconnected');
-                resourceHubReconnectAttempt = 0;
-                clearResourceHubReconnectTimer();
-            });
-            resourceHubConnection.onclose((err) => {
-                setResourceHubState(false);
-                if (isServiceUnavailableError(err)) {
-                    noteServiceOutage('resource hub closed');
-                }
-                scheduleResourceHubReconnect('connection closed');
-            });
-        }
-
-        await resourceHubConnection.start();
-        setResourceHubState(true);
-        clearServiceOutage('resource hub connected');
-        resourceHubReconnectAttempt = 0;
-        clearResourceHubReconnectTimer();
-        console.log('[SignalR] Resource hub connected');
-    } catch (err) {
-        console.warn('[SignalR] Failed to connect resource hub:', err);
-        if (isServiceUnavailableError(err)) {
-            noteServiceOutage('resource hub start failed');
-        }
-        setResourceHubState(false);
-        scheduleResourceHubReconnect('start failed');
-    } finally {
-        resourceHubConnectInProgress = false;
+        console.warn('[Admin] Unable to toggle warning bar (compat wrapper)', e);
     }
 }
 
@@ -1098,157 +781,13 @@ function applyTaskHubUploadActivity(activity) {
     syncPromptSelectedFilesState();
 }
 
-async function initTaskHub() {
-    if (!window.signalR) {
-        console.warn('[SignalR] signalR client not loaded');
-        scheduleTaskHubReconnect('signalR client not loaded');
-        return;
-    }
-
-    const outageCooldownMs = getServiceOutageCooldownMs();
-    if (outageCooldownMs > 0) {
-        scheduleTaskHubReconnect('service unavailable cooldown');
-        return;
-    }
-
-    const hubState = signalR.HubConnectionState;
-    if (taskHubConnection && hubState && (
-        taskHubConnection.state === hubState.Connected
-        || taskHubConnection.state === hubState.Connecting
-        || taskHubConnection.state === hubState.Reconnecting
-    )) {
-        return;
-    }
-
-    if (taskHubConnectInProgress) {
-        return;
-    }
-
-    taskHubConnectInProgress = true;
-
-    try {
-        if (!taskHubConnection) {
-            taskHubConnection = new signalR.HubConnectionBuilder()
-                .withUrl('/hubs/tasks')
-                .withAutomaticReconnect(createHubReconnectDelaysMs())
-                .build();
-
-            // Handle request status updates
-            taskHubConnection.on('RequestUpdate', (request) => {
-                console.log('[TaskHub] Request update:', request);
-                const requestId = String(getProp(request, 'requestId') || '').trim();
-                if (requestId) {
-                    activeRequests.set(requestId, request);
-                }
-                updateProgressDisplay(request);
-                applyTaskHubUploadStatus(request);
-            });
-
-            // Handle detailed activity updates
-            taskHubConnection.on('ActivityUpdate', (activity) => {
-                console.log('[TaskHub] Activity update:', activity);
-                const requestId = String(getProp(activity, 'requestId') || '').trim();
-                if (!requestId) {
-                    return;
-                }
-                if (!requestActivities.has(requestId)) {
-                    requestActivities.set(requestId, []);
-                }
-                requestActivities.get(requestId).push({
-                    timestamp: getProp(activity, 'timestamp') || new Date().toISOString(),
-                    activity: getProp(activity, 'activity'),
-                    progress: getProp(activity, 'progress')
-                });
-                updateActivityDisplay(requestId);
-                applyTaskHubUploadActivity(activity);
-            });
-
-            taskHubConnection.onreconnecting((err) => {
-                console.warn('[SignalR] Task hub reconnecting:', err);
-            });
-            taskHubConnection.onreconnected(() => {
-                taskHubReconnectAttempt = 0;
-                clearTaskHubReconnectTimer();
-                clearServiceOutage('task hub reconnected');
-                console.log('[SignalR] Task hub reconnected');
-            });
-            taskHubConnection.onclose((err) => {
-                console.warn('[SignalR] Task hub closed:', err);
-                if (isServiceUnavailableError(err)) {
-                    noteServiceOutage('task hub closed');
-                }
-                scheduleTaskHubReconnect('connection closed');
-            });
-        }
-
-        await taskHubConnection.start();
-        taskHubReconnectAttempt = 0;
-        clearTaskHubReconnectTimer();
-        clearServiceOutage('task hub connected');
-        console.log('[SignalR] Task hub connected');
-    } catch (err) {
-        console.warn('[SignalR] Failed to connect task hub:', err);
-        if (isServiceUnavailableError(err)) {
-            noteServiceOutage('task hub start failed');
-        }
-        scheduleTaskHubReconnect('start failed');
-    } finally {
-        taskHubConnectInProgress = false;
-    }
-}
-
-function updateProgressDisplay(request) {
-    const requestId = String(getProp(request, 'requestId') || '').trim();
-    if (!requestId) return;
-
-    const progress = Number(getProp(request, 'progress') || 0);
-    const details = getProp(request, 'details') || getProp(request, 'status') || '';
-
-    // Find any active progress bars and update them
-    const progressBars = document.querySelectorAll('[data-request-id="' + requestId + '"]');
-    progressBars.forEach(bar => {
-        if (bar.classList.contains('progress-bar')) {
-            bar.style.width = progress + '%';
-            bar.setAttribute('aria-valuenow', progress);
-        }
-        if (bar.classList.contains('progress-text')) {
-            bar.textContent = details;
-        }
-        if (bar.classList.contains('progress-percentage')) {
-            bar.textContent = progress + '%';
-        }
-    });
-}
-
-function updateActivityDisplay(requestId) {
-    const activityList = document.getElementById('activity-history-' + requestId);
-    if (!activityList) return;
-
-    const activities = requestActivities.get(requestId) || [];
-    activityList.innerHTML = activities.slice(-5).reverse().map(act => `
-        <div class="activity-item" style="padding: 4px 0; font-size: 12px; color: #666;">
-            <span style="font-weight: 500;">${act.activity}</span>
-            ${act.progress ? `<span style="float: right;">${act.progress}%</span>` : ''}
-        </div>
-    `).join('');
-}
-
-async function joinConversationHubGroup(conversationId) {
-    if (!conversationHubConnection || !conversationId) return;
-    try {
-        await conversationHubConnection.invoke('JoinConversation', String(conversationId));
-    } catch (err) {
-        console.warn('[SignalR] Failed to join conversation group:', err);
-    }
-}
-
 // Tab switching with forced refresh
 document.querySelectorAll('.tab').forEach(tab => {
     tab.addEventListener('click', () => {
         document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
         document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
         tab.classList.add('active');
-        document.getElementById(tab.dataset.tab).classList.add('active');
+        document.getElementById(tab.dataset.tab)?.classList.add('active');
         
         // Force reload data when switching tabs to ensure fresh data
         const tabName = tab.dataset.tab;
@@ -1261,6 +800,13 @@ document.querySelectorAll('.tab').forEach(tab => {
             loadReminders(true);
         } else if (tabName === 'groups') {
             Promise.resolve();
+        }
+
+        // Groq Live polling: only active when the tab is visible
+        if (tabName === 'groq-live') {
+            startGroqLivePolling();
+        } else {
+            stopGroqLivePolling();
         }
     });
 });
@@ -3673,8 +3219,6 @@ async function init() {
             const nextTheme = document.body.classList.contains('dark') ? 'light' : 'dark';
             applyTheme(nextTheme);
         });
-        initializeKeepAwakeToggle();
-        initializeGroqToggle();
     } catch (e) {
         console.warn('[INIT] Failed to attach theme toggle early:', e);
     }
@@ -3702,10 +3246,24 @@ async function init() {
             }
         });
 
-        // Stagger hub startup to avoid concurrent negotiate spikes during cold starts.
-        initConversationHub();
-        setTimeout(() => initResourceHub(), 750);
-        setTimeout(() => initTaskHub(), 1500);
+        // Start HTTP polling (replaces SignalR hubs)
+        startHealthPolling();
+        startResourcePolling();
+
+        // Wire up Groq Live Clear button
+        document.getElementById('groq-live-clear')?.addEventListener('click', async () => {
+            try {
+                await fetch(`${API_BASE}/groq-transcriptions`, { method: 'DELETE' });
+                groqLiveEntries = [];
+                groqLiveLastCount = 0;
+                const list = document.getElementById('groq-live-list');
+                const empty = document.getElementById('groq-live-empty');
+                if (list) [...list.children].forEach(c => { if (c !== empty) c.remove(); });
+                if (empty) empty.style.display = '';
+            } catch (err) {
+                console.warn('[GroqLive] Clear failed:', err);
+            }
+        });
         
         // Setup prompts file management
         const promptFileInput = document.getElementById('prompt-file-input');
@@ -4253,6 +3811,8 @@ if (document.readyState === 'loading') {
 }
 
 window.addEventListener('beforeunload', () => {
-    stopAdminKeepAlive();
+    stopHealthPolling();
+    stopResourcePolling();
+    stopGroqLivePolling();
     stopAdminSessionKeepAlive();
 });

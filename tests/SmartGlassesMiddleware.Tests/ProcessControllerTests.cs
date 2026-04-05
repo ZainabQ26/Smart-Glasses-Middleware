@@ -14,7 +14,7 @@ public class ProcessControllerTests
 {
     private Mock<IAIService> _aiServiceMock;
     private Mock<IPageSummaryService> _pageSummaryServiceMock;
-    private Mock<IServerSettingsService> _serverSettingsServiceMock;
+    private Mock<IGroqTranscriptionLogService> _groqTranscriptionLogMock;
     private Mock<ILogger<ProcessController>> _loggerMock;
     private Mock<IConfiguration> _configMock;
     private ProcessController _controller;
@@ -24,14 +24,14 @@ public class ProcessControllerTests
     {
         _aiServiceMock = new Mock<IAIService>();
         _pageSummaryServiceMock = new Mock<IPageSummaryService>();
-        _serverSettingsServiceMock = new Mock<IServerSettingsService>();
+        _groqTranscriptionLogMock = new Mock<IGroqTranscriptionLogService>();
         _loggerMock = new Mock<ILogger<ProcessController>>();
         _configMock = new Mock<IConfiguration>();
 
         _controller = new ProcessController(
             _aiServiceMock.Object,
             _pageSummaryServiceMock.Object,
-            _serverSettingsServiceMock.Object,
+            _groqTranscriptionLogMock.Object,
             _loggerMock.Object,
             _configMock.Object);
     }

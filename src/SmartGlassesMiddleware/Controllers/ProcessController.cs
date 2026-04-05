@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.DependencyInjection;
 using SmartGlassesMiddleware.Models;
 using SmartGlassesMiddleware.Services;
 using System.Net.Http.Headers;
@@ -13,7 +12,7 @@ public class ProcessController : ControllerBase
 {
     private readonly IAIService _aiService;
     private readonly IPageSummaryService _pageSummaryService;
-    private readonly IServerSettingsService _serverSettingsService;
+    private readonly IGroqTranscriptionLogService _groqTranscriptionLog;
     private readonly ILogger<ProcessController> _logger;
     private readonly IConfiguration _configuration;
 
@@ -21,13 +20,13 @@ public class ProcessController : ControllerBase
     public ProcessController(
         IAIService aiService,
         IPageSummaryService pageSummaryService,
-        IServerSettingsService serverSettingsService,
+        IGroqTranscriptionLogService groqTranscriptionLog,
         ILogger<ProcessController> logger,
         IConfiguration configuration)
     {
         _aiService = aiService;
         _pageSummaryService = pageSummaryService;
-        _serverSettingsService = serverSettingsService;
+        _groqTranscriptionLog = groqTranscriptionLog;
         _logger = logger;
         _configuration = configuration;
     }
@@ -114,6 +113,7 @@ public class ProcessController : ControllerBase
                 ? (textElement.GetString() ?? string.Empty).Trim()
                 : string.Empty;
 
+            _groqTranscriptionLog.Add(text, "wakeword");
             return Ok(new { text });
         }
         catch (OperationCanceledException)
@@ -134,10 +134,6 @@ public class ProcessController : ControllerBase
     {
         if (audio is null || audio.Length == 0)
             return BadRequest(new { error = "Audio is required" });
-
-        var groqSetting = await _serverSettingsService.GetGroqCommandTranscriptionSettingAsync(cancellationToken);
-        if (!groqSetting.Enabled)
-            return StatusCode(503, new { error = "Groq transcription is disabled" });
 
         var configuredGroqEnabled = _configuration["AI:Groq:Enabled"]?.Trim();
         if (bool.TryParse(configuredGroqEnabled, out var configEnabled) && !configEnabled)
@@ -188,6 +184,7 @@ public class ProcessController : ControllerBase
                 ? (textElement.GetString() ?? string.Empty).Trim()
                 : string.Empty;
 
+            _groqTranscriptionLog.Add(text, "command");
             return Ok(new { text, provider = "groq", model });
         }
         catch (OperationCanceledException)
