@@ -999,6 +999,7 @@ export default function App() {
       // Accept the full phrase ("hi iris") OR just the core name ("iris")
       const coreWord = normalizedWord.split(" ").pop();
       const matched = normalizedText.includes(normalizedWord) || normalizedText.includes(coreWord);
+      addLog(`🔍 Wake check: "${normalizedText}" vs "${coreWord}" → ${matched ? "MATCH ✅" : "no match"}`, "info");
 
       if (
         matched &&
@@ -1056,17 +1057,22 @@ export default function App() {
 
     // Start the mic capture loop
     async function startMic() {
+      addLog("🔄 Starting microphone...", "info");
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         if (disposed) { stream.getTracks().forEach(t => t.stop()); return; }
+        addLog("✅ Mic permission granted", "info");
 
         streamRef.current = stream;
         const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
         audioCtxRef.current = ctx;
+        addLog(`🔊 AudioContext state: ${ctx.state}, sampleRate: ${ctx.sampleRate}`, "info");
 
         // Mobile Chrome requires explicit resume after user gesture (getUserMedia)
         if (ctx.state === 'suspended') {
+          addLog("⏸️ AudioContext suspended — resuming...", "warn");
           await ctx.resume();
+          addLog(`🔊 AudioContext resumed — state: ${ctx.state}`, "info");
         }
 
         const source    = ctx.createMediaStreamSource(stream);
@@ -1079,14 +1085,26 @@ export default function App() {
         source.connect(processor);
         processor.connect(ctx.destination);
 
+        // Track speech detection diagnostics
+        let speechBurstCount = 0;
+        let lastDiagTime = Date.now();
+
         processor.port.onmessage = (ev) => {
           if (disposed) return;
           const samples = ev.data;
           const rms = Math.sqrt(samples.reduce((s, v) => s + v * v, 0) / samples.length);
           const now = Date.now();
 
+          // Periodic diagnostic: log every 10 seconds to show audio is flowing
+          if (now - lastDiagTime > 10000) {
+            addLog(`🔈 Audio flowing — RMS: ${rms.toFixed(4)}, speech bursts: ${speechBurstCount}, activated: ${activatedRef.current}`, "info");
+            lastDiagTime = now;
+            speechBurstCount = 0;
+          }
+
           if (rms >= RMS_THRESHOLD) {
             if (!isSpeaking) {
+              speechBurstCount++;
               speechChunks.push(...preSpeechBuffer);
               if (activatedRef.current) {
                 commandChunks.push(...preSpeechBuffer);
@@ -1110,6 +1128,8 @@ export default function App() {
                 silenceSince = 0;
                 const minChunkSec = activatedRef.current ? COMMAND_MIN_CHUNK_SEC : WAKE_MIN_CHUNK_SEC;
                 if (audio.length >= SAMPLE_RATE * minChunkSec) {
+                  const durationSec = (audio.length / SAMPLE_RATE).toFixed(2);
+                  addLog(`🎙️ Speech chunk: ${durationSec}s, activated: ${activatedRef.current}`, "info");
                   if (activatedRef.current) {
                     // Partial transcription during command — send to Groq
                     (async () => {
