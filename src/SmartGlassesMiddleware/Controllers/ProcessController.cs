@@ -114,6 +114,11 @@ public class ProcessController : ControllerBase
             content.Add(streamContent, "file", string.IsNullOrWhiteSpace(audio.FileName) ? "wakeword.wav" : audio.FileName);
             content.Add(new StringContent(model), "model");
 
+            // Bias Whisper toward the activation word to reduce hallucination on short clips
+            var activationWord = _configuration["AI:ActivationWord"]?.Trim();
+            if (string.IsNullOrWhiteSpace(activationWord)) activationWord = "Iris";
+            content.Add(new StringContent(activationWord), "prompt");
+
             if (!string.IsNullOrWhiteSpace(language))
                 content.Add(new StringContent(language), "language");
 

@@ -226,10 +226,12 @@ export default function App() {
       );
 
       const text = (payload?.text || "").trim();
-      console.log("[Voice Debug] Heard wake-word transcription (raw):", text);
+      if (text) {
+        addLog(`👂 Wake-word heard: "${text}"`, "info");
+      }
       return text || null;
     } catch (err) {
-      // Silently fail for wake-word — don't spam logs
+      addLog(`⚠️ Wake-word transcription failed: ${err?.message || "unknown"}`, "warn");
       return null;
     }
   }, [addLog, fetchJsonWithTimeout, float32ToWavBlob]);
@@ -883,8 +885,8 @@ export default function App() {
   useEffect(() => {
     const SAMPLE_RATE          = 16_000;
     const BUFFER_SIZE          = 1024;       // 64 ms per AudioWorklet callback
-    const RMS_THRESHOLD        = 0.010;      // RMS below this → silence
-    const WAKE_SILENCE_MS      = 220;        // wake-word path: short silence for snappier activation
+    const RMS_THRESHOLD        = 0.008;      // RMS below this → silence (lowered for mobile mics)
+    const WAKE_SILENCE_MS      = 400;        // wake-word path: 400ms to capture "hi iris" as one chunk
     const COMMAND_SILENCE_MS   = 650;        // command path: larger chunks for better transcription context
     const SENTENCE_END_MS      = 350;        // pause after sentence-end pattern → submit
     const FORCE_SUBMIT_MS      = 2_500;      // max silence during command → force submit
@@ -904,6 +906,7 @@ export default function App() {
     let silenceSince  = 0;
     let lastWakeCheckTime = 0;
     let wakewordInFlight = false; // prevent overlapping wake-word API calls
+    let pendingWakeAudio = null;   // queued audio when a wake-word call is in flight
 
     let forceSubmitTimer    = null;
     let sentenceEndTimer    = null;
@@ -987,23 +990,24 @@ export default function App() {
     // Handle wake-word transcription result from Groq
     function handleWakeWordResult(cleaned) {
       if (disposed) return;
-      const word    = activationWordRef.current;
-      const wordEsc = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const wakeRx  = new RegExp(`\\b${wordEsc}\\b`, "i");
-      const wakeWordMatched = wakeRx.test(cleaned);
-      console.log("[Voice Debug] Wake-word check:", {
-        heardText: cleaned,
-        activationWord: word,
-        wakeRegex: wakeRx.toString(),
-        matched: wakeWordMatched,
-      });
+      const word = activationWordRef.current;
+      // Normalize: strip punctuation, collapse whitespace, lowercase for comparison.
+      // Groq may return "Hi, Iris.", "hi iris", "Iris!", "iris", etc.
+      const normalize = (s) => s.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
+      const normalizedText = normalize(cleaned);
+      const normalizedWord = normalize(word);
+      // Accept the full phrase ("hi iris") OR just the core name ("iris")
+      const coreWord = normalizedWord.split(" ").pop();
+      const matched = normalizedText.includes(normalizedWord) || normalizedText.includes(coreWord);
+
       if (
-        wakeWordMatched &&
+        matched &&
         !activatedRef.current &&
         statusRef.current !== "sending" &&
         statusRef.current !== "processing"
       ) {
-        const rest = cleaned.replace(new RegExp(`\\b${wordEsc}\\b[\\s,:-]*`, "i"), "").trim();
+        // Remove the wake-word from the transcription to get any trailing command
+        const rest = normalizedText.replace(normalizedWord, "").replace(coreWord, "").trim();
         activatedRef.current = true;
         commandChunks = [...speechChunks];
         speechChunks = [];
@@ -1059,6 +1063,12 @@ export default function App() {
         streamRef.current = stream;
         const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
         audioCtxRef.current = ctx;
+
+        // Mobile Chrome requires explicit resume after user gesture (getUserMedia)
+        if (ctx.state === 'suspended') {
+          await ctx.resume();
+        }
+
         const source    = ctx.createMediaStreamSource(stream);
 
         // Add AudioWorklet module
@@ -1109,16 +1119,27 @@ export default function App() {
                       } catch (_) {}
                     })();
                   } else {
-                    // Wake-word check — send to Groq (debounced)
-                    if (!wakewordInFlight) {
+                    // Wake-word check — send to Groq (queue latest if in-flight)
+                    async function sendWakeAudio(chunk) {
                       wakewordInFlight = true;
-                      (async () => {
-                        try {
-                          const text = await transcribeWakewordWithGroqRef.current?.(audio);
-                          if (text && !disposed) handleWakeWordResult(text.trim());
-                        } catch (_) {}
-                        finally { wakewordInFlight = false; }
-                      })();
+                      try {
+                        const text = await transcribeWakewordWithGroqRef.current?.(chunk);
+                        if (text && !disposed) handleWakeWordResult(text.trim());
+                      } catch (_) {}
+                      finally {
+                        wakewordInFlight = false;
+                        // If a chunk was queued while we were in-flight, send it now
+                        if (pendingWakeAudio && !disposed && !activatedRef.current) {
+                          const queued = pendingWakeAudio;
+                          pendingWakeAudio = null;
+                          sendWakeAudio(queued);
+                        }
+                      }
+                    }
+                    if (!wakewordInFlight) {
+                      sendWakeAudio(audio);
+                    } else {
+                      pendingWakeAudio = audio; // keep latest, discard older
                     }
                   }
                 }
