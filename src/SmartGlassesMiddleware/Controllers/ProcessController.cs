@@ -72,8 +72,15 @@ public class ProcessController : ControllerBase
         var groqEnabled = true;
         if (_serverSettingsService is not null)
         {
-            var groqSetting = await _serverSettingsService.GetGroqCommandTranscriptionSettingAsync(cancellationToken);
-            groqEnabled = groqSetting.Enabled;
+            try
+            {
+                var groqSetting = await _serverSettingsService.GetGroqCommandTranscriptionSettingAsync(cancellationToken);
+                groqEnabled = groqSetting.Enabled;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to read Groq setting from cache — defaulting to enabled");
+            }
         }
 
         return Ok(new { speechTranscriptionMode = mode, activationWord, groqCommandTranscriptionEnabled = groqEnabled });
