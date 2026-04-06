@@ -204,6 +204,10 @@ export default function App({ mode = "voice" }) {
       );
 
       const text = (payload?.text || "").trim();
+      const model = (payload?.model || "").trim();
+      if (text) {
+        addLog(`🧠 Command model: ${model || "unknown"}`, "info");
+      }
       console.log("[Voice Debug] Heard command transcription (raw):", text);
       return text || null;
     } catch (err) {
@@ -229,18 +233,20 @@ export default function App({ mode = "voice" }) {
       );
 
       const text = (payload?.text || "").trim();
+      const model = (payload?.model || "").trim();
       const matched = payload?.matched ?? text.toLowerCase().includes("iris");
+      const commandAfterWakeword = (payload?.commandAfterWakeword || "").trim();
       const target = (activationWordRef.current || "Iris").trim();
       console.log(`[Voice Debug] Wake-word check: "${text}" (target "${target}") → ${matched ? "MATCH ✅" : "no match"}`);
       if (text) {
-        addLog(`👂 Wake-word heard: "${text}"`, "info");
+        addLog(`👂 Wake-word heard: "${text}" (${model || "unknown"})`, "info");
       } else {
         console.log("[Voice Debug] Wake-word transcription was empty.");
       }
-      return { text, matched };
+      return { text, matched, commandAfterWakeword };
     } catch (err) {
       addLog(`⚠️ Wake-word transcription failed: ${err?.message || "unknown"}`, "warn");
-      return { text: "", matched: false };
+      return { text: "", matched: false, commandAfterWakeword: "" };
     }
   }, [addLog, fetchJsonWithTimeout, float32ToWavBlob]);
 
@@ -1007,7 +1013,7 @@ export default function App({ mode = "voice" }) {
     }
 
     // Handle wake-word transcription result from Groq
-    function handleWakeWordResult(cleaned) {
+    function handleWakeWordResult(cleaned, trailingCommandOverride = "") {
       if (disposed) return;
       const word = activationWordRef.current;
       // Normalize: strip punctuation, collapse whitespace, lowercase for comparison.
@@ -1028,7 +1034,8 @@ export default function App({ mode = "voice" }) {
         statusRef.current !== "processing"
       ) {
         // Remove the wake-word from the transcription to get any trailing command
-        const rest = normalizedText.replace(normalizedWord, "").replace(coreWord, "").trim();
+        const overrideRest = normalize(trailingCommandOverride || "");
+        const rest = overrideRest || normalizedText.replace(normalizedWord, "").replace(coreWord, "").trim();
         activatedRef.current = true;
         commandChunks = [...speechChunks];
         speechChunks = [];
@@ -1166,7 +1173,7 @@ export default function App({ mode = "voice" }) {
                         const result = await transcribeWakewordWithGroqRef.current?.(chunk);
                         if (!disposed) {
                           if (result?.text) {
-                            handleWakeWordResult(result.text.trim());
+                            handleWakeWordResult(result.text.trim(), result.commandAfterWakeword || "");
                           } else if (result?.matched) {
                             // Fallback when backend marks wake-word matched but transcription text is empty.
                             handleWakeWordResult(activationWordRef.current || "Iris");
