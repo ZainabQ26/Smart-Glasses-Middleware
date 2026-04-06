@@ -1,12 +1,14 @@
 using NUnit.Framework;
 using Moq;
-using SmartGlassesMiddleware.Controllers;
-using SmartGlassesMiddleware.Services;
-using Microsoft.Extensions.Logging;
-using System.Threading.Tasks;
-using System.Threading;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using SmartGlassesMiddleware.Controllers;
+using SmartGlassesMiddleware.Services;
+using System.Threading.Tasks;
+using System.Threading;
 using SmartGlassesMiddleware.Models;
 
 namespace SmartGlassesMiddleware.Tests
@@ -14,6 +16,29 @@ namespace SmartGlassesMiddleware.Tests
     [TestFixture]
     public class FullComponentTests
     {
+        private static ProcessController BuildController(
+            IAIService aiService,
+            IPageSummaryService pageSummaryService,
+            IGroqTranscriptionLogService groqLog,
+            ILogger<ProcessController> logger,
+            IConfiguration configuration)
+        {
+            var services = new ServiceCollection();
+            services.AddSingleton(aiService);
+            services.AddSingleton(pageSummaryService);
+            services.AddSingleton(groqLog);
+            services.AddSingleton(logger);
+            services.AddSingleton(configuration);
+            var sp = services.BuildServiceProvider();
+
+            var controller = new ProcessController();
+            controller.ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext { RequestServices = sp }
+            };
+            return controller;
+        }
+
         [Test]
         public async Task ProcessSpeech_ValidTranscript_ReturnsMatchedHandlerAction()
         {
@@ -33,7 +58,7 @@ namespace SmartGlassesMiddleware.Tests
             var mockLogger = new Mock<ILogger<ProcessController>>();
             var mockPageSummary = new Mock<IPageSummaryService>();
 
-            var controller = new ProcessController(
+            var controller = BuildController(
                 mockAiService.Object,
                 mockPageSummary.Object,
                 new Mock<IGroqTranscriptionLogService>().Object,
@@ -68,7 +93,7 @@ namespace SmartGlassesMiddleware.Tests
             mockPageSummary.Setup(s => s.SummarizePageAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
                            .ReturnsAsync("A very good summary.");
 
-            var controller = new ProcessController(
+            var controller = BuildController(
                 mockAiService.Object,
                 mockPageSummary.Object,
                 new Mock<IGroqTranscriptionLogService>().Object,
