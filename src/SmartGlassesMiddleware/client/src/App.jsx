@@ -1632,23 +1632,6 @@ export default function App({ mode = "voice", language = "en" }) {
         </div>
       )}
 
-      {/* ── Command list overlay — shown only while actively listening ─────────── */}
-      {isListening && (
-        <div style={styles.commandListBackdrop}>
-          <div style={styles.commandList}>
-            <p style={styles.commandListTitle}>{t.commandsOverlayTitle}</p>
-            <div style={styles.commandListGrid}>
-              {COMMAND_LIST.map(([cmd, desc]) => (
-                <div key={cmd} style={styles.commandListRow}>
-                  <span style={styles.commandListCmd}>{cmd}</span>
-                  <span style={styles.commandListDesc}>{desc}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
       {mode === "voice" && (
         <div style={styles.indicator} onClick={handleMicButton}>
           <span style={dotStyle} />
@@ -1793,6 +1776,23 @@ export default function App({ mode = "voice", language = "en" }) {
         >
           {logOpen ? t.closeLog : t.activityLogBtn}
         </button>
+      )}
+
+      {/* ── Command list overlay — shown only while actively listening ─────────── */}
+      {isListening && (
+        <div style={styles.commandListBackdrop}>
+          <div style={styles.commandList}>
+            <p style={styles.commandListTitle}>{t.commandsOverlayTitle}</p>
+            <div style={styles.commandListGrid}>
+              {COMMAND_LIST.map(([cmd, desc]) => (
+                <div key={cmd} style={styles.commandListRow}>
+                  <span style={styles.commandListCmd}>{cmd}</span>
+                  <span style={styles.commandListDesc}>{desc}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       )}
 
       {mode === "voice" && logOpen && (
@@ -2002,8 +2002,8 @@ const styles = {
   commandListBackdrop: {
     position: "fixed",
     inset: 0,
-    background: "rgba(0,0,0,0.92)",
-    zIndex: 50,
+    background: "rgba(0,0,0,0.97)",
+    zIndex: 100,
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
@@ -2052,13 +2052,13 @@ const styles = {
     color: "#777",
   },
   indicator: {
-    position: "absolute",
+    position: "fixed",
     top: 16,
     right: 16,
     display: "flex",
     alignItems: "center",
     gap: 8,
-    zIndex: 55,
+    zIndex: 110,
   },
   dot: { width: 12, height: 12, borderRadius: "50%" },
   indicatorText: { fontSize: "0.85rem", color: "#ccc" },
