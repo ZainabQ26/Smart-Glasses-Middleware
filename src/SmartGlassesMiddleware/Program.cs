@@ -907,8 +907,8 @@ app.MapGet("/health", async (IServiceProvider services, HttpContext context) =>
     // take 4-8 minutes). The WakeupGate and CI smoke test use this endpoint so they
     // unblock as soon as ECS is up (~60 s), not when the DB is ready.
     // Use /ready for the DB/Redis readiness check.
-    context.Response.Headers.CacheControl = "no-store, no-cache, must-revalidate";
-    context.Response.Headers.Pragma = "no-cache";
+    context.Response.Headers.Append("Cache-Control", "no-store, no-cache, must-revalidate");
+    context.Response.Headers.Append("Pragma", "no-cache");
     return Results.Ok(new { status = "Healthy", timestamp = DateTime.UtcNow });
 });
 
@@ -916,8 +916,8 @@ app.MapGet("/health", async (IServiceProvider services, HttpContext context) =>
 app.MapGet("/api/process/client-settings", (IConfiguration configuration, HttpContext context, ILogger<Program> logger) =>
 {
     // Prevent CloudFront / browser / proxy caching — matches /health and /ready.
-    context.Response.Headers.CacheControl = "no-store, no-cache, must-revalidate";
-    context.Response.Headers.Pragma = "no-cache";
+    context.Response.Headers.Append("Cache-Control", "no-store, no-cache, must-revalidate");
+    context.Response.Headers.Append("Pragma", "no-cache");
 
     try
     {
@@ -963,8 +963,8 @@ app.MapGet("/api/process/client-settings", (IConfiguration configuration, HttpCo
 // the full cold-start without showing 500 errors to the user.
 app.MapGet("/ready", async (IServiceProvider services, HttpContext context) =>
 {
-    context.Response.Headers.CacheControl = "no-store, no-cache, must-revalidate";
-    context.Response.Headers.Pragma = "no-cache";
+    context.Response.Headers.Append("Cache-Control", "no-store, no-cache, must-revalidate");
+    context.Response.Headers.Append("Pragma", "no-cache");
 
     using var scope = services.CreateScope();
     var redis = scope.ServiceProvider.GetService<IConnectionMultiplexer>();
