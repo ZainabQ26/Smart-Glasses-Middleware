@@ -26,11 +26,8 @@ export default function App({ mode = "voice" }) {
   const [remindersToast, setRemindersToast] = useState(null);
   // Show landing screen until the user says the activation word for the first time.
   const [showLanding, setShowLanding] = useState(true);
-  // Configurable activation word — stored in localStorage and updated live when
-  // the admin panel changes it (via the storage event).
-  const [activationWord, setActivationWord] = useState(() => {
-    try { return localStorage.getItem("sgm_activation_word")?.trim() || "Hello Iris"; } catch (_) { return "Hello Iris"; }
-  });
+  // Activation word is sourced from backend app settings via /api/process/client-settings.
+  const [activationWord, setActivationWord] = useState("Hello Iris");
   // Ref copy so the async voice pipeline always reads the current value without
   // needing to restart the AudioContext effect.
   const activationWordRef = useRef(activationWord);
