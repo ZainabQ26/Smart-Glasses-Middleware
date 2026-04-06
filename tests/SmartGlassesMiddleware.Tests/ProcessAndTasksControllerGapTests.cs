@@ -18,7 +18,7 @@ namespace SmartGlassesMiddleware.Tests;
 [TestFixture]
 public class ProcessAndTasksControllerGapTests
 {
-    private static ProcessController BuildController(
+    private static (ProcessController controller, ServiceProvider serviceProvider) BuildController(
         IAIService? aiService = null,
         IPageSummaryService? pageSummaryService = null,
         IGroqTranscriptionLogService? groqLog = null,
@@ -38,7 +38,7 @@ public class ProcessAndTasksControllerGapTests
         {
             HttpContext = new DefaultHttpContext { RequestServices = sp }
         };
-        return controller;
+        return (controller, sp);
     }
 
     // ── ProcessController – Preview exception (lines 54-55) ──────────────────
@@ -50,7 +50,8 @@ public class ProcessAndTasksControllerGapTests
         aiMock.Setup(s => s.WillUseAdvancedModelAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new Exception("Bedrock unavailable"));
 
-        var controller = BuildController(aiService: aiMock.Object);
+        var (controller, sp) = BuildController(aiService: aiMock.Object);
+        using var _ = sp;
 
         var result = await controller.Preview(new ProcessRequest { Input = "test" }, CancellationToken.None);
 
@@ -67,7 +68,8 @@ public class ProcessAndTasksControllerGapTests
         aiMock.Setup(s => s.ProcessRequestAsync(It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<ProcessDocumentContext?>()))
             .ThrowsAsync(new InvalidOperationException("AI unavailable"));
 
-        var controller = BuildController(aiService: aiMock.Object);
+        var (controller, sp) = BuildController(aiService: aiMock.Object);
+        using var _ = sp;
 
         var result = await controller.Process(new ProcessRequest { Input = "hello" }, CancellationToken.None);
 
@@ -123,7 +125,8 @@ public class ProcessAndTasksControllerGapTests
         summaryMock.Setup(s => s.SummarizePageAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new ArgumentException("Invalid page"));
 
-        var controller = BuildController(pageSummaryService: summaryMock.Object);
+        var (controller, sp) = BuildController(pageSummaryService: summaryMock.Object);
+        using var _ = sp;
 
         var result = await controller.SummarizePage(
             new PageSummaryRequest { PageText = "Some text" }, CancellationToken.None);
@@ -138,7 +141,8 @@ public class ProcessAndTasksControllerGapTests
         summaryMock.Setup(s => s.SummarizePageAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Service unavailable"));
 
-        var controller = BuildController(pageSummaryService: summaryMock.Object);
+        var (controller, sp) = BuildController(pageSummaryService: summaryMock.Object);
+        using var _ = sp;
 
         var result = await controller.SummarizePage(
             new PageSummaryRequest { PageText = "Some text" }, CancellationToken.None);
@@ -154,7 +158,8 @@ public class ProcessAndTasksControllerGapTests
         summaryMock.Setup(s => s.SummarizePageAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new Exception("Unexpected error"));
 
-        var controller = BuildController(pageSummaryService: summaryMock.Object);
+        var (controller, sp) = BuildController(pageSummaryService: summaryMock.Object);
+        using var _ = sp;
 
         var result = await controller.SummarizePage(
             new PageSummaryRequest { PageText = "Some text" }, CancellationToken.None);
@@ -170,7 +175,8 @@ public class ProcessAndTasksControllerGapTests
         summaryMock.Setup(s => s.SummarizePageAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new OperationCanceledException());
 
-        var controller = BuildController(pageSummaryService: summaryMock.Object);
+        var (controller, sp) = BuildController(pageSummaryService: summaryMock.Object);
+        using var _ = sp;
 
         var result = await controller.SummarizePage(
             new PageSummaryRequest { PageText = "Some text" }, CancellationToken.None);
