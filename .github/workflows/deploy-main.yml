@@ -15,11 +15,6 @@ on:
           - dev
           - staging
           - prod
-      skip_migrations:
-        description: 'Skip EF Core migrations (recommended for fresh dev setup)'
-        required: false
-        default: true
-        type: boolean
       force_recreate_dev:
         description: 'DANGER: delete existing dev resources before apply'
         required: false
@@ -1129,105 +1124,10 @@ jobs:
           rm -rf /tmp/npm-* || true
           echo "Frontend cleanup complete"
 
-  run-migrations:
-    name: Run EF Core database migrations
-    needs: terraform-apply
-    # Fresh dev setups usually have no schema to migrate; only run when
-    # explicitly requested from workflow_dispatch with skip_migrations=false.
-    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.skip_migrations == 'false' }}
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
-    env:
-      AWS_REGION: ${{ secrets.AWS_REGION }}
-    steps:
-      - name: Download tf outputs
-        uses: actions/download-artifact@v4
-        with:
-          name: tf-outputs
-          path: ./tf
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_TERRAFORM_ROLE }}
-          aws-region: ${{ secrets.AWS_REGION }}
-
-      - name: Run one-shot migration task
-        run: |
-          CLUSTER=$(jq -r '.ecs_cluster_name.value // empty' ./tf/tf_outputs.json 2>/dev/null || true)
-          CLUSTER=${CLUSTER:-smart-glasses-dev-cluster}
-          SERVICE="smart-glasses-dev-api-service"
-
-          echo "Fetching task definition and network config from ECS service..."
-          SERVICE_JSON=$(aws ecs describe-services \
-            --cluster "$CLUSTER" --services "$SERVICE" \
-            --region "$AWS_REGION" \
-            --query 'services[0]' --output json)
-
-          TASK_DEF=$(echo "$SERVICE_JSON" | jq -r '.taskDefinition')
-          SUBNETS=$(echo "$SERVICE_JSON" | jq -r '[.networkConfiguration.awsvpcConfiguration.subnets[]] | join(",")')
-          SGS=$(echo "$SERVICE_JSON"    | jq -r '[.networkConfiguration.awsvpcConfiguration.securityGroups[]] | join(",")')
-          ASSIGN_PUBLIC_IP=$(echo "$SERVICE_JSON" | jq -r '.networkConfiguration.awsvpcConfiguration.assignPublicIp // "DISABLED"')
-
-          echo "Using task definition: $TASK_DEF"
-          echo "Migration task network: assignPublicIp=$ASSIGN_PUBLIC_IP"
-
-          TASK_ARN=$(aws ecs run-task \
-            --cluster "$CLUSTER" \
-            --task-definition "$TASK_DEF" \
-            --launch-type FARGATE \
-            --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SGS],assignPublicIp=$ASSIGN_PUBLIC_IP}" \
-            --overrides '{"containerOverrides":[{"name":"api","environment":[{"name":"MIGRATE_ONLY","value":"true"},{"name":"MIGRATE_ON_STARTUP","value":"false"}]}]}' \
-            --count 1 \
-            --query 'tasks[0].taskArn' \
-            --output text)
-
-          echo "Migration task: $TASK_ARN"
-          echo "Waiting for task to stop (up to 10 min)..."
-          aws ecs wait tasks-stopped \
-            --cluster "$CLUSTER" --tasks "$TASK_ARN" \
-            --region "$AWS_REGION"
-
-          EXIT_CODE=$(aws ecs describe-tasks \
-            --cluster "$CLUSTER" --tasks "$TASK_ARN" \
-            --region "$AWS_REGION" \
-            --query 'tasks[0].containers[0].exitCode' \
-            --output text)
-
-          STOP_REASON=$(aws ecs describe-tasks \
-            --cluster "$CLUSTER" --tasks "$TASK_ARN" \
-            --region "$AWS_REGION" \
-            --query 'tasks[0].stoppedReason' \
-            --output text)
-
-          CONTAINER_REASON=$(aws ecs describe-tasks \
-            --cluster "$CLUSTER" --tasks "$TASK_ARN" \
-            --region "$AWS_REGION" \
-            --query 'tasks[0].containers[0].reason' \
-            --output text)
-
-          echo "Migration task exit code: $EXIT_CODE"
-          echo "Migration task stopped reason: ${STOP_REASON:-n/a}"
-          echo "Migration task container reason: ${CONTAINER_REASON:-n/a}"
-          if [ "$EXIT_CODE" != "0" ]; then
-            echo "Migration task failed — fetching logs..."
-            LOG_GROUP="/ecs/smart-glasses-dev/api"
-            TASK_ID=$(basename "$TASK_ARN")
-            aws logs get-log-events \
-              --log-group-name "$LOG_GROUP" \
-              --log-stream-name "ecs/api/$TASK_ID" \
-              --limit 80 --region "$AWS_REGION" \
-              --query 'events[*].message' --output text 2>/dev/null || true
-            exit 1
-          fi
-          echo "Migrations applied successfully."
-
   verify-deployment:
     name: Wait for ECS service stability
-    needs: [terraform-apply, deploy-frontend, run-migrations]
-    if: ${{ always() && needs.terraform-apply.result == 'success' && needs.deploy-frontend.result == 'success' && (needs.run-migrations.result == 'success' || needs.run-migrations.result == 'skipped') }}
+    needs: [terraform-apply, deploy-frontend]
+    if: ${{ always() && needs.terraform-apply.result == 'success' && needs.deploy-frontend.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write

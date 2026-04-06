@@ -113,7 +113,6 @@ echo "Registered runner id=$RUNNER_ID (prefix=$RUNNER_PREFIX)."
 
 REF="${DEPLOY_REF:-main}"
 ENVIRONMENT="${DEPLOY_ENVIRONMENT:-dev}"
-SKIP_MIGRATIONS="${DEPLOY_SKIP_MIGRATIONS:-true}"
 FORCE_RECREATE_DEV="${DEPLOY_FORCE_RECREATE_DEV:-false}"
 
 if [ "$USE_LOCAL_RUNNER_OVERRIDE" = "true" ]; then
@@ -156,7 +155,6 @@ echo "Dispatching deploy-main.yml (ref=$REF, environment=$ENVIRONMENT)..."
 gh workflow run deploy-main.yml \
   --ref "$REF" \
   --field environment="$ENVIRONMENT" \
-  --field skip_migrations="$SKIP_MIGRATIONS" \
   --field force_recreate_dev="$FORCE_RECREATE_DEV"
 
 echo "Waiting for dispatched run id..."
