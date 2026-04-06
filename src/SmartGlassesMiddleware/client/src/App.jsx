@@ -986,11 +986,11 @@ export default function App({ mode = "voice" }) {
 
     const SAMPLE_RATE          = 16_000;
     const BUFFER_SIZE          = 1024;       // 64 ms per AudioWorklet callback
-    const RMS_THRESHOLD        = 0.008;      // RMS below this → silence (lowered for mobile mics)
+    const RMS_THRESHOLD        = 0.007;      // RMS below this → silence (lowered for better speaker detection)
     const WAKE_SILENCE_MS      = 400;        // wake-word path: 400ms to capture "hi iris" as one chunk
-    const COMMAND_SILENCE_MS   = 650;        // command path: larger chunks for better transcription context
+    const COMMAND_SILENCE_MS   = 1_200;      // command path: 1.2s delay for better speech capture and noise tolerance
     const SENTENCE_END_MS      = 350;        // pause after sentence-end pattern → submit
-    const FORCE_SUBMIT_MS      = 2_500;      // max silence during command → force submit
+    const FORCE_SUBMIT_MS      = 4_000;      // max silence during command → force submit (increased for longer pauses)
     const MIN_COMMAND_SEC      = 0.3;        // minimum audio duration (s) to bother submitting
     const MAX_COMMAND_WINDOW_MS = 7_000;     // hard cap after activation so noise cannot keep command mode open forever
     const MAX_COMMAND_AUDIO_SEC = 8.0;       // max accumulated command audio before forced finalization

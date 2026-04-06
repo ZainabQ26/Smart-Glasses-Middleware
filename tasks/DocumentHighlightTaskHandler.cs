@@ -20,7 +20,7 @@ public class DocumentHighlightTaskHandler : ITaskHandler
 
     public IReadOnlyList<string> Keywords => new[]
     {
-        "highlight in document", "document highlight"
+        "highlight in document", "document highlight", "highlights in document", "document highlights"
     };
 
     public DocumentHighlightTaskHandler(IAbbreviationService abbreviationService)
@@ -63,9 +63,16 @@ public class DocumentHighlightTaskHandler : ITaskHandler
             "highlight word ",
             "highlight the phrase ",
             "highlight phrase ",
+            "highlights the word ",
+            "highlights word ",
+            "highlights the phrase ",
+            "highlights phrase ",
             "document highlight ",
+            "document highlights ",
             "highlight the ",
             "highlight ",
+            "highlights the ",
+            "highlights ",
         ];
 
         foreach (var prefix in prefixes)
