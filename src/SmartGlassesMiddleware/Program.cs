@@ -954,7 +954,9 @@ app.MapGet("/api/process/client-settings", (IConfiguration configuration, HttpCo
         // Return safe defaults so the frontend can still function.
         return Results.Ok(new { speechTranscriptionMode = "groq-only", activationWord = "iris", groqCommandTranscriptionEnabled = true });
     }
-});
+})
+// Ensure this endpoint wins even if a stale controller action with the same route exists.
+.WithOrder(int.MinValue);
 
 // DB + Redis readiness endpoint.
 // The admin page's waitForAPI() polls this before loading data so it waits out
