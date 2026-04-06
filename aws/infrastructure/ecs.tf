@@ -259,6 +259,14 @@ locals {
             name  = "MIGRATE_ON_STARTUP"
             value = "false"
           },
+          {
+            name  = "DOTNET_gcServer"
+            value = "0"
+          },
+          {
+            name  = "DOTNET_gcConserveMemory"
+            value = "9"
+          },
         ],
         trimspace(var.groq_api_key) != "" ? [
           {
