@@ -1,5 +1,7 @@
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Moq;
 using NUnit.Framework;
@@ -28,12 +30,35 @@ public class ProcessControllerTests
         _loggerMock = new Mock<ILogger<ProcessController>>();
         _configMock = new Mock<IConfiguration>();
 
-        _controller = new ProcessController(
+        _controller = BuildController(
             _aiServiceMock.Object,
             _pageSummaryServiceMock.Object,
             _groqTranscriptionLogMock.Object,
             _loggerMock.Object,
             _configMock.Object);
+    }
+
+    private static ProcessController BuildController(
+        IAIService aiService,
+        IPageSummaryService pageSummaryService,
+        IGroqTranscriptionLogService groqTranscriptionLog,
+        ILogger<ProcessController> logger,
+        IConfiguration configuration)
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(aiService);
+        services.AddSingleton(pageSummaryService);
+        services.AddSingleton(groqTranscriptionLog);
+        services.AddSingleton(logger);
+        services.AddSingleton(configuration);
+        var sp = services.BuildServiceProvider();
+
+        var controller = new ProcessController();
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext { RequestServices = sp }
+        };
+        return controller;
     }
 
     [Test]
