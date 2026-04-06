@@ -55,6 +55,16 @@ static async Task ResetStalePendingUploadsAsync(IServiceProvider services, ILogg
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Single appsettings source: load only appsettings.json, then allow env vars/CLI overrides.
+builder.Configuration.Sources.Clear();
+builder.Configuration
+    .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+    .AddEnvironmentVariables();
+if (args is { Length: > 0 })
+{
+    builder.Configuration.AddCommandLine(args);
+}
+
 // Configure QuestPDF license for community usage to avoid runtime license validation errors
 QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
 
