@@ -30,3 +30,8 @@ body {
   height: 100%;
   overflow: hidden;
 }
+
+input::placeholder {
+  color: #ffffff;
+  opacity: 1;
+}
