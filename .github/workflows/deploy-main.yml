@@ -676,14 +676,6 @@ jobs:
           safe_import aws_ecs_cluster.main "$ECS_CLUSTER"
           safe_import aws_ecs_service.api  "${ECS_CLUSTER}/${PREFIX}-api-service"
 
-          # ── Lambda wake permissions (Function URL) ───────────────────────────
-          # These statements may already exist if they were added manually to
-          # hotfix wake-up behavior. Import them so terraform apply does not hit
-          # ResourceConflictException (statement id already exists).
-          WAKE_LAMBDA_NAME="${PREFIX}-ecs-idle-scaler"
-          safe_import "aws_lambda_permission.allow_function_url_public[0]" "${WAKE_LAMBDA_NAME}/FunctionURLAllowPublicAccess"
-          safe_import "aws_lambda_permission.allow_function_url_invoke[0]" "${WAKE_LAMBDA_NAME}/FunctionURLAllowInvokeFunction"
-
           # ── VPC and all sub-resources ─────────────────────────────────────────
           # Use the ALB's VPC as authoritative so all sub-resources land in the
           # correct VPC.  tf_import is used throughout so any stale wrong-VPC
@@ -916,8 +908,6 @@ jobs:
             -var "ecs_api_desired_count=1" \
             -var "ecs_api_min_capacity=1" \
             -var "ecs_api_max_capacity=1" \
-            -var "enable_ecs_idle_autoscaler=false" \
-            -var "ecs_idle_timeout_minutes=5" \
             -var "domain_name=" \
             -var "certificate_arn=${CERTIFICATE_ARN}" \
             -var "db_host=${DB_HOST}"
@@ -1370,7 +1360,7 @@ jobs:
             --cluster "$CLUSTER" --services "$SERVICE" --region "$AWS_REGION" \
             --query 'services[0].desiredCount' --output text 2>/dev/null || echo "0")
 
-          # In scale-to-zero mode there may be no healthy endpoint until wake-up.
+          # If desired count is 0, strict health verification is skipped.
           if [ "$DESIRED" = "0" ]; then
             echo "ECS desired count is 0; skipping strict health smoke test."
             exit 0

@@ -48,7 +48,3 @@ output "cloudfront_distribution_id" {
   value       = aws_cloudfront_distribution.frontend.id
 }
 
-output "ecs_wake_url" {
-  description = "Lambda Function URL for direct ECS wake (called by WakeupGate via /wake CF behavior)"
-  value       = local.enable_ecs_idle_autoscaler_effective ? aws_lambda_function_url.ecs_idle_scaler[0].function_url : ""
-}
