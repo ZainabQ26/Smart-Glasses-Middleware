@@ -916,6 +916,8 @@ export default function App({ mode = "voice" }) {
     const SENTENCE_END_MS      = 350;        // pause after sentence-end pattern → submit
     const FORCE_SUBMIT_MS      = 2_500;      // max silence during command → force submit
     const MIN_COMMAND_SEC      = 0.3;        // minimum audio duration (s) to bother submitting
+    const MAX_COMMAND_WINDOW_MS = 7_000;     // hard cap after activation so noise cannot keep command mode open forever
+    const MAX_COMMAND_AUDIO_SEC = 8.0;       // max accumulated command audio before forced finalization
     const WAKE_MIN_CHUNK_SEC   = 0.08;       // wake-word path: allow smaller chunks to reduce delay
     const COMMAND_MIN_CHUNK_SEC = 0.35;      // command path: larger chunks improve recognition stability
 
@@ -926,6 +928,8 @@ export default function App({ mode = "voice" }) {
     let preSpeechBuffer = []; // Rolling buffer of the last ~500ms of audio before speech
     const MAX_PRE_SPEECH_CHUNKS = Math.ceil((SAMPLE_RATE * 0.5) / BUFFER_SIZE);
     let commandChunks = [];   // all audio accumulated since activation
+    let commandSampleCount = 0;
+    let commandStartedAt = 0;
     let partialTexts  = [];   // Groq partial transcriptions so far
     let isSpeaking    = false;
     let silenceSince  = 0;
@@ -935,6 +939,7 @@ export default function App({ mode = "voice" }) {
 
     let forceSubmitTimer    = null;
     let sentenceEndTimer    = null;
+    let submitInFlight      = false;
 
     function concatF32(chunks) {
       const total = chunks.reduce((s, c) => s + c.length, 0);
@@ -942,6 +947,10 @@ export default function App({ mode = "voice" }) {
       let off = 0;
       for (const c of chunks) { out.set(c, off); off += c.length; }
       return out;
+    }
+
+    function totalSamples(chunks) {
+      return chunks.reduce((sum, c) => sum + c.length, 0);
     }
 
     function isSentenceComplete(text) {
@@ -968,11 +977,14 @@ export default function App({ mode = "voice" }) {
       }
     }
 
-    async function submitCommand() {
-      if (disposed || !activatedRef.current) return;
+    async function submitCommand(reason = "normal") {
+      if (disposed || !activatedRef.current || submitInFlight) return;
+      submitInFlight = true;
       clearTimers();
       const audio   = concatF32(commandChunks);
       commandChunks = [];
+      commandSampleCount = 0;
+      commandStartedAt = 0;
       const partial = partialTexts.join(" ").trim();
       partialTexts  = [];
 
@@ -986,10 +998,16 @@ export default function App({ mode = "voice" }) {
         } else {
           resumeListeningRef.current();
         }
+        submitInFlight = false;
         return;
       }
 
       activatedRef.current = false;
+      if (reason === "max-window") {
+        addLog("⏱️ Max command window reached — finalizing command.", "warn");
+      } else if (reason === "max-audio") {
+        addLog("⏱️ Max command audio reached — finalizing command.", "warn");
+      }
       if (partial) showTranscript(partial);
       setStatus("processing");
 
@@ -1009,6 +1027,8 @@ export default function App({ mode = "voice" }) {
       } catch (err) {
         addLog(`❌ Transcription error: ${err?.message || "unknown"}`, "error");
         resumeListeningRef.current();
+      } finally {
+        submitInFlight = false;
       }
     }
 
@@ -1038,6 +1058,8 @@ export default function App({ mode = "voice" }) {
         const rest = overrideRest || normalizedText.replace(normalizedWord, "").replace(coreWord, "").trim();
         activatedRef.current = true;
         commandChunks = [...speechChunks];
+        commandSampleCount = totalSamples(commandChunks);
+        commandStartedAt = Date.now();
         speechChunks = [];
         partialTexts  = [];
         clearTimers();
@@ -1122,6 +1144,22 @@ export default function App({ mode = "voice" }) {
           const rms = Math.sqrt(samples.reduce((s, v) => s + v * v, 0) / samples.length);
           const now = Date.now();
 
+          // Hard-stop command capture if it runs too long (usually caused by sustained background noise).
+          if (activatedRef.current && commandStartedAt > 0) {
+            const commandElapsedMs = now - commandStartedAt;
+            if (commandElapsedMs >= MAX_COMMAND_WINDOW_MS) {
+              if (!submitInFlight) {
+                if (partialTexts.join(" ").trim() || commandSampleCount >= SAMPLE_RATE * MIN_COMMAND_SEC) {
+                  void submitCommand("max-window");
+                } else {
+                  addLog("⏱️ Ignoring long background noise — resetting command mode.", "warn");
+                  resumeListeningRef.current();
+                }
+              }
+              return;
+            }
+          }
+
           // Periodic diagnostic: log every 10 seconds to show audio is flowing
           if (now - lastDiagTime > 10000) {
             addLog(`🔈 Audio flowing — RMS: ${rms.toFixed(4)}, speech bursts: ${speechBurstCount}, activated: ${activatedRef.current}`, "info");
@@ -1142,7 +1180,13 @@ export default function App({ mode = "voice" }) {
             silenceSince = 0;
             speechChunks.push(samples);
             if (activatedRef.current) {
+              if (commandStartedAt === 0) commandStartedAt = now;
               commandChunks.push(samples);
+              commandSampleCount += samples.length;
+              if (commandSampleCount >= SAMPLE_RATE * MAX_COMMAND_AUDIO_SEC && !submitInFlight) {
+                void submitCommand("max-audio");
+                return;
+              }
             }
           } else if (isSpeaking) {
             if (!silenceSince) silenceSince = now;
