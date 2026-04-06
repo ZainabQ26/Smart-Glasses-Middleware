@@ -8,11 +8,6 @@ output "s3_media_bucket" {
   value       = aws_s3_bucket.media.id
 }
 
-output "s3_documents_bucket" {
-  description = "S3 bucket for document storage"
-  value       = aws_s3_bucket.documents.id
-}
-
 output "cloudfront_distribution_domain" {
   description = "CloudFront distribution domain name"
   value       = aws_cloudfront_distribution.frontend.domain_name

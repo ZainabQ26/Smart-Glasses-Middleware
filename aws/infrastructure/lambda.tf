@@ -40,7 +40,7 @@ resource "aws_iam_role_policy" "lambda_document_processor" {
           "s3:DeleteObject"
         ]
         Resource = [
-          "${aws_s3_bucket.documents.arn}/*"
+          "${aws_s3_bucket.media.arn}/*"
         ]
       },
       {
@@ -107,7 +107,7 @@ resource "aws_lambda_function" "document_processor" {
   environment {
     variables = {
         DB_SECRET_ARN          = aws_secretsmanager_secret.db_connection.arn
-      DOCUMENTS_BUCKET      = aws_s3_bucket.documents.id
+      DOCUMENTS_BUCKET      = aws_s3_bucket.media.id
       DEPLOYMENT_ID         = var.deployment_id  # Changes on every deploy
     }
   }
@@ -123,7 +123,7 @@ resource "aws_lambda_function" "document_processor" {
 
 # S3 Event Notification to trigger Lambda
 resource "aws_s3_bucket_notification" "document_upload" {
-  bucket = aws_s3_bucket.documents.id
+  bucket = aws_s3_bucket.media.id
 
   lambda_function {
     lambda_function_arn = aws_lambda_function.document_processor.arn
@@ -183,5 +183,5 @@ resource "aws_lambda_permission" "allow_s3" {
   action              = "lambda:InvokeFunction"
   function_name       = aws_lambda_function.document_processor.function_name
   principal           = "s3.amazonaws.com"
-  source_arn          = aws_s3_bucket.documents.arn
+  source_arn          = aws_s3_bucket.media.arn
 }

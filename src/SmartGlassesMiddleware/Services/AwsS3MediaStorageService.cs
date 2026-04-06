@@ -12,13 +12,15 @@ namespace SmartGlassesMiddleware.Services;
 public class AwsS3MediaStorageService : IMediaStorageService
 {
     private readonly IAmazonS3 _s3Client;
-    private readonly string _bucketName;
+    private readonly string _mediaBucketName;
+    private readonly string _documentsBucketName;
     private readonly ILogger<AwsS3MediaStorageService> _logger;
 
     public AwsS3MediaStorageService(IAmazonS3 s3Client, IConfiguration configuration, ILogger<AwsS3MediaStorageService> logger)
     {
         _s3Client = s3Client;
-        _bucketName = configuration["AWS:S3:MediaBucket"] ?? throw new InvalidOperationException("AWS:S3:MediaBucket is not configured");
+        _mediaBucketName = ResolveBucketName(configuration, "AWS:S3:MediaBucket", "smart-glasses-dev-media");
+        _documentsBucketName = ResolveBucketName(configuration, "AWS:S3:DocumentsBucket", _mediaBucketName);
         _logger = logger;
     }
 
@@ -41,7 +43,7 @@ public class AwsS3MediaStorageService : IMediaStorageService
             if (streamLength == 0)
                 throw new InvalidOperationException($"Refusing to upload 0-byte stream to S3 key {key}");
 
-            _logger.LogInformation("Uploading to S3: {Bucket}/{Key} ({Bytes} bytes)", _bucketName, key, streamLength);
+            _logger.LogInformation("Uploading to S3: {Bucket}/{Key} ({Bytes} bytes)", _mediaBucketName, key, streamLength);
 
             // Copy to a MemoryStream so the AWS SDK knows the exact length and won't use
             // chunked transfer encoding which can result in a 0-byte object.
@@ -62,7 +64,7 @@ public class AwsS3MediaStorageService : IMediaStorageService
 
             var request = new PutObjectRequest
             {
-                BucketName = _bucketName,
+                BucketName = _mediaBucketName,
                 Key = key,
                 InputStream = ms,
                 ContentType = contentType,
@@ -79,12 +81,12 @@ public class AwsS3MediaStorageService : IMediaStorageService
             }
 
             await _s3Client.PutObjectAsync(request);
-            _logger.LogInformation("Uploaded file to S3: {Bucket}/{Key} ({Bytes} bytes)", _bucketName, key, ms.Length);
+            _logger.LogInformation("Uploaded file to S3: {Bucket}/{Key} ({Bytes} bytes)", _mediaBucketName, key, ms.Length);
             return key;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error uploading file to S3: {Bucket}/{Key}", _bucketName, key);
+            _logger.LogError(ex, "Error uploading file to S3: {Bucket}/{Key}", _mediaBucketName, key);
             throw;
         }
     }
@@ -93,49 +95,68 @@ public class AwsS3MediaStorageService : IMediaStorageService
 
     public async Task<Stream> DownloadFileAsync(string key)
     {
-        try
+        foreach (var bucketName in GetCandidateBuckets())
         {
-            var request = new GetObjectRequest
+            try
             {
-                BucketName = _bucketName,
-                Key = key
-            };
+                var request = new GetObjectRequest
+                {
+                    BucketName = bucketName,
+                    Key = key
+                };
 
-            var response = await _s3Client.GetObjectAsync(request);
+                using var response = await _s3Client.GetObjectAsync(request);
 
-            // Copy to MemoryStream so the caller owns the stream lifetime
-            var memStream = new MemoryStream();
-            await response.ResponseStream.CopyToAsync(memStream);
-            memStream.Position = 0;
+                // Copy to MemoryStream so the caller owns the stream lifetime
+                var memStream = new MemoryStream();
+                await response.ResponseStream.CopyToAsync(memStream);
+                memStream.Position = 0;
 
-            _logger.LogInformation("Downloaded file from S3: {Bucket}/{Key} ({Bytes} bytes)", _bucketName, key, memStream.Length);
-            return memStream;
+                _logger.LogInformation("Downloaded file from S3: {Bucket}/{Key} ({Bytes} bytes)", bucketName, key, memStream.Length);
+                return memStream;
+            }
+            catch (AmazonS3Exception ex) when (IsMissingObject(ex))
+            {
+                // Try the fallback bucket if this key was stored there previously.
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error downloading file from S3: {Bucket}/{Key}", bucketName, key);
+                throw;
+            }
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error downloading file from S3: {Bucket}/{Key}", _bucketName, key);
-            throw;
-        }
+
+        throw new FileNotFoundException($"File {key} was not found in any configured S3 bucket");
     }
 
     public async Task DeleteMediaAsync(string key)
     {
-        try
+        foreach (var bucketName in GetCandidateBuckets())
         {
-            var request = new DeleteObjectRequest
+            try
             {
-                BucketName = _bucketName,
-                Key = key
-            };
+                var request = new DeleteObjectRequest
+                {
+                    BucketName = bucketName,
+                    Key = key
+                };
 
-            await _s3Client.DeleteObjectAsync(request);
-            _logger.LogInformation("Deleted file from S3: {Bucket}/{Key}", _bucketName, key);
+                await _s3Client.DeleteObjectAsync(request);
+                _logger.LogInformation("Deleted file from S3: {Bucket}/{Key}", bucketName, key);
+                return;
+            }
+            catch (AmazonS3Exception ex) when (IsMissingObject(ex))
+            {
+                // Try the fallback bucket if this key was stored there previously.
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error deleting file from S3: {Bucket}/{Key}", bucketName, key);
+                throw;
+            }
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error deleting file from S3: {Bucket}/{Key}", _bucketName, key);
-            throw;
-        }
+
+        throw new FileNotFoundException($"File {key} was not found in any configured S3 bucket");
     }
 
     public string ComputeContentHash(Stream fileStream)
@@ -153,72 +174,75 @@ public class AwsS3MediaStorageService : IMediaStorageService
         var results = new List<StoredFileInfo>();
         try
         {
-            string? continuationToken = null;
-            do
+            foreach (var bucketName in GetCandidateBuckets())
             {
-                var listRequest = new ListObjectsV2Request
+                string? continuationToken = null;
+                do
                 {
-                    BucketName = _bucketName,
-                    ContinuationToken = continuationToken
-                };
-
-                var listResponse = await _s3Client.ListObjectsV2Async(listRequest, ct);
-
-                // Fetch HEAD metadata for all objects in parallel, capped at 10 concurrent calls
-                var semaphore = new System.Threading.SemaphoreSlim(10, 10);
-                var tasks = listResponse.S3Objects.Select(async obj =>
-                {
-                    await semaphore.WaitAsync(ct);
-                    try
+                    var listRequest = new ListObjectsV2Request
                     {
-                        var headRequest = new GetObjectMetadataRequest
+                        BucketName = bucketName,
+                        ContinuationToken = continuationToken
+                    };
+
+                    var listResponse = await _s3Client.ListObjectsV2Async(listRequest, ct);
+
+                    // Fetch HEAD metadata for all objects in parallel, capped at 10 concurrent calls
+                    var semaphore = new System.Threading.SemaphoreSlim(10, 10);
+                    var tasks = listResponse.S3Objects.Select(async obj =>
+                    {
+                        await semaphore.WaitAsync(ct);
+                        try
                         {
-                            BucketName = _bucketName,
-                            Key = obj.Key
-                        };
-                        var head = await _s3Client.GetObjectMetadataAsync(headRequest, ct);
+                            var headRequest = new GetObjectMetadataRequest
+                            {
+                                BucketName = bucketName,
+                                Key = obj.Key
+                            };
+                            var head = await _s3Client.GetObjectMetadataAsync(headRequest, ct);
 
-                        // S3 user-defined metadata keys are returned WITHOUT the "x-amz-meta-" prefix
-                        var userMeta = head.Metadata.Keys
-                            .Cast<string>()
-                            .ToDictionary(
-                                k => k,
-                                k => head.Metadata[k],
-                                StringComparer.OrdinalIgnoreCase);
+                            // S3 user-defined metadata keys are returned WITHOUT the "x-amz-meta-" prefix
+                            var userMeta = head.Metadata.Keys
+                                .Cast<string>()
+                                .ToDictionary(
+                                    k => k,
+                                    k => head.Metadata[k],
+                                    StringComparer.OrdinalIgnoreCase);
 
-                        var fileName = userMeta.TryGetValue("sgm-filename", out var fn) && !string.IsNullOrWhiteSpace(fn)
-                            ? fn
-                            : System.IO.Path.GetFileName(obj.Key);
+                            var fileName = userMeta.TryGetValue("sgm-filename", out var fn) && !string.IsNullOrWhiteSpace(fn)
+                                ? fn
+                                : System.IO.Path.GetFileName(obj.Key);
 
-                        return new StoredFileInfo(
-                            Key: obj.Key,
-                            FileName: fileName,
-                            ContentType: head.Headers.ContentType ?? "application/octet-stream",
-                            Size: head.ContentLength,
-                            LastModified: obj.LastModified,
-                            UserMetadata: userMeta);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to head S3 object {Key}; skipping", obj.Key);
-                        return null;
-                    }
-                    finally
-                    {
-                        semaphore.Release();
-                    }
-                });
+                            return new StoredFileInfo(
+                                Key: obj.Key,
+                                FileName: fileName,
+                                ContentType: head.Headers.ContentType ?? "application/octet-stream",
+                                Size: head.ContentLength,
+                                LastModified: obj.LastModified,
+                                UserMetadata: userMeta);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to head S3 object {Bucket}/{Key}; skipping", bucketName, obj.Key);
+                            return null;
+                        }
+                        finally
+                        {
+                            semaphore.Release();
+                        }
+                    });
 
-                var batch = await System.Threading.Tasks.Task.WhenAll(tasks);
-                results.AddRange(batch.OfType<StoredFileInfo>());
+                    var batch = await System.Threading.Tasks.Task.WhenAll(tasks);
+                    results.AddRange(batch.OfType<StoredFileInfo>());
 
-                continuationToken = listResponse.IsTruncated ? listResponse.NextContinuationToken : null;
+                    continuationToken = listResponse.IsTruncated ? listResponse.NextContinuationToken : null;
+                }
+                while (continuationToken != null);
             }
-            while (continuationToken != null);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error listing files from S3 bucket {Bucket}", _bucketName);
+            _logger.LogError(ex, "Error listing files from S3 buckets {MediaBucket} / {DocumentsBucket}", _mediaBucketName, _documentsBucketName);
         }
         return results;
     }
@@ -230,7 +254,7 @@ public class AwsS3MediaStorageService : IMediaStorageService
         var key = $"{Guid.NewGuid()}/{safeFileName}";
         var request = new GetPreSignedUrlRequest
         {
-            BucketName = _bucketName,
+            BucketName = _mediaBucketName,
             Key = key,
             Verb = HttpVerb.PUT,
             Expires = DateTime.UtcNow.Add(expiry),
@@ -238,5 +262,33 @@ public class AwsS3MediaStorageService : IMediaStorageService
         };
         var url = _s3Client.GetPreSignedURL(request);
         return Task.FromResult<(string, string)?>((url, key));
+    }
+
+    private IEnumerable<string> GetCandidateBuckets()
+    {
+        yield return _mediaBucketName;
+
+        if (!string.Equals(_documentsBucketName, _mediaBucketName, StringComparison.OrdinalIgnoreCase))
+        {
+            yield return _documentsBucketName;
+        }
+    }
+
+    private static string ResolveBucketName(IConfiguration configuration, string key, string fallback)
+    {
+        var value = configuration[key];
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            return value.Trim();
+        }
+
+        return fallback;
+    }
+
+    private static bool IsMissingObject(AmazonS3Exception ex)
+    {
+        return ex.StatusCode == System.Net.HttpStatusCode.NotFound
+            || string.Equals(ex.ErrorCode, "NoSuchKey", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(ex.ErrorCode, "NotFound", StringComparison.OrdinalIgnoreCase);
     }
 }
