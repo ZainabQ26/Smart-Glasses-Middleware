@@ -391,7 +391,9 @@ export default function App({ mode = "voice", language = "en" }) {
         return null;
       }
 
+        const audioBlob = float32ToWavBlob(audio);
       const formData = new FormData();
+        formData.append("audio", audioBlob, "audio.wav");
       formData.append("language", languageRef.current);
 
       const payload = await fetchJsonWithTimeout(
@@ -424,8 +426,11 @@ export default function App({ mode = "voice", language = "en" }) {
         return { text: "", matched: false, commandAfterWakeword: "" };
       }
 
+        const audioBlob = float32ToWavBlob(audio);
       const formData = new FormData();
+        formData.append("audio", audioBlob, "audio.wav");
       formData.append("language", languageRef.current);
+        formData.append("checkWakeword", "true");
 
       const payload = await fetchJsonWithTimeout(
         "/api/process/transcribe",
