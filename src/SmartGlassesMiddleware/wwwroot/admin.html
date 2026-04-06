@@ -1505,7 +1505,7 @@
             <button class="tab active" data-tab="files" data-testid="tab-files" aria-controls="files">Files</button>
             <button class="tab" data-tab="prompts" data-testid="tab-prompts" aria-controls="prompts">Conversation</button>
             <button class="tab" data-tab="groq-live" data-testid="tab-groq-live" aria-controls="groq-live">🎙 Groq Live</button>
-            <button id="lang-toggle" type="button" title="Toggle conversation language (EN / ES)" aria-label="Toggle language" data-testid="lang-toggle">🇺🇸 EN</button>
+            <button id="lang-toggle" type="button" title="Cambiar a Español" aria-label="Cambiar a Español" data-testid="lang-toggle">🇪🇸 ES</button>
             <button id="theme-toggle" class="theme-toggle" type="button" title="Toggle dark mode" aria-label="Toggle dark mode" data-testid="theme-toggle">🌙</button>
         </div>
 
@@ -1615,16 +1615,20 @@
                     current = lang;
                     localStorage.setItem('adminLanguage', lang);
                     langToggle.textContent = lang === 'es' ? '🇺🇸 EN' : '🇪🇸 ES';
-                    langToggle.title = lang === 'es'
+                    var title = lang === 'es'
                         ? 'Switch to English'
                         : 'Cambiar a Español';
+                    langToggle.title = title;
+                    langToggle.setAttribute('aria-label', title);
                     if (adminChatRoot) adminChatRoot.dataset.language = lang;
                     window.dispatchEvent(new CustomEvent('adminlanguagechange'));
                 }
 
                 // Set initial state without dispatching (React may not be mounted yet).
                 langToggle.textContent = current === 'es' ? '🇺🇸 EN' : '🇪🇸 ES';
-                langToggle.title = current === 'es' ? 'Switch to English' : 'Cambiar a Español';
+                var initialTitle = current === 'es' ? 'Switch to English' : 'Cambiar a Español';
+                langToggle.title = initialTitle;
+                langToggle.setAttribute('aria-label', initialTitle);
                 if (adminChatRoot) adminChatRoot.dataset.language = current;
 
                 langToggle.addEventListener('click', function() {

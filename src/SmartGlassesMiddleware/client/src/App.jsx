@@ -132,6 +132,18 @@ function tpl(str, vals) {
   return str.replace(/\{(\w+)\}/g, (_, k) => (vals[k] !== undefined ? vals[k] : k));
 }
 
+// Render a translation template that contains a single {word} placeholder as
+// React nodes, wrapping the word in a highlighted <strong> element.
+function renderWithHighlight(template, word) {
+  const parts = template.split('{word}');
+  if (parts.length < 2) return tpl(template, { word });
+  return (
+    <>
+      {parts[0]}<strong style={{color:"#f97316"}}>"{word}"</strong>{parts[1]}
+    </>
+  );
+}
+
 export default function App({ mode = "voice", language = "en" }) {
   const [status, setStatus]       = useState("idle"); // idle | listening | processing | sending
   const [logs, setLogs]           = useState([]);
@@ -1571,9 +1583,7 @@ export default function App({ mode = "voice", language = "en" }) {
           <div style={styles.landingCard}>
             <h1 style={styles.landingTitle}>{t.title}</h1>
             <p style={styles.landingSubtitle}>
-              {tpl(t.subtitleTemplate, { word: "" }).split(`""`)[0]}
-              <strong style={{color:"#f97316"}}>"{activationWord}"</strong>
-              {tpl(t.subtitleTemplate, { word: "" }).split(`""`)[1]}
+              {renderWithHighlight(t.subtitleTemplate, activationWord)}
             </p>
 
             {/* ── Initialization status ─────────────────────────────────── */}
@@ -1587,9 +1597,7 @@ export default function App({ mode = "voice", language = "en" }) {
                 <div style={styles.landingReadyRow}>
                   <span style={styles.landingReadyBadge}>✓</span>
                   <span style={styles.landingReadyText}>
-                    {tpl(t.readyTemplate, { word: "" }).split(`""`)[0]}
-                    <strong style={{color:"#f97316"}}>"{activationWord}"</strong>
-                    {tpl(t.readyTemplate, { word: "" }).split(`""`)[1]}
+                    {renderWithHighlight(t.readyTemplate, activationWord)}
                   </span>
                 </div>
               )}
