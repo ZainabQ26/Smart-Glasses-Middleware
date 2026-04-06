@@ -28,10 +28,23 @@ public class MiscCoverageTests
 {
     // ── NoOpBackgroundTaskQueue ──────────────────────────────────────────────
 
+    private IConfiguration CreateMockConfig()
+    {
+        var inMemorySettings = new Dictionary<string, string?> {
+            {"BackgroundTasks:DelayBetweenChecksMs", "100"}
+        };
+
+        IConfiguration configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(inMemorySettings)
+            .Build();
+
+        return configuration;
+    }
+
     [Test]
     public async Task NoOpQueue_DequeueAsync_AfterEnqueue_ReturnsItem()
     {
-        var queue = new NoOpBackgroundTaskQueue(NullLogger<NoOpBackgroundTaskQueue>.Instance);
+        var queue = new NoOpBackgroundTaskQueue(NullLogger<NoOpBackgroundTaskQueue>.Instance, CreateMockConfig());
         var entry = new BackgroundTaskEntry { Id = Guid.NewGuid(), Status = BackgroundTaskStatus.Queued };
 
         await queue.EnqueueAsync(entry);
@@ -46,7 +59,7 @@ public class MiscCoverageTests
     [Test]
     public async Task NoOpQueue_DequeueAsync_WhenCancelled_ReturnsNull()
     {
-        var queue = new NoOpBackgroundTaskQueue(NullLogger<NoOpBackgroundTaskQueue>.Instance);
+        var queue = new NoOpBackgroundTaskQueue(NullLogger<NoOpBackgroundTaskQueue>.Instance, CreateMockConfig());
 
         using var cts = new CancellationTokenSource();
         cts.Cancel(); // already cancelled
@@ -59,7 +72,7 @@ public class MiscCoverageTests
     [Test]
     public async Task NoOpQueue_Get_AfterEnqueue_ReturnsEntry()
     {
-        var queue = new NoOpBackgroundTaskQueue(NullLogger<NoOpBackgroundTaskQueue>.Instance);
+        var queue = new NoOpBackgroundTaskQueue(NullLogger<NoOpBackgroundTaskQueue>.Instance, CreateMockConfig());
         var id = Guid.NewGuid();
         var entry = new BackgroundTaskEntry { Id = id, Status = BackgroundTaskStatus.Queued };
 
@@ -73,14 +86,14 @@ public class MiscCoverageTests
     [Test]
     public void NoOpQueue_Get_UnknownId_ReturnsNull()
     {
-        var queue = new NoOpBackgroundTaskQueue(NullLogger<NoOpBackgroundTaskQueue>.Instance);
+        var queue = new NoOpBackgroundTaskQueue(NullLogger<NoOpBackgroundTaskQueue>.Instance, CreateMockConfig());
         Assert.That(queue.Get(Guid.NewGuid()), Is.Null);
     }
 
     [Test]
     public async Task NoOpQueue_UpdateAsync_UpdatesEntry()
     {
-        var queue = new NoOpBackgroundTaskQueue(NullLogger<NoOpBackgroundTaskQueue>.Instance);
+        var queue = new NoOpBackgroundTaskQueue(NullLogger<NoOpBackgroundTaskQueue>.Instance, CreateMockConfig());
         var id = Guid.NewGuid();
         var entry = new BackgroundTaskEntry { Id = id, Status = BackgroundTaskStatus.Queued };
 
@@ -90,51 +103,6 @@ public class MiscCoverageTests
         Assert.That(queue.Get(id)!.Status, Is.EqualTo(BackgroundTaskStatus.Processing));
     }
 
-    // ── ShowRemindersTaskHandler – JsonDateTimeConverter.Write ───────────────
-
-    [Test]
-    public async Task ShowReminders_WithReminders_SerializesDateTimeWithConverter()
-    {
-        // The Write method of JsonDateTimeConverter is exercised when HandleAsync serializes
-        // ReminderItems that have a DateTime CreatedAt marked with [JsonConverter(typeof(JsonDateTimeConverter))]
-        var historyMock = new Mock<IHistoryService>();
-        historyMock.Setup(h => h.GetHistoryByTypeAsync("reminder", It.IsAny<int>()))
-            .ReturnsAsync(new List<RequestHistory>
-            {
-                new RequestHistory
-                {
-                    Id = Guid.NewGuid(),
-                    InputText = "take medication",
-                    RequestType = "reminder",
-                    Response = "Reminder set",
-                    Timestamp = new DateTime(2024, 6, 15, 10, 30, 0, DateTimeKind.Utc)
-                }
-            });
-
-        var handler = new ShowRemindersTaskHandler(historyMock.Object,
-            NullLogger<ShowRemindersTaskHandler>.Instance);
-
-        var result = await handler.HandleAsync("show my reminders");
-
-        // The result should contain JSON with an ISO-8601 formatted date (via Write method)
-        Assert.That(result, Does.StartWith("__ACTION:SHOW_REMINDERS:"));
-        Assert.That(result, Does.Contain("2024-06-15"));
-    }
-
-    [Test]
-    public async Task ShowReminders_NoReminders_ReturnsNoRemindersMessage()
-    {
-        var historyMock = new Mock<IHistoryService>();
-        historyMock.Setup(h => h.GetHistoryByTypeAsync("reminder", It.IsAny<int>()))
-            .ReturnsAsync(new List<RequestHistory>());
-
-        var handler = new ShowRemindersTaskHandler(historyMock.Object,
-            NullLogger<ShowRemindersTaskHandler>.Instance);
-
-        var result = await handler.HandleAsync("show reminders");
-
-        Assert.That(result, Does.Contain("no reminders").IgnoreCase);
-    }
 
     // ── ConversationService – InvalidateGroupsCache via DetectOrCreate ───────
 

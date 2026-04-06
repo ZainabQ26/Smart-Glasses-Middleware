@@ -458,6 +458,7 @@ public class AIService : IAIService
 
         // ── select-document (open most-recent file directly) ──────────────────
         if (ContainsAnyPhrase(normalized,
+            "select document",
             "open last document",
             "select file",
             "select and open",
@@ -532,8 +533,7 @@ public class AIService : IAIService
             "pick a file",
             "pick a document",
             "choose a file",
-            "choose a document",
-            "select document")
+            "choose a document")
             || ContainsAllWords(normalized, "search", "file")
             || ContainsAllWords(normalized, "search", "document")
             || ContainsAllWords(normalized, "find", "file")
@@ -541,8 +541,7 @@ public class AIService : IAIService
             || ContainsAllWords(normalized, "show", "file")
             || ContainsAllWords(normalized, "browse", "file")
             || ContainsAllWords(normalized, "recent", "file")
-            || ContainsAllWords(normalized, "recent", "document")
-            || ContainsAllWords(normalized, "select", "document"))
+            || ContainsAllWords(normalized, "recent", "document"))
         {
             return "open-file";
         }
