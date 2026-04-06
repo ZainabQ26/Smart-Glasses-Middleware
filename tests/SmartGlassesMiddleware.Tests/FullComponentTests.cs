@@ -16,7 +16,7 @@ namespace SmartGlassesMiddleware.Tests
     [TestFixture]
     public class FullComponentTests
     {
-        private static ProcessController BuildController(
+        private static (ProcessController controller, ServiceProvider serviceProvider) BuildController(
             IAIService aiService,
             IPageSummaryService pageSummaryService,
             IGroqTranscriptionLogService groqLog,
@@ -36,7 +36,7 @@ namespace SmartGlassesMiddleware.Tests
             {
                 HttpContext = new DefaultHttpContext { RequestServices = sp }
             };
-            return controller;
+            return (controller, sp);
         }
 
         [Test]
@@ -58,13 +58,14 @@ namespace SmartGlassesMiddleware.Tests
             var mockLogger = new Mock<ILogger<ProcessController>>();
             var mockPageSummary = new Mock<IPageSummaryService>();
 
-            var controller = BuildController(
+            var (controller, sp1) = BuildController(
                 mockAiService.Object,
                 mockPageSummary.Object,
                 new Mock<IGroqTranscriptionLogService>().Object,
                 mockLogger.Object,
                 mockConfig.Object
             );
+            using var _sp1 = sp1;
 
             var req = new ProcessRequest { Input = "what time is it" };
 
@@ -93,13 +94,14 @@ namespace SmartGlassesMiddleware.Tests
             mockPageSummary.Setup(s => s.SummarizePageAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
                            .ReturnsAsync("A very good summary.");
 
-            var controller = BuildController(
+            var (controller, sp2) = BuildController(
                 mockAiService.Object,
                 mockPageSummary.Object,
                 new Mock<IGroqTranscriptionLogService>().Object,
                 mockLogger.Object,
                 mockConfig.Object
             );
+            using var _sp2 = sp2;
 
             var req = new PageSummaryRequest { PageText = "Some dummy document text here." };
 

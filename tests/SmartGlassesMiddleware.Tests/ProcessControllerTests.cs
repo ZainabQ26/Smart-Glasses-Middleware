@@ -20,6 +20,7 @@ public class ProcessControllerTests
     private Mock<ILogger<ProcessController>> _loggerMock;
     private Mock<IConfiguration> _configMock;
     private ProcessController _controller;
+    private ServiceProvider? _serviceProvider;
 
     [SetUp]
     public void Setup()
@@ -35,7 +36,14 @@ public class ProcessControllerTests
             _pageSummaryServiceMock.Object,
             _groqTranscriptionLogMock.Object,
             _loggerMock.Object,
-            _configMock.Object);
+            _configMock.Object,
+            out _serviceProvider);
+    }
+
+    [TearDown]
+    public void TearDown()
+    {
+        _serviceProvider?.Dispose();
     }
 
     private static ProcessController BuildController(
@@ -43,7 +51,8 @@ public class ProcessControllerTests
         IPageSummaryService pageSummaryService,
         IGroqTranscriptionLogService groqTranscriptionLog,
         ILogger<ProcessController> logger,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        out ServiceProvider serviceProvider)
     {
         var services = new ServiceCollection();
         services.AddSingleton(aiService);
@@ -51,12 +60,12 @@ public class ProcessControllerTests
         services.AddSingleton(groqTranscriptionLog);
         services.AddSingleton(logger);
         services.AddSingleton(configuration);
-        var sp = services.BuildServiceProvider();
+        serviceProvider = services.BuildServiceProvider();
 
         var controller = new ProcessController();
         controller.ControllerContext = new ControllerContext
         {
-            HttpContext = new DefaultHttpContext { RequestServices = sp }
+            HttpContext = new DefaultHttpContext { RequestServices = serviceProvider }
         };
         return controller;
     }
