@@ -98,7 +98,7 @@ Backend middleware and frontend for a smart glasses application. Provides a mult
 | Frontend | React 19 + Vite, served from S3 via CloudFront |
 | AI | AWS Bedrock (Nova / Titan Embed) — always |
 | Advanced model | External REST API (`AI:AdvancedModelEndpoint`) — request/response |
-| Audio transcription | Whisper Lambda (containerised, invoked via SQS) |
+| Audio transcription | In-browser Whisper WebGPU worker (`whisper-base`, multilingual); optional Groq Whisper API (`POST /api/process/transcribe`) |
 | Document processing | Lambda (Python), iText7, Tesseract OCR, pgvector RAG |
 | Database | PostgreSQL 16 + pgvector (RDS db.t3.micro) |
 | Cache / pub-sub | Redis (ElastiCache, optional) |
@@ -110,7 +110,7 @@ Backend middleware and frontend for a smart glasses application. Provides a mult
 ## Architecture Overview
 
 ```
-Browser
+Browser (Whisper WebGPU — in-browser transcription)
   └─► CloudFront (HTTPS, COOP+COEP headers)
         ├─► S3  —— static frontend (React SPA, ONNX/WASM assets)
         └─► ALB —— /api/*, /health, /hubs/*, /swagger*
@@ -118,22 +118,19 @@ Browser
                     ├─► RDS PostgreSQL (pgvector)
                     ├─► ElastiCache Redis (optional)
                     ├─► S3 (media + documents)
+                    │     └─► Lambda (document processing, triggered by S3 events)
                     ├─► Bedrock (LLM + embeddings)
                     ├─► Advanced model REST API (external, optional)
-                    └─► SQS → Whisper Lambda (transcription)
+                    └─► Groq Whisper API (server-side transcription, optional)
 ```
 
 ### Scale-to-zero
 
-The ECS service scales to 0 tasks when idle (default: 15 minutes of no traffic) and wakes on demand:
+The ECS service uses Application Auto Scaling (CPU target: 70 %, memory target: 80 %) to scale the number of running tasks. The `ecs_api_min_capacity` and `ecs_api_max_capacity` Terraform variables control the scaling bounds; both default to `1` in the current CI/CD configuration, so the service keeps exactly one task running at all times.
 
-1. Browser loads the React SPA from S3 (always available)
-2. `WakeupGate` component polls `/health` — on first non-200, immediately `POST /wake`
-3. `/wake` (CloudFront → Lambda Function URL) sets `desiredCount=1` in **< 1 second** and requests `StartDBInstance` if the dev DB is stopped
-4. ECS task starts; ALB health checks pass in ~20 s; app is serving in **~35–45 s total**
-5. The CloudWatch alarm (ALB + CloudFront 5xx metrics) provides a parallel wake signal
+To enable true scale-to-zero, pass `-var "ecs_api_min_capacity=0"` when running Terraform. The idle-traffic-based wake/sleep Lambda autoscaler that was previously part of this stack has been removed; scaling is now driven entirely by the CPU/memory metrics above.
 
-Cost while idle: **$0** (Fargate billing stops when `desiredCount=0`).
+Cost while scaled to zero (when `min_capacity = 0` and no tasks are running): **$0** (Fargate billing stops when `desiredCount = 0`).
 
 ## Local Development
 
@@ -147,7 +144,7 @@ Cost while idle: **$0** (Fargate billing stops when `desiredCount=0`).
 ### Start with LocalStack
 
 ```bash
-# Start LocalStack + PostgreSQL + MinIO + Redis
+# Start LocalStack + PostgreSQL + Redis
 docker-compose -f docker-compose.localstack.yml up -d
 
 # Verify LocalStack
