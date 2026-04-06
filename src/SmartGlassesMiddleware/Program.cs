@@ -736,6 +736,12 @@ static string ToTitleCaseWords(string value)
     return string.Join(' ', parts);
 }
 
+static int GetGroqClientMaxRequestsPerMinute(IConfiguration? configuration)
+{
+    var rpm = configuration?.GetValue<int?>("AI:Groq:ClientMaxRequestsPerMinute") ?? 30;
+    return rpm < 1 ? 1 : rpm;
+}
+
 // Add request logging middleware FIRST to track all requests
 app.Use(async (context, next) =>
 {
@@ -871,10 +877,11 @@ app.Use(async (context, next) =>
     {
         context.Response.Headers.CacheControl = "no-store, no-cache, must-revalidate";
         context.Response.Headers.Pragma = "no-cache";
+        var configuration = context.RequestServices.GetRequiredService<IConfiguration>();
+        var groqClientMaxRequestsPerMinute = GetGroqClientMaxRequestsPerMinute(configuration);
 
         try
         {
-            var configuration = context.RequestServices.GetRequiredService<IConfiguration>();
             var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
 
             var configuredMode = configuration["AI:SpeechTranscriptionMode"]?.Trim().ToLowerInvariant();
@@ -891,10 +898,6 @@ app.Use(async (context, next) =>
                 activationWord = "Hello Iris";
             else
                 activationWord = ToTitleCaseWords(activationWord);
-
-            var groqClientMaxRequestsPerMinute = configuration.GetValue<int?>("AI:Groq:ClientMaxRequestsPerMinute") ?? 16;
-            if (groqClientMaxRequestsPerMinute < 1)
-                groqClientMaxRequestsPerMinute = 1;
 
             await context.Response.WriteAsJsonAsync(new
             {
@@ -921,7 +924,7 @@ app.Use(async (context, next) =>
                 speechTranscriptionMode = "groq-only",
                 activationWord = "Hello Iris",
                 groqCommandTranscriptionEnabled = true,
-                groqClientMaxRequestsPerMinute = 16
+                groqClientMaxRequestsPerMinute
             });
         }
 
@@ -1040,6 +1043,8 @@ app.MapGet("/api/process/client-settings", (IConfiguration configuration, HttpCo
 
     try
     {
+        var groqClientMaxRequestsPerMinute = GetGroqClientMaxRequestsPerMinute(configuration);
+
         var configuredMode = configuration["AI:SpeechTranscriptionMode"]?.Trim().ToLowerInvariant();
         var mode = configuredMode switch
         {
@@ -1054,10 +1059,6 @@ app.MapGet("/api/process/client-settings", (IConfiguration configuration, HttpCo
             activationWord = "Hello Iris";
         else
             activationWord = ToTitleCaseWords(activationWord);
-
-        var groqClientMaxRequestsPerMinute = configuration.GetValue<int?>("AI:Groq:ClientMaxRequestsPerMinute") ?? 16;
-        if (groqClientMaxRequestsPerMinute < 1)
-            groqClientMaxRequestsPerMinute = 1;
 
         return Results.Ok(new { 
             speechTranscriptionMode = mode, 
@@ -1078,7 +1079,7 @@ app.MapGet("/api/process/client-settings", (IConfiguration configuration, HttpCo
         }
 
         // Return safe defaults so the frontend can still function.
-        return Results.Ok(new { speechTranscriptionMode = "groq-only", activationWord = "Hello Iris", groqCommandTranscriptionEnabled = true, groqClientMaxRequestsPerMinute = 16 });
+        return Results.Ok(new { speechTranscriptionMode = "groq-only", activationWord = "Hello Iris", groqCommandTranscriptionEnabled = true, groqClientMaxRequestsPerMinute = GetGroqClientMaxRequestsPerMinute(configuration) });
     }
 })
 // Ensure this endpoint wins even if a stale controller action with the same route exists.
