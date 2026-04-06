@@ -11,26 +11,11 @@ namespace SmartGlassesMiddleware.Controllers;
 [Route("api/process")]
 public class ProcessController : ControllerBase
 {
-    private readonly IAIService _aiService;
-    private readonly IPageSummaryService _pageSummaryService;
-    private readonly IGroqTranscriptionLogService _groqTranscriptionLog;
-    private readonly ILogger<ProcessController> _logger;
-    private readonly IConfiguration _configuration;
-
-    [ActivatorUtilitiesConstructor]
-    public ProcessController(
-        IAIService aiService,
-        IPageSummaryService pageSummaryService,
-        IGroqTranscriptionLogService groqTranscriptionLog,
-        ILogger<ProcessController> logger,
-        IConfiguration configuration)
-    {
-        _aiService = aiService;
-        _pageSummaryService = pageSummaryService;
-        _groqTranscriptionLog = groqTranscriptionLog;
-        _logger = logger;
-        _configuration = configuration;
-    }
+    private IAIService AiService => HttpContext.RequestServices.GetRequiredService<IAIService>();
+    private IPageSummaryService PageSummaryService => HttpContext.RequestServices.GetRequiredService<IPageSummaryService>();
+    private IGroqTranscriptionLogService GroqTranscriptionLog => HttpContext.RequestServices.GetRequiredService<IGroqTranscriptionLogService>();
+    private ILogger<ProcessController> Logger => HttpContext.RequestServices.GetRequiredService<ILogger<ProcessController>>();
+    private IConfiguration Configuration => HttpContext.RequestServices.GetRequiredService<IConfiguration>();
 
     /// <summary>
     /// Send a voice transcript to the AI service and return the response.
@@ -44,12 +29,12 @@ public class ProcessController : ControllerBase
 
         try
         {
-            var willUse = await _aiService.WillUseAdvancedModelAsync(request.Input, cancellationToken);
+            var willUse = await AiService.WillUseAdvancedModelAsync(request.Input, cancellationToken);
             return Ok(new { willUseAdvanced = willUse });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Preview failed");
+            Logger.LogError(ex, "Preview failed");
             return StatusCode(500, new { error = "Preview failed" });
         }
     }
@@ -68,15 +53,15 @@ public class ProcessController : ControllerBase
         if (audio is null || audio.Length == 0)
             return BadRequest(new { error = "Audio is required" });
 
-        var apiKey = _configuration["AI:Groq:ApiKey"]?.Trim();
+        var apiKey = Configuration["AI:Groq:ApiKey"]?.Trim();
         if (string.IsNullOrWhiteSpace(apiKey))
             return StatusCode(503, new { error = "Groq transcription is not configured" });
 
-        var endpoint = _configuration["AI:Groq:WhisperEndpoint"]?.Trim();
+        var endpoint = Configuration["AI:Groq:WhisperEndpoint"]?.Trim();
         if (string.IsNullOrWhiteSpace(endpoint))
             endpoint = "https://api.groq.com/openai/v1/audio/transcriptions";
 
-        var model = _configuration["AI:Groq:WhisperModel"]?.Trim();
+        var model = Configuration["AI:Groq:WhisperModel"]?.Trim();
         if (string.IsNullOrWhiteSpace(model))
             model = "whisper-large-v3-turbo";
 
@@ -99,7 +84,7 @@ public class ProcessController : ControllerBase
             // For wake-word detection, bias Whisper toward the activation word to reduce hallucination on short clips
             if (checkWakeword)
             {
-                var activationWord = _configuration["AI:ActivationWord"]?.Trim();
+                var activationWord = Configuration["AI:ActivationWord"]?.Trim();
                 if (string.IsNullOrWhiteSpace(activationWord)) activationWord = "Iris";
                 content.Add(new StringContent(activationWord), "prompt");
             }
@@ -114,7 +99,7 @@ public class ProcessController : ControllerBase
             if (!response.IsSuccessStatusCode)
             {
                 var logType = checkWakeword ? "wakeword" : "command";
-                _logger.LogWarning("Groq {Type} transcription failed ({StatusCode}): {Body}", logType, (int)response.StatusCode, body);
+                Logger.LogWarning("Groq {Type} transcription failed ({StatusCode}): {Body}", logType, (int)response.StatusCode, body);
                 return StatusCode(502, new { error = "Groq transcription failed" });
             }
 
@@ -126,12 +111,12 @@ public class ProcessController : ControllerBase
                     : string.Empty;
 
                 var logType = checkWakeword ? "wakeword" : "command";
-                _groqTranscriptionLog.Add(text, logType);
+                GroqTranscriptionLog.Add(text, logType);
 
                 // For wake-word detection, check if the transcription contains the activation word
                 if (checkWakeword)
                 {
-                    var activationWord = _configuration["AI:ActivationWord"]?.Trim() ?? "Iris";
+                    var activationWord = Configuration["AI:ActivationWord"]?.Trim() ?? "Iris";
                     var normalized = text.ToLowerInvariant().Replace(activationWord.ToLowerInvariant(), "").Trim();
                     var matched = text.ToLowerInvariant().Contains(activationWord.ToLowerInvariant());
                     return Ok(new { text, matched, provider = "groq", model });
@@ -141,7 +126,7 @@ public class ProcessController : ControllerBase
             }
             catch (JsonException jsonEx)
             {
-                _logger.LogWarning(jsonEx, "Failed to parse Groq response as JSON. Response: {Body}", body);
+                Logger.LogWarning(jsonEx, "Failed to parse Groq response as JSON. Response: {Body}", body);
                 return StatusCode(502, new { error = "Invalid response from Groq API" });
             }
         }
@@ -153,7 +138,7 @@ public class ProcessController : ControllerBase
         catch (Exception ex)
         {
             var logType = checkWakeword ? "wakeword" : "command";
-            _logger.LogError(ex, "Groq {Type} transcription error.", logType);
+            Logger.LogError(ex, "Groq {Type} transcription error.", logType);
             return StatusCode(503, new { error = "Groq transcription unavailable" });
         }
     }
@@ -195,7 +180,7 @@ public class ProcessController : ControllerBase
         try
         {
             // usedAdvancedModel is not relevant for the UI — discard it
-            var (task, response, usedAdvanced) = await _aiService.ProcessRequestAsync(request.Input, cancellationToken, request.DocumentContext);
+            var (task, response, usedAdvanced) = await AiService.ProcessRequestAsync(request.Input, cancellationToken, request.DocumentContext);
             return Ok(new { task, response, usedAdvancedModel = usedAdvanced });
         }
         catch (OperationCanceledException)
@@ -204,7 +189,7 @@ public class ProcessController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error processing AI request for transcript");
+            Logger.LogError(ex, "Error processing AI request for transcript");
             return StatusCode(500, new { error = "Failed to process request" });
         }
     }
@@ -218,7 +203,7 @@ public class ProcessController : ControllerBase
 
         try
         {
-            var summary = await _pageSummaryService.SummarizePageAsync(
+            var summary = await PageSummaryService.SummarizePageAsync(
                 request.PageText,
                 request.DocumentName,
                 request.PageNumber,
@@ -232,7 +217,7 @@ public class ProcessController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            _logger.LogWarning(ex, "Page summary request could not be completed");
+            Logger.LogWarning(ex, "Page summary request could not be completed");
             return StatusCode(503, new { error = ex.Message });
         }
         catch (OperationCanceledException)
@@ -241,7 +226,7 @@ public class ProcessController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error summarizing current page");
+            Logger.LogError(ex, "Error summarizing current page");
             return StatusCode(500, new { error = "Failed to summarize page" });
         }
     }
