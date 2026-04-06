@@ -63,7 +63,7 @@ public class ProcessController : ControllerBase
 
         var model = Configuration["AI:Groq:WhisperModel"]?.Trim();
         if (string.IsNullOrWhiteSpace(model))
-            model = "whisper-large-v3-turbo";
+            model = "whisper-large-v3";
 
         try
         {
