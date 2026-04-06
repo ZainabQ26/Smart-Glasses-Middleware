@@ -29,7 +29,7 @@ export default function App({ mode = "voice" }) {
   // Configurable activation word — stored in localStorage and updated live when
   // the admin panel changes it (via the storage event).
   const [activationWord, setActivationWord] = useState(() => {
-    try { return localStorage.getItem("sgm_activation_word")?.trim() || "Iris"; } catch (_) { return "Iris"; }
+    try { return localStorage.getItem("sgm_activation_word")?.trim() || "Hello Iris"; } catch (_) { return "Hello Iris"; }
   });
   // Ref copy so the async voice pipeline always reads the current value without
   // needing to restart the AudioContext effect.
@@ -229,8 +229,8 @@ export default function App({ mode = "voice" }) {
       );
 
       const text = (payload?.text || "").trim();
-      const matched = payload?.matched ?? text.toLowerCase().includes("iris");
-      const target = (activationWordRef.current || "Iris").trim();
+      const matched = payload?.matched ?? text.toLowerCase().includes("Hello Iris");
+      const target = (activationWordRef.current || "Hello Iris").trim();
       console.log(`[Voice Debug] Wake-word check: "${text}" (target "${target}") → ${matched ? "MATCH ✅" : "no match"}`);
       if (text) {
         addLog(`👂 Wake-word heard: "${text}"`, "info");
@@ -572,7 +572,7 @@ export default function App({ mode = "voice" }) {
       if (isBlankAudioOrNoise(commandText)) {
         addLog("🔊 Detected blank audio or background noise — requiring reactivation.", "warn");
         setPendingAction(null);
-        showAiResponse("I didn't hear a clear command. Please say \"Iris\" again.");
+        showAiResponse("I didn't hear a clear command. Please say \"Hello Iris\" again.");
         // Return to idle/wake-word mode — requires reactivation
         resumeListeningRef.current?.();
         return;
@@ -1169,7 +1169,7 @@ export default function App({ mode = "voice" }) {
                             handleWakeWordResult(result.text.trim());
                           } else if (result?.matched) {
                             // Fallback when backend marks wake-word matched but transcription text is empty.
-                            handleWakeWordResult(activationWordRef.current || "Iris");
+                            handleWakeWordResult(activationWordRef.current || "Hello Iris");
                           }
                         }
                       } catch (_) {}

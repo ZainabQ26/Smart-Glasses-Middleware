@@ -837,7 +837,7 @@ app.Use(async (context, next) =>
 
             var activationWord = configuration["AI:ActivationWord"]?.Trim().ToLowerInvariant();
             if (string.IsNullOrWhiteSpace(activationWord))
-                activationWord = "iris";
+                activationWord = "Hello Iris";
 
             await context.Response.WriteAsJsonAsync(new
             {
@@ -861,7 +861,7 @@ app.Use(async (context, next) =>
             await context.Response.WriteAsJsonAsync(new
             {
                 speechTranscriptionMode = "groq-only",
-                activationWord = "iris",
+                activationWord = "Hello Iris",
                 groqCommandTranscriptionEnabled = true
             });
         }
@@ -992,7 +992,7 @@ app.MapGet("/api/process/client-settings", (IConfiguration configuration, HttpCo
 
         var activationWord = configuration["AI:ActivationWord"]?.Trim().ToLowerInvariant();
         if (string.IsNullOrWhiteSpace(activationWord))
-            activationWord = "iris";
+            activationWord = "Hello Iris";
 
         return Results.Ok(new { 
             speechTranscriptionMode = mode, 
@@ -1012,7 +1012,7 @@ app.MapGet("/api/process/client-settings", (IConfiguration configuration, HttpCo
         }
 
         // Return safe defaults so the frontend can still function.
-        return Results.Ok(new { speechTranscriptionMode = "groq-only", activationWord = "iris", groqCommandTranscriptionEnabled = true });
+        return Results.Ok(new { speechTranscriptionMode = "groq-only", activationWord = "Hello Iris", groqCommandTranscriptionEnabled = true });
     }
 })
 // Ensure this endpoint wins even if a stale controller action with the same route exists.

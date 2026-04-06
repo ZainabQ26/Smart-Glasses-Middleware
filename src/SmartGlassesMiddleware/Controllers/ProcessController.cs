@@ -85,7 +85,7 @@ public class ProcessController : ControllerBase
             if (checkWakeword)
             {
                 var activationWord = Configuration["AI:ActivationWord"]?.Trim();
-                if (string.IsNullOrWhiteSpace(activationWord)) activationWord = "Iris";
+                if (string.IsNullOrWhiteSpace(activationWord)) activationWord = "Hello Iris";
                 content.Add(new StringContent(activationWord), "prompt");
             }
 
