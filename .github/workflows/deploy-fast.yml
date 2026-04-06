@@ -450,6 +450,53 @@ jobs:
             exit 1
           fi
 
+      - name: Verify ECS is running the new API image (no rollback)
+        run: |
+          set -euo pipefail
+
+          CLUSTER="${{ needs.deploy-api.outputs.cluster }}"
+          SERVICE="${{ needs.deploy-api.outputs.service }}"
+          CLUSTER=${CLUSTER:-smart-glasses-dev-cluster}
+          SERVICE=${SERVICE:-smart-glasses-dev-api-service}
+
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          EXPECTED_IMAGE="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/smart-glasses-dev-api:${GITHUB_SHA}"
+
+          SERVICE_JSON=$(aws ecs describe-services \
+            --cluster "$CLUSTER" --services "$SERVICE" --region "$AWS_REGION" \
+            --query 'services[0]' --output json)
+
+          PRIMARY_TASK_DEF=$(echo "$SERVICE_JSON" | jq -r '(.deployments // []) | map(select(.status == "PRIMARY"))[0].taskDefinition // empty')
+          if [ -z "$PRIMARY_TASK_DEF" ] || [ "$PRIMARY_TASK_DEF" = "null" ] || [ "$PRIMARY_TASK_DEF" = "None" ]; then
+            PRIMARY_TASK_DEF=$(echo "$SERVICE_JSON" | jq -r '.taskDefinition // empty')
+          fi
+
+          if [ -z "$PRIMARY_TASK_DEF" ] || [ "$PRIMARY_TASK_DEF" = "null" ] || [ "$PRIMARY_TASK_DEF" = "None" ]; then
+            echo "::error::Unable to resolve PRIMARY task definition for ${SERVICE}."
+            exit 1
+          fi
+
+          ACTUAL_IMAGE=$(aws ecs describe-task-definition \
+            --task-definition "$PRIMARY_TASK_DEF" \
+            --region "$AWS_REGION" \
+            --query 'taskDefinition.containerDefinitions[?name==`api`].image | [0]' \
+            --output text)
+
+          echo "Expected image: ${EXPECTED_IMAGE}"
+          echo "PRIMARY task definition: ${PRIMARY_TASK_DEF}"
+          echo "Actual api image: ${ACTUAL_IMAGE}"
+
+          if [ "$ACTUAL_IMAGE" != "$EXPECTED_IMAGE" ]; then
+            echo "::error::ECS PRIMARY deployment is not using the new image tag ${GITHUB_SHA}. Possible rollback detected."
+            aws ecs describe-services \
+              --cluster "$CLUSTER" --services "$SERVICE" --region "$AWS_REGION" \
+              --query 'services[0].events[0:10].[createdAt,message]' \
+              --output text 2>/dev/null || true
+            exit 1
+          fi
+
+          echo "ECS PRIMARY deployment is running the expected image tag ${GITHUB_SHA}."
+
       - name: Smoke-test health endpoint
         run: |
           set -euo pipefail
