@@ -53,12 +53,22 @@ public class S3FileIndexService : IHostedService
 
         try
         {
-            _backgroundCts.Cancel();
+            // Allow startup indexing to finish naturally; only cancel if shutdown is forced.
             await _backgroundTask.WaitAsync(cancellationToken);
         }
         catch (OperationCanceledException)
         {
-            _logger.LogInformation("S3FileIndexService: background indexing stopped during shutdown");
+            _backgroundCts.Cancel();
+            try
+            {
+                await _backgroundTask;
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected when cancellation is requested during shutdown.
+            }
+
+            _logger.LogInformation("S3FileIndexService: background indexing cancelled during shutdown");
         }
         finally
         {
