@@ -252,13 +252,6 @@ locals {
             name  = "DEPLOYMENT_ID"
             value = var.deployment_id
           },
-          {
-            # Migrations are applied by the CI run-migrations job (one-shot Fargate task
-            # with MIGRATE_ONLY=true) before new tasks handle traffic. No migration on
-            # every cold start.
-            name  = "MIGRATE_ON_STARTUP"
-            value = "false"
-          },
         ],
         trimspace(var.groq_api_key) != "" ? [
           {

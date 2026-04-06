@@ -61,14 +61,12 @@ gh run watch <run-id> --exit-status
 gh workflow run deploy-main.yml \
       --ref main \
       -f environment=dev \
-      -f skip_migrations=true \
       -f force_recreate_dev=false
 ```
 
 Input guidance:
 
 - `environment`: `dev|staging|prod`
-- `skip_migrations`: set `true` for fresh dev setups
 - `force_recreate_dev`: keep `false` unless you intentionally want destructive cleanup of dev resources
 
 3. Watch deploy progress:
@@ -160,8 +158,6 @@ dotnet run
 
 API available at `http://localhost:5000`. Swagger UI at `http://localhost:5000/swagger`.
 
-`appsettings.Development.json` enables `MigrateOnStartup: true` so EF migrations run automatically against the local database on first start.
-
 ### Run the Frontend (standalone)
 
 ```bash
@@ -193,7 +189,6 @@ docker build -f src/SmartGlassesMiddleware/Dockerfile -t smart-glasses-api:local
 | `AI:ActivationWord` | `Iris` | Wake word that triggers command mode |
 | `AWS:Bedrock:ModelId` | `us.amazon.nova-2-lite-v1:0` | Bedrock chat model |
 | `AWS:Bedrock:EmbeddingModelId` | `amazon.titan-embed-text-v2:0` | Bedrock embedding model |
-| `MigrateOnStartup` | `true` (dev) / `false` (AWS) | Run EF migrations on boot |
 
 ### Speech Transcription Mode
 
@@ -230,24 +225,6 @@ The response is expected to contain a `response` field:
 ```
 
 If the response cannot be parsed, the raw body is returned.
-
-## Database Migrations
-
-Migrations are **only applied during CI deployment**, not at container startup, to eliminate cold-start latency and migration lock risk.
-
-**CI flow:** `terraform-apply` → `run-migrations` (one-shot Fargate task with `MIGRATE_ONLY=true`) → `verify-deployment`
-
-The `run-migrations` CI job:
-1. Launches a Fargate task using the just-deployed image with env override `MIGRATE_ONLY=true`
-2. The container runs `db.Database.Migrate()` then exits cleanly (exit code 0)
-3. CI waits, checks the exit code, and prints CloudWatch logs on failure
-
-**For local development**, `MigrateOnStartup: true` in `appsettings.Development.json` applies migrations on `dotnet run`.
-
-**Manual migration** (if needed):
-```bash
-dotnet ef database update --project src/SmartGlassesMiddleware
-```
 
 ## Task Handlers
 
@@ -388,8 +365,8 @@ Deployments are tag-driven (see [Deploy Via GitHub Actions](#deploy-via-github-a
 
 ```
 build-api ──────────┐
-build-lambda ───────┼──► terraform-apply ──► run-migrations ──┐
-                    │         │                                 ├──► verify-deployment
+build-lambda ───────┼──► terraform-apply ──┐
+                    │         │             ├──► verify-deployment
                     │         └──► deploy-frontend ────────────┘
                     │
                     └── (Docker images pushed to ECR with SHA tag)
@@ -398,7 +375,6 @@ build-lambda ───────┼──► terraform-apply ──► run-mig
 - **`build-api`** — builds the React frontend (Vite) and the .NET API into a single Docker image, pushes to ECR
 - **`build-lambda`** — builds the Whisper Lambda container image and the document processor Lambda ZIP
 - **`terraform-apply`** — runs `terraform apply` (via Docker) with the new image SHA as a variable; manages all AWS infrastructure
-- **`run-migrations`** — one-shot Fargate task applies EF Core migrations against RDS
 - **`deploy-frontend`** — syncs built assets to S3, invalidates CloudFront cache
 - **`verify-deployment`** — waits for ECS service stability, fetches container logs, smoke-tests `/health`
 

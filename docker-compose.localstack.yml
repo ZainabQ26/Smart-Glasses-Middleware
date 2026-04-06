@@ -134,7 +134,6 @@ services:
       - AWS__Bedrock__ModelId=anthropic.claude-v2
       - AWS__Bedrock__EmbeddingModelId=amazon.titan-embed-text-v1
       - AWS__Bedrock__Endpoint=http://localstack:4566
-      - MigrateOnStartup=true
     ports:
       - "5000:5000"
     networks:
