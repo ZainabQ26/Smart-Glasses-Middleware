@@ -40,8 +40,14 @@ export default function App({ mode = "voice" }) {
 
   // Inline PDF viewer state.
   const [openPdf, setOpenPdf] = useState(null); // { id, name } | null
+  const [currentHighlightKeyword, setCurrentHighlightKeyword] = useState(null); // Track last highlighted word
   const pdfViewerRef = useRef(null);
   const handleClosePdf = useCallback(() => setOpenPdf(null), []);
+
+  // Clear currentHighlightKeyword when a new document is opened
+  useEffect(() => {
+    setCurrentHighlightKeyword(null);
+  }, [openPdf?.id]);
 
   const activatedRef        = useRef(false);
   const vadRef              = useRef(null);   // VAD removed; kept so optional calls are no-ops
@@ -700,6 +706,8 @@ export default function App({ mode = "voice" }) {
 
             if (terms.length > 0) {
               addLog(`🧪 Parsed highlight terms: ${terms.map((t) => `"${t}"`).join(", ")}`, "info");
+              // Use the first term as the current highlight keyword for navigation
+              setCurrentHighlightKeyword(terms[0]);
               terms.forEach((term) => localPdf.highlightWord(term));
               addLog(`🖊️ Command: highlight ${terms.map((t) => `"${t}"`).join(", ")}`, "voice");
               setAiResponse(null);
@@ -708,6 +716,47 @@ export default function App({ mode = "voice" }) {
             }
           }
         }
+              // Voice command: next highlight
+              if (/\bnext\s+highlight\b/.test(lowered)) {
+                if (currentHighlightKeyword) {
+                  addLog(`➡️ Command: next highlight for "${currentHighlightKeyword}"`, "voice");
+                  setAiResponse(null);
+                  setPendingAction(null);
+                  if (
+                    pdfViewerRef.current &&
+                    typeof pdfViewerRef.current.nextHighlight === 'function'
+                  ) {
+                    pdfViewerRef.current.nextHighlight(currentHighlightKeyword);
+                  } else {
+                    console.warn('nextHighlight method is not available on pdfViewerRef.current:', pdfViewerRef.current);
+                    setAiResponse("Highlight navigation is not available. Please try again after the document loads.");
+                  }
+                } else {
+                  setAiResponse("Say 'highlight [word]' first, then 'next highlight'.");
+                }
+                return;
+              }
+
+              // Voice command: previous highlight
+              if (/\b(prev|previous)\s+highlight\b/.test(lowered)) {
+                if (currentHighlightKeyword) {
+                  addLog(`⬅️ Command: previous highlight for "${currentHighlightKeyword}"`, "voice");
+                  setAiResponse(null);
+                  setPendingAction(null);
+                  if (
+                    pdfViewerRef.current &&
+                    typeof pdfViewerRef.current.prevHighlight === 'function'
+                  ) {
+                    pdfViewerRef.current.prevHighlight(currentHighlightKeyword);
+                  } else {
+                    console.warn('prevHighlight method is not available on pdfViewerRef.current:', pdfViewerRef.current);
+                    setAiResponse("Highlight navigation is not available. Please try again after the document loads.");
+                  }
+                } else {
+                  setAiResponse("Say 'highlight [word]' first, then 'previous highlight'.");
+                }
+                return;
+              }
       }
 
       // Reset the advanced-model badge; it will be updated once the actual response arrives.
@@ -1360,6 +1409,8 @@ export default function App({ mode = "voice" }) {
     [`"number "#"`,            "goes to file number in recent files list"],
     [`" t document"`,    "open last uploaded document"],
     [`"next/previous page"`,   "next/previous page"],
+    [`"next highlight"`,       "go to next occurrence of highlighted word"],
+    [`"previous highlight"`,   "go to previous occurrence of highlighted word"],
     [`"go to page 5"`,         "jump to page"],
     [`"highlight [word]"`,     "highlight text"],
     [`"clear highlights"`,     "delete all highlights"],
@@ -1422,6 +1473,8 @@ export default function App({ mode = "voice" }) {
                     ["number #", "go to file number in recent files list"],
                     ["open last document", "Open the last uploaded document"],
                     ["next/previous page", "Go to the next/previous page"],
+                    ["next highlight", "Go to next occurrence of highlighted word"],
+                    ["previous highlight", "Go to previous occurrence of highlighted word"],
                     ["go to page 5", "Jump to a specific page"],
                     ["highlight aspirin", "Highlight a word in the open document"],
                     ["clear highlights", "Remove all highlights"],

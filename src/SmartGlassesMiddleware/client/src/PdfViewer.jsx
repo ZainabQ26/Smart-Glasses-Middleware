@@ -228,6 +228,7 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
     if (!state) return;
     goToPage(state.pageNumber - 1);
   }, [goToPage]);
+  
 
   // ── Highlighting ─────────────────────────────────────────────────────────────
 
@@ -486,6 +487,54 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
   }, [showToast, documentName]);
 
   // ── Expose imperative handle to parent ──────────────────────────────────────
+
+  // Define prevHighlight and nextHighlight as functions
+  const moveToHighlight = useCallback(async (keyword, direction) => {
+    const state = viewerStateRef.current;
+    const canvas = canvasRef.current;  
+    let arrayOfLocations = [];
+    let newIndex = -1;
+    let currentHighlightIndex = state.currentIndexOfHighlight;
+    let pageOfWord = -1;
+    let key = "";
+
+    if (!state || !canvas) {
+      return;
+    }
+    if (!keyword || !keyword?.trim()) {
+      return;
+    }
+    key = keyword.toLocaleLowerCase();
+    arrayOfLocations = state.getRectangleArray(key);
+    if (arrayOfLocations.length <= 1) {
+      return;
+    }
+    switch (direction) {
+      case "prev":
+        newIndex = getPrevHighlight(arrayOfLocations, currentHighlightIndex);
+        break;
+      case "next":
+        newIndex = getNextHighlight(arrayOfLocations, currentHighlightIndex);
+        break;
+    }
+    state.currentIndexOfHighlight = newIndex;
+    pageOfWord = arrayOfLocations[state.currentIndexOfHighlight].pageNumber;
+    if (state.pageNumber !== pageOfWord) {
+      await renderPageWithHighlights(state, pageOfWord, canvas);
+      setCurrentPage(pageOfWord);
+    }
+    const dirText = direction === "next" ? "next" : "previous";
+    showToast(`Moved to ${dirText} "${keyword}" highlight (${newIndex + 1}/${arrayOfLocations.length})`);
+  }, [showToast]);
+
+  const nextHighlight = useCallback(async (keyword) => {
+    await moveToHighlight(keyword, "next");
+  }, [moveToHighlight]);
+
+  const prevHighlight = useCallback(async (keyword) => {
+    await moveToHighlight(keyword, "prev");
+  }, [moveToHighlight]);
+
   useImperativeHandle(ref, () => ({
     nextPage,
     prevPage,
@@ -497,7 +546,51 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
     getDocumentContext,
     printDocument,
     printHighlightedPages,
-  }), [nextPage, prevPage, goToPage, highlightWord, goToLoincCode, removeHighlights, getCurrentPageText, getDocumentContext, printDocument, printHighlightedPages]);
+    prevHighlight,
+    nextHighlight,
+    moveToHighlight,
+  }), [nextPage, prevPage, goToPage, highlightWord, goToLoincCode, removeHighlights, getCurrentPageText, getDocumentContext, printDocument, printHighlightedPages, prevHighlight, nextHighlight, moveToHighlight]);
+
+  /**
+   * 
+   * @param {*} arrayOfLocations 
+   * @param {*} currentIndexOfHighlight 
+   * @returns 
+   */
+  function getPrevHighlight (arrayOfLocations, currentIndexOfHighlight) {
+    // If the currently highlighted rectangle is at the front of the array locations, then the prev will be the last location in the array.
+    if (currentIndexOfHighlight === 0) {
+      currentIndexOfHighlight = arrayOfLocations.length - 1;
+    }
+    // Whent he currently highlighted rectangle is not at the front of the array
+    else {
+      currentIndexOfHighlight--;
+    }
+
+    // Return the new index
+    return currentIndexOfHighlight;
+  } 
+
+  /**
+   * 
+   * @param {*} arrayOfLocations 
+   * @param {*} currentIndexOfHighlight 
+   * @returns 
+   */
+  function getNextHighlight (arrayOfLocations, currentIndexOfHighlight) {
+    // If the the currently highlighted is at the end of the highlight locations, then the next will be the first location in the array
+    if (currentIndexOfHighlight === arrayOfLocations.length - 1) {
+          currentIndexOfHighlight = 0;
+       }
+    // When the currently highlighted rectangle is not at the end of the array
+    else {
+      currentIndexOfHighlight++;
+    }       
+
+    // Return the new index
+    return currentIndexOfHighlight;
+  }
+
 
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
