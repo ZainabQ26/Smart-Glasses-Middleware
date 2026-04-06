@@ -135,9 +135,7 @@ resource "aws_iam_role_policy" "ecs_task" {
         ]
         Resource = [
           aws_s3_bucket.media.arn,
-          "${aws_s3_bucket.media.arn}/*",
-          aws_s3_bucket.documents.arn,
-          "${aws_s3_bucket.documents.arn}/*"
+          "${aws_s3_bucket.media.arn}/*"
         ]
       },
       {
@@ -249,10 +247,6 @@ locals {
           {
             name  = "AWS__S3__MediaBucket"
             value = aws_s3_bucket.media.id
-          },
-          {
-            name  = "AWS__S3__DocumentsBucket"
-            value = aws_s3_bucket.documents.id
           },
           {
             name  = "DEPLOYMENT_ID"

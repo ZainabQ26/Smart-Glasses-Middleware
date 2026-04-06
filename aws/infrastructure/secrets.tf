@@ -40,7 +40,6 @@ resource "aws_secretsmanager_secret_version" "app_secrets" {
   secret_id = aws_secretsmanager_secret.app_secrets[0].id
   secret_string = jsonencode({
     s3_media_bucket      = aws_s3_bucket.media.id
-    s3_documents_bucket  = aws_s3_bucket.documents.id
     bedrock_model_id     = "anthropic.claude-3-sonnet-20240229-v1:0"
     embedding_model_id   = "amazon.titan-embed-text-v2:0"
     transcribe_language  = "en-US"
