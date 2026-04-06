@@ -961,6 +961,8 @@ jobs:
           rm -rf /tmp/* /var/tmp/* || true
           df -h
           echo "Storage cleanup complete"
+
+  deploy-frontend:
     name: Build & deploy frontend to S3
     needs: terraform-apply
     runs-on: ubuntu-latest
