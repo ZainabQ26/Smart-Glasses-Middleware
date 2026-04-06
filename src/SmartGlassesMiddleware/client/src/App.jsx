@@ -1629,15 +1629,17 @@ export default function App({ mode = "voice", language = "en" }) {
 
       {/* ── Command list overlay — shown only while actively listening ─────────── */}
       {isListening && (
-        <div style={styles.commandList}>
-          <p style={styles.commandListTitle}>{t.commandsOverlayTitle}</p>
-          <div style={styles.commandListGrid}>
-            {COMMAND_LIST.map(([cmd, desc]) => (
-              <div key={cmd} style={styles.commandListRow}>
-                <span style={styles.commandListCmd}>{cmd}</span>
-                <span style={styles.commandListDesc}>{desc}</span>
-              </div>
-            ))}
+        <div style={styles.commandListBackdrop}>
+          <div style={styles.commandList}>
+            <p style={styles.commandListTitle}>{t.commandsOverlayTitle}</p>
+            <div style={styles.commandListGrid}>
+              {COMMAND_LIST.map(([cmd, desc]) => (
+                <div key={cmd} style={styles.commandListRow}>
+                  <span style={styles.commandListCmd}>{cmd}</span>
+                  <span style={styles.commandListDesc}>{desc}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}
@@ -1990,19 +1992,30 @@ const styles = {
     fontSize: "0.9rem",
     color: "#ccc",
   },
-  // Full command list overlay shown at top-left only while the assistant is listening.
-  commandList: {
+  // Full-screen backdrop shown only while the assistant is listening. Covers all content
+  // underneath so nothing bleeds through or overlaps.
+  commandListBackdrop: {
     position: "fixed",
-    top: 60,
-    left: 12,
-    background: "rgba(10,10,10,0.93)",
+    inset: 0,
+    background: "rgba(0,0,0,0.92)",
+    zIndex: 50,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "flex-start",
+    // top padding clears the indicator bar; bottom padding clears the Activity Log button
+    padding: "60px 16px 76px",
+    overflowY: "auto",
+    overflowX: "hidden",
+  },
+  // Commands panel centred within the backdrop.
+  commandList: {
+    background: "rgba(10,10,10,0.98)",
     border: "1px solid #2a2a2a",
     borderRadius: 10,
     padding: "10px 14px",
-    zIndex: 50,
-    maxWidth: "min(320px, calc(100vw - 24px))",
-    maxHeight: "calc(100vh - 80px)",
-    overflowY: "auto",
+    width: "100%",
+    maxWidth: 480,
   },
   commandListTitle: {
     margin: "0 0 8px",
@@ -2040,7 +2053,7 @@ const styles = {
     display: "flex",
     alignItems: "center",
     gap: 8,
-    zIndex: 40,
+    zIndex: 55,
   },
   dot: { width: 12, height: 12, borderRadius: "50%" },
   indicatorText: { fontSize: "0.85rem", color: "#ccc" },
