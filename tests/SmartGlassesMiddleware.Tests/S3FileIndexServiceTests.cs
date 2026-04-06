@@ -87,6 +87,7 @@ public class S3FileIndexServiceTests
                     .ReturnsAsync(s3Files);
 
         await _service.StartAsync(CancellationToken.None);
+        await _service.StopAsync(CancellationToken.None);
 
         var indexed = await _db.ManagedFiles.ToListAsync();
         Assert.That(indexed, Has.Count.EqualTo(1));
@@ -134,6 +135,7 @@ public class S3FileIndexServiceTests
                     .ReturnsAsync(s3Files);
 
         await _service.StartAsync(CancellationToken.None);
+        await _service.StopAsync(CancellationToken.None);
 
         var indexed = await _db.ManagedFiles.ToListAsync();
         Assert.That(indexed, Has.Count.EqualTo(1), "Should not duplicate existing records");
@@ -157,6 +159,7 @@ public class S3FileIndexServiceTests
                     .ReturnsAsync(s3Files);
 
         await _service.StartAsync(CancellationToken.None);
+        await _service.StopAsync(CancellationToken.None);
 
         var indexed = await _db.ManagedFiles.ToListAsync();
         Assert.That(indexed, Is.Empty, "_state/ prefix should be skipped");
@@ -183,6 +186,7 @@ public class S3FileIndexServiceTests
                     .ReturnsAsync(s3Files);
 
         await _service.StartAsync(CancellationToken.None);
+        await _service.StopAsync(CancellationToken.None);
 
         var indexed = await _db.ManagedFiles.ToListAsync();
         Assert.That(indexed, Has.Count.EqualTo(1));
@@ -199,6 +203,7 @@ public class S3FileIndexServiceTests
 
         // Should complete without throwing
         Assert.DoesNotThrowAsync(() => _service.StartAsync(CancellationToken.None));
+        Assert.DoesNotThrowAsync(() => _service.StopAsync(CancellationToken.None));
     }
 
     [Test]
@@ -239,6 +244,7 @@ public class S3FileIndexServiceTests
                     .ReturnsAsync(s3Files);
 
         await _service.StartAsync(CancellationToken.None);
+        await _service.StopAsync(CancellationToken.None);
 
         var indexed = await _db.ManagedFiles.ToListAsync();
         Assert.That(indexed, Has.Count.EqualTo(2));

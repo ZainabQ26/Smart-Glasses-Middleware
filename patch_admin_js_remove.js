@@ -641,6 +641,42 @@
 
             // Local PDF navigation commands matching App.jsx
             const lowered = promptText.toLowerCase().trim();
+
+            const moveToHighlightMatch = (findPrevious = false) => {
+                try {
+                    const pdfApp = window.PDFViewerApplication;
+                    const findController = pdfApp?.findController;
+                    const existingState = findController?._state || {};
+                    const existingQuery = typeof existingState.query === 'string'
+                        ? existingState.query.trim()
+                        : '';
+
+                    if (findController && typeof findController.executeCommand === 'function' && existingQuery) {
+                        findController.executeCommand('findagain', {
+                            query: existingQuery,
+                            phraseSearch: existingState.phraseSearch !== false,
+                            caseSensitive: !!existingState.caseSensitive,
+                            entireWord: !!existingState.entireWord,
+                            highlightAll: true,
+                            findPrevious: !!findPrevious
+                        });
+                        return true;
+                    }
+
+                    // Fallback to toolbar buttons when available.
+                    const buttonId = findPrevious ? 'findPrevious' : 'findNext';
+                    const findButton = document.getElementById(buttonId);
+                    if (findButton && typeof findButton.click === 'function') {
+                        findButton.click();
+                        return true;
+                    }
+                } catch (err) {
+                    console.warn('[PDF HIGHLIGHT NAV] Failed to move between highlighted matches', err);
+                }
+
+                return false;
+            };
+
             if (/\b(?:next page|go to next page|page down)\b/.test(lowered)) {
                 responseContent.innerHTML = '<div style="padding: 15px; white-space: pre-wrap;">Next page</div>';
                 if (window.pdfViewer && window.pdfViewer.pdfDocument) {
@@ -650,6 +686,20 @@
                         window.pdfViewer.currentPageNumber = currentPage + 1;
                     }
                 }
+                document.getElementById('prompt-name').value = '';
+                return;
+            }
+
+            if (/\b(?:next highlight|next highlighted|next highlighted word|next highlighted phrase|go to next highlight|find next highlight)\b/.test(lowered)) {
+                const moved = moveToHighlightMatch(false);
+                responseContent.innerHTML = `<div style="padding: 15px; white-space: pre-wrap;">${moved ? 'Next highlighted match' : 'No active highlighted match to navigate. Highlight a term first.'}</div>`;
+                document.getElementById('prompt-name').value = '';
+                return;
+            }
+
+            if (/\b(?:previous highlight|prev highlight|back highlight|previous highlighted|previous highlighted word|go to previous highlight|find previous highlight)\b/.test(lowered)) {
+                const moved = moveToHighlightMatch(true);
+                responseContent.innerHTML = `<div style="padding: 15px; white-space: pre-wrap;">${moved ? 'Previous highlighted match' : 'No active highlighted match to navigate. Highlight a term first.'}</div>`;
                 document.getElementById('prompt-name').value = '';
                 return;
             }
@@ -906,6 +956,18 @@
                             window.pdfViewer.currentPageNumber = currentPage - 1;
                         }
                     }
+                    return;
+                }
+
+                if (normalizedAnswer.includes('__ACTION:NEXT_HIGHLIGHT__')) {
+                    const moved = moveToHighlightMatch(false);
+                    responseContent.innerHTML = `<div style="padding: 15px; white-space: pre-wrap;">${moved ? 'Next highlighted match' : 'No active highlighted match to navigate. Highlight a term first.'}</div>`;
+                    return;
+                }
+
+                if (normalizedAnswer.includes('__ACTION:PREVIOUS_HIGHLIGHT__')) {
+                    const moved = moveToHighlightMatch(true);
+                    responseContent.innerHTML = `<div style="padding: 15px; white-space: pre-wrap;">${moved ? 'Previous highlighted match' : 'No active highlighted match to navigate. Highlight a term first.'}</div>`;
                     return;
                 }
 
