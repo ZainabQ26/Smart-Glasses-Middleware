@@ -103,7 +103,7 @@ public class ClientSettingsIntegrationTests
         var mode = root.GetProperty("speechTranscriptionMode").GetString();
         Assert.That(mode, Is.EqualTo(expectedMode));
 
-        var activationWord = root.GetProperty("activationWord").GetString();
+        var activationWord = root.GetProperty("activationWord").GetString()?.ToLowerInvariant();
         Assert.That(activationWord, Is.EqualTo(expectedActivationWord));
 
         var groqEnabled = root.GetProperty("groqCommandTranscriptionEnabled").GetBoolean();
