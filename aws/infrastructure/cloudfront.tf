@@ -76,25 +76,6 @@ resource "aws_cloudfront_distribution" "frontend" {
     }
   }
 
-  # Lambda Function URL origin — used by the /wake behavior for instant ECS scale-up.
-  # Only added when the ECS idle autoscaler is enabled (FURL resource has count conditional).
-  dynamic "origin" {
-    for_each = local.enable_ecs_idle_autoscaler_effective ? [aws_lambda_function_url.ecs_idle_scaler[0].function_url] : []
-
-    content {
-      # Strip "https://" and trailing "/" to get bare hostname for CF origin
-      domain_name = trimsuffix(trimprefix(origin.value, "https://"), "/")
-      origin_id   = "Lambda-Wake"
-
-      custom_origin_config {
-        http_port              = 80
-        https_port             = 443
-        origin_protocol_policy = "https-only"
-        origin_ssl_protocols   = ["TLSv1.2"]
-      }
-    }
-  }
-
   # Default cache behavior for frontend
   default_cache_behavior {
     allowed_methods  = ["GET", "HEAD", "OPTIONS"]
@@ -117,37 +98,7 @@ resource "aws_cloudfront_distribution" "frontend" {
     response_headers_policy_id = aws_cloudfront_response_headers_policy.coop_coep.id
   }
 
-  # /wake behavior — direct Lambda invocation for instant ECS scale-up.
-  # The browser WakeupGate POSTs here on the first non-200 /health response;
-  # the Lambda immediately sets ECS desiredCount=1 without waiting for the
-  # CloudWatch metric pipeline (~5 min delay for CF 5xxErrorRate to propagate).
-  dynamic "ordered_cache_behavior" {
-    for_each = local.enable_ecs_idle_autoscaler_effective ? [1] : []
-
-    content {
-      path_pattern     = "/wake"
-      allowed_methods  = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
-      cached_methods   = ["GET", "HEAD"]
-      target_origin_id = "Lambda-Wake"
-
-      forwarded_values {
-        query_string = false
-
-        cookies {
-          forward = "none"
-        }
-      }
-
-      viewer_protocol_policy = "redirect-to-https"
-      min_ttl                = 0
-      default_ttl            = 0
-      max_ttl                = 0
-      compress               = false
-    }
-  }
-
   # Static assets — served from S3 so the app is always available even when ECS is at 0 tasks.
-  # index.html loads from S3, which contains the WakeupGate that polls /health to wake ECS.
   # Only /api/*, /health, /swagger*, and /hubs/* still route to the ALB.
   # NOTE: Do NOT forward the Host header to S3. Forwarding Host sends the CloudFront domain
   # (d3t5kcvyyonw8d.cloudfront.net) to S3, which breaks OAC SigV4 signing and returns 404.
