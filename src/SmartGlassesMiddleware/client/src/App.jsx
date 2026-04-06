@@ -380,21 +380,29 @@ export default function App({ mode = "voice", language = "en" }) {
 
   const transcribeCommandWithGroq = useCallback(async (audio, { isFinal = false } = {}) => {
     try {
-      const allowed = await tryAcquireGroqBudget({
-        canWait: isFinal,
-        maxWaitMs: isFinal ? 1500 : 0,
-      });
-      if (!allowed) {
-        logGroqThrottle(isFinal
-          ? "⏳ Waiting for Groq rate limit window before final command transcription."
-          : "⏳ Skipping partial transcription to stay under Groq rate limit.");
+      if (!audio || audio.length === 0) {
         return null;
       }
 
-        const audioBlob = float32ToWavBlob(audio);
+      const allowed = await tryAcquireGroqBudget({
+        canWait: isFinal,
+        maxWaitMs: isFinal ? 5000 : 0,
+      });
+      if (!allowed) {
+        if (!isFinal) {
+          logGroqThrottle("⏳ Skipping partial transcription to stay under Groq rate limit.");
+          return null;
+        }
+
+        // Never drop the final command due to local throttling; let the backend/provider decide.
+        addLog("⏳ Local throttle active — sending final command transcription anyway.", "warn");
+      }
+
+      const audioBlob = float32ToWavBlob(audio);
       const formData = new FormData();
-        formData.append("audio", audioBlob, "audio.wav");
+      formData.append("audio", audioBlob, "audio.wav");
       formData.append("language", languageRef.current);
+      formData.append("checkWakeword", "false");
 
       const payload = await fetchJsonWithTimeout(
         "/api/process/transcribe",
@@ -420,17 +428,21 @@ export default function App({ mode = "voice", language = "en" }) {
 
   const transcribeWakewordWithGroq = useCallback(async (audio) => {
     try {
+      if (!audio || audio.length === 0) {
+        return { text: "", matched: false, commandAfterWakeword: "" };
+      }
+
       const allowed = await tryAcquireGroqBudget();
       if (!allowed) {
         logGroqThrottle("⏳ Skipping wake-word check to stay under Groq rate limit.");
         return { text: "", matched: false, commandAfterWakeword: "" };
       }
 
-        const audioBlob = float32ToWavBlob(audio);
+      const audioBlob = float32ToWavBlob(audio);
       const formData = new FormData();
-        formData.append("audio", audioBlob, "audio.wav");
+      formData.append("audio", audioBlob, "audio.wav");
       formData.append("language", languageRef.current);
-        formData.append("checkWakeword", "true");
+      formData.append("checkWakeword", "true");
 
       const payload = await fetchJsonWithTimeout(
         "/api/process/transcribe",
@@ -788,13 +800,45 @@ export default function App({ mode = "voice", language = "en" }) {
         return;
       }
 
+      // Prioritize numeric file selection while recent-files mode is active.
+      // This must run before generic noise/length filters because ASR often
+      // returns short variants (for example, "to" for "two").
+      const capturedPending = pendingActionRef.current;
+      if (capturedPending?.type === "SHOW_RECENT_FILES") {
+        const num = parseFileSelectionNumber(commandText);
+        if (num !== null) {
+          const files = capturedPending.files ?? [];
+          if (num >= 1 && num <= files.length) {
+            addLog(`📂 Opening file ${num}: "${files[num - 1].name}"`, "voice");
+            showTranscript(commandText);
+            setPendingAction(null);
+            openDocumentPreview(files[num - 1]);
+            return;
+          }
+
+          // Number out of range — keep the list visible and continue listening.
+          addLog(`⚠️ File number ${num} is not in the list (1–${files.length}).`, "warn");
+          showTranscript(commandText);
+          showAiResponse(`There are only ${files.length} files. Say a number between 1 and ${files.length}.`);
+          setPendingAction(capturedPending);
+          keepMicActive = true;
+          return;
+        }
+      }
+
       // ── Check for blank audio or background noise ──────────────────────
       if (isBlankAudioOrNoise(commandText)) {
         addLog("🔊 Detected blank audio or background noise — requiring reactivation.", "warn");
-        setPendingAction(null);
-        showAiResponse(tpl(t.noClearCommandTemplate, { word: activationWordRef.current }));
-        // Return to idle/wake-word mode — requires reactivation
-        resumeListeningRef.current?.();
+        if (capturedPending?.type === "SHOW_RECENT_FILES") {
+          showAiResponse("Please say just the file number, like 1, 2, or 3.");
+          setPendingAction(capturedPending);
+          keepMicActive = true;
+        } else {
+          setPendingAction(null);
+          showAiResponse(tpl(t.noClearCommandTemplate, { word: activationWordRef.current }));
+          // Return to idle/wake-word mode — requires reactivation
+          resumeListeningRef.current?.();
+        }
         return;
       }
 
@@ -811,30 +855,6 @@ export default function App({ mode = "voice", language = "en" }) {
         showAiResponse(t.commandTooBrief);
         resumeListeningRef.current?.();
         return;
-      }
-
-      // ── Shortcut: numeric file selection when the recent-files list is shown ─
-      const capturedPending = pendingActionRef.current;
-      if (capturedPending?.type === "SHOW_RECENT_FILES") {
-        const num = parseFileSelectionNumber(commandText);
-        if (num !== null) {
-          const files = capturedPending.files ?? [];
-          if (num >= 1 && num <= files.length) {
-            addLog(`📂 Opening file ${num}: "${files[num - 1].name}"`, "voice");
-            showTranscript(commandText);
-            setPendingAction(null);
-            openDocumentPreview(files[num - 1]);
-            return; // mic will reset via finally (keepMicActive = false)
-          } else {
-            // Number out of range — keep the list visible and stay listening.
-            addLog(`⚠️ File number ${num} is not in the list (1–${files.length}).`, "warn");
-            showTranscript(commandText);
-            showAiResponse(`There are only ${files.length} files. Say a number between 1 and ${files.length}.`);
-            setPendingAction(capturedPending); // restore list
-            keepMicActive = true;
-            return;
-          }
-        }
       }
 
       // If a PDF is open, execute common viewer commands locally so commands
@@ -1830,19 +1850,26 @@ function formatActionTime(value) {
 function parseFileSelectionNumber(text) {
   if (!text) return null;
   const s = text.trim().toLowerCase();
+  const normalized = s.replace(/[.,!?;:]+$/g, "").trim();
 
   // Word ordinals / cardinals (covers the typical 1–5 list size)
-  const words = { one: 1, first: 1, two: 2, second: 2, three: 3, third: 3, four: 4, fourth: 4, five: 5, fifth: 5 };
+  const words = {
+    one: 1, first: 1,
+    two: 2, second: 2, to: 2, too: 2,
+    three: 3, third: 3,
+    four: 4, fourth: 4, for: 4,
+    five: 5, fifth: 5,
+  };
   for (const [word, num] of Object.entries(words)) {
-    if (new RegExp(`\\b${word}\\b`).test(s)) return num;
+    if (new RegExp(`\\b${word}\\b`).test(normalized)) return num;
   }
 
   // Patterns like "file 2", "number 3", "open 4", "#5", "pick 1", "select 2"
-  const prefixMatch = s.match(/(?:file|number|open|pick|select|item)\s*#?\s*([1-9])\b/);
+  const prefixMatch = normalized.match(/(?:file|number|open|pick|select|item)\s*#?\s*([1-9])\b/);
   if (prefixMatch) return parseInt(prefixMatch[1], 10);
 
   // Bare single digit (possibly surrounded by whitespace or punctuation)
-  const bareMatch = s.match(/^\s*([1-9])\s*$/);
+  const bareMatch = normalized.match(/^\s*#?\s*([1-9])\s*$/);
   if (bareMatch) return parseInt(bareMatch[1], 10);
 
   return null;
