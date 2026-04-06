@@ -913,7 +913,7 @@ app.MapGet("/health", async (IServiceProvider services, HttpContext context) =>
 });
 
 // Minimal API client-settings endpoint — bypasses ProcessController DI.
-app.MapGet("/api/process/client-settings", (IConfiguration configuration, HttpContext context) =>
+app.MapGet("/api/process/client-settings", (IConfiguration configuration, HttpContext context, ILogger<Program> logger) =>
 {
     // Prevent CloudFront / browser / proxy caching — matches /health and /ready.
     context.Response.Headers.CacheControl = "no-store, no-cache, must-revalidate";
@@ -938,8 +938,14 @@ app.MapGet("/api/process/client-settings", (IConfiguration configuration, HttpCo
     }
     catch (Exception ex)
     {
-        var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
-        logger.LogError(ex, "client-settings endpoint failed");
+        try
+        {
+            logger.LogError(ex, "client-settings endpoint failed");
+        }
+        catch
+        {
+            // If logging fails, silently continue - don't escalate to 500 error
+        }
 
         // Return safe defaults so the frontend can still function.
         return Results.Ok(new { speechTranscriptionMode = "groq-only", activationWord = "iris", groqCommandTranscriptionEnabled = true });

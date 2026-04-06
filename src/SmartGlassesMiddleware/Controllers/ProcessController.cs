@@ -109,13 +109,21 @@ public class ProcessController : ControllerBase
                 return StatusCode(502, new { error = "Groq transcription failed" });
             }
 
-            using var jsonDoc = JsonDocument.Parse(body);
-            var text = jsonDoc.RootElement.TryGetProperty("text", out var textElement)
-                ? (textElement.GetString() ?? string.Empty).Trim()
-                : string.Empty;
+            try
+            {
+                using var jsonDoc = JsonDocument.Parse(body);
+                var text = jsonDoc.RootElement.TryGetProperty("text", out var textElement)
+                    ? (textElement.GetString() ?? string.Empty).Trim()
+                    : string.Empty;
 
-            _groqTranscriptionLog.Add(text, "wakeword");
-            return Ok(new { text });
+                _groqTranscriptionLog.Add(text, "wakeword");
+                return Ok(new { text });
+            }
+            catch (JsonException jsonEx)
+            {
+                _logger.LogWarning(jsonEx, "Failed to parse Groq response as JSON. Response: {Body}", body);
+                return StatusCode(502, new { error = "Invalid response from Groq API" });
+            }
         }
         catch (OperationCanceledException)
         {
@@ -123,7 +131,7 @@ public class ProcessController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Groq wakeword transcription failed");
+            _logger.LogError(ex, "Groq wakeword transcription error.");
             return StatusCode(503, new { error = "Groq transcription unavailable" });
         }
     }
@@ -180,13 +188,21 @@ public class ProcessController : ControllerBase
                 return StatusCode(502, new { error = "Groq transcription failed" });
             }
 
-            using var jsonDoc = JsonDocument.Parse(body);
-            var text = jsonDoc.RootElement.TryGetProperty("text", out var textElement)
-                ? (textElement.GetString() ?? string.Empty).Trim()
-                : string.Empty;
+            try
+            {
+                using var jsonDoc = JsonDocument.Parse(body);
+                var text = jsonDoc.RootElement.TryGetProperty("text", out var textElement)
+                    ? (textElement.GetString() ?? string.Empty).Trim()
+                    : string.Empty;
 
-            _groqTranscriptionLog.Add(text, "command");
-            return Ok(new { text, provider = "groq", model });
+                _groqTranscriptionLog.Add(text, "command");
+                return Ok(new { text, provider = "groq", model });
+            }
+            catch (JsonException jsonEx)
+            {
+                _logger.LogWarning(jsonEx, "Failed to parse Groq response as JSON. Response: {Body}", body);
+                return StatusCode(502, new { error = "Invalid response from Groq API" });
+            }
         }
         catch (OperationCanceledException)
         {
@@ -194,7 +210,7 @@ public class ProcessController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Groq command transcription unavailable.");
+            _logger.LogError(ex, "Groq command transcription error.");
             return StatusCode(503, new { error = "Groq transcription unavailable" });
         }
     }
