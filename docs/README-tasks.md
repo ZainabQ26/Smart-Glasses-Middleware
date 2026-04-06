@@ -84,6 +84,164 @@ Microphone → Groq Whisper API (transcription) → activation word check ("Iris
         → Stage 3: advanced handler [AWS Bedrock — ONLY for unknown commands]
 ```
 
+## Audio Transcription via Groq Whisper API
+
+### Overview
+The system uses **Groq's Whisper API** for real-time speech-to-text transcription. Groq offers ultra-fast inference on OpenAI's Whisper model, making it ideal for low-latency voice command processing on smart glasses.
+
+### How It Works
+
+**Frontend (React/WebAudio API):**
+1. Audio is captured from the device microphone in real-time via `AudioContext`
+2. Audio data is buffered in 32-bit float format at 16kHz sample rate
+3. **Two transcription paths:**
+   - **Wake-word detection** (wakeword path): Smaller audio chunks (~500ms) sent frequently for faster activation word recognition
+   - **Command transcription** (command path): Larger audio chunks (~2s) accumulated after wake-word is detected
+
+**Backend (ASP.NET Core → Groq API):**
+1. Client sends audio WAV blob to `/api/process/transcribe` endpoint
+2. Server forwards audio to Groq Whisper API with model specification
+3. Groq performs ultra-fast inference (typically 100-500ms for real-time audio)
+4. Server receives transcribed text and returns to client
+5. Client applies blank audio/noise detection before sending to task classifier
+
+### Models Used
+
+| Context | Model | Speed | Accuracy | Use Case |
+|---------|-------|-------|----------|----------|
+| Wake-word detection | `whisper-large-v3-turbo` | Fastest (10-200ms) | High | Rapid "Hello Iris" detection |
+| Command transcription | `whisper-large-v3` | Fast (100-500ms) | Very High | Full command accuracy |
+
+The **turbo variant** is used for wake-word paths (faster response) while the standard **large** model is used for command transcription (higher accuracy for complex commands).
+
+### Request Flow Example
+
+```
+User speaks: "Hello Iris, go to page 5"
+
+1. Microphone capture (WebAudio API)
+   ↓
+2. Audio buffering in 32-bit float chunks
+   ↓
+3a. First chunk → POST /api/process/transcribe (wakeword=true, model=whisper-turbo)
+   → Groq returns: "Hello Iris"
+   → Wake-word detected, enter command mode
+   ↓
+3b. Next chunks → POST /api/process/transcribe (wakeword=false, model=whisper-large)
+   → Groq returns: "go to page 5"
+   → Run blank audio detection
+   ↓
+4. POST /api/process with transcript
+   → Stage 1: Match "go-to-page" via keywords
+   → Dispatch to GoToPageTaskHandler
+```
+
+### Configuration
+
+**Groq API Credentials:**
+```json
+{
+  "AI": {
+    "Groq": {
+      "ApiKey": "gsk_your_api_key_here",
+      "WhisperEndpoint": "https://api.groq.com/openai/v1/audio/transcriptions",
+      "WhisperWakewordModel": "whisper-large-v3-turbo",
+      "WhisperCommandModel": "whisper-large-v3"
+    }
+  }
+}
+```
+
+> **⚠️ SECURITY WARNING:** Never commit the actual API key to `appsettings.json` or any config file. The example above shows the structure only.
+
+**Never store the actual Groq API key in appsettings.json or any configuration file committed to git.**
+
+Instead, inject it as an **environment variable**:
+
+#### Local Development
+```bash
+# Set before running the app
+export AI__Groq__ApiKey="gsk_your_actual_key"
+dotnet run
+```
+
+Or in `.env` file (for docker-compose):
+```
+AI__Groq__ApiKey=gsk_your_actual_key
+```
+
+#### GitHub Actions (CI/CD)
+
+1. **Store API key in GitHub Secrets:**
+   - Go to repository Settings → Secrets and Variables → Actions
+   - Create a new secret: `GROQ_API_KEY` with your actual key
+   
+2. **Reference in workflow:**
+```yaml
+# .github/workflows/deploy.yml
+env:
+  AI__Groq__ApiKey: ${{ secrets.GROQ_API_KEY }}
+```
+
+GitHub Actions **automatically masks secrets in logs** — if the Groq key appears anywhere in logs, it will be redacted as `***`.
+
+#### AWS ECS (Production)
+
+Secrets are injected via AWS Secrets Manager (same pattern as DB credentials):
+
+```hcl
+# terraform configuration
+taskDefinition = {
+  containerDefinitions = [{
+    secrets = [
+      {
+        name      = "AI__Groq__ApiKey"
+        valueFrom = aws_secretsmanager_secret_version.groq_key.arn
+      }
+    ]
+  }]
+}
+```
+
+Get an API key from [Groq Console](https://console.groq.com).
+
+**Groq Timeout Settings:**
+```json
+{
+  "ServiceTimeouts": {
+    "TranscriptionTimeoutSeconds": 30
+  }
+}
+```
+
+Default: 30 seconds. Increase if experiencing timeout errors with slow network.
+
+### Cost & Performance Notes
+
+**Speed:**
+- Wake-word detection: 10-200ms (Groq's strength is ultra-low latency)
+- Command transcription: 100-500ms per audio chunk
+- No local fallback if Groq is unavailable (requires API key)
+
+**Cost:**
+- Groq pricing is per-request, typically $0.02-0.05 per transcription (no monthly minimum)
+- Smart caching of credentials means no per-request authentication overhead
+- Significantly cheaper than AWS Transcribe or Google Cloud Speech-to-Text at scale
+
+**Reliability:**
+- Automatic retry on transient failures (built into HTTP client)
+- Graceful error messages if API is unavailable
+- No audio is cached on-device after transcription
+
+### Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| "Transcription timeout" | Increase `TranscriptionTimeoutSeconds` or check network latency |
+| Wake-word not detected | Verify `ActivationWord` config, ensure microphone is working, check Groq API key |
+| High latency (>1s) | Groq servers may be experiencing load; add retry logic or use smaller chunks |
+| API key invalid | Generate new key from [Groq Console](https://console.groq.com), ensure no whitespace |
+
 ## Configuration
 
 **Activation word (configurable):**
