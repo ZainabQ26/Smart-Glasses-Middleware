@@ -44,7 +44,6 @@ public class ProcessController : ControllerBase
     [HttpPost]
     [Route("transcribe")]
     [RequestSizeLimit(12 * 1024 * 1024)]
-    [RequestFormLimits(MultipartBodyLengthLimit = 12 * 1024 * 1024)]
     public async Task<IActionResult> Transcribe(
         [FromForm] IFormFile? audio, 
         [FromForm] string? language,
@@ -147,7 +146,6 @@ public class ProcessController : ControllerBase
     [HttpPost]
     [Route("transcribe-wakeword")]
     [RequestSizeLimit(2 * 1024 * 1024)]
-    [RequestFormLimits(MultipartBodyLengthLimit = 2 * 1024 * 1024)]
     [Obsolete("Use /transcribe with checkWakeword=true instead")]
     public async Task<IActionResult> TranscribeWakeword([FromForm] IFormFile? audio, [FromForm] string? language, CancellationToken cancellationToken)
     {
@@ -162,7 +160,6 @@ public class ProcessController : ControllerBase
     [HttpPost]
     [Route("transcribe-command")]
     [RequestSizeLimit(12 * 1024 * 1024)]
-    [RequestFormLimits(MultipartBodyLengthLimit = 12 * 1024 * 1024)]
     [Obsolete("Use /transcribe with checkWakeword=false instead")]
     public async Task<IActionResult> TranscribeCommand([FromForm] IFormFile? audio, [FromForm] string? language, CancellationToken cancellationToken)
     {
