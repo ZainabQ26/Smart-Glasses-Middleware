@@ -321,8 +321,8 @@ export default function App({ mode = "voice", language = "en" }) {
     );
   }, []);
 
-  // Keep a safety margin under strict provider limits (for example 20 RPM).
-  const [groqMaxRequestsPerMinute, setGroqMaxRequestsPerMinute] = useState(16);
+  // Hydrated from /api/process/client-settings (AI:Groq:ClientMaxRequestsPerMinute).
+  const [groqMaxRequestsPerMinute, setGroqMaxRequestsPerMinute] = useState(1);
   const GROQ_MAX_REQUESTS_PER_SECOND = 1;
   const GROQ_MIN_INTERVAL_MS = Math.max(
     Math.ceil(1000 / GROQ_MAX_REQUESTS_PER_SECOND),
