@@ -473,7 +473,9 @@ jobs:
 
           # ── S3 (data must never be destroyed) ─────────────────────────────────
           safe_import aws_s3_bucket.media     "${PREFIX}-media"
-          safe_import aws_s3_bucket.documents "${PREFIX}-documents"
+          # aws_s3_bucket.documents was removed when storage was collapsed to one bucket.
+          # Remove any stale state entry to prevent Terraform planning a destroy action.
+          terraform state rm -lock=false "aws_s3_bucket.documents" 2>/dev/null || true
           safe_import aws_s3_bucket.frontend  "${PREFIX}-frontend"
 
           # ── KMS ───────────────────────────────────────────────────────────────
@@ -492,7 +494,7 @@ jobs:
               --query 'ARN' --output text --region "$REGION" 2>/dev/null || true)
             safe_import "$TF_RES" "$ARN"
           }
-          import_secret aws_secretsmanager_secret.db_credentials    "${PREFIX}-db-credentials"
+          import_secret aws_secretsmanager_secret.db_connection "smart-glasses-db-connection-${ENV}"
           # app_secrets is now prod-only. Ensure stale dev state is removed.
           if [ "$ENV" = "dev" ]; then
             terraform state rm -lock=false "aws_secretsmanager_secret.app_secrets" 2>/dev/null || true
@@ -506,14 +508,11 @@ jobs:
           else
             import_secret "aws_secretsmanager_secret.app_secrets[0]" "${PREFIX}-app-secrets"
           fi
-          # redis_credentials count=0 for dev (cost_optimized_non_prod=true disables redis).
-          # Importing it would leave a count=0 resource in state, causing a
-          # prevent_destroy-blocked destroy on apply. Remove from state instead.
+          # redis_credentials does not exist in Terraform config (Redis is disabled for dev/cost-optimized).
+          # Remove any stale state entry to prevent Terraform planning a destroy action.
           if [ "$ENV" = "dev" ]; then
             terraform state rm -lock=false "aws_secretsmanager_secret.redis_credentials[0]" 2>/dev/null || true
             EXISTING_STATE=$(printf '%s\n' "$EXISTING_STATE" | grep -vxF "aws_secretsmanager_secret.redis_credentials[0]" || true)
-          else
-            import_secret aws_secretsmanager_secret.redis_credentials "${PREFIX}-redis-credentials"
           fi
 
           # ── CloudFront ────────────────────────────────────────────────────────
@@ -863,7 +862,7 @@ jobs:
       - name: Seed empty Secrets Manager secrets with placeholder values
         run: |
           # When enable_rds=false (free-tier), Terraform does NOT create a version
-          # for aws_secretsmanager_secret.db_credentials or .redis_credentials.
+          # for aws_secretsmanager_secret.db_connection.
           # ECS fails at ResourceInitializationError if a secret it references has
           # no AWSCURRENT staging label, so we seed those secrets here.
           ENV=dev
@@ -891,7 +890,7 @@ jobs:
           # DB credentials placeholder – allows the container to start even when
           # Aurora does not exist (free-tier).  The app will fail to connect but
           # will at least boot so health checks can return a non-503.
-          seed_secret_if_empty "${PREFIX}-db-credentials" \
+          seed_secret_if_empty "smart-glasses-db-connection-${ENV}" \
             '{"username":"placeholder","password":"placeholder","engine":"postgres","host":"localhost","port":5432,"dbname":"placeholder","connection_string":"Host=localhost;Port=5432;Database=placeholder;Username=placeholder;Password=placeholder"}'
 
           echo "Secret seeding complete."
