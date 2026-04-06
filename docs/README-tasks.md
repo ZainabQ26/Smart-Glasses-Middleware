@@ -21,7 +21,7 @@ The application automatically:
 Command recognition is entirely local and happens in two stages:
 
 ### Stage 1 — Keyword matching (fastest path)
-Each handler declares a `Keywords` list. The dispatcher scans those lists against the transcript before any other logic runs. Example: "what time is it" matches `TimeTaskHandler.Keywords`.
+Each handler declares a `Keywords` list. The dispatcher scans those lists against the transcript before any other logic runs. Example: "show recent files" matches `OpenFileTaskHandler.Keywords`.
 
 ### Stage 2 — Rule-based pattern matching
 `TryRuleBasedTask` in `AIService` runs an extensive set of phrase patterns for all known tasks. This covers natural-language variations that keyword lists might miss (e.g. "latest document" → `select-document`, "print this" → `print`, "retry ocr" → `ocr-retry`).
@@ -34,26 +34,6 @@ If both stages produce no match, the input is classified as `unknown`. When `AI:
 ## Available Task Handlers
 
 ### Core Local Tasks
-
-**TimeTaskHandler.cs** - `task: time`
-- Returns current date and time locally (no external call)
-- Example: "what time is it", "what's today's date"
-
-**ReminderTaskHandler.cs** - `task: reminder`
-- Saves reminders to the in-memory database
-- Example: "remind me to call John at 3pm", "set a reminder for tomorrow"
-
-**DeleteReminderTaskHandler.cs** - `task: delete-reminder`
-- Deletes a reminder by matching text
-- Example: "delete my reminder about the meeting", "cancel the dentist reminder"
-
-**EditReminderTaskHandler.cs** - `task: edit-reminder`
-- Updates an existing reminder
-- Example: "change the dentist reminder to 4pm"
-
-**ShowRemindersTaskHandler.cs** - `task: show-reminders`
-- Lists all saved reminders
-- Example: "show my reminders", "what are my reminders"
 
 **TemplateTaskHandler.cs** - `task: template`
 - Template/example for creating new handlers
@@ -134,7 +114,7 @@ Microphone → Groq Whisper API (transcription) → activation word check ("Iris
 {
   "AI": {
     "KnownTasks": [
-      "time", "reminder", "edit-reminder", "delete-reminder", "show-reminders",
+      "template",
       "open-file", "select-document", "next-page", "previous-page", "go-to-page",
       "go-to-loinc", "close-document", "highlight-word", "remove-highlights",
       "summarize-page", "document-search", "document-highlight", "document-query",

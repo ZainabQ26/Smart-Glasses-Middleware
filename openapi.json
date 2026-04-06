@@ -35,7 +35,7 @@
     },
     {
       "name": "History",
-      "description": "Request history and reminders"
+      "description": "Request history"
     },
     {
       "name": "Media",
@@ -2002,39 +2002,6 @@
         }
       }
     },
-    "/api/history/reminders": {
-      "get": {
-        "tags": [
-          "History"
-        ],
-        "summary": "Get reminder history entries",
-        "parameters": [
-          {
-            "name": "count",
-            "in": "query",
-            "schema": {
-              "type": "integer",
-              "default": 100
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "List of reminders",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/RequestHistory"
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/history/type/{requestType}": {
       "get": {
         "tags": [
@@ -2069,114 +2036,6 @@
                   "items": {
                     "$ref": "#/components/schemas/RequestHistory"
                   }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/history/reminders/{id}": {
-      "put": {
-        "tags": [
-          "History"
-        ],
-        "summary": "Update a reminder's text",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateReminderRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Reminder updated",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestHistory"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid request"
-          },
-          "403": {
-            "description": "Not a reminder entry"
-          },
-          "404": {
-            "description": "Reminder not found"
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "History"
-        ],
-        "summary": "Delete a reminder",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Reminder deleted"
-          },
-          "403": {
-            "description": "Not a reminder entry"
-          },
-          "404": {
-            "description": "Reminder not found"
-          }
-        }
-      }
-    },
-    "/api/history/reminders/query": {
-      "post": {
-        "tags": [
-          "History"
-        ],
-        "summary": "Query reminders using semantic search",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/QueryRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Query result",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/QueryResult"
                 }
               }
             }
@@ -3833,17 +3692,6 @@
             "nullable": true
           }
         }
-      },
-      "UpdateReminderRequest": {
-        "type": "object",
-        "properties": {
-          "text": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "text"
-        ]
       }
     }
   }
