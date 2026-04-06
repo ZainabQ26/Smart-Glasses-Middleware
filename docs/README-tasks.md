@@ -52,6 +52,8 @@ If both stages produce no match, the input is classified as `unknown`. When `AI:
 **CloseDocumentTaskHandler.cs** - `task: close-document` — "close document", "exit pdf"  
 **SummarizePageTaskHandler.cs** - `task: summarize-page` — "summarize this page"  
 **HighlightWordTaskHandler.cs** - `task: highlight-word` — "highlight headache", "find dosage"  
+**NextHighlightTaskHandler.cs** - `task: next-highlight` — "next highlight", "go to next highlighted word"  
+**PreviousHighlightTaskHandler.cs** - `task: previous-highlight` — "previous highlight", "go to previous highlighted word"  
 **RemoveHighlightsTaskHandler.cs** - `task: remove-highlights` — "clear all highlights"  
 **DocumentSearchTaskHandler.cs** - `task: document-search` — "search for contraindications"  
 **DocumentHighlightTaskHandler.cs** - `task: document-highlight` — "highlight in document"  

@@ -217,6 +217,8 @@ public class AIService : IAIService
         ["select-document"]    = "user wants to immediately open/preview the most recently uploaded document without browsing. Use when the user says 'select document', 'open last file', 'open latest document', 'select and open', or wants the last/most-recent document directly.",
         ["next-page"]          = "user wants to go to the next page in a document or PDF",
         ["previous-page"]      = "user wants to go to the previous page in a document or PDF",
+        ["next-highlight"]     = "user wants to jump to the next highlighted match in a document or PDF",
+        ["previous-highlight"] = "user wants to jump to the previous highlighted match in a document or PDF",
         ["open-admin-panel"]   = "user wants to open, navigate to, or access the admin panel or administration page",
         ["advanced"]           = "user wants advanced features, settings, or RAG document processing",
         ["template"]           = "user wants to use or fill in a template",
@@ -421,10 +423,35 @@ public class AIService : IAIService
             return "next-page";
         }
 
+        // ── next-highlight ────────────────────────────────────────────────────
+        if (ContainsAnyPhrase(normalized,
+            "next highlight",
+            "next highlighted",
+            "next highlighted word",
+            "next highlighted phrase",
+            "go to next highlight",
+            "find next highlight"))
+        {
+            return "next-highlight";
+        }
+
         // ── previous-page ─────────────────────────────────────────────────────
         if (ContainsAnyPhrase(normalized, "previous page", "prev page", "back page", "page up", "go back a page"))
         {
             return "previous-page";
+        }
+
+        // ── previous-highlight ────────────────────────────────────────────────
+        if (ContainsAnyPhrase(normalized,
+            "previous highlight",
+            "prev highlight",
+            "back highlight",
+            "previous highlighted",
+            "previous highlighted word",
+            "go to previous highlight",
+            "find previous highlight"))
+        {
+            return "previous-highlight";
         }
 
         // ── summarize-page ────────────────────────────────────────────────────
