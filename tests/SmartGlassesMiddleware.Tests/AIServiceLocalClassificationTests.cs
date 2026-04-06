@@ -41,21 +41,23 @@ public class AIServiceLocalClassificationTests
                 ["AI:KnownTasks:6"] = "select-document",
                 ["AI:KnownTasks:7"] = "next-page",
                 ["AI:KnownTasks:8"] = "previous-page",
-                ["AI:KnownTasks:9"] = "summarize-page",
-                ["AI:KnownTasks:10"] = "highlight-word",
-                ["AI:KnownTasks:11"] = "open-admin-panel",
-                ["AI:KnownTasks:12"] = "close-document",
-                ["AI:KnownTasks:13"] = "go-to-page",
-                ["AI:KnownTasks:14"] = "go-to-loinc",
-                ["AI:KnownTasks:15"] = "print",
-                ["AI:KnownTasks:16"] = "print-highlighted-pages",
-                ["AI:KnownTasks:17"] = "remove-highlights",
-                ["AI:KnownTasks:18"] = "document-search",
-                ["AI:KnownTasks:19"] = "document-query",
-                ["AI:KnownTasks:20"] = "document-highlight",
-                ["AI:KnownTasks:21"] = "ocr",
-                ["AI:KnownTasks:22"] = "ocr-retry",
-                ["AI:KnownTasks:23"] = "advanced",
+                ["AI:KnownTasks:9"] = "next-highlight",
+                ["AI:KnownTasks:10"] = "previous-highlight",
+                ["AI:KnownTasks:11"] = "summarize-page",
+                ["AI:KnownTasks:12"] = "highlight-word",
+                ["AI:KnownTasks:13"] = "open-admin-panel",
+                ["AI:KnownTasks:14"] = "close-document",
+                ["AI:KnownTasks:15"] = "go-to-page",
+                ["AI:KnownTasks:16"] = "go-to-loinc",
+                ["AI:KnownTasks:17"] = "print",
+                ["AI:KnownTasks:18"] = "print-highlighted-pages",
+                ["AI:KnownTasks:19"] = "remove-highlights",
+                ["AI:KnownTasks:20"] = "document-search",
+                ["AI:KnownTasks:21"] = "document-query",
+                ["AI:KnownTasks:22"] = "document-highlight",
+                ["AI:KnownTasks:23"] = "ocr",
+                ["AI:KnownTasks:24"] = "ocr-retry",
+                ["AI:KnownTasks:25"] = "advanced",
             })
             .Build();
 
@@ -65,7 +67,7 @@ public class AIServiceLocalClassificationTests
         var knownTasks = new List<string>
         {
             "time","reminder","edit-reminder","delete-reminder","show-reminders",
-            "open-file","select-document","next-page","previous-page","summarize-page",
+            "open-file","select-document","next-page","previous-page","next-highlight","previous-highlight","summarize-page",
             "highlight-word","open-admin-panel","close-document","go-to-page","go-to-loinc",
             "print","print-highlighted-pages","remove-highlights","document-search",
             "document-query","document-highlight","ocr","ocr-retry","advanced"
@@ -246,6 +248,28 @@ public class AIServiceLocalClassificationTests
     {
         var result = await _service.ClassifyOnlyAsync(input);
         Assert.That(result, Is.EqualTo("previous-page"), $"Input: '{input}'");
+    }
+
+    // ── next-highlight ───────────────────────────────────────────────────────
+
+    [TestCase("next highlight")]
+    [TestCase("next highlighted word")]
+    [TestCase("go to next highlight")]
+    public async Task ClassifyOnlyAsync_NextHighlightVariants_ReturnsNextHighlight(string input)
+    {
+        var result = await _service.ClassifyOnlyAsync(input);
+        Assert.That(result, Is.EqualTo("next-highlight"), $"Input: '{input}'");
+    }
+
+    // ── previous-highlight ───────────────────────────────────────────────────
+
+    [TestCase("previous highlight")]
+    [TestCase("prev highlight")]
+    [TestCase("go to previous highlight")]
+    public async Task ClassifyOnlyAsync_PreviousHighlightVariants_ReturnsPreviousHighlight(string input)
+    {
+        var result = await _service.ClassifyOnlyAsync(input);
+        Assert.That(result, Is.EqualTo("previous-highlight"), $"Input: '{input}'");
     }
 
     // ── summarize-page ────────────────────────────────────────────────────────
