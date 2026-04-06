@@ -118,7 +118,7 @@ builder.Services.AddOpenApi(options =>
                 Provides a multi-modal AI API for voice-driven task dispatch, document processing,
                 audio transcription, and conversation management.
 
-                **Voice pipeline:** Audio is transcribed by an on-device Whisper WebGPU worker.
+                **Voice pipeline:** Audio is transcribed by the server-side Groq Whisper API.
                 Transcripts are sent to `POST /api/process`, which classifies the intent with
                 AWS Bedrock and routes to the matching task handler.
 
@@ -294,7 +294,7 @@ builder.Services.AddScoped<IPageSummaryService, BedrockPageSummaryService>();
 // Global mapping service for ResourceGroup -> Conversation
 builder.Services.AddSingleton<IGroqTranscriptionLogService, GroqTranscriptionLogService>();
 
-// Audio transcription service removed: transcription now handled entirely in-browser via Whisper worker
+// Audio transcription is handled server-side via Groq at /api/process/transcribe.
 
 // Auto-register ITaskHandler implementations from this assembly and optional plugin DLLs in the 'tasks' folder.
 
@@ -884,14 +884,7 @@ app.Use(async (context, next) =>
         {
             var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
 
-            var configuredMode = configuration["AI:SpeechTranscriptionMode"]?.Trim().ToLowerInvariant();
-            var mode = configuredMode switch
-            {
-                "webspeech-only" => "webspeech-only",
-                "whisper-only" => "whisper-only",
-                "groq-only" => "groq-only",
-                _ => "groq-only"
-            };
+            var mode = "groq-only";
 
             var activationWord = configuration["AI:ActivationWord"]?.Trim();
             if (string.IsNullOrWhiteSpace(activationWord))
@@ -1045,14 +1038,7 @@ app.MapGet("/api/process/client-settings", (IConfiguration configuration, HttpCo
     {
         var groqClientMaxRequestsPerMinute = GetGroqClientMaxRequestsPerMinute(configuration);
 
-        var configuredMode = configuration["AI:SpeechTranscriptionMode"]?.Trim().ToLowerInvariant();
-        var mode = configuredMode switch
-        {
-            "webspeech-only" => "webspeech-only",
-            "whisper-only" => "whisper-only",
-            "groq-only" => "groq-only",
-            _ => "groq-only"
-        };
+        var mode = "groq-only";
 
         var activationWord = configuration["AI:ActivationWord"]?.Trim();
         if (string.IsNullOrWhiteSpace(activationWord))
