@@ -230,15 +230,17 @@ export default function App({ mode = "voice" }) {
 
       const text = (payload?.text || "").trim();
       const matched = payload?.matched ?? text.toLowerCase().includes("iris");
-      console.log(`[Voice Debug] Wake-word check: "${text}" → ${matched ? "MATCH ✅" : "no match"}`);
+      const target = (activationWordRef.current || "Iris").trim();
+      console.log(`[Voice Debug] Wake-word check: "${text}" (target "${target}") → ${matched ? "MATCH ✅" : "no match"}`);
       if (text) {
         addLog(`👂 Wake-word heard: "${text}"`, "info");
+      } else {
+        console.log("[Voice Debug] Wake-word transcription was empty.");
       }
-      // Return only the text; the caller will check `matched` from the full response
-      return text || null;
+      return { text, matched };
     } catch (err) {
       addLog(`⚠️ Wake-word transcription failed: ${err?.message || "unknown"}`, "warn");
-      return null;
+      return { text: "", matched: false };
     }
   }, [addLog, fetchJsonWithTimeout, float32ToWavBlob]);
 
@@ -1156,8 +1158,15 @@ export default function App({ mode = "voice" }) {
                     async function sendWakeAudio(chunk) {
                       wakewordInFlight = true;
                       try {
-                        const text = await transcribeWakewordWithGroqRef.current?.(chunk);
-                        if (text && !disposed) handleWakeWordResult(text.trim());
+                        const result = await transcribeWakewordWithGroqRef.current?.(chunk);
+                        if (!disposed) {
+                          if (result?.text) {
+                            handleWakeWordResult(result.text.trim());
+                          } else if (result?.matched) {
+                            // Fallback when backend marks wake-word matched but transcription text is empty.
+                            handleWakeWordResult(activationWordRef.current || "Iris");
+                          }
+                        }
                       } catch (_) {}
                       finally {
                         wakewordInFlight = false;

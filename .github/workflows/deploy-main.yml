@@ -112,13 +112,48 @@ jobs:
             ${{ steps.ecr-login.outputs.registry }}/smart-glasses-dev-api:latest
           platforms: linux/amd64
           no-cache: true
-          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+          # Use gha cache backend to avoid large local cache directories on runner disk.
+          cache-from: type=gha,scope=smart-glasses-api
+          cache-to: type=gha,mode=max,scope=smart-glasses-api
+
+      - name: Apply ECR lifecycle policy (prune old images)
+        run: |
+          set -euo pipefail
+          cat > /tmp/ecr-lifecycle.json <<'EOF'
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Expire untagged images after 1 day",
+                "selection": {
+                  "tagStatus": "untagged",
+                  "countType": "sinceImagePushed",
+                  "countUnit": "days",
+                  "countNumber": 1
+                },
+                "action": { "type": "expire" }
+              },
+              {
+                "rulePriority": 2,
+                "description": "Keep last 30 tagged images",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 30
+                },
+                "action": { "type": "expire" }
+              }
+            ]
+          }
+          EOF
+          aws ecr put-lifecycle-policy \
+            --repository-name smart-glasses-dev-api \
+            --region "${{ secrets.AWS_REGION }}" \
+            --lifecycle-policy-text file:///tmp/ecr-lifecycle.json
 
       - name: Cleanup Docker and build caches
         if: always()
         run: |
-          # Clean up buildx cache to avoid storage exhaustion
-          rm -rf /tmp/.buildx-cache-new /tmp/.buildx-cache || true
           # Remove all dangling Docker images and build cache
           docker system prune -af --volumes || true
           # Clean up Docker buildx build state
@@ -166,6 +201,7 @@ jobs:
     needs: [build-api, build-lambda]
     runs-on: ubuntu-latest
     permissions:
+      actions: write
       id-token: write
       contents: read
     env:
@@ -373,6 +409,33 @@ jobs:
             PAGE=$((PAGE+1))
           done
           echo "lambda-document-zip cleanup complete."
+
+      - name: Delete old workflow artifacts (keep 3 days)
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          CUTOFF_EPOCH=$(date -u -d '3 days ago' +%s)
+          PAGE=1
+          echo "Deleting workflow artifacts older than 3 days..."
+          while :; do
+            RESP=$(curl -s -H "Authorization: token $GH_TOKEN" "https://api.github.com/repos/${REPO}/actions/artifacts?per_page=100&page=${PAGE}") || true
+            COUNT=$(echo "$RESP" | jq '.artifacts | length')
+            if [ "$COUNT" -eq 0 ]; then
+              break
+            fi
+            echo "$RESP" | jq -r '.artifacts[] | [.id, .name, .created_at] | @tsv' | while IFS=$'\t' read -r ID NAME CREATED; do
+              CREATED_EPOCH=$(date -u -d "$CREATED" +%s)
+              if [ "$CREATED_EPOCH" -lt "$CUTOFF_EPOCH" ]; then
+                echo "Deleting artifact id=$ID name=$NAME created=$CREATED"
+                curl -s -X DELETE -H "Authorization: token $GH_TOKEN" "https://api.github.com/repos/${REPO}/actions/artifacts/${ID}" >/dev/null || true
+              fi
+            done
+            PAGE=$((PAGE+1))
+          done
+          echo "Old artifact cleanup complete."
 
       - name: Patch IAM role with application-autoscaling permission
         run: |
@@ -935,8 +998,11 @@ jobs:
           docker buildx prune -af || true
           # Clean up node modules from successful builds
           rm -rf src/SmartGlassesMiddleware/client/node_modules || true
-          # Clean up dotnet cache
-          rm -rf ~/.dotnet/temp ~/.nuget/packages/.* || true
+          # Clean up dotnet and NuGet caches
+          dotnet nuget locals all --clear || true
+          rm -rf ~/.dotnet/temp || true
+          # Clean npm cache if present
+          npm cache clean --force || true
           # Clean up any temp files
           rm -rf /tmp/* /var/tmp/* || true
           df -h
@@ -1357,6 +1423,50 @@ jobs:
             sleep 15
           done
           echo "Health check did not return 200 after retries while desired count is $DESIRED."
+          exit 1
+
+      - name: Smoke-test client-settings endpoint
+        run: |
+          CLUSTER=$(jq -r '.ecs_cluster_name.value // empty' ./tf/tf_outputs.json 2>/dev/null || true)
+          CLUSTER=${CLUSTER:-smart-glasses-dev-cluster}
+          SERVICE=$(aws ecs list-services \
+            --cluster "$CLUSTER" --region "$AWS_REGION" \
+            --query 'serviceArns[?ends_with(@, `-api-service`)] | [0]' \
+            --output text 2>/dev/null | awk -F/ '{print $NF}')
+          if [ -z "$SERVICE" ] || [ "$SERVICE" = "None" ] || [ "$SERVICE" = "null" ]; then
+            SERVICE="smart-glasses-dev-api-service"
+          fi
+          DESIRED=$(aws ecs describe-services \
+            --cluster "$CLUSTER" --services "$SERVICE" --region "$AWS_REGION" \
+            --query 'services[0].desiredCount' --output text 2>/dev/null || echo "0")
+
+          if [ "$DESIRED" = "0" ]; then
+            echo "ECS desired count is 0; skipping strict client-settings smoke test."
+            exit 0
+          fi
+
+          CF_DOMAIN=$(jq -r '.cloudfront_distribution_domain.value // empty' ./tf/tf_outputs.json 2>/dev/null || true)
+          if [ -z "$CF_DOMAIN" ] || [ "$CF_DOMAIN" = "None" ] || [ "$CF_DOMAIN" = "null" ]; then
+            echo "Could not resolve CloudFront domain from outputs; skipping client-settings smoke test."
+            exit 0
+          fi
+
+          URL="https://${CF_DOMAIN}/api/process/client-settings"
+          echo "Client settings check: $URL"
+          for i in $(seq 1 8); do
+            BODY=$(mktemp)
+            STATUS=$(curl -sS -m 20 -o "$BODY" -w "%{http_code}" "$URL" || true)
+            echo "Attempt $i: HTTP $STATUS"
+            if [ "$STATUS" = "200" ] && jq -e '.activationWord and .speechTranscriptionMode' "$BODY" >/dev/null 2>&1; then
+              echo "client-settings endpoint healthy and payload shape is valid"
+              rm -f "$BODY"
+              exit 0
+            fi
+            echo "Response body:"; cat "$BODY" || true
+            rm -f "$BODY"
+            sleep 15
+          done
+          echo "client-settings endpoint smoke test failed."
           exit 1
 
       - name: Print deployed website URL
