@@ -897,6 +897,11 @@ export default function App({ mode = "voice" }) {
   // after a short pause (SENTENCE_END_MS) rather than waiting for the full
   // force-submit timeout.
   useEffect(() => {
+    if (mode !== "voice") {
+      setWakeWordReady(false);
+      return undefined;
+    }
+
     const SAMPLE_RATE          = 16_000;
     const BUFFER_SIZE          = 1024;       // 64 ms per AudioWorklet callback
     const RMS_THRESHOLD        = 0.008;      // RMS below this → silence (lowered for mobile mics)
@@ -1227,7 +1232,7 @@ export default function App({ mode = "voice" }) {
       processorRef.current = null;
       setWakeWordReady(false);
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [mode]);
 
   // Keepalive control is server-side and managed from the admin panel toggle.
 
