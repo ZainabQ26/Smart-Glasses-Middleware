@@ -1661,7 +1661,7 @@ export default function App({ mode = "voice", language = "en" }) {
         </div>
       )}
 
-      <main style={styles.main}>
+      <main className="sgm-main" style={styles.main}>
 
         {(transcript || isSending || aiResponse || pendingAction) && (
           <section style={styles.conversationArea}>
@@ -2067,8 +2067,9 @@ const styles = {
     minHeight: 0,
     maxWidth: 680,
     width: "100%",
-    margin: "48px auto 32px",
-    padding: "0 16px",
+    margin: "0 auto",
+    // top padding clears the fixed indicator bar; bottom padding clears the fixed log-toggle button
+    padding: "52px 16px 72px",
     display: "flex",
     flexDirection: "column",
     gap: 24,
@@ -2430,6 +2431,9 @@ if (typeof document !== "undefined" && !document.getElementById("app-mobile-styl
     }
     @media (max-height: 480px) {
       .assistant-logo { display: none !important; }
+    }
+    @media (max-width: 480px), (max-height: 700px) {
+      .sgm-main { gap: 12px !important; }
     }
   `;
   document.head.appendChild(style);
