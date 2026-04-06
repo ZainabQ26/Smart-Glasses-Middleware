@@ -184,8 +184,72 @@ export default function App({ mode = "voice" }) {
     );
   }, []);
 
-  const transcribeCommandWithGroq = useCallback(async (audio) => {
+  // Keep a safety margin under strict provider limits (for example 20 RPM).
+  const GROQ_MAX_REQUESTS_PER_MINUTE = 16;
+  const GROQ_MIN_INTERVAL_MS = Math.ceil(60_000 / GROQ_MAX_REQUESTS_PER_MINUTE);
+  const groqLimiterRef = useRef({
+    windowStartMs: Date.now(),
+    count: 0,
+    lastRequestAtMs: 0,
+    lastThrottleLogAtMs: 0,
+  });
+
+  const tryAcquireGroqBudget = useCallback(async ({ canWait = false, maxWaitMs = 0 } = {}) => {
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const limiter = groqLimiterRef.current;
+    const now = Date.now();
+
+    if (now - limiter.windowStartMs >= 60_000) {
+      limiter.windowStartMs = now;
+      limiter.count = 0;
+    }
+
+    const waitMs = Math.max(0, GROQ_MIN_INTERVAL_MS - (now - limiter.lastRequestAtMs));
+    if (waitMs > 0) {
+      if (!canWait || waitMs > maxWaitMs) {
+        return false;
+      }
+      await sleep(waitMs);
+    }
+
+    const nowAfterWait = Date.now();
+    if (nowAfterWait - limiter.windowStartMs >= 60_000) {
+      limiter.windowStartMs = nowAfterWait;
+      limiter.count = 0;
+    }
+
+    if (limiter.count >= GROQ_MAX_REQUESTS_PER_MINUTE) {
+      return false;
+    }
+
+    limiter.count += 1;
+    limiter.lastRequestAtMs = nowAfterWait;
+    return true;
+  }, [GROQ_MAX_REQUESTS_PER_MINUTE, GROQ_MIN_INTERVAL_MS]);
+
+  const logGroqThrottle = useCallback((message) => {
+    const limiter = groqLimiterRef.current;
+    const now = Date.now();
+    if (now - limiter.lastThrottleLogAtMs < 5000) {
+      return;
+    }
+    limiter.lastThrottleLogAtMs = now;
+    addLog(message, "warn");
+  }, [addLog]);
+
+  const transcribeCommandWithGroq = useCallback(async (audio, { isFinal = false } = {}) => {
     try {
+      const allowed = await tryAcquireGroqBudget({
+        canWait: isFinal,
+        maxWaitMs: isFinal ? 1500 : 0,
+      });
+      if (!allowed) {
+        logGroqThrottle(isFinal
+          ? "⏳ Waiting for Groq rate limit window before final command transcription."
+          : "⏳ Skipping partial transcription to stay under Groq rate limit.");
+        return null;
+      }
+
       const formData = new FormData();
       formData.append("audio", float32ToWavBlob(audio), "command.wav");
       formData.append("language", "en");
@@ -211,10 +275,16 @@ export default function App({ mode = "voice" }) {
       addLog(`⚠️ Groq transcription error: ${err?.message || "unknown error"}`, "warn");
       return null;
     }
-  }, [API_TIMEOUT_MS, addLog, fetchJsonWithTimeout, float32ToWavBlob]);
+  }, [API_TIMEOUT_MS, addLog, fetchJsonWithTimeout, float32ToWavBlob, tryAcquireGroqBudget, logGroqThrottle]);
 
   const transcribeWakewordWithGroq = useCallback(async (audio) => {
     try {
+      const allowed = await tryAcquireGroqBudget();
+      if (!allowed) {
+        logGroqThrottle("⏳ Skipping wake-word check to stay under Groq rate limit.");
+        return { text: "", matched: false, commandAfterWakeword: "" };
+      }
+
       const formData = new FormData();
       formData.append("audio", float32ToWavBlob(audio), "wakeword.wav");
       formData.append("language", "en");
@@ -245,7 +315,7 @@ export default function App({ mode = "voice" }) {
       addLog(`⚠️ Wake-word transcription failed: ${err?.message || "unknown"}`, "warn");
       return { text: "", matched: false, commandAfterWakeword: "" };
     }
-  }, [addLog, fetchJsonWithTimeout, float32ToWavBlob]);
+  }, [addLog, fetchJsonWithTimeout, float32ToWavBlob, tryAcquireGroqBudget, logGroqThrottle]);
 
 
 
@@ -1010,7 +1080,7 @@ export default function App({ mode = "voice" }) {
 
       // Send to Groq for final transcription
       try {
-        const text = await transcribeCommandWithGroqRef.current?.(audio);
+        const text = await transcribeCommandWithGroqRef.current?.(audio, { isFinal: true });
         if (text && text.length >= 2 && /[A-Za-z0-9]/.test(text)) {
           addLog(`🗣️ Groq: "${text}"`, "voice");
           showTranscript(text);
@@ -1018,7 +1088,7 @@ export default function App({ mode = "voice" }) {
           setStatus("sending");
           sendToAIRef.current?.(text);
         } else {
-          addLog("(No speech detected in command)", "warn");
+          addLog("(No speech detected in command or transcription deferred by rate limit)", "warn");
           resumeListeningRef.current();
         }
       } catch (err) {
