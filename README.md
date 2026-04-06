@@ -277,6 +277,9 @@ The middleware dispatches AI-classified requests to typed task handlers. Handler
 | `PrintTaskHandler` | `print` | Triggers the browser print dialog for the open PDF |
 | `PrintHighlightedPagesTaskHandler` | `print-highlighted-pages` | Prints only the pages that contain at least one active highlight |
 | `AdminPanelTaskHandler` | `open-admin-panel` | Navigates the frontend to the admin panel |
+| `NextHighlightTaskHandler` | `next-highlight` | Navigates to the next highlighted match in the open PDF |
+| `PreviousHighlightTaskHandler` | `previous-highlight` | Navigates to the previous highlighted match in the open PDF |
+| `DocumentQueryTaskHandler` | `document-query` | Performs a RAG-based query against the current document |
 
 ### Adding a custom handler
 
@@ -329,6 +332,13 @@ Highlighting supports multi-word phrases (e.g. `"highlight patient information"`
 
 A **Highlights legend** is displayed below the PDF canvas.  It shows each highlighted keyword alongside its color and the sorted list of page numbers on which it was found.  The legend updates automatically when highlights are added or removed.
 
+### Navigating highlights
+
+| Voice command | Action |
+|--------------|--------|
+| `"next highlight"` / `"go to next highlight"` | Jumps to the next highlighted match in the document |
+| `"previous highlight"` / `"go to previous highlight"` | Jumps to the previous highlighted match in the document |
+
 ### Closing the viewer
 
 | Voice command | Action |
@@ -365,16 +375,15 @@ The raw OpenAPI JSON is available at `/openapi/v1.json`.
 | Group | Endpoints |
 |-------|-----------|
 | AI interaction | `POST /api/ask` — text/task dispatch |
-| Process | `POST /api/process` — voice transcript → AI task dispatch; `GET /api/process/client-settings` |
-| Documents | `POST /api/documents/upload`, `POST /api/documents/query`, `GET/DELETE /api/documents/{id}` |
-| Conversations | `GET/POST/PUT/DELETE /api/conversations` |
-| History | `GET /api/history` |
+| Process | `POST /api/process` — voice transcript → AI task dispatch; `POST /api/process/preview` — model-selection preview; `POST /api/process/transcribe` — Groq audio transcription; `GET /api/process/client-settings` |
+| Documents | `POST /api/documents/upload`, `POST /api/documents/query`, `GET/DELETE /api/documents/{documentId}`, `GET /api/documents/{documentId}/download`, `POST /api/documents/{documentId}/highlight`, `POST /api/documents/{documentId}/find-location`, `POST /api/documents/{id}/move`, `GET /api/documents`, `POST /api/documents/reprocess`, `GET /api/documents/unprocessed` |
+| History | `GET /api/history`, `GET /api/history/{id}`, `GET /api/history/type/{requestType}`, `GET /api/history/reminders`, `PUT/DELETE /api/history/reminders/{id}`, `POST /api/history/reminders/query` |
 | Tasks | `GET /api/tasks/{id}` — background task status |
-| Admin | `GET/POST/PUT/DELETE /api/admin/files`, `/api/admin/prompts`, `/api/admin/groups` |
+| Admin | `GET/POST /api/admin/files`, `DELETE /api/admin/files/{id}`, `GET /api/admin/files/{id}/preview`, `GET /api/admin/files/{id}/download`, `GET /api/admin/files/{id}/status`, `GET /api/admin/files/{id}/info`, `GET /api/admin/files/upload-url`, `POST /api/admin/files/complete`, `POST /api/admin/fix-processed-managedfiles`, `POST /api/admin/reindex`, `GET /api/admin/batch`, `GET/DELETE /api/admin/groq-transcriptions`, `GET /api/admin/abbreviations/download`, `POST /api/admin/clear-all` |
 | Monitoring | `GET /api/monitoring/requests` |
-| AI Interactions | `GET /api/ai-interactions` — model usage logs and stats |
-| Health | `GET /health` — Postgres + Redis liveness |
-| Debug | `GET /api/debug/tasks/status` — handler registration diagnostics |
+| AI Interactions | `GET /api/ai-interactions` — model usage logs and stats; `GET /api/ai-interactions/{id}`; `GET /api/ai-interactions/stats` |
+| Health | `GET /health` — Postgres + Redis liveness; `GET /ready` — full readiness check (DB + Redis) |
+| Debug | `GET /api/debug/tasks/status` — handler registration diagnostics; `POST /api/debug/echo-form`; `POST /api/debug/echo-raw` |
 
 ## CI/CD Pipeline
 
