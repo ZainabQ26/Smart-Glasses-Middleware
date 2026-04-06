@@ -185,8 +185,12 @@ export default function App({ mode = "voice" }) {
   }, []);
 
   // Keep a safety margin under strict provider limits (for example 20 RPM).
-  const GROQ_MAX_REQUESTS_PER_MINUTE = 16;
-  const GROQ_MIN_INTERVAL_MS = Math.ceil(60_000 / GROQ_MAX_REQUESTS_PER_MINUTE);
+  const [groqMaxRequestsPerMinute, setGroqMaxRequestsPerMinute] = useState(16);
+  const GROQ_MAX_REQUESTS_PER_SECOND = 1;
+  const GROQ_MIN_INTERVAL_MS = Math.max(
+    Math.ceil(1000 / GROQ_MAX_REQUESTS_PER_SECOND),
+    Math.ceil(60_000 / Math.max(1, groqMaxRequestsPerMinute)),
+  );
   const groqLimiterRef = useRef({
     windowStartMs: Date.now(),
     count: 0,
@@ -218,14 +222,14 @@ export default function App({ mode = "voice" }) {
       limiter.count = 0;
     }
 
-    if (limiter.count >= GROQ_MAX_REQUESTS_PER_MINUTE) {
+    if (limiter.count >= groqMaxRequestsPerMinute) {
       return false;
     }
 
     limiter.count += 1;
     limiter.lastRequestAtMs = nowAfterWait;
     return true;
-  }, [GROQ_MAX_REQUESTS_PER_MINUTE, GROQ_MIN_INTERVAL_MS]);
+  }, [groqMaxRequestsPerMinute, GROQ_MIN_INTERVAL_MS]);
 
   const logGroqThrottle = useCallback((message) => {
     const limiter = groqLimiterRef.current;
@@ -360,6 +364,11 @@ export default function App({ mode = "voice" }) {
           if (w) {
             setActivationWord(w);
             activationWordRef.current = w;
+          }
+
+          const configuredRpm = Number(data?.groqClientMaxRequestsPerMinute);
+          if (Number.isFinite(configuredRpm) && configuredRpm >= 1) {
+            setGroqMaxRequestsPerMinute(Math.max(1, Math.floor(configuredRpm)));
           }
 
           // Groq transcription is handled entirely server-side via /api/process/transcribe-* endpoints
