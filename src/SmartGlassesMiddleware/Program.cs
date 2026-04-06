@@ -934,7 +934,11 @@ app.MapGet("/api/process/client-settings", (IConfiguration configuration, HttpCo
         if (string.IsNullOrWhiteSpace(activationWord))
             activationWord = "iris";
 
-        return Results.Ok(new { speechTranscriptionMode = mode, activationWord, groqCommandTranscriptionEnabled = true });
+        return Results.Ok(new { 
+            speechTranscriptionMode = mode, 
+            activationWord, 
+            groqCommandTranscriptionEnabled = true
+        });
     }
     catch (Exception ex)
     {

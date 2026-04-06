@@ -192,9 +192,10 @@ export default function App({ mode = "voice" }) {
       const formData = new FormData();
       formData.append("audio", float32ToWavBlob(audio), "command.wav");
       formData.append("language", "en");
+      formData.append("checkWakeword", "false");
 
       const payload = await fetchJsonWithTimeout(
-        "/api/process/transcribe-command",
+        "/api/process/transcribe",
         {
           method: "POST",
           body: formData,
@@ -216,9 +217,10 @@ export default function App({ mode = "voice" }) {
       const formData = new FormData();
       formData.append("audio", float32ToWavBlob(audio), "wakeword.wav");
       formData.append("language", "en");
+      formData.append("checkWakeword", "true");
 
       const payload = await fetchJsonWithTimeout(
-        "/api/process/transcribe-wakeword",
+        "/api/process/transcribe",
         {
           method: "POST",
           body: formData,
@@ -227,16 +229,20 @@ export default function App({ mode = "voice" }) {
       );
 
       const text = (payload?.text || "").trim();
-      console.log(`[Voice Debug], within transcribe Wake Word with Groq: ${text}`);
+      const matched = payload?.matched ?? text.toLowerCase().includes("iris");
+      console.log(`[Voice Debug] Wake-word check: "${text}" → ${matched ? "MATCH ✅" : "no match"}`);
       if (text) {
         addLog(`👂 Wake-word heard: "${text}"`, "info");
       }
+      // Return only the text; the caller will check `matched` from the full response
       return text || null;
     } catch (err) {
       addLog(`⚠️ Wake-word transcription failed: ${err?.message || "unknown"}`, "warn");
       return null;
     }
   }, [addLog, fetchJsonWithTimeout, float32ToWavBlob]);
+
+
 
   useEffect(() => {
     return () => {
@@ -246,7 +252,9 @@ export default function App({ mode = "voice" }) {
   }, []);
 
   // Keep activationWordRef in sync with the state value.
-  useEffect(() => { activationWordRef.current = activationWord; }, [activationWord]);
+  useEffect(() => {
+    activationWordRef.current = activationWord;
+  }, [activationWord]);
 
 
 
@@ -278,6 +286,8 @@ export default function App({ mode = "voice" }) {
             setActivationWord(w);
             activationWordRef.current = w;
           }
+
+          // Groq transcription is handled entirely server-side via /api/process/transcribe-* endpoints
 
           if (!cancelled) {
             await sleep(POLL_INTERVAL_MS);
