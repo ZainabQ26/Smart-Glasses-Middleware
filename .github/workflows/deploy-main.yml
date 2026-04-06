@@ -285,43 +285,24 @@ jobs:
           SHA="${{ github.sha }}"
           IMAGE_URI="${REGISTRY}/${REPOSITORY}:${SHA}"
 
-          # Guard against stale/missing image tags so Terraform never updates ECS
-          # to a non-existent image (which would make the backend unavailable).
-          if aws ecr describe-images \
-            --repository-name "$REPOSITORY" \
-            --image-ids imageTag="$SHA" \
-            --region "$AWS_REGION" >/dev/null 2>&1; then
-            SELECTED_IMAGE="$IMAGE_URI"
-          else
-            echo "::warning::Image tag $SHA not found in ECR; falling back to currently running ECS image."
-
-            CLUSTER="smart-glasses-dev-cluster"
-            SERVICE="smart-glasses-dev-api-service"
-            TASK_DEF_ARN=$(aws ecs describe-services \
-              --cluster "$CLUSTER" \
-              --services "$SERVICE" \
-              --region "$AWS_REGION" \
-              --query 'services[0].taskDefinition' \
-              --output text 2>/dev/null || true)
-
-            if [ -z "$TASK_DEF_ARN" ] || [ "$TASK_DEF_ARN" = "None" ] || [ "$TASK_DEF_ARN" = "null" ]; then
-              echo "Unable to resolve running ECS task definition for fallback image."
-              exit 1
+          # Wait for ECR tag availability to avoid deploying an older fallback image.
+          SELECTED_IMAGE=""
+          for attempt in {1..20}; do
+            if aws ecr describe-images \
+              --repository-name "$REPOSITORY" \
+              --image-ids imageTag="$SHA" \
+              --region "$AWS_REGION" >/dev/null 2>&1; then
+              SELECTED_IMAGE="$IMAGE_URI"
+              echo "Using freshly built image: $SELECTED_IMAGE"
+              break
             fi
+            echo "Image tag $SHA not visible in ECR yet (attempt $attempt/20); retrying in 15s..."
+            sleep 15
+          done
 
-            FALLBACK_IMAGE=$(aws ecs describe-task-definition \
-              --task-definition "$TASK_DEF_ARN" \
-              --region "$AWS_REGION" \
-              --query 'taskDefinition.containerDefinitions[?name==`api`].image | [0]' \
-              --output text 2>/dev/null || true)
-
-            if [ -z "$FALLBACK_IMAGE" ] || [ "$FALLBACK_IMAGE" = "None" ] || [ "$FALLBACK_IMAGE" = "null" ]; then
-              echo "Unable to resolve fallback image from ECS task definition $TASK_DEF_ARN."
-              exit 1
-            fi
-
-            SELECTED_IMAGE="$FALLBACK_IMAGE"
-            echo "Using fallback image: $SELECTED_IMAGE"
+          if [ -z "$SELECTED_IMAGE" ]; then
+            echo "::error::Image tag $SHA was not found in ECR after retries. Aborting deploy to avoid stale rollback."
+            exit 1
           fi
 
           cat > aws/infrastructure/tf_image_vars.auto.tfvars <<EOF

@@ -118,23 +118,23 @@ jobs:
             exit 1
           fi
 
-          if aws ecr describe-images \
-            --repository-name "$REPOSITORY" \
-            --image-ids imageTag="$GITHUB_SHA" \
-            --region "$AWS_REGION" >/dev/null 2>&1; then
-            IMAGE="$CANDIDATE_IMAGE"
-          else
-            echo "::warning::Image tag $GITHUB_SHA not found in ECR; keeping currently running API image."
-            IMAGE=$(aws ecs describe-task-definition \
-              --task-definition "$TASK_DEF_ARN" \
-              --region "$AWS_REGION" \
-              --query 'taskDefinition.containerDefinitions[?name==`api`].image | [0]' \
-              --output text 2>/dev/null || true)
-
-            if [ -z "$IMAGE" ] || [ "$IMAGE" = "None" ] || [ "$IMAGE" = "null" ]; then
-              echo "Unable to resolve fallback API image from task definition $TASK_DEF_ARN."
-              exit 1
+          IMAGE=""
+          for attempt in {1..20}; do
+            if aws ecr describe-images \
+              --repository-name "$REPOSITORY" \
+              --image-ids imageTag="$GITHUB_SHA" \
+              --region "$AWS_REGION" >/dev/null 2>&1; then
+              IMAGE="$CANDIDATE_IMAGE"
+              echo "Using freshly built image: $IMAGE"
+              break
             fi
+            echo "Image tag $GITHUB_SHA not visible in ECR yet (attempt $attempt/20); retrying in 15s..."
+            sleep 15
+          done
+
+          if [ -z "$IMAGE" ]; then
+            echo "::error::Image tag $GITHUB_SHA was not found in ECR after retries. Aborting deploy to avoid stale rollback."
+            exit 1
           fi
 
           aws ecs describe-task-definition \
