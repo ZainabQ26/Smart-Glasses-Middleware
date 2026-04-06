@@ -13,7 +13,138 @@ import PdfViewer from "./PdfViewer.jsx";
 //
 import glassesImg from "./pdf/image/Gemini_Generated_Image_8mwak58mwak58mwa.png";
 
-export default function App({ mode = "voice" }) {
+// ─── TRANSLATIONS ─────────────────────────────────────────────────────────────
+const TRANSLATIONS = {
+  en: {
+    title: "Hey, Eye-ris here. How can I help?",
+    subtitleTemplate: 'Say "{word}" to start, then speak your command.',
+    connectingMic: "Connecting microphone…",
+    readyTemplate: 'Ready — say "{word}" to begin',
+    howItWorksTitle: "🎤 How It Works",
+    steps: [
+      'Say "{word}" to wake the assistant.',
+      "Speak your command clearly.",
+      "The assistant will respond or perform the action.",
+      'Say "{word}" again for the next command.',
+      'After "search recent files", you can specify a file number without reactivating.',
+    ],
+    commonCommandsTitle: "📋 Common Commands",
+    commandsOverlayTitle: "📋 Commands",
+    commandList: [
+      ["search recent files", "browse recent uploaded files"],
+      ["number #", "go to file number in recent files list"],
+      ["open last document", "Open the last uploaded document"],
+      ["next/previous page", "Go to the next/previous page"],
+      ["go to page 5", "Jump to a specific page"],
+      ["highlight aspirin", "Highlight a word in the open document"],
+      ["clear highlights", "Remove all highlights"],
+      ["search for blood pressure", "Search for text in documents"],
+      ["search for BP", "Search using FDA SPL abbreviations"],
+      ["remind me to…", "Set a reminder"],
+      ["show my reminders", "List all your reminders"],
+      ["print document", "Print the open document with highlights"],
+      ["admin panel", "Open the admin panel"],
+    ],
+    sendingAI: "🤖 Sending to AI…",
+    transcribing: "⏳ Transcribing…",
+    listening: "🗣️ Listening…",
+    connectingMicShort: "⏳ Connecting mic…",
+    sayWordTemplate: 'Say "{word}"',
+    you: "You",
+    aiThinking: "AI is thinking…",
+    aiLabel: "AI",
+    advanced: "Advanced",
+    recentFiles: "📂 Recent Uploaded Files",
+    recentFilesHintTemplate: "Say a number (1–{n}) or tap a file to open it.",
+    lastDocument: "📄 Last Uploaded Document",
+    previewDocument: "Preview Document →",
+    remindersTitle: "📝 Your Reminders",
+    noReminders: "No reminders yet.",
+    textInputPlaceholderTemplate: 'type "{word}" to start, followed by your command.',
+    send: "Send",
+    closeLog: "✕ Close Log",
+    activityLogBtn: "📋 Activity Log",
+    activityLogTitle: "Activity Log",
+    noActivityTemplate: 'No activity yet. Say "{word}".',
+    noClearCommandTemplate: 'I didn\'t hear a clear command. Please say "{word}" again.',
+    commandTooBrief: "That was too brief. Please say a full command.",
+    didntCatch: "I didn't catch that command. Please try again.",
+  },
+  es: {
+    title: "Hola, aquí Eye-ris. ¿En qué puedo ayudarte?",
+    subtitleTemplate: 'Di "{word}" para empezar, luego habla tu comando.',
+    connectingMic: "Conectando micrófono…",
+    readyTemplate: 'Listo — di "{word}" para comenzar',
+    howItWorksTitle: "🎤 Cómo funciona",
+    steps: [
+      'Di "{word}" para activar el asistente.',
+      "Habla tu comando claramente.",
+      "El asistente responderá o realizará la acción.",
+      'Di "{word}" de nuevo para el siguiente comando.',
+      'Tras "buscar archivos recientes", puedes indicar el número sin reactivar.',
+    ],
+    commonCommandsTitle: "📋 Comandos comunes",
+    commandsOverlayTitle: "📋 Comandos",
+    commandList: [
+      ["buscar archivos recientes", "explorar archivos subidos recientemente"],
+      ["número #", "ir al número de archivo en la lista reciente"],
+      ["abrir último documento", "Abrir el último documento subido"],
+      ["página siguiente/anterior", "Ir a la página siguiente/anterior"],
+      ["ir a la página 5", "Saltar a una página específica"],
+      ["resaltar aspirina", "Resaltar una palabra en el documento abierto"],
+      ["borrar resaltados", "Eliminar todos los resaltados"],
+      ["buscar presión arterial", "Buscar texto en documentos"],
+      ["buscar PA", "Buscar usando abreviaciones FDA SPL"],
+      ["recuérdame…", "Establecer un recordatorio"],
+      ["mostrar mis recordatorios", "Listar todos tus recordatorios"],
+      ["imprimir documento", "Imprimir el documento abierto con resaltados"],
+      ["panel de administración", "Abrir el panel de administración"],
+    ],
+    sendingAI: "🤖 Enviando a IA…",
+    transcribing: "⏳ Transcribiendo…",
+    listening: "🗣️ Escuchando…",
+    connectingMicShort: "⏳ Conectando mic…",
+    sayWordTemplate: 'Di "{word}"',
+    you: "Tú",
+    aiThinking: "La IA está pensando…",
+    aiLabel: "IA",
+    advanced: "Avanzado",
+    recentFiles: "📂 Archivos subidos recientes",
+    recentFilesHintTemplate: "Di un número (1–{n}) o toca un archivo para abrirlo.",
+    lastDocument: "📄 Último documento subido",
+    previewDocument: "Vista previa →",
+    remindersTitle: "📝 Tus recordatorios",
+    noReminders: "Aún no hay recordatorios.",
+    textInputPlaceholderTemplate: 'escribe "{word}" para empezar, seguido de tu comando.',
+    send: "Enviar",
+    closeLog: "✕ Cerrar registro",
+    activityLogBtn: "📋 Registro de actividad",
+    activityLogTitle: "Registro de actividad",
+    noActivityTemplate: 'Sin actividad aún. Di "{word}".',
+    noClearCommandTemplate: 'No escuché un comando claro. Di "{word}" de nuevo.',
+    commandTooBrief: "Eso fue demasiado breve. Por favor di un comando completo.",
+    didntCatch: "No capturé ese comando. Por favor intenta de nuevo.",
+  },
+};
+
+// Interpolate {key} placeholders in a translation template string.
+function tpl(str, vals) {
+  return str.replace(/\{(\w+)\}/g, (_, k) => (vals[k] !== undefined ? vals[k] : k));
+}
+
+// Render a translation template that contains a single {word} placeholder as
+// React nodes, wrapping the word in a highlighted <strong> element.
+function renderWithHighlight(template, word) {
+  const parts = template.split('{word}');
+  if (parts.length < 2) return tpl(template, { word });
+  return (
+    <>
+      {parts[0]}<strong style={{color:"#f97316"}}>"{word}"</strong>{parts[1]}
+    </>
+  );
+}
+
+export default function App({ mode = "voice", language = "en" }) {
   const [status, setStatus]       = useState("idle"); // idle | listening | processing | sending
   const [logs, setLogs]           = useState([]);
   const [inputText, setInputText] = useState("");
@@ -31,6 +162,12 @@ export default function App({ mode = "voice" }) {
   // Ref copy so the async voice pipeline always reads the current value without
   // needing to restart the AudioContext effect.
   const activationWordRef = useRef(activationWord);
+  // Ref copy of the current language so async callbacks always read the latest value.
+  const languageRef = useRef(language);
+  // Keep languageRef in sync whenever the language prop changes.
+  useEffect(() => { languageRef.current = language; }, [language]);
+  // Active translation bundle.
+  const t = TRANSLATIONS[language] || TRANSLATIONS.en;
   // Wrapper keeps the ref in sync so async callbacks always read the current value.
   const setPendingAction = useCallback((val) => {
     pendingActionRef.current = typeof val === "function" ? val(pendingActionRef.current) : val;
@@ -255,9 +392,7 @@ export default function App({ mode = "voice" }) {
       }
 
       const formData = new FormData();
-      formData.append("audio", float32ToWavBlob(audio), "command.wav");
-      formData.append("language", "en");
-      formData.append("checkWakeword", "false");
+      formData.append("language", languageRef.current);
 
       const payload = await fetchJsonWithTimeout(
         "/api/process/transcribe",
@@ -290,9 +425,7 @@ export default function App({ mode = "voice" }) {
       }
 
       const formData = new FormData();
-      formData.append("audio", float32ToWavBlob(audio), "wakeword.wav");
-      formData.append("language", "en");
-      formData.append("checkWakeword", "true");
+      formData.append("language", languageRef.current);
 
       const payload = await fetchJsonWithTimeout(
         "/api/process/transcribe",
@@ -646,7 +779,7 @@ export default function App({ mode = "voice" }) {
       if (!commandText) {
         addLog("⚠️ Command was empty after wake-word cleanup.", "warn");
         setPendingAction(null);
-        showAiResponse("I didn't catch that command. Please try again.");
+        showAiResponse(t.didntCatch);
         return;
       }
 
@@ -654,7 +787,7 @@ export default function App({ mode = "voice" }) {
       if (isBlankAudioOrNoise(commandText)) {
         addLog("🔊 Detected blank audio or background noise — requiring reactivation.", "warn");
         setPendingAction(null);
-        showAiResponse("I didn't hear a clear command. Please say \"Hello Iris\" again.");
+        showAiResponse(tpl(t.noClearCommandTemplate, { word: activationWordRef.current }));
         // Return to idle/wake-word mode — requires reactivation
         resumeListeningRef.current?.();
         return;
@@ -670,7 +803,7 @@ export default function App({ mode = "voice" }) {
       if (requiresTwoWords) {
         addLog("⏱️ Command too brief — likely background noise.", "warn");
         setPendingAction(null);
-        showAiResponse("That was too brief. Please say a full command.");
+        showAiResponse(t.commandTooBrief);
         resumeListeningRef.current?.();
         return;
       }
@@ -1416,14 +1549,14 @@ export default function App({ mode = "voice" }) {
   const isProcessing = status === "processing";
   const isSending    = status === "sending";
   const btnLabel = isSending
-    ? "🤖 Sending to AI…"
+    ? t.sendingAI
     : isProcessing
-      ? "⏳ Transcribing…"
+      ? t.transcribing
       : isListening
-        ? "🗣️ Listening…"
+        ? t.listening
         : !wakeWordReady
-          ? "⏳ Connecting mic…"
-          : `Say "${activationWord}"`;
+          ? t.connectingMicShort
+          : tpl(t.sayWordTemplate, { word: activationWord });
   const dotColor = isSending    ? "#3498db"
     : isProcessing ? "#9b59b6"
     : isListening  ? "#e67e22"
@@ -1434,20 +1567,7 @@ export default function App({ mode = "voice" }) {
   const dotStyle = { ...styles.dot, background: dotColor, ...(shouldPulse ? { animation: "pulse 1s ease-in-out infinite" } : {}) };
 
   // Full command list shown as an overlay in the top-left only while listening.
-  const COMMAND_LIST = [
-    [`"search recent files"`,  "browse recent uploaded files"],
-    [`"number "#"`,            "goes to file number in recent files list"],
-    [`" t document"`,    "open last uploaded document"],
-    [`"next/previous page"`,   "next/previous page"],
-    [`"go to page 5"`,         "jump to page"],
-    [`"highlight [word]"`,     "highlight text"],
-    [`"clear highlights"`,     "delete all highlights"],
-    [`"search for [text]"`,    "search document"],
-    [`"print document"`,       "save document as PDF with highlights"],
-    [`"show my reminders"`,    "list reminders"],
-    [`"remind me to…"`,        "set reminder"],
-    [`"admin panel"`,          "open settings"],
-  ];
+  const COMMAND_LIST = t.commandList.map(([cmd, desc]) => [`"${cmd}"`, desc]);
 
   return (
     <div style={{ ...styles.page, ...(mode === "admin" ? styles.adminMode : {}) }}>
@@ -1461,9 +1581,9 @@ export default function App({ mode = "voice" }) {
             style={{ display: 'block', maxWidth: '280px', width: '100%', height: 'auto', flexShrink: 0 }}
           />
           <div style={styles.landingCard}>
-            <h1 style={styles.landingTitle}>Hey, Eye-ris here. How can I help?</h1>
+            <h1 style={styles.landingTitle}>{t.title}</h1>
             <p style={styles.landingSubtitle}>
-              Say <strong style={{color:"#f97316"}}>"{activationWord}"</strong> to start, then speak your command.
+              {renderWithHighlight(t.subtitleTemplate, activationWord)}
             </p>
 
             {/* ── Initialization status ─────────────────────────────────── */}
@@ -1471,46 +1591,30 @@ export default function App({ mode = "voice" }) {
               {!wakeWordReady ? (
                 <div style={styles.landingLoadingRow}>
                   <div style={styles.landingSpinner} />
-                  <span style={styles.landingLoadingText}>Connecting microphone…</span>
+                  <span style={styles.landingLoadingText}>{t.connectingMic}</span>
                 </div>
               ) : (
                 <div style={styles.landingReadyRow}>
                   <span style={styles.landingReadyBadge}>✓</span>
                   <span style={styles.landingReadyText}>
-                    Ready — say <strong style={{color:"#f97316"}}>"{activationWord}"</strong> to begin
+                    {renderWithHighlight(t.readyTemplate, activationWord)}
                   </span>
                 </div>
               )}
             </div>
             <div style={styles.landingSection} className="sgm-landing-how">
-              <h2 style={styles.landingH2}>🎤 How It Works</h2>
+              <h2 style={styles.landingH2}>{t.howItWorksTitle}</h2>
               <ol style={styles.landingOl}>
-                <li>Say <em>"{activationWord}"</em> to wake the assistant.</li>
-                <li>Speak your command clearly.</li>
-                <li>The assistant will respond or perform the action.</li>
-                <li>Say "{activationWord}" again for the next command.</li>
-                <li>After "search recent files", you can specify file number without reactivating.</li>
+                {t.steps.map((step, i) => (
+                  <li key={i}>{tpl(step, { word: activationWord })}</li>
+                ))}
               </ol>
             </div>
             <div style={styles.landingSection} className="sgm-landing-cmds">
-              <h2 style={styles.landingH2}>📋 Common Commands</h2>
+              <h2 style={styles.landingH2}>{t.commonCommandsTitle}</h2>
               <table style={styles.landingTable}>
                 <tbody>
-                  {[
-                    ["search recent files", "browse recent uploaded files"],
-                    ["number #", "go to file number in recent files list"],
-                    ["open last document", "Open the last uploaded document"],
-                    ["next/previous page", "Go to the next/previous page"],
-                    ["go to page 5", "Jump to a specific page"],
-                    ["highlight aspirin", "Highlight a word in the open document"],
-                    ["clear highlights", "Remove all highlights"],
-                    ["search for blood pressure", "Search for text in documents"],
-                    ["search for BP", "Search using FDA SPL abbreviations"],
-                    ["remind me to…", "Set a reminder"],
-                    ["show my reminders", "List all your reminders"],
-                    ["print document", "Print the open document with highlights"],
-                    ["admin panel", "Open the admin panel"],
-                  ].map(([cmd, desc]) => (
+                  {t.commandList.map(([cmd, desc]) => (
                     <tr key={cmd}>
                       <td style={styles.landingCmd}>"{cmd}"</td>
                       <td style={styles.landingDesc}>{desc}</td>
@@ -1526,7 +1630,7 @@ export default function App({ mode = "voice" }) {
       {/* ── Command list overlay — shown only while actively listening ─────────── */}
       {isListening && (
         <div style={styles.commandList}>
-          <p style={styles.commandListTitle}>📋 Commands</p>
+          <p style={styles.commandListTitle}>{t.commandsOverlayTitle}</p>
           <div style={styles.commandListGrid}>
             {COMMAND_LIST.map(([cmd, desc]) => (
               <div key={cmd} style={styles.commandListRow}>
@@ -1556,31 +1660,31 @@ export default function App({ mode = "voice" }) {
           <section style={styles.conversationArea}>
             {transcript && (
               <div style={styles.transcriptBubble}>
-                <span style={styles.bubbleLabel}>You</span>
+                <span style={styles.bubbleLabel}>{t.you}</span>
                 <p style={styles.bubbleText}>{transcript}</p>
               </div>
             )}
             {isSending && !aiResponse && !pendingAction && (
               <div style={styles.thinkingBubble}>
-                <span style={styles.thinkingText}>AI is thinking…</span>
+                <span style={styles.thinkingText}>{t.aiThinking}</span>
               </div>
             )}
             {aiResponse && !pendingAction && (
               <div style={styles.aiBubble}>
-                <span style={styles.bubbleLabel}>AI</span>
+                <span style={styles.bubbleLabel}>{t.aiLabel}</span>
                 <p style={styles.bubbleText}>{aiResponse}</p>
                 {usedAdvancedModel && (
                   <div style={{position: 'absolute', right: 12, bottom: 8, background: 'rgba(11,99,166,0.9)', color: 'white', padding: '4px 6px', borderRadius: 6, fontSize: 12, display: 'flex', alignItems: 'center', gap: 6}} title="Generated by advanced model">
                     <span style={{fontSize:12}}>⚡</span>
-                    <span style={{fontSize:11}}>Advanced</span>
+                    <span style={{fontSize:11}}>{t.advanced}</span>
                   </div>
                 )}
               </div>
             )}
             {pendingAction?.type === "SHOW_RECENT_FILES" && (
               <div style={styles.actionCard}>
-                <p style={styles.actionCardTitle}>📂 Recent Uploaded Files</p>
-                <p style={styles.actionCardHint}>Say a number (1–{pendingAction.files.length}) or tap a file to open it.</p>
+                <p style={styles.actionCardTitle}>{t.recentFiles}</p>
+                <p style={styles.actionCardHint}>{tpl(t.recentFilesHintTemplate, { n: pendingAction.files.length })}</p>
                 <div style={styles.actionList}>
                   {pendingAction.files.map((file, index) => (
                     <button
@@ -1603,13 +1707,13 @@ export default function App({ mode = "voice" }) {
             )}
             {pendingAction?.type === "SELECT_DOCUMENT" && (
               <div style={styles.actionCard}>
-                <p style={styles.actionCardTitle}>📄 Last Uploaded Document</p>
+                <p style={styles.actionCardTitle}>{t.lastDocument}</p>
                 <p style={styles.actionCardDoc}>{pendingAction.name}</p>
                 <button
                   style={styles.actionBtnSecondary}
                   onClick={() => openDocumentPreview({ previewId: pendingAction.id, name: pendingAction.name })}
                 >
-                  Preview Document →
+                  {t.previewDocument}
                 </button>
               </div>
             )}
@@ -1625,9 +1729,9 @@ export default function App({ mode = "voice" }) {
               ? "opacity 0.9s ease-out"
               : "opacity 0.25s ease-in",
           }}>
-            <p style={styles.remindersToastTitle}>📝 Your Reminders</p>
+            <p style={styles.remindersToastTitle}>{t.remindersTitle}</p>
             {remindersToast.reminders.length === 0 ? (
-              <p style={styles.remindersToastEmpty}>No reminders yet.</p>
+              <p style={styles.remindersToastEmpty}>{t.noReminders}</p>
             ) : (
               <ul style={styles.remindersToastList}>
                 {remindersToast.reminders.map((r, i) => (
@@ -1664,12 +1768,12 @@ export default function App({ mode = "voice" }) {
               type="text"
               value={inputText}
               onChange={e => setInputText(e.target.value)}
-              placeholder={`type "${activationWord}" to start, followed by your command.`}
+              placeholder={tpl(t.textInputPlaceholderTemplate, { word: activationWord })}
               style={styles.textInput}
               disabled={isSending || isProcessing}
             />
             <button type="submit" disabled={isSending || isProcessing || !inputText.trim()} style={styles.textSubmitBtn}>
-              Send
+              {t.send}
             </button>
           </form>
         </div>
@@ -1680,15 +1784,15 @@ export default function App({ mode = "voice" }) {
           style={styles.logToggleBtn}
           onClick={() => setLogOpen(prev => !prev)}
         >
-          {logOpen ? "✕ Close Log" : "📋 Activity Log"}
+          {logOpen ? t.closeLog : t.activityLogBtn}
         </button>
       )}
 
       {mode === "voice" && logOpen && (
         <div style={styles.logPanel}>
-          <h2 style={styles.sectionTitle}>Activity Log</h2>
+          <h2 style={styles.sectionTitle}>{t.activityLogTitle}</h2>
           {logs.length === 0 ? (
-            <p style={styles.emptyLog}>No activity yet. Say "{activationWord}".</p>
+            <p style={styles.emptyLog}>{tpl(t.noActivityTemplate, { word: activationWord })}</p>
           ) : (
             <ul style={styles.logList}>
               {logs.map(entry => (

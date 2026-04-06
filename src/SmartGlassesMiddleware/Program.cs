@@ -806,6 +806,19 @@ app.Use(async (context, next) =>
     await next();
 });
 
+// Serve the Spanish-language home page at /es and /es/.
+app.Use(async (context, next) =>
+{
+    if (HttpMethods.IsGet(context.Request.Method) &&
+        (context.Request.Path.Equals("/es", StringComparison.OrdinalIgnoreCase) ||
+         context.Request.Path.Equals("/es/", StringComparison.OrdinalIgnoreCase)))
+    {
+        context.Request.Path = "/es/index.html";
+    }
+
+    await next();
+});
+
 app.UseStaticFiles(new StaticFileOptions
 {
     ContentTypeProvider = contentTypeProvider,
