@@ -208,11 +208,6 @@ public class AIService : IAIService
 
     private static readonly Dictionary<string, string> TaskDescriptions = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["time"]               = "user wants to know the current time or date",
-        ["reminder"]           = "user wants to set, add, or create a new reminder or alarm",
-        ["edit-reminder"]      = "user wants to change or update an existing reminder",
-        ["delete-reminder"]    = "user wants to remove, cancel, or delete a reminder",
-        ["show-reminders"]     = "user wants to see, list, view, or show their reminders",
         ["document-query"]     = "user wants to ask a question about the contents of a document",
         ["summarize-page"]     = "user wants a summary of the currently open or visible page in a document",
         ["highlight-word"]     = "user wants to highlight, search for, or find a word or phrase in the currently open document. Use when the user says 'highlight X', 'search for X', 'find X', or any variant of highlighting or searching text.",
@@ -222,6 +217,8 @@ public class AIService : IAIService
         ["select-document"]    = "user wants to immediately open/preview the most recently uploaded document without browsing. Use when the user says 'select document', 'open last file', 'open latest document', 'select and open', or wants the last/most-recent document directly.",
         ["next-page"]          = "user wants to go to the next page in a document or PDF",
         ["previous-page"]      = "user wants to go to the previous page in a document or PDF",
+        ["next-highlight"]     = "user wants to jump to the next highlighted match in a document or PDF",
+        ["previous-highlight"] = "user wants to jump to the previous highlighted match in a document or PDF",
         ["open-admin-panel"]   = "user wants to open, navigate to, or access the admin panel or administration page",
         ["advanced"]           = "user wants advanced features, settings, or RAG document processing",
         ["template"]           = "user wants to use or fill in a template",
@@ -296,12 +293,7 @@ public class AIService : IAIService
             "today's date",
             "current date",
             "date and time",
-            "what's the time")
-            || ContainsAllWords(normalized, "what", "time")
-            || ContainsAllWords(normalized, "current", "time")
-            || ContainsAllWords(normalized, "tell", "time")
-            || ContainsAllWords(normalized, "what", "date")
-            || ContainsAllWords(normalized, "current", "date"))
+            "what's the time"))
         {
             return "time";
         }
@@ -318,13 +310,7 @@ public class AIService : IAIService
             "remember to",
             "don t forget to",   // apostrophe stripped by normalization: "don't" → "don t"
             "dont forget to",
-            "make a note to")
-            || ContainsAllWords(normalized, "remind", "me")
-            || ContainsAllWords(normalized, "set", "reminder")
-            || ContainsAllWords(normalized, "add", "reminder")
-            || ContainsAllWords(normalized, "create", "reminder")
-            || ContainsAllWords(normalized, "new", "reminder")
-            || ContainsAllWords(normalized, "make", "reminder"))
+            "make a note to"))
         {
             return "reminder";
         }
@@ -337,11 +323,7 @@ public class AIService : IAIService
             "modify reminder",
             "edit my reminder",
             "change my reminder",
-            "update my reminder")
-            || ContainsAllWords(normalized, "edit", "reminder")
-            || ContainsAllWords(normalized, "change", "reminder")
-            || ContainsAllWords(normalized, "update", "reminder")
-            || ContainsAllWords(normalized, "modify", "reminder"))
+            "update my reminder"))
         {
             return "edit-reminder";
         }
@@ -353,11 +335,7 @@ public class AIService : IAIService
             "cancel reminder",
             "delete the reminder",
             "remove the reminder",
-            "cancel the reminder")
-            || ContainsAllWords(normalized, "delete", "reminder")
-            || ContainsAllWords(normalized, "remove", "reminder")
-            || ContainsAllWords(normalized, "cancel", "reminder")
-            || ContainsAllWords(normalized, "get", "rid", "reminder"))
+            "cancel the reminder"))
         {
             return "delete-reminder";
         }
@@ -373,14 +351,7 @@ public class AIService : IAIService
             "what are my reminders",
             "upcoming reminders",
             "all reminders",
-            "read my reminders")
-            || ContainsAllWords(normalized, "show", "reminder")
-            || ContainsAllWords(normalized, "see", "reminder")
-            || ContainsAllWords(normalized, "check", "reminder")
-            || ContainsAllWords(normalized, "view", "reminder")
-            || ContainsAllWords(normalized, "list", "reminder")
-            || ContainsAllWords(normalized, "display", "reminder")
-            || ContainsAllWords(normalized, "read", "reminder"))
+            "read my reminders"))
         {
             return "show-reminders";
         }
@@ -586,6 +557,21 @@ public class AIService : IAIService
             return "next-page";
         }
 
+        // ── next-highlight ────────────────────────────────────────────────────
+        if (ContainsAnyPhrase(normalized,
+            "next highlight",
+            "next highlighted",
+            "next highlighted word",
+            "next highlighted phrase",
+            "go to next highlight",
+            "find next highlight")
+            || ContainsAllWords(normalized, "next", "highlight")
+            || ContainsAllWords(normalized, "jump", "next", "highlight")
+            || ContainsAllWords(normalized, "move", "next", "highlight"))
+        {
+            return "next-highlight";
+        }
+
         // ── previous-page ─────────────────────────────────────────────────────
         if (ContainsAnyPhrase(normalized, "previous page", "prev page", "back page", "page up", "go back a page")
             || ContainsAllWords(normalized, "previous", "page")
@@ -595,6 +581,23 @@ public class AIService : IAIService
             || ContainsAllWords(normalized, "back", "page"))
         {
             return "previous-page";
+        }
+
+        // ── previous-highlight ────────────────────────────────────────────────
+        if (ContainsAnyPhrase(normalized,
+            "previous highlight",
+            "prev highlight",
+            "back highlight",
+            "previous highlighted",
+            "previous highlighted word",
+            "go to previous highlight",
+            "find previous highlight")
+            || ContainsAllWords(normalized, "previous", "highlight")
+            || ContainsAllWords(normalized, "prev", "highlight")
+            || ContainsAllWords(normalized, "back", "highlight")
+            || ContainsAllWords(normalized, "last", "highlight"))
+        {
+            return "previous-highlight";
         }
 
         // ── summarize-page ────────────────────────────────────────────────────

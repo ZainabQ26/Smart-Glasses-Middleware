@@ -2,6 +2,7 @@ using System.Net;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using NUnit.Framework;
@@ -75,7 +76,7 @@ public class ClientSettingsIntegrationTests
     }
 
     [Test]
-    public async Task GetClientSettings_DefaultValues_WhenNoConfigSet()
+    public async Task GetClientSettings_ReflectsConfiguredValues()
     {
         var response = await _client.GetAsync("/api/process/client-settings");
         response.EnsureSuccessStatusCode();
@@ -84,15 +85,27 @@ public class ClientSettingsIntegrationTests
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
 
-        // Default mode should be "groq-only" when no config is provided
+        var configuration = _factory.Services.GetRequiredService<IConfiguration>();
+        var configuredMode = configuration["AI:SpeechTranscriptionMode"]?.Trim().ToLowerInvariant();
+        var expectedMode = configuredMode switch
+        {
+            "webspeech-only" => "webspeech-only",
+            "whisper-only" => "whisper-only",
+            "groq-only" => "groq-only",
+            _ => "groq-only"
+        };
+
+        var configuredActivationWord = configuration["AI:ActivationWord"]?.Trim().ToLowerInvariant();
+        var expectedActivationWord = string.IsNullOrWhiteSpace(configuredActivationWord)
+            ? "hello iris"
+            : configuredActivationWord;
+
         var mode = root.GetProperty("speechTranscriptionMode").GetString();
-        Assert.That(mode, Is.EqualTo("groq-only"));
+        Assert.That(mode, Is.EqualTo(expectedMode));
 
-        // Default activation word should be "iris" when no config is provided
         var activationWord = root.GetProperty("activationWord").GetString();
-        Assert.That(activationWord, Is.EqualTo("iris"));
+        Assert.That(activationWord, Is.EqualTo(expectedActivationWord));
 
-        // groqCommandTranscriptionEnabled should always be true
         var groqEnabled = root.GetProperty("groqCommandTranscriptionEnabled").GetBoolean();
         Assert.That(groqEnabled, Is.True);
     }

@@ -55,6 +55,16 @@ static async Task ResetStalePendingUploadsAsync(IServiceProvider services, ILogg
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Single appsettings source: load only appsettings.json, then allow env vars/CLI overrides.
+builder.Configuration.Sources.Clear();
+builder.Configuration
+    .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+    .AddEnvironmentVariables();
+if (args is { Length: > 0 })
+{
+    builder.Configuration.AddCommandLine(args);
+}
+
 // Configure QuestPDF license for community usage to avoid runtime license validation errors
 QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
 
@@ -712,6 +722,20 @@ static string GetFrameOptionsForPath(PathString path)
     return "DENY";
 }
 
+static string ToTitleCaseWords(string value)
+{
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return value;
+    }
+
+    var parts = value
+        .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+        .Select(part => char.ToUpperInvariant(part[0]) + part[1..].ToLowerInvariant());
+
+    return string.Join(' ', parts);
+}
+
 // Add request logging middleware FIRST to track all requests
 app.Use(async (context, next) =>
 {
@@ -835,9 +859,11 @@ app.Use(async (context, next) =>
                 _ => "groq-only"
             };
 
-            var activationWord = configuration["AI:ActivationWord"]?.Trim().ToLowerInvariant();
+            var activationWord = configuration["AI:ActivationWord"]?.Trim();
             if (string.IsNullOrWhiteSpace(activationWord))
                 activationWord = "Hello Iris";
+            else
+                activationWord = ToTitleCaseWords(activationWord);
 
             await context.Response.WriteAsJsonAsync(new
             {
@@ -990,9 +1016,11 @@ app.MapGet("/api/process/client-settings", (IConfiguration configuration, HttpCo
             _ => "groq-only"
         };
 
-        var activationWord = configuration["AI:ActivationWord"]?.Trim().ToLowerInvariant();
+        var activationWord = configuration["AI:ActivationWord"]?.Trim();
         if (string.IsNullOrWhiteSpace(activationWord))
             activationWord = "Hello Iris";
+        else
+            activationWord = ToTitleCaseWords(activationWord);
 
         return Results.Ok(new { 
             speechTranscriptionMode = mode, 
