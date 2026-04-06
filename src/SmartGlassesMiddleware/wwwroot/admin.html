@@ -310,6 +310,41 @@
             color: #e8eef5 !important;
         }
 
+        /* Language toggle — mirrors the theme-toggle button style */
+        #lang-toggle {
+            width: 54px;
+            height: 44px;
+            padding: 0 6px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+            box-shadow: none;
+            background: #ecf0f1;
+            border: 1px solid #dcdcdc;
+            color: #2c3e50;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+            transition: background-color 0.2s ease, color 0.2s ease;
+        }
+
+        #lang-toggle:hover {
+            background: #dfe6e9;
+        }
+
+        body.dark #lang-toggle {
+            background: #2d3750 !important;
+            color: #d7e6f6 !important;
+            border: 1px solid rgba(255,255,255,0.04) !important;
+        }
+
+        body.dark #lang-toggle:hover {
+            background: #36425b !important;
+            color: #e8eef5 !important;
+        }
+
         /* Soften harsh white elements that use inline styles and improve legibility */
         body.dark #file-preview,
         body.dark #prompt-preview-panel,
@@ -1470,6 +1505,7 @@
             <button class="tab active" data-tab="files" data-testid="tab-files" aria-controls="files">Files</button>
             <button class="tab" data-tab="prompts" data-testid="tab-prompts" aria-controls="prompts">Conversation</button>
             <button class="tab" data-tab="groq-live" data-testid="tab-groq-live" aria-controls="groq-live">🎙 Groq Live</button>
+            <button id="lang-toggle" type="button" title="Cambiar a Español" aria-label="Cambiar a Español" data-testid="lang-toggle">🇪🇸 ES</button>
             <button id="theme-toggle" class="theme-toggle" type="button" title="Toggle dark mode" aria-label="Toggle dark mode" data-testid="theme-toggle">🌙</button>
         </div>
 
@@ -1562,6 +1598,41 @@
                         const target = document.getElementById(tab.dataset.tab);
                         if (target) target.classList.add('active');
                     });
+                });
+            } catch (e) { /* noop */ }
+        })();
+        // Language toggle — switches the admin conversation React app between English and Spanish.
+        (function() {
+            try {
+                var langToggle = document.getElementById('lang-toggle');
+                if (!langToggle) return;
+                var adminChatRoot = document.getElementById('admin-chat-root');
+
+                // Restore saved preference (default: 'en').
+                var current = localStorage.getItem('adminLanguage') === 'es' ? 'es' : 'en';
+
+                function applyLang(lang) {
+                    current = lang;
+                    localStorage.setItem('adminLanguage', lang);
+                    langToggle.textContent = lang === 'es' ? '🇺🇸 EN' : '🇪🇸 ES';
+                    var title = lang === 'es'
+                        ? 'Switch to English'
+                        : 'Cambiar a Español';
+                    langToggle.title = title;
+                    langToggle.setAttribute('aria-label', title);
+                    if (adminChatRoot) adminChatRoot.dataset.language = lang;
+                    window.dispatchEvent(new CustomEvent('adminlanguagechange'));
+                }
+
+                // Set initial state without dispatching (React may not be mounted yet).
+                langToggle.textContent = current === 'es' ? '🇺🇸 EN' : '🇪🇸 ES';
+                var initialTitle = current === 'es' ? 'Switch to English' : 'Cambiar a Español';
+                langToggle.title = initialTitle;
+                langToggle.setAttribute('aria-label', initialTitle);
+                if (adminChatRoot) adminChatRoot.dataset.language = current;
+
+                langToggle.addEventListener('click', function() {
+                    applyLang(current === 'en' ? 'es' : 'en');
                 });
             } catch (e) { /* noop */ }
         })();
