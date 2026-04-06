@@ -812,6 +812,66 @@ if (!app.Environment.IsEnvironment("Testing"))
 }
 app.UseCors();
 
+// Short-circuit client-settings before MVC controller selection so a broken
+// ProcessController activation path cannot take down this GET endpoint.
+app.Use(async (context, next) =>
+{
+    if (HttpMethods.IsGet(context.Request.Method) && context.Request.Path.Equals("/api/process/client-settings", StringComparison.OrdinalIgnoreCase))
+    {
+        context.Response.Headers.CacheControl = "no-store, no-cache, must-revalidate";
+        context.Response.Headers.Pragma = "no-cache";
+
+        try
+        {
+            var configuration = context.RequestServices.GetRequiredService<IConfiguration>();
+            var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+
+            var configuredMode = configuration["AI:SpeechTranscriptionMode"]?.Trim().ToLowerInvariant();
+            var mode = configuredMode switch
+            {
+                "webspeech-only" => "webspeech-only",
+                "whisper-only" => "whisper-only",
+                "groq-only" => "groq-only",
+                _ => "groq-only"
+            };
+
+            var activationWord = configuration["AI:ActivationWord"]?.Trim().ToLowerInvariant();
+            if (string.IsNullOrWhiteSpace(activationWord))
+                activationWord = "iris";
+
+            await context.Response.WriteAsJsonAsync(new
+            {
+                speechTranscriptionMode = mode,
+                activationWord,
+                groqCommandTranscriptionEnabled = true
+            });
+        }
+        catch (Exception ex)
+        {
+            try
+            {
+                var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+                logger.LogError(ex, "client-settings middleware failed");
+            }
+            catch
+            {
+                // Avoid cascading failure if logging itself is unavailable.
+            }
+
+            await context.Response.WriteAsJsonAsync(new
+            {
+                speechTranscriptionMode = "groq-only",
+                activationWord = "iris",
+                groqCommandTranscriptionEnabled = true
+            });
+        }
+
+        return;
+    }
+
+    await next();
+});
+
 // CRITICAL: UseRouting() is required for controller endpoints to work
 app.UseRouting();
 
