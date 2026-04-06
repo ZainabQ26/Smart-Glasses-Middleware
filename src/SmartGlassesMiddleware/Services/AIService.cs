@@ -652,6 +652,7 @@ public class AIService : IAIService
         // ── highlight-word (generic client-side PDF highlight / find) ──────────
         if (ContainsAnyPhrase(normalized,
             "highlight ",
+            "highlights ",
             "search for ",
             "search the ",
             "find the word",
