@@ -1309,6 +1309,58 @@ jobs:
             exit 1
           fi
 
+      - name: Verify ECS is running the new API image (no rollback)
+        run: |
+          set -euo pipefail
+
+          CLUSTER=$(jq -r '.ecs_cluster_name.value // empty' ./tf/tf_outputs.json 2>/dev/null || true)
+          CLUSTER=${CLUSTER:-smart-glasses-dev-cluster}
+          SERVICE=$(aws ecs list-services \
+            --cluster "$CLUSTER" --region "$AWS_REGION" \
+            --query 'serviceArns[?ends_with(@, `-api-service`)] | [0]' \
+            --output text 2>/dev/null | awk -F/ '{print $NF}')
+          if [ -z "$SERVICE" ] || [ "$SERVICE" = "None" ] || [ "$SERVICE" = "null" ]; then
+            SERVICE="smart-glasses-dev-api-service"
+          fi
+
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          EXPECTED_IMAGE="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/smart-glasses-dev-api:${GITHUB_SHA}"
+
+          SERVICE_JSON=$(aws ecs describe-services \
+            --cluster "$CLUSTER" --services "$SERVICE" --region "$AWS_REGION" \
+            --query 'services[0]' --output json)
+
+          PRIMARY_TASK_DEF=$(echo "$SERVICE_JSON" | jq -r '(.deployments // []) | map(select(.status == "PRIMARY"))[0].taskDefinition // empty')
+          if [ -z "$PRIMARY_TASK_DEF" ] || [ "$PRIMARY_TASK_DEF" = "null" ] || [ "$PRIMARY_TASK_DEF" = "None" ]; then
+            PRIMARY_TASK_DEF=$(echo "$SERVICE_JSON" | jq -r '.taskDefinition // empty')
+          fi
+
+          if [ -z "$PRIMARY_TASK_DEF" ] || [ "$PRIMARY_TASK_DEF" = "null" ] || [ "$PRIMARY_TASK_DEF" = "None" ]; then
+            echo "::error::Unable to resolve PRIMARY task definition for ${SERVICE}."
+            exit 1
+          fi
+
+          ACTUAL_IMAGE=$(aws ecs describe-task-definition \
+            --task-definition "$PRIMARY_TASK_DEF" \
+            --region "$AWS_REGION" \
+            --query 'taskDefinition.containerDefinitions[?name==`api`].image | [0]' \
+            --output text)
+
+          echo "Expected image: ${EXPECTED_IMAGE}"
+          echo "PRIMARY task definition: ${PRIMARY_TASK_DEF}"
+          echo "Actual api image: ${ACTUAL_IMAGE}"
+
+          if [ "$ACTUAL_IMAGE" != "$EXPECTED_IMAGE" ]; then
+            echo "::error::ECS PRIMARY deployment is not using the new image tag ${GITHUB_SHA}. Possible rollback detected."
+            aws ecs describe-services \
+              --cluster "$CLUSTER" --services "$SERVICE" --region "$AWS_REGION" \
+              --query 'services[0].events[0:10].[createdAt,message]' \
+              --output text 2>/dev/null || true
+            exit 1
+          fi
+
+          echo "ECS PRIMARY deployment is running the expected image tag ${GITHUB_SHA}."
+
       - name: Fetch ECS container logs from CloudWatch
         if: always()
         run: |
