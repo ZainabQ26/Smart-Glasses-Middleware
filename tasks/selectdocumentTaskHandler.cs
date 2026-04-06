@@ -12,7 +12,7 @@ public class SelectDocumentTaskHandler : ITaskHandler
 
     public IReadOnlyList<string> Keywords => new[]
     {
-        "open document", "select document", "open the document", "open pdf", "open the pdf",
+        "open document", "open last document", "open the document", "open pdf", "open the pdf",
         "load document", "view document"
     };
 

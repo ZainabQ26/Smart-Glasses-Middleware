@@ -1361,7 +1361,7 @@ export default function App({ mode = "voice" }) {
   const COMMAND_LIST = [
     [`"search recent files"`,  "browse recent uploaded files"],
     [`"number "#"`,            "goes to file number in recent files list"],
-    [`"select document"`,      "open last uploaded document"],
+    [`" t document"`,    "open last uploaded document"],
     [`"next/previous page"`,   "next/previous page"],
     [`"go to page 5"`,         "jump to page"],
     [`"highlight [word]"`,     "highlight text"],
@@ -1423,7 +1423,7 @@ export default function App({ mode = "voice" }) {
                   {[
                     ["search recent files", "browse recent uploaded files"],
                     ["number #", "go to file number in recent files list"],
-                    ["select document", "Open the last uploaded document"],
+                    ["open last document", "Open the last uploaded document"],
                     ["next/previous page", "Go to the next/previous page"],
                     ["go to page 5", "Jump to a specific page"],
                     ["highlight aspirin", "Highlight a word in the open document"],
@@ -1588,7 +1588,7 @@ export default function App({ mode = "voice" }) {
               type="text"
               value={inputText}
               onChange={e => setInputText(e.target.value)}
-              placeholder="Type a command (e.g. search recent files, next page)"
+              placeholder={`type "${activationWord}" to start, followed by your command.`}
               style={styles.textInput}
               disabled={isSending || isProcessing}
             />
