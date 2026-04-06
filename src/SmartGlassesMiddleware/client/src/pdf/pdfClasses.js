@@ -38,12 +38,27 @@ export class ViewerState {
     this._pageNumber = 1;
     /** @type {Array<{keyWord: string, rectangleArrays: HighlightRectangle[]}>} */
     this._highlights = [];
+    this._currentIndexOfHighlight = 0;
   }
 
   get pdf() { return this._pdf; }
 
   get pageNumber() { return this._pageNumber; }
   set pageNumber(n) { this._pageNumber = n; }
+
+  /** 
+  @returns {Number} 
+  */
+  get currentIndexOfHighlight () {
+    return this._currentIndexOfHighlight;
+  }
+  /**
+  @param {string} currentIndex
+  @returns {Number}
+  */
+  set currentIndexOfHighlight (currentIndex) {
+    this._currentIndexOfHighlight = currentIndex;
+  }
 
   /** All active highlights. */
   get highlights() { return this._highlights; }
