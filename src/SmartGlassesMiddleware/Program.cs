@@ -792,6 +792,20 @@ var contentTypeProvider = new Microsoft.AspNetCore.StaticFiles.FileExtensionCont
 contentTypeProvider.Mappings[".wasm"] = "application/wasm";
 contentTypeProvider.Mappings[".mjs"]  = "application/javascript";
 contentTypeProvider.Mappings[".onnx"] = "application/octet-stream";
+
+// Allow extensionless admin URL while preserving existing /admin.html access.
+app.Use(async (context, next) =>
+{
+    if (HttpMethods.IsGet(context.Request.Method) &&
+        (context.Request.Path.Equals("/admin", StringComparison.OrdinalIgnoreCase) ||
+         context.Request.Path.Equals("/admin/", StringComparison.OrdinalIgnoreCase)))
+    {
+        context.Request.Path = "/admin.html";
+    }
+
+    await next();
+});
+
 app.UseStaticFiles(new StaticFileOptions
 {
     ContentTypeProvider = contentTypeProvider,
