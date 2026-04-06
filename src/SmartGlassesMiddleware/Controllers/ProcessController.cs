@@ -4,6 +4,7 @@ using SmartGlassesMiddleware.Models;
 using SmartGlassesMiddleware.Services;
 using System.Net.Http.Headers;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace SmartGlassesMiddleware.Controllers;
 
@@ -61,9 +62,20 @@ public class ProcessController : ControllerBase
         if (string.IsNullOrWhiteSpace(endpoint))
             endpoint = "https://api.groq.com/openai/v1/audio/transcriptions";
 
-        var model = Configuration["AI:Groq:WhisperModel"]?.Trim();
+        var legacyModel = Configuration["AI:Groq:WhisperModel"]?.Trim();
+        var wakewordModel = Configuration["AI:Groq:WhisperWakewordModel"]?.Trim();
+        var commandModel = Configuration["AI:Groq:WhisperCommandModel"]?.Trim();
+
+        var model = checkWakeword
+            ? (string.IsNullOrWhiteSpace(wakewordModel)
+                ? (string.IsNullOrWhiteSpace(legacyModel) ? "whisper-large-v3-turbo" : legacyModel)
+                : wakewordModel)
+            : (string.IsNullOrWhiteSpace(commandModel)
+                ? (string.IsNullOrWhiteSpace(legacyModel) ? "whisper-large-v3" : legacyModel)
+                : commandModel);
+
         if (string.IsNullOrWhiteSpace(model))
-            model = "whisper-large-v3-turbo";
+            model = checkWakeword ? "whisper-large-v3-turbo" : "whisper-large-v3";
 
         try
         {
@@ -99,7 +111,7 @@ public class ProcessController : ControllerBase
             if (!response.IsSuccessStatusCode)
             {
                 var logType = checkWakeword ? "wakeword" : "command";
-                Logger.LogWarning("Groq {Type} transcription failed ({StatusCode}): {Body}", logType, (int)response.StatusCode, body);
+                Logger.LogWarning("Groq {Type} transcription failed ({StatusCode}) for model {Model}: {Body}", logType, (int)response.StatusCode, model, body);
                 return StatusCode(502, new { error = "Groq transcription failed" });
             }
 
@@ -111,15 +123,25 @@ public class ProcessController : ControllerBase
                     : string.Empty;
 
                 var logType = checkWakeword ? "wakeword" : "command";
-                GroqTranscriptionLog.Add(text, logType);
+                GroqTranscriptionLog.Add(text, logType, model);
 
                 // For wake-word detection, check if the transcription contains the activation word
                 if (checkWakeword)
                 {
                     var activationWord = Configuration["AI:ActivationWord"]?.Trim() ?? "Iris";
-                    var normalized = text.ToLowerInvariant().Replace(activationWord.ToLowerInvariant(), "").Trim();
-                    var matched = text.ToLowerInvariant().Contains(activationWord.ToLowerInvariant());
-                    return Ok(new { text, matched, provider = "groq", model });
+                    var wakeRegex = new Regex($@"\b{Regex.Escape(activationWord)}\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+                    var wakeMatch = wakeRegex.Match(text);
+                    var matched = wakeMatch.Success;
+
+                    var commandAfterWakeword = string.Empty;
+                    if (matched)
+                    {
+                        commandAfterWakeword = text[(wakeMatch.Index + wakeMatch.Length)..]
+                            .TrimStart(' ', ',', ':', ';', '-', '.', '!', '?')
+                            .Trim();
+                    }
+
+                    return Ok(new { text, matched, commandAfterWakeword, provider = "groq", model });
                 }
 
                 return Ok(new { text, provider = "groq", model });

@@ -210,6 +210,7 @@ function renderGroqLiveEntry(entry) {
     const time = entry.timestampUtc
         ? new Date(entry.timestampUtc).toLocaleTimeString()
         : '';
+    const model = (entry.model || '').trim();
 
     const el = document.createElement('div');
     el.style.cssText = 'display:flex;align-items:flex-start;gap:10px;padding:8px 10px;background:#fff;border:1px solid #e0e0e0;border-radius:6px;font-size:14px;';
@@ -225,14 +226,24 @@ function renderGroqLiveEntry(entry) {
     text.style.cssText = 'flex:1;word-break:break-word;';
     text.textContent = entry.text || '(empty)';
 
+    const meta = document.createElement('div');
+    meta.style.cssText = 'display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex-shrink:0;';
+
+    const modelEl = document.createElement('span');
+    modelEl.style.cssText = 'font-size:11px;color:#4b5563;white-space:nowrap;';
+    modelEl.textContent = model ? model : 'model: unknown';
+
     // Timestamp
     const ts = document.createElement('span');
     ts.style.cssText = 'font-size:11px;color:#aaa;flex-shrink:0;white-space:nowrap;';
     ts.textContent = time;
 
+    meta.appendChild(modelEl);
+    meta.appendChild(ts);
+
     el.appendChild(badge);
     el.appendChild(text);
-    el.appendChild(ts);
+    el.appendChild(meta);
     return el;
 }
 
