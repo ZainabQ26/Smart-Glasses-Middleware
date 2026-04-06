@@ -208,11 +208,6 @@ public class AIService : IAIService
 
     private static readonly Dictionary<string, string> TaskDescriptions = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["time"]               = "user wants to know the current time or date",
-        ["reminder"]           = "user wants to set, add, or create a new reminder or alarm",
-        ["edit-reminder"]      = "user wants to change or update an existing reminder",
-        ["delete-reminder"]    = "user wants to remove, cancel, or delete a reminder",
-        ["show-reminders"]     = "user wants to see, list, view, or show their reminders",
         ["document-query"]     = "user wants to ask a question about the contents of a document",
         ["summarize-page"]     = "user wants a summary of the currently open or visible page in a document",
         ["highlight-word"]     = "user wants to highlight, search for, or find a word or phrase in the currently open document. Use when the user says 'highlight X', 'search for X', 'find X', or any variant of highlighting or searching text.",
@@ -266,82 +261,6 @@ public class AIService : IAIService
 
         var normalized = Regex.Replace(input.ToLowerInvariant(), @"[^a-z0-9\s-]", " ");
         normalized = Regex.Replace(normalized, @"\s+", " ").Trim();
-
-        // ── time ──────────────────────────────────────────────────────────────
-        if (ContainsAnyPhrase(normalized,
-            "what time",
-            "what is the time",
-            "current time",
-            "time right now",
-            "tell me the time",
-            "what hour",
-            "what day",
-            "what is today",
-            "today's date",
-            "current date",
-            "date and time",
-            "what's the time"))
-        {
-            return "time";
-        }
-
-        // ── reminder ──────────────────────────────────────────────────────────
-        if (ContainsAnyPhrase(normalized,
-            "remind me",
-            "set a reminder",
-            "add a reminder",
-            "create reminder",
-            "create a reminder",
-            "set reminder",
-            "new reminder",
-            "remember to",
-            "don t forget to",   // apostrophe stripped by normalization: "don't" → "don t"
-            "dont forget to",
-            "make a note to"))
-        {
-            return "reminder";
-        }
-
-        // ── edit-reminder ─────────────────────────────────────────────────────
-        if (ContainsAnyPhrase(normalized,
-            "edit reminder",
-            "update reminder",
-            "change reminder",
-            "modify reminder",
-            "edit my reminder",
-            "change my reminder",
-            "update my reminder"))
-        {
-            return "edit-reminder";
-        }
-
-        // ── delete-reminder ───────────────────────────────────────────────────
-        if (ContainsAnyPhrase(normalized,
-            "delete reminder",
-            "remove reminder",
-            "cancel reminder",
-            "delete the reminder",
-            "remove the reminder",
-            "cancel the reminder"))
-        {
-            return "delete-reminder";
-        }
-
-        // ── show-reminders ────────────────────────────────────────────────────
-        if (ContainsAnyPhrase(normalized,
-            "show reminders",
-            "show my reminders",
-            "list reminders",
-            "my reminders",
-            "view reminders",
-            "see my reminders",
-            "what are my reminders",
-            "upcoming reminders",
-            "all reminders",
-            "read my reminders"))
-        {
-            return "show-reminders";
-        }
 
         // ── close-document ────────────────────────────────────────────────────
         if (ContainsAnyPhrase(normalized,
