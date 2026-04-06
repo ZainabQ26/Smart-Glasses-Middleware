@@ -24,6 +24,8 @@ public class S3FileIndexService : IHostedService
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<S3FileIndexService> _logger;
+    private CancellationTokenSource? _backgroundCts;
+    private Task? _backgroundTask;
 
     public S3FileIndexService(IServiceScopeFactory scopeFactory, ILogger<S3FileIndexService> logger)
     {
@@ -31,9 +33,57 @@ public class S3FileIndexService : IHostedService
         _logger = logger;
     }
 
-    public async Task StartAsync(CancellationToken cancellationToken)
+    public Task StartAsync(CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("S3FileIndexService: scheduling ManagedFile index rebuild from S3 in background");
+
+        _backgroundCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _backgroundTask = Task.Run(() => RebuildIndexAsync(_backgroundCts.Token), CancellationToken.None);
+
+        // Never block application startup on S3 listing/index rebuild.
+        return Task.CompletedTask;
+    }
+
+    public async Task StopAsync(CancellationToken cancellationToken)
+    {
+        if (_backgroundCts == null || _backgroundTask == null)
+        {
+            return;
+        }
+
+        try
+        {
+            _backgroundCts.Cancel();
+            await _backgroundTask.WaitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("S3FileIndexService: background indexing stopped during shutdown");
+        }
+        finally
+        {
+            _backgroundCts.Dispose();
+            _backgroundCts = null;
+            _backgroundTask = null;
+        }
+    }
+
+    /// <summary>
+    /// Builds the metadata dictionary that should be attached to every S3 upload so
+    /// the file can be fully reconstructed on the next startup without a separate database.
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> BuildUploadMetadata(Guid fileId, string fileName, string label)
+        => new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            [MetaFileId] = fileId.ToString(),
+            [MetaFileName] = fileName,
+            [MetaLabel] = label
+        };
+
+    private async Task RebuildIndexAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("S3FileIndexService: rebuilding ManagedFile index from S3");
+
         try
         {
             using var scope = _scopeFactory.CreateScope();
@@ -106,27 +156,13 @@ public class S3FileIndexService : IHostedService
         }
         catch (OperationCanceledException)
         {
-            _logger.LogWarning("S3FileIndexService: startup indexing timed out; the file list may be incomplete until next restart");
+            _logger.LogWarning("S3FileIndexService: startup indexing timed out or was cancelled; file list may be incomplete until next run");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "S3FileIndexService: unexpected error during startup indexing");
         }
     }
-
-    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-
-    /// <summary>
-    /// Builds the metadata dictionary that should be attached to every S3 upload so
-    /// the file can be fully reconstructed on the next startup without a separate database.
-    /// </summary>
-    public static IReadOnlyDictionary<string, string> BuildUploadMetadata(Guid fileId, string fileName, string label)
-        => new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            [MetaFileId] = fileId.ToString(),
-            [MetaFileName] = fileName,
-            [MetaLabel] = label
-        };
 
     // ── helpers ──────────────────────────────────────────────────────────────
 

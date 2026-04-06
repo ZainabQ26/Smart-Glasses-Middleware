@@ -15,6 +15,7 @@ public class AbbreviationSyncBackgroundService : BackgroundService
     private readonly ILogger<AbbreviationSyncBackgroundService> _logger;
     private readonly TimeSpan _syncInterval;
     private DateTime _nextSyncTime;
+    private bool _syncNowOnStart;
 
     public AbbreviationSyncBackgroundService(
         IServiceProvider serviceProvider,
@@ -39,9 +40,10 @@ public class AbbreviationSyncBackgroundService : BackgroundService
 
         if (timeSinceLastSync >= _syncInterval)
         {
-            _logger.LogInformation("Last sync was {Days} days ago. Syncing now...", timeSinceLastSync.TotalDays);
-            await SyncAbbreviationsAsync(cancellationToken);
-            _nextSyncTime = DateTime.UtcNow.Add(_syncInterval);
+            // Do not block host startup on remote API calls. Execute initial sync in ExecuteAsync.
+            _syncNowOnStart = true;
+            _nextSyncTime = DateTime.UtcNow;
+            _logger.LogInformation("Last sync was {Days} days ago. Initial sync queued for background execution.", timeSinceLastSync.TotalDays);
         }
         else
         {
@@ -57,6 +59,15 @@ public class AbbreviationSyncBackgroundService : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("Abbreviation sync background service running. Next sync scheduled for {Time} UTC", _nextSyncTime);
+
+        if (_syncNowOnStart)
+        {
+            _logger.LogInformation("Running initial FDA abbreviation sync in background after startup...");
+            await SyncAbbreviationsAsync(stoppingToken);
+            _nextSyncTime = DateTime.UtcNow.Add(_syncInterval);
+            _syncNowOnStart = false;
+            _logger.LogInformation("Initial sync complete. Next sync scheduled for {Time} UTC", _nextSyncTime);
+        }
 
         while (!stoppingToken.IsCancellationRequested)
         {
