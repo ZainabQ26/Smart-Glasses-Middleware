@@ -865,11 +865,16 @@ app.Use(async (context, next) =>
             else
                 activationWord = ToTitleCaseWords(activationWord);
 
+            var groqClientMaxRequestsPerMinute = configuration.GetValue<int?>("AI:Groq:ClientMaxRequestsPerMinute") ?? 16;
+            if (groqClientMaxRequestsPerMinute < 1)
+                groqClientMaxRequestsPerMinute = 1;
+
             await context.Response.WriteAsJsonAsync(new
             {
                 speechTranscriptionMode = mode,
                 activationWord,
-                groqCommandTranscriptionEnabled = true
+                groqCommandTranscriptionEnabled = true,
+                groqClientMaxRequestsPerMinute
             });
         }
         catch (Exception ex)
@@ -888,7 +893,8 @@ app.Use(async (context, next) =>
             {
                 speechTranscriptionMode = "groq-only",
                 activationWord = "Hello Iris",
-                groqCommandTranscriptionEnabled = true
+                groqCommandTranscriptionEnabled = true,
+                groqClientMaxRequestsPerMinute = 16
             });
         }
 
@@ -1022,10 +1028,15 @@ app.MapGet("/api/process/client-settings", (IConfiguration configuration, HttpCo
         else
             activationWord = ToTitleCaseWords(activationWord);
 
+        var groqClientMaxRequestsPerMinute = configuration.GetValue<int?>("AI:Groq:ClientMaxRequestsPerMinute") ?? 16;
+        if (groqClientMaxRequestsPerMinute < 1)
+            groqClientMaxRequestsPerMinute = 1;
+
         return Results.Ok(new { 
             speechTranscriptionMode = mode, 
             activationWord, 
-            groqCommandTranscriptionEnabled = true
+            groqCommandTranscriptionEnabled = true,
+            groqClientMaxRequestsPerMinute
         });
     }
     catch (Exception ex)
@@ -1040,7 +1051,7 @@ app.MapGet("/api/process/client-settings", (IConfiguration configuration, HttpCo
         }
 
         // Return safe defaults so the frontend can still function.
-        return Results.Ok(new { speechTranscriptionMode = "groq-only", activationWord = "Hello Iris", groqCommandTranscriptionEnabled = true });
+        return Results.Ok(new { speechTranscriptionMode = "groq-only", activationWord = "Hello Iris", groqCommandTranscriptionEnabled = true, groqClientMaxRequestsPerMinute = 16 });
     }
 })
 // Ensure this endpoint wins even if a stale controller action with the same route exists.
