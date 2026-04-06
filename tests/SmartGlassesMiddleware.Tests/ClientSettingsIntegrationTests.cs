@@ -95,9 +95,9 @@ public class ClientSettingsIntegrationTests
             _ => "groq-only"
         };
 
-        var configuredActivationWord = configuration["AI:ActivationWord"]?.Trim().ToLowerInvariant();
+        var configuredActivationWord = configuration["AI:ActivationWord"]?.Trim();
         var expectedActivationWord = string.IsNullOrWhiteSpace(configuredActivationWord)
-            ? "hello iris"
+            ? "Iris"
             : configuredActivationWord;
 
         var mode = root.GetProperty("speechTranscriptionMode").GetString();

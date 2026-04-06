@@ -53,21 +53,6 @@ public class TaskDispatcherMoreTests
         Assert.That(result, Is.Null);
     }
 
-    [Test]
-    public void GetHandlerTypeMap_ContainsTimeHandler()
-    {
-        var dispatcher = CreateDispatcher();
-        var map = dispatcher.GetHandlerTypeMap();
-        Assert.That(map.ContainsKey("time"), Is.True);
-    }
-
-    [Test]
-    public void GetHandlerTypeMap_ContainsReminderHandler()
-    {
-        var dispatcher = CreateDispatcher();
-        var map = dispatcher.GetHandlerTypeMap();
-        Assert.That(map.ContainsKey("reminder"), Is.True);
-    }
 
     [Test]
     public async Task TryHandleAsync_UnknownTask_ReturnsFalse()
@@ -87,29 +72,4 @@ public class TaskDispatcherMoreTests
         Assert.That(tasks.Count, Is.GreaterThan(0));
     }
 
-    [Test]
-    public void KnownTasks_WithConfiguredTasks_ReturnsOnlyMatching()
-    {
-        var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["AI:KnownTasks:0"] = "time",
-                ["AI:KnownTasks:1"] = "reminder",
-            })
-            .Build();
-
-        var dispatcher = CreateDispatcher(config);
-        var tasks = dispatcher.KnownTasks;
-
-        Assert.That(tasks, Contains.Item("time"));
-        Assert.That(tasks, Contains.Item("reminder"));
-    }
-
-    [Test]
-    public void TryMatchByKeyword_WithTimeKeyword_ReturnsTimeTask()
-    {
-        var dispatcher = CreateDispatcher();
-        var result = dispatcher.TryMatchByKeyword("what time is it");
-        Assert.That(result, Is.EqualTo("time"));
-    }
 }

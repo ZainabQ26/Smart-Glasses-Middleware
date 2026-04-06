@@ -1,134 +1,51 @@
 # Smart Glasses Middleware
 
-## Deploy Via GitHub Actions (Tag + Manual Run)
+## Overview
 
-There are two deploy workflows:
+Backend middleware and frontend for a smart glasses application. Provides a multi-modal API for AI interaction, document processing, audio transcription, and task management. It operates as an always-online, single-server architecture deployed on AWS ECS Fargate, utilizing a pure in-memory state serialized to S3/MinIO.
 
-- **`deploy-main.yml`** — full deploy (Terraform + migrations + frontend), triggers on `v*` tags or `workflow_dispatch`
-- **`deploy-fast.yml`** — fast deploy (no Terraform), triggers on `deploy-*` tags or `workflow_dispatch`
-
-1. Tag-based deploy (push a tag to trigger Actions):
-
-```bash
-# From repo root, on the commit you want to deploy
-git pull
-
-# Full deploy (Terraform + migrations):
-git tag v$(date +%Y%m%d-%H%M)
-git push origin --tags
-
-# Fast deploy (skips Terraform, just builds and deploys the new image):
-git tag deploy-$(date +%Y%m%d-%H%M)
-git push origin --tags
-```
-
-The workflow triggers on tags matching:
-
-- `v*` — full deploy via `deploy-main.yml`
-- `deploy-*` — fast deploy via `deploy-fast.yml`
-
-## Documentation Site (DocFX + GitHub Pages)
-
-This repo includes an automated docs workflow in `.github/workflows/docs-pages.yml`.
-
-- Static docs are built by DocFX from `docs/`
-- C# API reference is generated from `src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj`
-- Runs manually via `workflow_dispatch` and publishes to GitHub Pages
-- Documentation URL: https://robertbiv.github.io/Smart-Glasses-Middleware/
-
-### One-time GitHub setup
-
-1. In GitHub, open **Settings -> Pages**
-2. Under **Build and deployment**, set **Source** to **GitHub Actions**
-
-### Manual run
-
-```bash
-gh workflow run docs-pages.yml --ref main
-```
-
-### Monitor run
-
-```bash
-gh run list --workflow docs-pages.yml --limit 5
-gh run watch <run-id> --exit-status
-```
-
-2. Manual deploy (`workflow_dispatch`) with required inputs:
-
-```bash
-# Dev deploy, recommended defaults
-gh workflow run deploy-main.yml \
-      --ref main \
-      -f environment=dev \
-      -f force_recreate_dev=false
-```
-
-Input guidance:
-
-- `environment`: `dev|staging|prod`
-- `force_recreate_dev`: keep `false` unless you intentionally want destructive cleanup of dev resources
-
-3. Watch deploy progress:
-
-```bash
-gh run list --workflow deploy-main.yml --limit 5
-gh run watch <run-id> --exit-status
-```
-
-After deploy completes, the workflow logs now print a notice line with the live site URL:
-
-- `Deployment URL: https://...`
-
-Current dev URL:
-
-- `https://d2vzlm78lj63v4.cloudfront.net`
-
-In GitHub Actions, open the `verify-deployment` job and check the `Print deployed website URL` step.
-
-Backend middleware and frontend for a smart glasses application. Provides a multi-modal API for AI interaction, document processing, audio transcription, and task management, deployed to AWS ECS Fargate with automatic scale-to-zero when idle.
-
-## Stack
+## Stack & Architecture
 
 | Layer | Technology |
 |-------|-----------|
 | API | ASP.NET Core (.NET 10), C# |
-| Frontend | React 19 + Vite, served from S3 via CloudFront |
+| Frontend | React 19 + Vite, served statically by ASP.NET Core from `wwwroot` |
 | AI | AWS Bedrock (Nova / Titan Embed) — always |
 | Advanced model | External REST API (`AI:AdvancedModelEndpoint`) — request/response |
-| Audio transcription | In-browser Whisper WebGPU worker (`whisper-base`, multilingual); optional Groq Whisper API (`POST /api/process/transcribe`) |
-| Document processing | Lambda (Python), iText7, Tesseract OCR, pgvector RAG |
-| Database | PostgreSQL 16 + pgvector (RDS db.t3.micro) |
-| Cache / pub-sub | Redis (ElastiCache, optional) |
+| Audio transcription | In-browser Whisper WebGPU worker (`Xenova/whisper-tiny`) |
+| Document processing | Lambda (Python), iText7, Tesseract OCR |
+| Database | Pure `InMemoryDatabase` with `StatePersistenceService` serializing to S3/MinIO |
 | Object storage | AWS S3 (prod) or MinIO (local dev) |
-| Real-time | SignalR over WebSocket |
+| Real-time | Continuous polling |
 | Infrastructure | Terraform, ECS Fargate, CloudFront, ALB, Secrets Manager |
 | CI/CD | GitHub Actions → Terraform apply → ECR push → ECS deploy |
 
-## Architecture Overview
+### Architecture Principles
 
+- **Single Always-Online Server:** The application is permanently online and does not scale to zero. It runs as a single instance (`ecs_api_desired_count=1`, `ecs_api_min_capacity=1`, `ecs_api_max_capacity=1`) leveraging Fargate Spot for cost optimization. Wakeup overlays have been removed.
+- **In-Memory State & Storage:** External PostgreSQL and Redis dependencies have been completely removed. State is loaded and persisted using `StatePersistenceService` to S3 (production) or MinIO (local development) during boot and shutdown. RAG and pgvector dependencies have been removed.
+- **Polling over WebSockets:** The application relies entirely on continuous polling for state updates in the React frontend, avoiding SignalR and cross-tab storage events.
+- **In-Browser Transcription:** The frontend uses `@huggingface/transformers` to run the `Xenova/whisper-tiny` model directly in the browser via WebGPU acceleration, preserving memory on constrained mobile environments via quantized model weights.
+- **Static Frontend Serving:** The Vite React frontend compiles directly to the ASP.NET Core `wwwroot` directory and is served by the backend, simplifying deployment.
+- **Always Free Tier AWS:** Infrastructure is designed to stay within the AWS Free Tier, relying on static Tesseract binaries in Lambda rather than Amazon Textract.
+
+## CI/CD Pipeline
+
+Deployments are managed via GitHub Actions:
+
+- **`deploy-main.yml`** — full deploy (Terraform + frontend), triggers on `v*` tags or `workflow_dispatch`
+- **`deploy-fast.yml`** — fast deploy (no Terraform), triggers on `deploy-*` tags or `workflow_dispatch`
+
+Tag-based deploy examples:
+```bash
+# Full deploy (Terraform + infrastructure):
+git tag v$(date +%Y%m%d-%H%M)
+git push origin --tags
+
+# Fast deploy (skips Terraform, updates image):
+git tag deploy-$(date +%Y%m%d-%H%M)
+git push origin --tags
 ```
-Browser (Whisper WebGPU — in-browser transcription)
-  └─► CloudFront (HTTPS, COOP+COEP headers)
-        ├─► S3  —— static frontend (React SPA, ONNX/WASM assets)
-        └─► ALB —— /api/*, /health, /hubs/*, /swagger*
-              └─► ECS Fargate (ASP.NET Core, port 5000)
-                    ├─► RDS PostgreSQL (pgvector)
-                    ├─► ElastiCache Redis (optional)
-                    ├─► S3 (media + documents)
-                    │     └─► Lambda (document processing, triggered by S3 events)
-                    ├─► Bedrock (LLM + embeddings)
-                    ├─► Advanced model REST API (external, optional)
-                    └─► Groq Whisper API (server-side transcription, optional)
-```
-
-### Scale-to-zero
-
-The ECS service uses Application Auto Scaling (CPU target: 70 %, memory target: 80 %) to scale the number of running tasks. The `ecs_api_min_capacity` and `ecs_api_max_capacity` Terraform variables control the scaling bounds; both default to `1` in the current CI/CD configuration, so the service keeps exactly one task running at all times.
-
-To enable true scale-to-zero, pass `-var "ecs_api_min_capacity=0"` when running Terraform. The idle-traffic-based wake/sleep Lambda autoscaler that was previously part of this stack has been removed; scaling is now driven entirely by the CPU/memory metrics above.
-
-Cost while scaled to zero (when `min_capacity = 0` and no tasks are running): **$0** (Fargate billing stops when `desiredCount = 0`).
 
 ## Local Development
 
@@ -139,15 +56,25 @@ Cost while scaled to zero (when `min_capacity = 0` and no tasks are running): **
 - Node.js 25.8.1
 - AWS CLI v2
 
-### Start with LocalStack
+### Start Storage Services
+
+Although the codebase includes a full `docker-compose.localstack.yml`, the application primarily relies on MinIO/LocalStack for S3 API compatibility as Postgres and Redis have been removed.
 
 ```bash
-# Start LocalStack + PostgreSQL + Redis
 docker-compose -f docker-compose.localstack.yml up -d
-
-# Verify LocalStack
-curl http://localhost:4566/_localstack/health
 ```
+
+### Build Frontend
+
+The frontend is a React application built with Vite that outputs static files to `../wwwroot` for ASP.NET Core to serve.
+
+```bash
+cd src/SmartGlassesMiddleware/client
+npm install
+npm run build
+```
+
+*Note: For live preview development, run `npm run dev -- --host 0.0.0.0 --port 3000` with `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=.com` to allow proxy routing.*
 
 ### Run the API
 
@@ -158,252 +85,38 @@ dotnet run
 
 API available at `http://localhost:5000`. Swagger UI at `http://localhost:5000/swagger`.
 
-### Run the Frontend (standalone)
+## Administration & Handlers
 
+### Admin Panel
+
+The admin panel's 'Conversation' tab functions as a single, real-time chat interface. Historical message persistence has been removed. Abbreviations are no longer stored in a database; they are loaded and maintained purely in-memory via `AbbreviationService`.
+
+### Task Handlers
+
+The middleware dispatches AI-classified requests to typed task handlers implementing `ITaskHandler`. Place new core handlers in `src/SmartGlassesMiddleware/Services/` under the `SmartGlassesMiddleware.Services` namespace. The `tasks/` directory is reserved for local dev plugin drops.
+
+## Documentation Site (DocFX + GitHub Pages)
+
+- Static docs are built by DocFX from `docs/` and published via `.github/workflows/docs-pages.yml` to GitHub Pages.
+- C# API reference is generated from source code standard XML doc comments.
+- Test coverage reports are automatically included as a resource in the generated site.
+
+To build locally:
 ```bash
-cd src/SmartGlassesMiddleware/client
-npm install
-npm run dev   # Vite dev server at http://localhost:5173
+dotnet tool install -g docfx
+./scripts/run_tests.sh
+cp -r CoverageReport/* docs/tests/
+docfx docs/docfx.json
 ```
-
-Note: `src/SmartGlassesMiddleware/wwwroot/index.html` and `src/SmartGlassesMiddleware/wwwroot/assets/` are build-generated by Vite (`npm run build`) and are intentionally not tracked in git. The GitHub Actions `deploy-frontend` job builds these files and uploads them to S3/CloudFront.
-
-### Build the Docker image locally
-
-```bash
-# Must use repo root as context so tasks/ folder is included in the build
-docker build -f src/SmartGlassesMiddleware/Dockerfile -t smart-glasses-api:local .
-```
-
-## Configuration
-
-### Local dev (`appsettings.json` + `appsettings.Development.json`)
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `ConnectionStrings:DefaultConnection` | `Host=localhost;...` | PostgreSQL |
-| `ConnectionStrings:Redis` | `localhost:6379` | Redis (optional) |
-| `MinIO:Endpoint` | `localhost:9000` | MinIO endpoint (local storage) |
-| `AI:AdvancedModelEndpoint` | `` | External REST API for unknown tasks |
-| `AI:UseAdvancedModel` | `false` | Enable advanced model routing |
-| `AI:ActivationWord` | `Iris` | Wake word that triggers command mode |
-| `AWS:Bedrock:ModelId` | `us.amazon.nova-2-lite-v1:0` | Bedrock chat model |
-| `AWS:Bedrock:EmbeddingModelId` | `amazon.titan-embed-text-v2:0` | Bedrock embedding model |
-
-### Speech Transcription Mode
-
-The client-side transcription behavior is configurable via the `AI:SpeechTranscriptionMode` setting. Add this under the `AI` section in your `appsettings.*.json` files or provide it as an environment variable (`AI__SpeechTranscriptionMode`). Valid values:
-
-- `whisper-only`: Ignore Web Speech results and always use the on-device Whisper WebGPU worker for transcription (default).
-- `auto`: Use the browser Web Speech API as the primary fast-path; fall back to the Whisper worker when needed.
-- `webspeech-only`: Use only the browser Web Speech API. The Whisper worker is ignored.
-
-The current client implementation uses only the local Whisper WebGPU worker (single multilingual `whisper-base` model running in a Web Worker with WebGPU acceleration). The `SpeechTranscriptionMode` setting is read by the server and exposed via `GET /api/process/client-settings`.
-
-The server exposes a convenience endpoint that the SPA calls on load:
-
-- `GET /api/process/client-settings` — returns `{ "speechTranscriptionMode": "whisper-only|auto|webspeech-only", "activationWord": "Iris" }`.
-
-### AWS (`appsettings.AWS.json`)
-
-Secrets (DB connection string, S3 bucket names, Redis URL) are injected at runtime from AWS Secrets Manager via ECS task secret references — no plaintext credentials in the image.
-
-AI classification and embeddings always use Bedrock (Nova / Titan Embed V2). The ECS task role grants the necessary `bedrock:InvokeModel` permissions. Unknown tasks are forwarded to the advanced model REST API (`AI:AdvancedModelEndpoint`).
-
-## Advanced Model
-
-When `AI:UseAdvancedModel=true`, requests that don't match a local task handler are forwarded to the external REST API configured at `AI:AdvancedModelEndpoint`.
-
-The request is a simple JSON POST:
-```json
-{ "message": "user input" }
-```
-
-The response is expected to contain a `response` field:
-```json
-{ "response": "AI response text" }
-```
-
-If the response cannot be parsed, the raw body is returned.
-
-## Task Handlers
-
-The middleware dispatches AI-classified requests to typed task handlers. Handlers are written in C# and implement `ITaskHandler`.
-
-### Built-in handlers (`tasks/`)
-
-| Handler | Task name | Description |
-|---------|-----------|-------------|
-| `SelectDocumentTaskHandler` | `select-document` | Opens the most recently uploaded document in the inline viewer |
-| `OpenFileTaskHandler` | `open-file` | Lists the last 5 uploaded files so the user can choose one to open |
-| `DocumentSearchTaskHandler` | `document-search` | Finds text in documents, returns page/position |
-| `DocumentHighlightTaskHandler` | `document-highlight` | Highlights text in a document |
-| `AdvancedTaskHandler` | `advanced` | Forwards to the configured external REST API endpoint |
-| `TemplateTaskHandler` | `template` | Starter template for new handlers |
-| `NextPageTaskHandler` | `next-page` | Navigates the inline PDF viewer to the next page |
-| `PreviousPageTaskHandler` | `previous-page` | Navigates the inline PDF viewer to the previous page |
-| `HighlightWordTaskHandler` | `highlight-word` | Highlights a word/phrase in the open PDF; cycles color on repeat |
-| `RemoveHighlightsTaskHandler` | `remove-highlights` | Clears all keyword highlights from the open PDF |
-| `CloseDocumentTaskHandler` | `close-document` | Closes the inline PDF viewer and returns to the home screen |
-| `GoToPageTaskHandler` | `go-to-page` | Navigates the inline PDF viewer to a specific page number |
-| `GoToLoincPageTaskHandler` | `go-to-loinc` | Searches for a LOINC code in the open PDF, navigates to its page, and highlights it |
-| `SummarizePageTaskHandler` | `summarize-page` | Summarises the text on the currently visible PDF page via Bedrock |
-| `PrintTaskHandler` | `print` | Triggers the browser print dialog for the open PDF |
-| `PrintHighlightedPagesTaskHandler` | `print-highlighted-pages` | Prints only the pages that contain at least one active highlight |
-| `AdminPanelTaskHandler` | `open-admin-panel` | Navigates the frontend to the admin panel |
-| `NextHighlightTaskHandler` | `next-highlight` | Navigates to the next highlighted match in the open PDF |
-| `PreviousHighlightTaskHandler` | `previous-highlight` | Navigates to the previous highlighted match in the open PDF |
-| `DocumentQueryTaskHandler` | `document-query` | Performs a RAG-based query against the current document |
-
-### Adding a custom handler
-
-1. Create a `.cs` file implementing `ITaskHandler` in the `tasks/` folder
-2. It is compiled into `SmartGlassesMiddleware.dll` at `dotnet publish` time via `<Compile Include>` in the `.csproj`
-3. Alternatively, drop a compiled `.dll` into a `tasks/` directory alongside the running binary for runtime hot-loading (local dev only)
-
-## Inline PDF Viewer
-
-The home screen includes a built-in PDF viewer powered by [PDF.js](https://mozilla.github.io/pdf.js/).  The viewer is **hidden by default** and appears as a full-screen overlay only when a document is opened.  Opening a different document while one is already open automatically closes the old document and starts fresh — highlights do **not** carry over between documents.
-
-The **activation word** (default: `Iris`, configurable via `AI:ActivationWord`) wakes the assistant for each command. All voice commands below assume the activation word has just been spoken.
-
-### Opening a document
-
-Say the **activation word** and then one of:
-
-| Voice command | What happens |
-|--------------|--------------|
-| `"open my files"` / `"show recent files"` | Lists the last 5 uploaded files; say a number to open one |
-| `"open the last document"` / `"select document"` | Opens the most recently uploaded document |
-
-### Navigating pages
-
-| Voice command | Action |
-|--------------|--------|
-| `"next page"` | Advance to the next page |
-| `"previous page"` / `"go back"` | Return to the previous page |
-| `"go to page 5"` / `"jump to page 12"` | Jump directly to page 5 / 12 |
-
-Highlights are preserved when changing pages — they carry over to every page in the document and the legend always shows where each keyword was found.
-
-### Navigating by LOINC code
-
-| Voice command | Action |
-|--------------|--------|
-| `"go to LOINC code 8480-6"` | Searches the document for LOINC code `8480-6`, jumps to the first matching page, and highlights the code |
-| `"find LOINC 1558-6"` | Same, for code `1558-6` |
-| `"show me LOINC 8480 dash 6"` | Spoken form also accepted |
-
-### Highlighting keywords
-
-| Voice command | Action |
-|--------------|--------|
-| `"highlight <word>"` | Highlights every occurrence of `<word>` in yellow |
-| `"highlight <word>"` *(said again)* | Re-highlights in the next color (sky blue → green → coral → lavender → grey, cycling) |
-| `"remove highlights"` / `"clear highlights"` | Removes all keyword highlights |
-
-Highlighting supports multi-word phrases (e.g. `"highlight patient information"`).
-
-A **Highlights legend** is displayed below the PDF canvas.  It shows each highlighted keyword alongside its color and the sorted list of page numbers on which it was found.  The legend updates automatically when highlights are added or removed.
-
-### Navigating highlights
-
-| Voice command | Action |
-|--------------|--------|
-| `"next highlight"` / `"go to next highlight"` | Jumps to the next highlighted match in the document |
-| `"previous highlight"` / `"go to previous highlight"` | Jumps to the previous highlighted match in the document |
-
-### Closing the viewer
-
-| Voice command | Action |
-|--------------|--------|
-| `"close document"` | Hides the PDF viewer and returns to the home screen |
-
-The ✕ **Close** button in the viewer header also closes it.
-
-### Summarising the current page
-
-| Voice command | Action |
-|--------------|--------|
-| `"summarize page"` / `"summarize this page"` | Sends the current page text to Bedrock and displays a summary |
-| `"what is on this page"` | Same |
-
-### Printing
-
-| Voice command | Action |
-|--------------|--------|
-| `"print document"` / `"print pdf"` | Opens the browser print dialog for the full document |
-| `"print highlighted pages"` / `"print pages with highlights"` | Prints only pages that contain at least one active highlight |
-
-### Admin panel
-
-| Voice command | Action |
-|--------------|--------|
-| `"open admin panel"` / `"go to admin"` | Navigates the frontend to the admin panel |
-
-## API Endpoints
-
-Run the application and visit `/swagger` for the full interactive spec (powered by [Scalar](https://scalar.com)).
-The raw OpenAPI JSON is available at `/openapi/v1.json`.
-
-| Group | Endpoints |
-|-------|-----------|
-| AI interaction | `POST /api/ask` — text/task dispatch |
-| Process | `POST /api/process` — voice transcript → AI task dispatch; `POST /api/process/preview` — model-selection preview; `POST /api/process/transcribe` — Groq audio transcription; `GET /api/process/client-settings` |
-| Documents | `POST /api/documents/upload`, `POST /api/documents/query`, `GET/DELETE /api/documents/{documentId}`, `GET /api/documents/{documentId}/download`, `POST /api/documents/{documentId}/highlight`, `POST /api/documents/{documentId}/find-location`, `POST /api/documents/{id}/move`, `GET /api/documents`, `POST /api/documents/reprocess`, `GET /api/documents/unprocessed` |
-| History | `GET /api/history`, `GET /api/history/{id}`, `GET /api/history/type/{requestType}`, `GET /api/history/reminders`, `PUT/DELETE /api/history/reminders/{id}`, `POST /api/history/reminders/query` |
-| Tasks | `GET /api/tasks/{id}` — background task status |
-| Admin | `GET/POST /api/admin/files`, `DELETE /api/admin/files/{id}`, `GET /api/admin/files/{id}/preview`, `GET /api/admin/files/{id}/download`, `GET /api/admin/files/{id}/status`, `GET /api/admin/files/{id}/info`, `GET /api/admin/files/upload-url`, `POST /api/admin/files/complete`, `POST /api/admin/fix-processed-managedfiles`, `POST /api/admin/reindex`, `GET /api/admin/batch`, `GET/DELETE /api/admin/groq-transcriptions`, `GET /api/admin/abbreviations/download`, `POST /api/admin/clear-all` |
-| Monitoring | `GET /api/monitoring/requests` |
-| AI Interactions | `GET /api/ai-interactions` — model usage logs and stats; `GET /api/ai-interactions/{id}`; `GET /api/ai-interactions/stats` |
-| Health | `GET /health` — Postgres + Redis liveness; `GET /ready` — full readiness check (DB + Redis) |
-| Debug | `GET /api/debug/tasks/status` — handler registration diagnostics; `POST /api/debug/echo-form`; `POST /api/debug/echo-raw` |
-
-## CI/CD Pipeline
-
-Deployments are tag-driven (see [Deploy Via GitHub Actions](#deploy-via-github-actions-tag--manual-run) above). Pushing a `v*` tag (full deploy) or a `deploy-*` tag (fast deploy, no Terraform) triggers the pipeline:
-
-```
-build-api ──────────┐
-build-lambda ───────┼──► terraform-apply ──┐
-                    │         │             ├──► verify-deployment
-                    │         └──► deploy-frontend ────────────┘
-                    │
-                    └── (Docker images pushed to ECR with SHA tag)
-```
-
-- **`build-api`** — builds the React frontend (Vite) and the .NET API into a single Docker image, pushes to ECR
-- **`build-lambda`** — builds the Whisper Lambda container image and the document processor Lambda ZIP
-- **`terraform-apply`** — runs `terraform apply` (via Docker) with the new image SHA as a variable; manages all AWS infrastructure
-- **`deploy-frontend`** — syncs built assets to S3, invalidates CloudFront cache
-- **`verify-deployment`** — waits for ECS service stability, fetches container logs, smoke-tests `/health`
-
-Infrastructure is defined in `aws/infrastructure/` (Terraform). Local testing uses `docs/LOCALSTACK.md`.
 
 ## Unit Testing
 
-A comprehensive automated test suite has been added under the `tests/` directory.
+A comprehensive automated test suite utilizes `NUnit` and `Moq`. The project uses `System.TimeProvider` for time abstraction to enable deterministic testing.
 
 ### Running tests
 ```bash
-dotnet test tests/SmartGlassesMiddleware.Tests/SmartGlassesMiddleware.Tests.csproj
+./scripts/run_tests.sh
 ```
+This script runs all unit tests, generates code coverage reports (HTML/Text/PDF), and enforces a minimum coverage threshold of 10%. Tests evaluate various backend components including services, task handlers, and controllers utilizing mock data.
 
-### Coverage report
-```bash
-dotnet test tests/SmartGlassesMiddleware.Tests/SmartGlassesMiddleware.Tests.csproj --collect:"XPlat Code Coverage"
-```
-
-The `tests/` directory contains tests utilizing `NUnit` and `Moq`. These tests evaluate various backend components including services, task handlers, and controllers, with tests that span end-to-end component flows utilizing mock data to isolate logic successfully without external dependencies like the Database. For more info, please see `tests/README.md`.
-
-## Old Readmes
-
-Additional documentation (like AWS details, abbreviations sync instructions, advanced API calls, and localstack specifics) are kept in the `docs/` folder for reference.
-
-## Infrastructure Notes
-
-- **CloudFront → ALB protocol**: HTTP (not HTTPS) for the origin connection. The ALB TLS certificate covers the custom domain only; CloudFront validates against the ELB hostname which doesn't match, causing 502s with `https-only`.
-- **COOP + COEP headers**: Set by a CloudFront response headers policy to enable `SharedArrayBuffer` in the browser, required for `@huggingface/transformers` v3 (ONNX Runtime threaded WASM).
-- **ECS CPU**: 1 vCPU (1024 units) to reduce .NET 10 JIT cold-start time. Cost impact is negligible with scale-to-zero.
-- **ALB health check interval**: 10 s, `healthy_threshold=2` — ALB marks the target healthy ~20 s after the container is listening.
-
+*Note: Keep test files in the base `SmartGlassesMiddleware.Tests` namespace to avoid shadowing issues.*
