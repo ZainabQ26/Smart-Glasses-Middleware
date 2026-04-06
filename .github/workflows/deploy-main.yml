@@ -112,8 +112,19 @@ jobs:
             ${{ steps.ecr-login.outputs.registry }}/smart-glasses-dev-api:latest
           platforms: linux/amd64
           no-cache: true
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
 
-      # No local cache rotation required when using gha cache.
+      - name: Cleanup Docker and build caches
+        if: always()
+        run: |
+          # Clean up buildx cache to avoid storage exhaustion
+          rm -rf /tmp/.buildx-cache-new /tmp/.buildx-cache || true
+          # Remove all dangling Docker images and build cache
+          docker system prune -af --volumes || true
+          # Clean up Docker buildx build state
+          docker buildx du --verbose || true
+          docker buildx prune -af || true
+          echo "Docker cleanup complete"
 
   # Packages the Document Processor Lambda zip. Runs in PARALLEL with build-api — no shared deps.
   # Whisper Lambda removed: audio transcription now handled entirely browser-side via Whisper worker.
@@ -134,6 +145,15 @@ jobs:
           cd aws/lambda-document-processor
           chmod +x build.sh
           ./build.sh
+
+      - name: Clean up Python cache
+        if: always()
+        run: |
+          # Clean up Python and pip caches to save space
+          rm -rf ~/.cache/pip ~/.cache/python || true
+          find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+          find . -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
+          echo "Python cleanup complete"
 
       - name: Upload Document Processor zip
         uses: actions/upload-artifact@v4
@@ -922,7 +942,25 @@ jobs:
           path: aws/infrastructure/tf_outputs.json
           retention-days: 1
 
-  deploy-frontend:
+      - name: Final storage cleanup
+        if: always()
+        run: |
+          echo "=== Final Storage Cleanup ==="
+          # Clean up Terraform state and working files
+          rm -rf aws/infrastructure/.terraform aws/infrastructure/.terraform.lock.hcl aws/infrastructure/tf_image_vars.auto.tfvars || true
+          # Clean up any leftover build artifacts
+          rm -rf aws/lambda-document-processor/deployment.zip aws/lambda-document-processor/venv || true
+          # Clean up Docker system
+          docker system prune -af --volumes || true
+          docker buildx prune -af || true
+          # Clean up node modules from successful builds
+          rm -rf src/SmartGlassesMiddleware/client/node_modules || true
+          # Clean up dotnet cache
+          rm -rf ~/.dotnet/temp ~/.nuget/packages/.* || true
+          # Clean up any temp files
+          rm -rf /tmp/* /var/tmp/* || true
+          df -h
+          echo "Storage cleanup complete"
     name: Build & deploy frontend to S3
     needs: terraform-apply
     runs-on: ubuntu-latest
@@ -1039,6 +1077,19 @@ jobs:
             --query "Invalidation.{Id:Id,Status:Status}" \
             --output json)
           echo "Invalidation: $RESULT"
+
+      - name: Cleanup frontend build artifacts
+        if: always()
+        run: |
+          echo "Cleaning up frontend build artifacts..."
+          # Remove node_modules to save space
+          rm -rf src/SmartGlassesMiddleware/client/node_modules || true
+          rm -rf src/SmartGlassesMiddleware/client/.next || true
+          # Clean npm cache
+          npm cache clean --force || true
+          # Clean build cache
+          rm -rf /tmp/npm-* || true
+          echo "Frontend cleanup complete"
 
   run-migrations:
     name: Run EF Core database migrations
