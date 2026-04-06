@@ -260,11 +260,6 @@ The middleware dispatches AI-classified requests to typed task handlers. Handler
 
 | Handler | Task name | Description |
 |---------|-----------|-------------|
-| `TimeTaskHandler` | `time` | Returns current date/time |
-| `ReminderTaskHandler` | `reminder` | Saves a reminder to the DB |
-| `DeleteReminderTaskHandler` | `delete-reminder` | Deletes a reminder by matching text |
-| `EditReminderTaskHandler` | `edit-reminder` | Edits an existing reminder |
-| `ShowRemindersTaskHandler` | `show-reminders` | Lists all saved reminders |
 | `SelectDocumentTaskHandler` | `select-document` | Opens the most recently uploaded document in the inline viewer |
 | `OpenFileTaskHandler` | `open-file` | Lists the last 5 uploaded files so the user can choose one to open |
 | `DocumentSearchTaskHandler` | `document-search` | Finds text in documents, returns page/position |
@@ -356,12 +351,6 @@ The ✕ **Close** button in the viewer header also closes it.
 | `"print document"` / `"print pdf"` | Opens the browser print dialog for the full document |
 | `"print highlighted pages"` / `"print pages with highlights"` | Prints only pages that contain at least one active highlight |
 
-### Reminders
-
-| Voice command | Action |
-|--------------|--------|
-| `"show reminders"` / `"my reminders"` | Displays a list of all saved reminders |
-
 ### Admin panel
 
 | Voice command | Action |
@@ -379,7 +368,7 @@ The raw OpenAPI JSON is available at `/openapi/v1.json`.
 | Process | `POST /api/process` — voice transcript → AI task dispatch; `GET /api/process/client-settings` |
 | Documents | `POST /api/documents/upload`, `POST /api/documents/query`, `GET/DELETE /api/documents/{id}` |
 | Conversations | `GET/POST/PUT/DELETE /api/conversations` |
-| History | `GET /api/history`, `GET/PUT/DELETE /api/history/reminders/{id}` |
+| History | `GET /api/history` |
 | Tasks | `GET /api/tasks/{id}` — background task status |
 | Admin | `GET/POST/PUT/DELETE /api/admin/files`, `/api/admin/prompts`, `/api/admin/groups` |
 | Monitoring | `GET /api/monitoring/requests` |
