@@ -67,7 +67,7 @@ The workflow now includes 4 cleanup jobs executed with `if: always()` to ensure 
 ## Testing
 Run a test deployment with:
 ```bash
-gh workflow run deploy-main.yml -f environment=dev -f skip_migrations=true -f force_recreate_dev=false
+gh workflow run deploy-main.yml -f environment=dev -f force_recreate_dev=false
 ```
 
 Monitor the run to verify cleanup steps execute and report disk usage.
