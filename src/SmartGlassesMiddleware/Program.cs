@@ -888,7 +888,7 @@ app.Use(async (context, next) =>
 
             var activationWord = configuration["AI:ActivationWord"]?.Trim();
             if (string.IsNullOrWhiteSpace(activationWord))
-                activationWord = "Hello Iris";
+                activationWord = "Iris";
             else
                 activationWord = ToTitleCaseWords(activationWord);
 
@@ -915,7 +915,7 @@ app.Use(async (context, next) =>
             await context.Response.WriteAsJsonAsync(new
             {
                 speechTranscriptionMode = "groq-only",
-                activationWord = "Hello Iris",
+                activationWord = "Iris",
                 groqCommandTranscriptionEnabled = true,
                 groqClientMaxRequestsPerMinute
             });
@@ -1042,7 +1042,7 @@ app.MapGet("/api/process/client-settings", (IConfiguration configuration, HttpCo
 
         var activationWord = configuration["AI:ActivationWord"]?.Trim();
         if (string.IsNullOrWhiteSpace(activationWord))
-            activationWord = "Hello Iris";
+            activationWord = "Iris";
         else
             activationWord = ToTitleCaseWords(activationWord);
 
@@ -1065,7 +1065,7 @@ app.MapGet("/api/process/client-settings", (IConfiguration configuration, HttpCo
         }
 
         // Return safe defaults so the frontend can still function.
-        return Results.Ok(new { speechTranscriptionMode = "groq-only", activationWord = "Hello Iris", groqCommandTranscriptionEnabled = true, groqClientMaxRequestsPerMinute = GetGroqClientMaxRequestsPerMinute(configuration) });
+        return Results.Ok(new { speechTranscriptionMode = "groq-only", activationWord = "Iris", groqCommandTranscriptionEnabled = true, groqClientMaxRequestsPerMinute = GetGroqClientMaxRequestsPerMinute(configuration) });
     }
 })
 // Ensure this endpoint wins even if a stale controller action with the same route exists.

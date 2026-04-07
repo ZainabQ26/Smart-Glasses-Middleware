@@ -81,10 +81,8 @@ const TRANSLATIONS = {
       ["clear highlights", "Remove all highlights"],
       ["search for blood pressure", "Search for text in documents"],
       ["search for BP", "Search using FDA SPL abbreviations"],
-      ["remind me to…", "Set a reminder"],
-      ["show my reminders", "List all your reminders"],
       ["print document", "Print the open document with highlights"],
-      ["admin panel", "Open the admin panel"],
+      ["print highlighted", "Print the open document highlighted "],
     ],
     sendingAI: "🤖 Sending to AI…",
     transcribing: "⏳ Transcribing…",
@@ -137,10 +135,8 @@ const TRANSLATIONS = {
       ["borrar resaltados", "Eliminar todos los resaltados"],
       ["buscar presión arterial", "Buscar texto en documentos"],
       ["buscar PA", "Buscar usando abreviaciones FDA SPL"],
-      ["recuérdame…", "Establecer un recordatorio"],
-      ["mostrar mis recordatorios", "Listar todos tus recordatorios"],
       ["imprimir documento", "Imprimir el documento abierto con resaltados"],
-      ["panel de administración", "Abrir el panel de administración"],
+      ["imprimir resaltados", "Imprimir el documento abierto resaltado"],
     ],
     sendingAI: "🤖 Enviando a IA…",
     transcribing: "⏳ Transcribiendo…",
@@ -200,7 +196,7 @@ export default function App({ mode = "voice", language = "en" }) {
   // Show landing screen until the user says the activation word for the first time.
   const [showLanding, setShowLanding] = useState(true);
   // Activation word is sourced from backend app settings via /api/process/client-settings.
-  const [activationWord, setActivationWord] = useState("Hello Iris");
+  const [activationWord, setActivationWord] = useState("Iris");
   // Ref copy so the async voice pipeline always reads the current value without
   // needing to restart the AudioContext effect.
   const activationWordRef = useRef(activationWord);
@@ -497,9 +493,9 @@ export default function App({ mode = "voice", language = "en" }) {
 
       const text = (payload?.text || "").trim();
       const model = (payload?.model || "").trim();
-      const matched = payload?.matched ?? text.toLowerCase().includes("hello iris");
+      const matched = payload?.matched ?? text.toLowerCase().includes("Iris");
       const commandAfterWakeword = (payload?.commandAfterWakeword || "").trim();
-      const target = (activationWordRef.current || "Hello Iris").trim();
+      const target = (activationWordRef.current || "Iris").trim();
       console.log(`[Voice Debug] Wake-word check: "${text}" (target "${target}") → ${matched ? "MATCH ✅" : "no match"}`);
       if (text) {
         addLog(`👂 Wake-word heard: "${text}" (${model || "unknown"})`, "info");
@@ -1496,7 +1492,7 @@ export default function App({ mode = "voice", language = "en" }) {
                             handleWakeWordResult(result.text.trim(), result.commandAfterWakeword || "");
                           } else if (result?.matched) {
                             // Fallback when backend marks wake-word matched but transcription text is empty.
-                            handleWakeWordResult(activationWordRef.current || "Hello Iris");
+                            handleWakeWordResult(activationWordRef.current || "Iris");
                           }
                         }
                       } catch (_) {}
