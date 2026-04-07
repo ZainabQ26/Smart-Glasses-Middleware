@@ -1619,60 +1619,78 @@ export default function App({ mode = "voice", language = "en" }) {
             src={glassesImg}
             alt="Smart Glasses"
             className="assistant-logo"
-            style={{ display: 'block', margin: '40px auto 24px auto', maxWidth: '340px', width: '100%', height: 'auto' }}
+            style={{ display: 'block', maxWidth: '280px', width: '100%', height: 'auto', flexShrink: 0 }}
           />
-          <div style={styles.landingCard}>
-            <h1 style={styles.landingTitle}>Hey, Eye-ris here. How can I help?</h1>
-            <p style={styles.landingSubtitle}>
-              Say <strong style={{color:"#f97316"}}>"{activationWord}"</strong> to start, then speak your command.
-            </p>
-
-            {/* ── Initialization status ─────────────────────────────────── */}
-            <div style={styles.landingStatus}>
-              {!wakeWordReady ? (
-                <div style={styles.landingLoadingRow}>
-                  <div style={styles.landingSpinner} />
-                  <span style={styles.landingLoadingText}>Connecting microphone…</span>
-                </div>
-              ) : (
-                <div style={styles.landingReadyRow}>
-                  <span style={styles.landingReadyBadge}>✓</span>
-                  <span style={styles.landingReadyText}>
-                    Ready — say <strong style={{color:"#f97316"}}>"{activationWord}"</strong> to begin
-                  </span>
-                </div>
-              )}
+          <div style={styles.landingCard} className="sgm-landing-card">
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center' }}>
+              <div />
+              <h1 style={styles.landingTitle}>{t.title}</h1>
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                <img
+                  src={psuLogo}
+                  alt="Penn State shield"
+                  style={{ height: 100, width: 'auto' }}
+                />
+              </div>
             </div>
 
             <div style={styles.landingSection} className="sgm-landing-how">
-              <h2 style={styles.landingH2}>🎤 How It Works</h2>
               <ol style={styles.landingOl}>
-                <li>Say <em>"{activationWord}"</em> to wake the assistant.</li>
-                <li>Speak your command clearly.</li>
-                <li>The assistant will respond or perform the action.</li>
-                <li>Say "{activationWord}" again for the next command.</li>
-                <li>After "search recent files", you can specify a file number without reactivating.</li>
+                {t.steps.map((step, i) => (
+                  <li key={i} style={styles.landingOlItem}>
+                    <span style={styles.landingOlNum}>{i + 1}.</span>
+                    {i === 0 ? (
+                      <span>
+                        Say <strong style={{color: '#f97316'}}>"Iris"</strong>
+                        <br />
+                        <span style={{color: '#aaa', fontSize: '0.88rem'}}>(This is to wake the assistant.)</span>
+                      </span>
+                    ) : i === 1 ? (
+                      <span>
+                        Speak command clearly
+                        <br />
+                        <span style={{color: '#aaa', fontSize: '0.88rem'}}>(The assistant will respond or perform the action.)</span>
+                      </span>
+                    ) : i === 2 ? (
+                      <span>Say <strong style={{color: '#f97316'}}>"Iris"</strong> again for the next command.</span>
+                    ) : i === 3 ? (
+                      <span>
+                        After <strong>"search recent files"</strong>
+                        <br />
+                        <span style={{color: '#aaa', fontSize: '0.88rem'}}>(You can specify a file number without reactivating.)</span>
+                      </span>
+                    ) : (
+                      <span>{tpl(step, { word: activationWord })}</span>
+                    )}
+                  </li>
+                ))}
               </ol>
             </div>
 
+            {/* ── Initialization status ─────────────────────────────────── */}
+            {!wakeWordReady ? (
+              <div style={styles.landingStatus}>
+                <div style={styles.landingLoadingRow}>
+                  <div style={styles.landingSpinner} />
+                  <span style={styles.landingLoadingText}>{t.connectingMic}</span>
+                </div>
+              </div>
+            ) : (
+              <div style={styles.landingOlItem}>
+                <span style={styles.landingOlNum}>5.</span>
+                <div style={{ ...styles.landingStatus, flex: 1, margin: 0 }}>
+                  <div style={styles.landingReadyRow}>
+                    <span style={styles.landingReadyBadge}>✓</span>
+                    <span style={styles.landingReadyText}>Ready</span>
+                  </div>
+                </div>
+              </div>
+            )}
             <div style={styles.landingSection} className="sgm-landing-cmds">
-              <h2 style={styles.landingH2}>📋 Common Commands</h2>
+              <h2 style={styles.landingH2}>{t.commonCommandsTitle}</h2>
               <table style={styles.landingTable}>
                 <tbody>
-                  {[
-                    ["search recent files", "browse recent uploaded files"],
-                    ["number #", "go to file number in recent files list"],
-                    ["select document", "Open the last uploaded document"],
-                    ["next/previous page", "Go to the next/previous page"],
-                    ["go to page 5", "Jump to a specific page"],
-                    ["highlight aspirin", "Highlight a word in the open document"],
-                    ["clear highlights", "Remove all highlights"],
-                    ["search for blood pressure", "Search for text in documents"],
-                    ["remind me to…", "Set a reminder"],
-                    ["show my reminders", "List all your reminders"],
-                    ["print document", "Print the open document with highlights"],
-                    ["admin panel", "Open the admin panel"],
-                  ].map(([cmd, desc]) => (
+                  {t.commandList.map(([cmd, desc]) => (
                     <tr key={cmd}>
                       <td style={styles.landingCmd}>"{cmd}"</td>
                       <td style={styles.landingDesc}>{desc}</td>
@@ -1681,8 +1699,6 @@ export default function App({ mode = "voice", language = "en" }) {
                 </tbody>
               </table>
             </div>
-
-            <p style={styles.landingDismiss}>This screen will disappear after your first activation.</p>
           </div>
         </div>
       )}
@@ -2047,8 +2063,7 @@ const styles = {
     fontSize: "1rem",
     color: "#ccc",
     textAlign: "center",
-  },
-  landingSection: {
+  },  landingSection: {
     display: "flex",
     flexDirection: "column",
     gap: 10,
@@ -2152,23 +2167,24 @@ const styles = {
     fontSize: "0.9rem",
     color: "#ccc",
   },
-  // Full-screen backdrop shown only while the assistant is listening. Covers all content
-  // underneath so nothing bleeds through or overlaps.
-  commandListBackdrop: {
-    position: "fixed",
-    inset: 0,
-    background: "rgba(0,0,0,0.97)",
-    zIndex: 100,
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "flex-start",
-    // top padding clears the indicator bar; bottom padding clears the Activity Log button
-    padding: "60px 16px 76px",
+  // Commands tab — full-page command reference (replaces the old listening-triggered popup).
+  commandPage: {
+    flex: 1,
+    minHeight: 0,
+    maxWidth: 680,
+    width: "100%",
+    margin: "0 auto",
+    padding: "52px 16px 80px",
     overflowY: "auto",
-    overflowX: "hidden",
   },
-  // Commands panel centred within the backdrop.
+  commandPageTitle: {
+    margin: "0 0 12px",
+    fontSize: "0.85rem",
+    fontWeight: 700,
+    color: "#f97316",
+    textTransform: "uppercase",
+    letterSpacing: "0.06em",
+  },
   commandList: {
     background: "rgba(10,10,10,0.98)",
     border: "1px solid #2a2a2a",
@@ -2223,8 +2239,8 @@ const styles = {
     maxWidth: 680,
     width: "100%",
     margin: "0 auto",
-    // top padding clears the fixed indicator bar; bottom padding clears the fixed log-toggle button
-    padding: "52px 16px 72px",
+    // top padding clears the fixed indicator bar; bottom padding clears the tab bar + log button
+    padding: "52px 16px 130px",
     display: "flex",
     flexDirection: "column",
     gap: 24,
@@ -2424,7 +2440,7 @@ const styles = {
   },
   logToggleBtn: {
     position: "fixed",
-    bottom: 20,
+    bottom: 64,  // sits above the tab bar
     right: 20,
     background: "#222",
     color: "#ccc",
@@ -2434,6 +2450,58 @@ const styles = {
     fontSize: "0.85rem",
     cursor: "pointer",
     zIndex: 50,
+  },
+  // Bottom tab bar
+  tabBar: {
+    position: "fixed",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 56,
+    display: "flex",
+    background: "#111",
+    borderTop: "1px solid #2a2a2a",
+    zIndex: 60,
+  },
+  tabBtn: {
+    flex: 1,
+    background: "none",
+    border: "none",
+    color: "#888",
+    fontSize: "0.78rem",
+    fontWeight: 600,
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    transition: "color 0.15s",
+  },
+  tabBtnActive: {
+    color: "#f97316",
+    borderTop: "2px solid #f97316",
+  },
+  // Files tab — empty state
+  filesEmptyPage: {
+    flex: 1,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
+    padding: "0 24px 80px",
+  },
+  filesEmptyText: {
+    margin: 0,
+    fontSize: "1.1rem",
+    color: "#ccc",
+    fontWeight: 600,
+  },
+  filesEmptyHint: {
+    margin: 0,
+    fontSize: "0.9rem",
+    color: "#666",
+    textAlign: "center",
   },
   logPanel: {
     position: "fixed",
