@@ -155,6 +155,8 @@ export default function App({ mode = "voice", language = "en" }) {
   const [pendingAction, _setPendingActionState] = useState(null); // { type: "SHOW_RECENT_FILES", files } | { type: "SELECT_DOCUMENT", id, name } | null
   // Reminders toast: null | { reminders: [], phase: 'visible'|'fading' }
   const [remindersToast, setRemindersToast] = useState(null);
+  // Active bottom tab on the voice interface: "conversation" | "commands" | "files"
+  const [activeTab, setActiveTab] = useState("conversation");
   // Show landing screen until the user says the activation word for the first time.
   const [showLanding, setShowLanding] = useState(true);
   // Activation word is sourced from backend app settings via /api/process/client-settings.
@@ -598,6 +600,7 @@ export default function App({ mode = "voice", language = "en" }) {
 
     setPendingAction(null);
     setOpenPdf({ id: previewId, name });
+    setActiveTab("files");
     addLog(`📄 Opening document: "${name}"`, "info");
   }, [addLog, setPendingAction]);
 
@@ -1591,90 +1594,85 @@ export default function App({ mode = "voice", language = "en" }) {
   const shouldPulse = isProcessing || isSending || !wakeWordReady;
   const dotStyle = { ...styles.dot, background: dotColor, ...(shouldPulse ? { animation: "pulse 1s ease-in-out infinite" } : {}) };
 
-  // Full command list shown as an overlay in the top-left only while listening.
-  const COMMAND_LIST = t.commandList.map(([cmd, desc]) => [`"${cmd}"`, desc]);
+  const COMMAND_LIST = [
+    [`"search recent files"`,  "browse recent uploaded files"],
+    [`"number #"`,             "go to file number in recent files list"],
+    [`"select document"`,      "open last uploaded document"],
+    [`"next/previous page"`,   "next/previous page"],
+    [`"go to page 5"`,         "jump to page"],
+    [`"highlight [word]"`,     "highlight text"],
+    [`"clear highlights"`,     "delete all highlights"],
+    [`"search for [text]"`,    "search document"],
+    [`"print document"`,       "save document as PDF with highlights"],
+    [`"show my reminders"`,    "list reminders"],
+    [`"remind me to…"`,        "set reminder"],
+    [`"admin panel"`,          "open settings"],
+  ];
 
   return (
     <div style={{ ...styles.page, ...(mode === "admin" ? styles.adminMode : {}) }}>
-      {/* ── Landing screen — shown until first activation ─────────────────────── */}
+
+      {/* ── Landing screen — shown until first activation (voice mode only) ──── */}
       {mode === "voice" && showLanding && (
         <div style={styles.landing} className="sgm-landing">
           <img
             src={glassesImg}
             alt="Smart Glasses"
             className="assistant-logo"
-            style={{ display: 'block', maxWidth: '280px', width: '100%', height: 'auto', flexShrink: 0 }}
+            style={{ display: 'block', margin: '40px auto 24px auto', maxWidth: '340px', width: '100%', height: 'auto' }}
           />
-          <div style={styles.landingCard} className="sgm-landing-card">
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center' }}>
-              <div />
-              <h1 style={styles.landingTitle}>{t.title}</h1>
-              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-                <img
-                  src={psuLogo}
-                  alt="Penn State shield"
-                  style={{ height: 100, width: 'auto' }}
-                />
-              </div>
+          <div style={styles.landingCard}>
+            <h1 style={styles.landingTitle}>Hey, Eye-ris here. How can I help?</h1>
+            <p style={styles.landingSubtitle}>
+              Say <strong style={{color:"#f97316"}}>"{activationWord}"</strong> to start, then speak your command.
+            </p>
+
+            {/* ── Initialization status ─────────────────────────────────── */}
+            <div style={styles.landingStatus}>
+              {!wakeWordReady ? (
+                <div style={styles.landingLoadingRow}>
+                  <div style={styles.landingSpinner} />
+                  <span style={styles.landingLoadingText}>Connecting microphone…</span>
+                </div>
+              ) : (
+                <div style={styles.landingReadyRow}>
+                  <span style={styles.landingReadyBadge}>✓</span>
+                  <span style={styles.landingReadyText}>
+                    Ready — say <strong style={{color:"#f97316"}}>"{activationWord}"</strong> to begin
+                  </span>
+                </div>
+              )}
             </div>
 
             <div style={styles.landingSection} className="sgm-landing-how">
+              <h2 style={styles.landingH2}>🎤 How It Works</h2>
               <ol style={styles.landingOl}>
-                {t.steps.map((step, i) => (
-                  <li key={i} style={styles.landingOlItem}>
-                    <span style={styles.landingOlNum}>{i + 1}.</span>
-                    {i === 0 ? (
-                      <span>
-                        Say <strong style={{color: '#f97316'}}>"Iris"</strong>
-                        <br />
-                        <span style={{color: '#aaa', fontSize: '0.88rem'}}>(This is to wake the assistant.)</span>
-                      </span>
-                    ) : i === 1 ? (
-                      <span>
-                        Speak command clearly
-                        <br />
-                        <span style={{color: '#aaa', fontSize: '0.88rem'}}>(The assistant will respond or perform the action.)</span>
-                      </span>
-                    ) : i === 2 ? (
-                      <span>Say <strong style={{color: '#f97316'}}>"Iris"</strong> again for the next command.</span>
-                    ) : i === 3 ? (
-                      <span>
-                        After <strong>"search recent files"</strong>
-                        <br />
-                        <span style={{color: '#aaa', fontSize: '0.88rem'}}>(You can specify a file number without reactivating.)</span>
-                      </span>
-                    ) : (
-                      <span>{tpl(step, { word: activationWord })}</span>
-                    )}
-                  </li>
-                ))}
+                <li>Say <em>"{activationWord}"</em> to wake the assistant.</li>
+                <li>Speak your command clearly.</li>
+                <li>The assistant will respond or perform the action.</li>
+                <li>Say "{activationWord}" again for the next command.</li>
+                <li>After "search recent files", you can specify a file number without reactivating.</li>
               </ol>
             </div>
 
-            {/* ── Initialization status ─────────────────────────────────── */}
-            {!wakeWordReady ? (
-              <div style={styles.landingStatus}>
-                <div style={styles.landingLoadingRow}>
-                  <div style={styles.landingSpinner} />
-                  <span style={styles.landingLoadingText}>{t.connectingMic}</span>
-                </div>
-              </div>
-            ) : (
-              <div style={styles.landingOlItem}>
-                <span style={styles.landingOlNum}>5.</span>
-                <div style={{ ...styles.landingStatus, flex: 1, margin: 0 }}>
-                  <div style={styles.landingReadyRow}>
-                    <span style={styles.landingReadyBadge}>✓</span>
-                    <span style={styles.landingReadyText}>Ready</span>
-                  </div>
-                </div>
-              </div>
-            )}
             <div style={styles.landingSection} className="sgm-landing-cmds">
-              <h2 style={styles.landingH2}>{t.commonCommandsTitle}</h2>
+              <h2 style={styles.landingH2}>📋 Common Commands</h2>
               <table style={styles.landingTable}>
                 <tbody>
-                  {t.commandList.map(([cmd, desc]) => (
+                  {[
+                    ["search recent files", "browse recent uploaded files"],
+                    ["number #", "go to file number in recent files list"],
+                    ["select document", "Open the last uploaded document"],
+                    ["next/previous page", "Go to the next/previous page"],
+                    ["go to page 5", "Jump to a specific page"],
+                    ["highlight aspirin", "Highlight a word in the open document"],
+                    ["clear highlights", "Remove all highlights"],
+                    ["search for blood pressure", "Search for text in documents"],
+                    ["remind me to…", "Set a reminder"],
+                    ["show my reminders", "List all your reminders"],
+                    ["print document", "Print the open document with highlights"],
+                    ["admin panel", "Open the admin panel"],
+                  ].map(([cmd, desc]) => (
                     <tr key={cmd}>
                       <td style={styles.landingCmd}>"{cmd}"</td>
                       <td style={styles.landingDesc}>{desc}</td>
@@ -1683,10 +1681,13 @@ export default function App({ mode = "voice", language = "en" }) {
                 </tbody>
               </table>
             </div>
+
+            <p style={styles.landingDismiss}>This screen will disappear after your first activation.</p>
           </div>
         </div>
       )}
 
+      {/* ── Mic status indicator — always on top ─────────────────────────────── */}
       {mode === "voice" && (
         <div style={styles.indicator} onClick={handleMicButton}>
           <span style={dotStyle} />
@@ -1699,162 +1700,238 @@ export default function App({ mode = "voice", language = "en" }) {
         </div>
       )}
 
-      <main className="sgm-main" style={styles.main}>
+      {/* ── Voice mode: tab pages ─────────────────────────────────────────────── */}
+      {mode === "voice" && (
+        <>
+          {/* ── Conversation tab ──────────────────────────────────────────── */}
+          <main className="sgm-main" style={{ ...styles.main, display: activeTab === "conversation" ? "flex" : "none" }}>
 
-        {(transcript || isSending || aiResponse || pendingAction) && (
-          <section style={styles.conversationArea}>
-            {transcript && (
-              <div style={styles.transcriptBubble}>
-                <span style={styles.bubbleLabel}>{t.you}</span>
-                <p style={styles.bubbleText}>{transcript}</p>
-              </div>
-            )}
-            {isSending && !aiResponse && !pendingAction && (
-              <div style={styles.thinkingBubble}>
-                <span style={styles.thinkingText}>{t.aiThinking}</span>
-              </div>
-            )}
-            {aiResponse && !pendingAction && (
-              <div style={styles.aiBubble}>
-                <span style={styles.bubbleLabel}>{t.aiLabel}</span>
-                <p style={styles.bubbleText}>{aiResponse}</p>
-                {usedAdvancedModel && (
-                  <div style={{position: 'absolute', right: 12, bottom: 8, background: 'rgba(11,99,166,0.9)', color: 'white', padding: '4px 6px', borderRadius: 6, fontSize: 12, display: 'flex', alignItems: 'center', gap: 6}} title="Generated by advanced model">
-                    <span style={{fontSize:12}}>⚡</span>
-                    <span style={{fontSize:11}}>{t.advanced}</span>
+            {(transcript || isSending || aiResponse || pendingAction) && (
+              <section style={styles.conversationArea}>
+                {transcript && (
+                  <div style={styles.transcriptBubble}>
+                    <span style={styles.bubbleLabel}>You</span>
+                    <p style={styles.bubbleText}>{transcript}</p>
                   </div>
+                )}
+                {isSending && !aiResponse && !pendingAction && (
+                  <div style={styles.thinkingBubble}>
+                    <span style={styles.thinkingText}>AI is thinking…</span>
+                  </div>
+                )}
+                {aiResponse && !pendingAction && (
+                  <div style={styles.aiBubble}>
+                    <span style={styles.bubbleLabel}>AI</span>
+                    <p style={styles.bubbleText}>{aiResponse}</p>
+                    {usedAdvancedModel && (
+                      <div style={{position: 'absolute', right: 12, bottom: 8, background: 'rgba(11,99,166,0.9)', color: 'white', padding: '4px 6px', borderRadius: 6, fontSize: 12, display: 'flex', alignItems: 'center', gap: 6}} title="Generated by advanced model">
+                        <span style={{fontSize:12}}>⚡</span>
+                        <span style={{fontSize:11}}>Advanced</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {pendingAction?.type === "SHOW_RECENT_FILES" && (
+                  <div style={styles.actionCard}>
+                    <p style={styles.actionCardTitle}>📂 Recent Uploaded Files</p>
+                    <p style={styles.actionCardHint}>Say a number (1–{pendingAction.files.length}) or tap a file to open it.</p>
+                    <div style={styles.actionList}>
+                      {pendingAction.files.map((file, index) => (
+                        <button
+                          key={file.previewId ?? file.id ?? `${file.name}-${index}`}
+                          type="button"
+                          style={styles.actionListBtn}
+                          onClick={() => openDocumentPreview(file)}
+                        >
+                          <span style={styles.actionListIndex}>{index + 1}</span>
+                          <span style={styles.actionListBody}>
+                            <span style={styles.actionListName}>{file.name}</span>
+                            {file.uploadedAt && (
+                              <span style={styles.actionListMeta}>{formatActionTime(file.uploadedAt)}</span>
+                            )}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {pendingAction?.type === "SELECT_DOCUMENT" && (
+                  <div style={styles.actionCard}>
+                    <p style={styles.actionCardTitle}>📄 Last Uploaded Document</p>
+                    <p style={styles.actionCardDoc}>{pendingAction.name}</p>
+                    <button
+                      style={styles.actionBtnSecondary}
+                      onClick={() => openDocumentPreview({ previewId: pendingAction.id, name: pendingAction.name })}
+                    >
+                      Preview Document →
+                    </button>
+                  </div>
+                )}
+              </section>
+            )}
+
+            {/* ── Reminders toast — fades out like a notification ─────────── */}
+            {remindersToast && (
+              <div style={{
+                ...styles.remindersToast,
+                opacity:    remindersToast.phase === "fading" ? 0 : 1,
+                transition: remindersToast.phase === "fading"
+                  ? "opacity 0.9s ease-out"
+                  : "opacity 0.25s ease-in",
+              }}>
+                <p style={styles.remindersToastTitle}>📝 Your Reminders</p>
+                {remindersToast.reminders.length === 0 ? (
+                  <p style={styles.remindersToastEmpty}>No reminders yet.</p>
+                ) : (
+                  <ul style={styles.remindersToastList}>
+                    {remindersToast.reminders.map((r, i) => (
+                      <li key={r.id ?? i} style={styles.remindersToastItem}>
+                        <span style={styles.remindersToastBullet}>{i + 1}.</span>
+                        <span>{r.text}</span>
+                        {r.createdAt && (
+                          <span style={styles.remindersToastMeta}>
+                            {formatActionTime(r.createdAt)}
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
                 )}
               </div>
             )}
-            {pendingAction?.type === "SHOW_RECENT_FILES" && (
-              <div style={styles.actionCard}>
-                <p style={styles.actionCardTitle}>{t.recentFiles}</p>
-                <p style={styles.actionCardHint}>{tpl(t.recentFilesHintTemplate, { n: pendingAction.files.length })}</p>
-                <div style={styles.actionList}>
-                  {pendingAction.files.map((file, index) => (
-                    <button
-                      key={file.previewId ?? file.id ?? `${file.name}-${index}`}
-                      type="button"
-                      style={styles.actionListBtn}
-                      onClick={() => openDocumentPreview(file)}
-                    >
-                      <span style={styles.actionListIndex}>{index + 1}</span>
-                      <span style={styles.actionListBody}>
-                        <span style={styles.actionListName}>{file.name}</span>
-                        {file.uploadedAt && (
-                          <span style={styles.actionListMeta}>{formatActionTime(file.uploadedAt)}</span>
-                        )}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-            {pendingAction?.type === "SELECT_DOCUMENT" && (
-              <div style={styles.actionCard}>
-                <p style={styles.actionCardTitle}>{t.lastDocument}</p>
-                <p style={styles.actionCardDoc}>{pendingAction.name}</p>
-                <button
-                  style={styles.actionBtnSecondary}
-                  onClick={() => openDocumentPreview({ previewId: pendingAction.id, name: pendingAction.name })}
-                >
-                  {t.previewDocument}
+
+            {/* ── Text command input — always on conversation page ─────────── */}
+            <div style={styles.textInputArea}>
+              <form onSubmit={handleTextSubmit} style={{ display: 'flex', gap: '10px', width: '100%', maxWidth: '680px', margin: '0 auto' }}>
+                <input
+                  type="text"
+                  value={inputText}
+                  onChange={e => setInputText(e.target.value)}
+                  placeholder={`Type "${activationWord}" to start, followed by your command.`}
+                  style={styles.textInput}
+                  disabled={isSending || isProcessing}
+                />
+                <button type="submit" disabled={isSending || isProcessing || !inputText.trim()} style={styles.textSubmitBtn}>
+                  Send
                 </button>
-              </div>
-            )}
-          </section>
-        )}
+              </form>
+            </div>
+          </main>
 
-        {/* ── Reminders toast — fades out like a notification ───────────── */}
-        {remindersToast && (
-          <div style={{
-            ...styles.remindersToast,
-            opacity:    remindersToast.phase === "fading" ? 0 : 1,
-            transition: remindersToast.phase === "fading"
-              ? "opacity 0.9s ease-out"
-              : "opacity 0.25s ease-in",
-          }}>
-            <p style={styles.remindersToastTitle}>{t.remindersTitle}</p>
-            {remindersToast.reminders.length === 0 ? (
-              <p style={styles.remindersToastEmpty}>{t.noReminders}</p>
-            ) : (
-              <ul style={styles.remindersToastList}>
-                {remindersToast.reminders.map((r, i) => (
-                  <li key={r.id ?? i} style={styles.remindersToastItem}>
-                    <span style={styles.remindersToastBullet}>{i + 1}.</span>
-                    <span>{r.text}</span>
-                    {r.createdAt && (
-                      <span style={styles.remindersToastMeta}>
-                        {formatActionTime(r.createdAt)}
-                      </span>
-                    )}
-                  </li>
+          {/* ── Commands tab ──────────────────────────────────────────────── */}
+          {activeTab === "commands" && (
+            <div style={styles.commandPage}>
+              <p style={styles.commandPageTitle}>📋 Commands</p>
+              <div style={styles.commandListGrid}>
+                {COMMAND_LIST.map(([cmd, desc]) => (
+                  <div key={cmd} style={styles.commandListRow}>
+                    <span style={styles.commandListCmd}>{cmd}</span>
+                    <span style={styles.commandListDesc}>{desc}</span>
+                  </div>
                 ))}
-              </ul>
-            )}
-          </div>
-        )}
+              </div>
+            </div>
+          )}
 
-        {openPdf && (
-          <PdfViewer
-            key={openPdf.id}
-            ref={pdfViewerRef}
-            documentId={openPdf.id}
-            documentName={openPdf.name}
-            onClose={handleClosePdf}
-          />
-        )}
-      </main>
+          {/* ── Files tab ─────────────────────────────────────────────────── */}
+          {/* Keep PdfViewer mounted whenever a PDF is open so voice commands
+              (nextPage, prevPage, etc.) keep working regardless of active tab. */}
+          {openPdf && (
+            <div style={{ display: activeTab === "files" ? "flex" : "none", flex: 1, minHeight: 0, flexDirection: "column" }}>
+              <PdfViewer
+                key={openPdf.id}
+                ref={pdfViewerRef}
+                documentId={openPdf.id}
+                documentName={openPdf.name}
+                onClose={handleClosePdf}
+              />
+            </div>
+          )}
+          {activeTab === "files" && !openPdf && (
+            <div style={styles.filesEmptyPage}>
+              <p style={styles.filesEmptyText}>No document open.</p>
+              <p style={styles.filesEmptyHint}>Say "open last document" or "search recent files" to open one.</p>
+            </div>
+          )}
 
-      {mode === "admin" && (
-        <div style={styles.textInputArea}>
-          <form onSubmit={handleTextSubmit} style={{ display: 'flex', gap: '10px', width: '100%', maxWidth: '680px', margin: '0 auto' }}>
-            <input
-              type="text"
-              value={inputText}
-              onChange={e => setInputText(e.target.value)}
-              placeholder={tpl(t.textInputPlaceholderTemplate, { word: activationWord })}
-              style={styles.textInput}
-              disabled={isSending || isProcessing}
-            />
-            <button type="submit" disabled={isSending || isProcessing || !inputText.trim()} style={styles.textSubmitBtn}>
-              {t.send}
-            </button>
-          </form>
-        </div>
+          {/* ── Bottom tab bar ────────────────────────────────────────────── */}
+          <nav style={styles.tabBar}>
+            {[
+              { id: "conversation", label: "💬 Conversation" },
+              { id: "commands",     label: "📋 Commands" },
+              { id: "files",        label: "📁 Files" },
+            ].map(tab => (
+              <button
+                key={tab.id}
+                style={{ ...styles.tabBtn, ...(activeTab === tab.id ? styles.tabBtnActive : {}) }}
+                onClick={() => setActiveTab(tab.id)}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </nav>
+        </>
       )}
 
+      {/* ── Admin mode: chat input ────────────────────────────────────────────── */}
+      {mode === "admin" && (
+        <>
+          <main className="sgm-main" style={styles.main}>
+            {(transcript || isSending || aiResponse || pendingAction) && (
+              <section style={styles.conversationArea}>
+                {transcript && (
+                  <div style={styles.transcriptBubble}>
+                    <span style={styles.bubbleLabel}>You</span>
+                    <p style={styles.bubbleText}>{transcript}</p>
+                  </div>
+                )}
+                {isSending && !aiResponse && !pendingAction && (
+                  <div style={styles.thinkingBubble}>
+                    <span style={styles.thinkingText}>AI is thinking…</span>
+                  </div>
+                )}
+                {aiResponse && !pendingAction && (
+                  <div style={styles.aiBubble}>
+                    <span style={styles.bubbleLabel}>AI</span>
+                    <p style={styles.bubbleText}>{aiResponse}</p>
+                  </div>
+                )}
+              </section>
+            )}
+          </main>
+          <div style={styles.textInputArea}>
+            <form onSubmit={handleTextSubmit} style={{ display: 'flex', gap: '10px', width: '100%', maxWidth: '680px', margin: '0 auto' }}>
+              <input
+                type="text"
+                value={inputText}
+                onChange={e => setInputText(e.target.value)}
+                placeholder={tpl(t.textInputPlaceholderTemplate, { word: activationWord })}
+                style={styles.textInput}
+                disabled={isSending || isProcessing}
+              />
+              <button type="submit" disabled={isSending || isProcessing || !inputText.trim()} style={styles.textSubmitBtn}>
+                {t.send}
+              </button>
+            </form>
+          </div>
+        </>
+      )}
+
+      {/* ── Activity log toggle & panel ──────────────────────────────────────── */}
       {mode === "voice" && (
         <button
           style={styles.logToggleBtn}
           onClick={() => setLogOpen(prev => !prev)}
         >
-          {logOpen ? t.closeLog : t.activityLogBtn}
+          {logOpen ? "✕ Close Log" : "📋 Activity Log"}
         </button>
-      )}
-
-      {/* ── Command list overlay — shown only while actively listening ─────────── */}
-      {isListening && (
-        <div style={styles.commandListBackdrop}>
-          <div style={styles.commandList}>
-            <p style={styles.commandListTitle}>{t.commandsOverlayTitle}</p>
-            <div style={styles.commandListGrid}>
-              {COMMAND_LIST.map(([cmd, desc]) => (
-                <div key={cmd} style={styles.commandListRow}>
-                  <span style={styles.commandListCmd}>{cmd}</span>
-                  <span style={styles.commandListDesc}>{desc}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
       )}
 
       {mode === "voice" && logOpen && (
         <div style={styles.logPanel}>
-          <h2 style={styles.sectionTitle}>{t.activityLogTitle}</h2>
+          <h2 style={styles.sectionTitle}>Activity Log</h2>
           {logs.length === 0 ? (
-            <p style={styles.emptyLog}>{tpl(t.noActivityTemplate, { word: activationWord })}</p>
+            <p style={styles.emptyLog}>No activity yet. Say "{activationWord}".</p>
           ) : (
             <ul style={styles.logList}>
               {logs.map(entry => (
