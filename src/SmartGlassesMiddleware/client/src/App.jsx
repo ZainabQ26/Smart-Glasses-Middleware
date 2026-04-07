@@ -12,20 +12,20 @@ import PdfViewer from "./PdfViewer.jsx";
 //     Groq Whisper Turbo on the server
 //
 import glassesImg from "./pdf/image/Gemini_Generated_Image_8mwak58mwak58mwa.png";
+import psuLogo from "./pdf/image/Penn-State-University-Emblem.png";
 
 // ─── TRANSLATIONS ─────────────────────────────────────────────────────────────
 const TRANSLATIONS = {
   en: {
-    title: "Hey, Eye-ris here. How can I help?",
+    title: "This is Eye-RIS!\nHow can I help?",
     subtitleTemplate: 'Say "{word}" to start, then speak your command.',
     connectingMic: "Connecting microphone…",
     readyTemplate: 'Ready — say "{word}" to begin',
     howItWorksTitle: "🎤 How It Works",
     steps: [
-      'Say "{word}" to wake the assistant.',
-      "Speak your command clearly.",
+      'Say "{word}" to wake the assistant and speak your command.',
       "The assistant will respond or perform the action.",
-      'Say "{word}" again for the next command.',
+      'Say "Iris" again for the next command.',
       'After "search recent files", you can specify a file number without reactivating.',
     ],
     commonCommandsTitle: "📋 Common Commands",
@@ -1598,43 +1598,78 @@ export default function App({ mode = "voice", language = "en" }) {
     <div style={{ ...styles.page, ...(mode === "admin" ? styles.adminMode : {}) }}>
       {/* ── Landing screen — shown until first activation ─────────────────────── */}
       {mode === "voice" && showLanding && (
-        <div style={styles.landing}>
+        <div style={styles.landing} className="sgm-landing">
           <img
             src={glassesImg}
             alt="Smart Glasses"
             className="assistant-logo"
             style={{ display: 'block', maxWidth: '280px', width: '100%', height: 'auto', flexShrink: 0 }}
           />
-          <div style={styles.landingCard}>
-            <h1 style={styles.landingTitle}>{t.title}</h1>
-            <p style={styles.landingSubtitle}>
-              {renderWithHighlight(t.subtitleTemplate, activationWord)}
-            </p>
+          <div style={styles.landingCard} className="sgm-landing-card">
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center' }}>
+              <div />
+              <h1 style={styles.landingTitle}>{t.title}</h1>
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                <img
+                  src={psuLogo}
+                  alt="Penn State shield"
+                  style={{ height: 100, width: 'auto' }}
+                />
+              </div>
+            </div>
+
+            <div style={styles.landingSection} className="sgm-landing-how">
+              <ol style={styles.landingOl}>
+                {t.steps.map((step, i) => (
+                  <li key={i} style={styles.landingOlItem}>
+                    <span style={styles.landingOlNum}>{i + 1}.</span>
+                    {i === 0 ? (
+                      <span>
+                        Say <strong style={{color: '#f97316'}}>"Iris"</strong>
+                        <br />
+                        <span style={{color: '#aaa', fontSize: '0.88rem'}}>(This is to wake the assistant.)</span>
+                      </span>
+                    ) : i === 1 ? (
+                      <span>
+                        Speak command clearly
+                        <br />
+                        <span style={{color: '#aaa', fontSize: '0.88rem'}}>(The assistant will respond or perform the action.)</span>
+                      </span>
+                    ) : i === 2 ? (
+                      <span>Say <strong style={{color: '#f97316'}}>"Iris"</strong> again for the next command.</span>
+                    ) : i === 3 ? (
+                      <span>
+                        After <strong>"search recent files"</strong>
+                        <br />
+                        <span style={{color: '#aaa', fontSize: '0.88rem'}}>(You can specify a file number without reactivating.)</span>
+                      </span>
+                    ) : (
+                      <span>{tpl(step, { word: activationWord })}</span>
+                    )}
+                  </li>
+                ))}
+              </ol>
+            </div>
 
             {/* ── Initialization status ─────────────────────────────────── */}
-            <div style={styles.landingStatus}>
-              {!wakeWordReady ? (
+            {!wakeWordReady ? (
+              <div style={styles.landingStatus}>
                 <div style={styles.landingLoadingRow}>
                   <div style={styles.landingSpinner} />
                   <span style={styles.landingLoadingText}>{t.connectingMic}</span>
                 </div>
-              ) : (
-                <div style={styles.landingReadyRow}>
-                  <span style={styles.landingReadyBadge}>✓</span>
-                  <span style={styles.landingReadyText}>
-                    {renderWithHighlight(t.readyTemplate, activationWord)}
-                  </span>
+              </div>
+            ) : (
+              <div style={styles.landingOlItem}>
+                <span style={styles.landingOlNum}>5.</span>
+                <div style={{ ...styles.landingStatus, flex: 1, margin: 0 }}>
+                  <div style={styles.landingReadyRow}>
+                    <span style={styles.landingReadyBadge}>✓</span>
+                    <span style={styles.landingReadyText}>Ready</span>
+                  </div>
                 </div>
-              )}
-            </div>
-            <div style={styles.landingSection} className="sgm-landing-how">
-              <h2 style={styles.landingH2}>{t.howItWorksTitle}</h2>
-              <ol style={styles.landingOl}>
-                {t.steps.map((step, i) => (
-                  <li key={i}>{tpl(step, { word: activationWord })}</li>
-                ))}
-              </ol>
-            </div>
+              </div>
+            )}
             <div style={styles.landingSection} className="sgm-landing-cmds">
               <h2 style={styles.landingH2}>{t.commonCommandsTitle}</h2>
               <table style={styles.landingTable}>
@@ -1652,21 +1687,6 @@ export default function App({ mode = "voice", language = "en" }) {
         </div>
       )}
 
-      {/* ── Command list overlay — shown only while actively listening ─────────── */}
-      {isListening && (
-        <div style={styles.commandList}>
-          <p style={styles.commandListTitle}>{t.commandsOverlayTitle}</p>
-          <div style={styles.commandListGrid}>
-            {COMMAND_LIST.map(([cmd, desc]) => (
-              <div key={cmd} style={styles.commandListRow}>
-                <span style={styles.commandListCmd}>{cmd}</span>
-                <span style={styles.commandListDesc}>{desc}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {mode === "voice" && (
         <div style={styles.indicator} onClick={handleMicButton}>
           <span style={dotStyle} />
@@ -1679,7 +1699,7 @@ export default function App({ mode = "voice", language = "en" }) {
         </div>
       )}
 
-      <main style={styles.main}>
+      <main className="sgm-main" style={styles.main}>
 
         {(transcript || isSending || aiResponse || pendingAction) && (
           <section style={styles.conversationArea}>
@@ -1813,6 +1833,23 @@ export default function App({ mode = "voice", language = "en" }) {
         </button>
       )}
 
+      {/* ── Command list overlay — shown only while actively listening ─────────── */}
+      {isListening && (
+        <div style={styles.commandListBackdrop}>
+          <div style={styles.commandList}>
+            <p style={styles.commandListTitle}>{t.commandsOverlayTitle}</p>
+            <div style={styles.commandListGrid}>
+              {COMMAND_LIST.map(([cmd, desc]) => (
+                <div key={cmd} style={styles.commandListRow}>
+                  <span style={styles.commandListCmd}>{cmd}</span>
+                  <span style={styles.commandListDesc}>{desc}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {mode === "voice" && logOpen && (
         <div style={styles.logPanel}>
           <h2 style={styles.sectionTitle}>{t.activityLogTitle}</h2>
@@ -1910,8 +1947,8 @@ const styles = {
     overflowX: "hidden",
   },
   landingCard: {
-    background: "#111",
-    border: "1px solid #333",
+    background: "#1E407C",
+    border: "1px solid #2a5aaa",
     borderRadius: 16,
     padding: "min(32px, 5vh) min(28px, 5vw)",
     maxWidth: 620,
@@ -1926,6 +1963,7 @@ const styles = {
     fontWeight: 700,
     color: "#fff",
     textAlign: "center",
+    whiteSpace: "pre-line",
   },
   landingSubtitle: {
     margin: 0,
@@ -1948,13 +1986,28 @@ const styles = {
   },
   landingOl: {
     margin: 0,
-    paddingLeft: 22,
+    paddingLeft: 0,
+    listStyle: "none",
     display: "flex",
     flexDirection: "column",
     gap: 6,
     color: "#ddd",
     fontSize: "0.95rem",
     lineHeight: 1.6,
+  },
+  landingOlItem: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: 10,
+  },
+  landingOlNum: {
+    minWidth: 22,
+    textAlign: "right",
+    color: "#ddd",
+    fontSize: "0.95rem",
+    paddingTop: "0.15em",
+    lineHeight: 1.6,
+    flexShrink: 0,
   },
   landingTable: {
     width: "100%",
@@ -2022,19 +2075,30 @@ const styles = {
     fontSize: "0.9rem",
     color: "#ccc",
   },
-  // Full command list overlay shown at top-left only while the assistant is listening.
-  commandList: {
+  // Full-screen backdrop shown only while the assistant is listening. Covers all content
+  // underneath so nothing bleeds through or overlaps.
+  commandListBackdrop: {
     position: "fixed",
-    top: 60,
-    left: 12,
-    background: "rgba(10,10,10,0.93)",
+    inset: 0,
+    background: "rgba(0,0,0,0.97)",
+    zIndex: 100,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "flex-start",
+    // top padding clears the indicator bar; bottom padding clears the Activity Log button
+    padding: "60px 16px 76px",
+    overflowY: "auto",
+    overflowX: "hidden",
+  },
+  // Commands panel centred within the backdrop.
+  commandList: {
+    background: "rgba(10,10,10,0.98)",
     border: "1px solid #2a2a2a",
     borderRadius: 10,
     padding: "10px 14px",
-    zIndex: 50,
-    maxWidth: "min(320px, calc(100vw - 24px))",
-    maxHeight: "calc(100vh - 80px)",
-    overflowY: "auto",
+    width: "100%",
+    maxWidth: 480,
   },
   commandListTitle: {
     margin: "0 0 8px",
@@ -2066,13 +2130,13 @@ const styles = {
     color: "#777",
   },
   indicator: {
-    position: "absolute",
+    position: "fixed",
     top: 16,
     right: 16,
     display: "flex",
     alignItems: "center",
     gap: 8,
-    zIndex: 40,
+    zIndex: 110,
   },
   dot: { width: 12, height: 12, borderRadius: "50%" },
   indicatorText: { fontSize: "0.85rem", color: "#ccc" },
@@ -2081,8 +2145,9 @@ const styles = {
     minHeight: 0,
     maxWidth: 680,
     width: "100%",
-    margin: "48px auto 32px",
-    padding: "0 16px",
+    margin: "0 auto",
+    // top padding clears the fixed indicator bar; bottom padding clears the fixed log-toggle button
+    padding: "52px 16px 72px",
     display: "flex",
     flexDirection: "column",
     gap: 24,
@@ -2099,7 +2164,7 @@ const styles = {
     flex: 1,
     padding: "12px 16px",
     borderRadius: "8px",
-    border: "1px solid rgba(255,255,255,0.2)",
+    border: "2px solid #999",
     background: "#fff",
     color: "#000",
     fontSize: "1rem",
@@ -2433,15 +2498,17 @@ if (typeof document !== "undefined" && !document.getElementById("app-mobile-styl
   const style = document.createElement("style");
   style.id = "app-mobile-style";
   style.textContent = `
-    @media (max-width: 768px), (max-height: 900px) {
-      .sgm-landing-cmds { display: none !important; }
+    @media (max-width: 600px) {
+      .sgm-landing { gap: 10px !important; padding: 10px 12px 12px !important; }
+      .assistant-logo { max-width: 100px !important; }
+      .sgm-landing-card { padding: 14px 14px !important; gap: 10px !important; }
+      .sgm-landing-card h1 { font-size: 1.2rem !important; }
+      .sgm-landing-card > div > div > img { height: 65px !important; }
+      .sgm-landing-how ol { gap: 3px !important; font-size: 0.82rem !important; }
+      .sgm-landing-how li > span > span { font-size: 0.74rem !important; }
+      .sgm-main { gap: 12px !important; }
     }
-    @media (max-width: 500px), (max-height: 750px) {
-      .sgm-landing-how { display: none !important; }
-    }
-    @media (max-width: 500px), (max-height: 600px) {
-      .assistant-logo { max-width: 160px !important; }
-    }
+    .sgm-landing-cmds { display: none !important; }
     @media (max-height: 480px) {
       .assistant-logo { display: none !important; }
     }
