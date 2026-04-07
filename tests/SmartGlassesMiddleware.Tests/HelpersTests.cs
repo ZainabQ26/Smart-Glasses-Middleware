@@ -28,6 +28,34 @@ public class HelpersTests
     }
 
     [Test]
+    public void ConfigurationWrapper_HandlesEdgeCases()
+    {
+        // Test negative and zero constructor parameters
+        var config = new ConfigurationWrapper(0, -100);
+        Assert.That(config["RAG:MaxRetries"], Is.EqualTo("0"));
+        Assert.That(config["RAG:RetryDelayMs"], Is.EqualTo("-100"));
+
+        // Test getting an unset key explicitly
+        Assert.That(config["NonExistentKey"], Is.Null);
+
+        // Test setting a value to empty string and retrieving it
+        config["EmptyStringKey"] = "";
+        Assert.That(config["EmptyStringKey"], Is.EqualTo(""));
+
+        // Test setting a value to null and retrieving it
+        config["NullKey"] = null;
+        Assert.That(config["NullKey"], Is.Null);
+
+        // Test overwriting a value multiple times
+        config["OverwriteKey"] = "FirstValue";
+        Assert.That(config["OverwriteKey"], Is.EqualTo("FirstValue"));
+        config["OverwriteKey"] = "SecondValue";
+        Assert.That(config["OverwriteKey"], Is.EqualTo("SecondValue"));
+        config["OverwriteKey"] = null;
+        Assert.That(config["OverwriteKey"], Is.Null);
+    }
+
+    [Test]
     public void ConfigurationSection_Works()
     {
         var config = new ConfigurationWrapper(3, 500);
@@ -53,6 +81,9 @@ public class HelpersTests
 
         var subSection = section.GetSection("Sub");
         Assert.That(subSection.Path, Is.EqualTo("Path:Sub"));
+
+        var subSubSection = subSection.GetSection("SubSub");
+        Assert.That(subSubSection.Path, Is.EqualTo("Path:Sub:SubSub"));
     }
 
     [Test]

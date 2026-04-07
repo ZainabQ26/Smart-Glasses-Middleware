@@ -18,10 +18,6 @@
       "description": "AI interaction logs and statistics"
     },
     {
-      "name": "Conversations",
-      "description": "Conversation thread management and querying"
-    },
-    {
       "name": "Debug",
       "description": "Debugging and diagnostic utilities"
     },
@@ -30,12 +26,8 @@
       "description": "Document upload, querying, and RAG operations"
     },
     {
-      "name": "GroupConversationMappings",
-      "description": "Resource group to conversation mappings"
-    },
-    {
       "name": "History",
-      "description": "Request history and reminders"
+      "description": "Request history"
     },
     {
       "name": "Media",
@@ -442,442 +434,6 @@
         }
       }
     },
-    "/api/admin/prompts": {
-      "get": {
-        "tags": [
-          "Admin"
-        ],
-        "summary": "List all managed prompts",
-        "responses": {
-          "200": {
-            "description": "List of prompts",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ManagedPrompt"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "Admin"
-        ],
-        "summary": "Create a new managed prompt",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PromptRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Prompt created",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ManagedPrompt"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid request"
-          }
-        }
-      }
-    },
-    "/api/admin/prompts/{id}": {
-      "put": {
-        "tags": [
-          "Admin"
-        ],
-        "summary": "Update an existing managed prompt",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PromptRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Prompt updated",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ManagedPrompt"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Prompt not found"
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "Admin"
-        ],
-        "summary": "Delete a managed prompt",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Prompt deleted"
-          },
-          "404": {
-            "description": "Prompt not found"
-          }
-        }
-      }
-    },
-    "/api/admin/groups": {
-      "get": {
-        "tags": [
-          "Admin"
-        ],
-        "summary": "List all resource groups",
-        "parameters": [
-          {
-            "name": "page",
-            "in": "query",
-            "schema": {
-              "type": "integer",
-              "default": 1
-            }
-          },
-          {
-            "name": "pageSize",
-            "in": "query",
-            "schema": {
-              "type": "integer",
-              "default": 20
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "List of resource groups",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ResourceGroup"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "Admin"
-        ],
-        "summary": "Create a new resource group",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GroupRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Group created",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ResourceGroup"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid request"
-          }
-        }
-      }
-    },
-    "/api/admin/groups/{id}": {
-      "get": {
-        "tags": [
-          "Admin"
-        ],
-        "summary": "Get detailed information about a resource group",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Resource group details including files and prompts",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ResourceGroup"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Group not found"
-          }
-        }
-      },
-      "put": {
-        "tags": [
-          "Admin"
-        ],
-        "summary": "Update a resource group",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GroupRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Group updated",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ResourceGroup"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Group not found"
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "Admin"
-        ],
-        "summary": "Delete a resource group",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Group deleted"
-          },
-          "404": {
-            "description": "Group not found"
-          }
-        }
-      }
-    },
-    "/api/admin/groups/{groupId}/files/{fileId}": {
-      "post": {
-        "tags": [
-          "Admin"
-        ],
-        "summary": "Add a file to a resource group",
-        "parameters": [
-          {
-            "name": "groupId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "fileId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "File added to group"
-          },
-          "404": {
-            "description": "Group or file not found"
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "Admin"
-        ],
-        "summary": "Remove a file from a resource group",
-        "parameters": [
-          {
-            "name": "groupId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "fileId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "File removed from group"
-          },
-          "404": {
-            "description": "Group or file not found"
-          }
-        }
-      }
-    },
-    "/api/admin/groups/{groupId}/prompts/{promptId}": {
-      "post": {
-        "tags": [
-          "Admin"
-        ],
-        "summary": "Add a prompt to a resource group",
-        "parameters": [
-          {
-            "name": "groupId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "promptId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Prompt added to group"
-          },
-          "404": {
-            "description": "Group or prompt not found"
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "Admin"
-        ],
-        "summary": "Remove a prompt from a resource group",
-        "parameters": [
-          {
-            "name": "groupId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "promptId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Prompt removed from group"
-          },
-          "404": {
-            "description": "Group or prompt not found"
-          }
-        }
-      }
-    },
     "/api/admin/clear-all": {
       "post": {
         "tags": [
@@ -1023,457 +579,6 @@
                 }
               }
             }
-          }
-        }
-      }
-    },
-    "/api/conversations": {
-      "post": {
-        "tags": [
-          "Conversations"
-        ],
-        "summary": "Create a new conversation",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateConversationRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Conversation created",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Conversation"
-                }
-              }
-            }
-          }
-        }
-      },
-      "get": {
-        "tags": [
-          "Conversations"
-        ],
-        "summary": "List conversations",
-        "parameters": [
-          {
-            "name": "groupId",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "page",
-            "in": "query",
-            "schema": {
-              "type": "integer",
-              "default": 1
-            }
-          },
-          {
-            "name": "pageSize",
-            "in": "query",
-            "schema": {
-              "type": "integer",
-              "default": 20
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Paginated list of conversations",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/conversations/{id}": {
-      "get": {
-        "tags": [
-          "Conversations"
-        ],
-        "summary": "Get a conversation by ID",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Conversation details",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Conversation"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Conversation not found"
-          }
-        }
-      },
-      "put": {
-        "tags": [
-          "Conversations"
-        ],
-        "summary": "Update conversation title",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateConversationRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Conversation updated"
-          },
-          "400": {
-            "description": "Invalid request"
-          },
-          "404": {
-            "description": "Conversation not found"
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "Conversations"
-        ],
-        "summary": "Permanently delete a conversation and its messages",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Conversation deleted"
-          },
-          "404": {
-            "description": "Conversation not found"
-          }
-        }
-      }
-    },
-    "/api/conversations/{id}/messages": {
-      "post": {
-        "tags": [
-          "Conversations"
-        ],
-        "summary": "Add a message to a conversation",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AddMessageRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Message added",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ChatMessage"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Conversation not found"
-          }
-        }
-      }
-    },
-    "/api/conversations/{id}/query": {
-      "post": {
-        "tags": [
-          "Conversations"
-        ],
-        "summary": "Query using a conversation's context with RAG",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ConversationQueryRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Query result",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/QueryResult"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Conversation not found"
-          }
-        }
-      }
-    },
-    "/api/conversations/{id}/summarize": {
-      "post": {
-        "tags": [
-          "Conversations"
-        ],
-        "summary": "Generate a summary for a conversation",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "generateEmbedding",
-            "in": "query",
-            "schema": {
-              "type": "boolean",
-              "default": false
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Summary generated",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Conversation not found"
-          }
-        }
-      }
-    },
-    "/api/conversations/{id}/archive": {
-      "post": {
-        "tags": [
-          "Conversations"
-        ],
-        "summary": "Archive a conversation",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Conversation archived"
-          },
-          "404": {
-            "description": "Conversation not found"
-          }
-        }
-      }
-    },
-    "/api/conversations/{id}/group": {
-      "put": {
-        "tags": [
-          "Conversations"
-        ],
-        "summary": "Update the resource group associated with a conversation",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateConversationGroupRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Conversation group updated"
-          },
-          "400": {
-            "description": "Invalid request"
-          },
-          "404": {
-            "description": "Conversation not found"
-          }
-        }
-      }
-    },
-    "/api/conversations/mapping": {
-      "get": {
-        "tags": [
-          "GroupConversationMappings"
-        ],
-        "summary": "Get the conversation mapped to a resource group",
-        "parameters": [
-          {
-            "name": "groupId",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Mapping found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GroupConversationMapping"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Mapping not found"
-          }
-        }
-      },
-      "put": {
-        "tags": [
-          "GroupConversationMappings"
-        ],
-        "summary": "Create or update the conversation mapping for a resource group",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GroupConversationMapping"
-              }
-            }
-          }
-        },
-        "responses": {
-          "204": {
-            "description": "Mapping upserted"
-          },
-          "400": {
-            "description": "Invalid request"
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "GroupConversationMappings"
-        ],
-        "summary": "Delete the conversation mapping for a resource group",
-        "parameters": [
-          {
-            "name": "groupId",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Mapping deleted"
-          },
-          "400": {
-            "description": "Invalid request"
           }
         }
       }
@@ -2002,39 +1107,6 @@
         }
       }
     },
-    "/api/history/reminders": {
-      "get": {
-        "tags": [
-          "History"
-        ],
-        "summary": "Get reminder history entries",
-        "parameters": [
-          {
-            "name": "count",
-            "in": "query",
-            "schema": {
-              "type": "integer",
-              "default": 100
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "List of reminders",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/RequestHistory"
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/history/type/{requestType}": {
       "get": {
         "tags": [
@@ -2069,114 +1141,6 @@
                   "items": {
                     "$ref": "#/components/schemas/RequestHistory"
                   }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/history/reminders/{id}": {
-      "put": {
-        "tags": [
-          "History"
-        ],
-        "summary": "Update a reminder's text",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateReminderRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Reminder updated",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestHistory"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid request"
-          },
-          "403": {
-            "description": "Not a reminder entry"
-          },
-          "404": {
-            "description": "Reminder not found"
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "History"
-        ],
-        "summary": "Delete a reminder",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Reminder deleted"
-          },
-          "403": {
-            "description": "Not a reminder entry"
-          },
-          "404": {
-            "description": "Reminder not found"
-          }
-        }
-      }
-    },
-    "/api/history/reminders/query": {
-      "post": {
-        "tags": [
-          "History"
-        ],
-        "summary": "Query reminders using semantic search",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/QueryRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Query result",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/QueryResult"
                 }
               }
             }
@@ -2497,28 +1461,10 @@
         "tags": [
           "Admin"
         ],
-        "summary": "Get files, prompts, and groups in a single batch request for efficiency",
+        "summary": "Get files in a single batch request for efficiency",
         "parameters": [
           {
             "name": "includeFiles",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "default": true
-            }
-          },
-          {
-            "name": "includePrompts",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "default": true
-            }
-          },
-          {
-            "name": "includeGroups",
             "in": "query",
             "required": false,
             "schema": {
@@ -2538,7 +1484,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Batch data containing files, prompts, and groups",
+            "description": "Batch data containing files",
             "content": {
               "application/json": {
                 "schema": {
@@ -2557,39 +1503,411 @@
                           "type": "integer"
                         }
                       }
-                    },
-                    "prompts": {
-                      "type": "object",
-                      "properties": {
-                        "data": {
-                          "type": "array",
-                          "items": {
-                            "type": "object"
-                          }
-                        },
-                        "count": {
-                          "type": "integer"
-                        }
-                      }
-                    },
-                    "groups": {
-                      "type": "object",
-                      "properties": {
-                        "data": {
-                          "type": "array",
-                          "items": {
-                            "type": "object"
-                          }
-                        },
-                        "count": {
-                          "type": "integer"
-                        }
-                      }
                     }
                   }
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Readiness check (DB + Redis)",
+        "description": "Returns 200 when the database and optional Redis cache are reachable. Returns 503 when not ready.",
+        "responses": {
+          "200": {
+            "description": "Service is ready"
+          },
+          "503": {
+            "description": "Service is not yet ready"
+          }
+        }
+      }
+    },
+    "/api/admin/groq-transcriptions": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Get recent Groq transcription log entries",
+        "parameters": [
+          {
+            "name": "maxCount",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recent transcription log entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "entries": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "count": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Clear all Groq transcription log entries",
+        "responses": {
+          "200": {
+            "description": "Transcription log cleared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "cleared": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/abbreviations/download": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Download all abbreviations as CSV",
+        "responses": {
+          "200": {
+            "description": "CSV file of abbreviations",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/history/reminders": {
+      "get": {
+        "tags": [
+          "History"
+        ],
+        "summary": "Get all saved reminders",
+        "parameters": [
+          {
+            "name": "count",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of reminder history entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RequestHistory"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/history/reminders/{id}": {
+      "put": {
+        "tags": [
+          "History"
+        ],
+        "summary": "Update the text of an existing reminder",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "text"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Reminder updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestHistory"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "404": {
+            "description": "Reminder not found"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "History"
+        ],
+        "summary": "Delete a reminder by ID",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Reminder deleted"
+          },
+          "404": {
+            "description": "Reminder not found"
+          }
+        }
+      }
+    },
+    "/api/history/reminders/query": {
+      "post": {
+        "tags": [
+          "History"
+        ],
+        "summary": "Semantic RAG query over saved reminders",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Query results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueryResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Query is required"
+          }
+        }
+      }
+    },
+    "/api/process/transcribe": {
+      "post": {
+        "tags": [
+          "Process"
+        ],
+        "summary": "Transcribe audio via Groq Whisper",
+        "description": "Accepts a multipart audio file and returns the transcription. Set `checkWakeword=true` to detect the activation word and extract the command following it.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "audio": {
+                    "type": "string",
+                    "format": "binary"
+                  },
+                  "language": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "checkWakeword": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                },
+                "required": [
+                  "audio"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Transcription result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string"
+                    },
+                    "matched": {
+                      "type": "boolean",
+                      "nullable": true
+                    },
+                    "commandAfterWakeword": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "provider": {
+                      "type": "string"
+                    },
+                    "model": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Audio is required"
+          },
+          "408": {
+            "description": "Transcription timed out"
+          },
+          "503": {
+            "description": "Groq transcription not configured"
+          }
+        }
+      }
+    },
+    "/api/process/transcribe-wakeword": {
+      "post": {
+        "tags": [
+          "Process"
+        ],
+        "summary": "Transcribe audio for wake-word detection (deprecated)",
+        "description": "Deprecated. Use `POST /api/process/transcribe` with `checkWakeword=true` instead.",
+        "deprecated": true,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "audio": {
+                    "type": "string",
+                    "format": "binary"
+                  },
+                  "language": {
+                    "type": "string",
+                    "nullable": true
+                  }
+                },
+                "required": [
+                  "audio"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Wake-word detection result"
+          }
+        }
+      }
+    },
+    "/api/process/transcribe-command": {
+      "post": {
+        "tags": [
+          "Process"
+        ],
+        "summary": "Transcribe a full command audio clip (deprecated)",
+        "description": "Deprecated. Use `POST /api/process/transcribe` with `checkWakeword=false` instead.",
+        "deprecated": true,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "audio": {
+                    "type": "string",
+                    "format": "binary"
+                  },
+                  "language": {
+                    "type": "string",
+                    "nullable": true
+                  }
+                },
+                "required": [
+                  "audio"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Command transcription result"
           }
         }
       }
@@ -2656,35 +1974,6 @@
             "nullable": true
           }
         }
-      },
-      "AddMessageRequest": {
-        "type": "object",
-        "properties": {
-          "role": {
-            "type": "string",
-            "description": "Message role: 'user', 'assistant', or 'system'",
-            "example": "user"
-          },
-          "content": {
-            "type": "string"
-          },
-          "model": {
-            "type": "string",
-            "nullable": true
-          },
-          "documentIds": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "nullable": true
-          }
-        },
-        "required": [
-          "role",
-          "content"
-        ]
       },
       "AudioRequest": {
         "type": "object",
@@ -2760,44 +2049,6 @@
           }
         }
       },
-      "ChatMessage": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "conversationId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "role": {
-            "type": "string",
-            "description": "'user', 'assistant', or 'system'"
-          },
-          "content": {
-            "type": "string"
-          },
-          "model": {
-            "type": "string",
-            "nullable": true
-          },
-          "timestamp": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "tokenCount": {
-            "type": "integer",
-            "nullable": true
-          },
-          "attachments": {
-            "type": "array",
-            "items": {
-              "type": "object"
-            }
-          }
-        }
-      },
       "CompleteUploadRequest": {
         "type": "object",
         "description": "Notifies the server that a presigned S3 upload was completed by the browser",
@@ -2830,85 +2081,6 @@
           "key",
           "fileName"
         ]
-      },
-      "Conversation": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "title": {
-            "type": "string"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "updatedAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "isActive": {
-            "type": "boolean"
-          },
-          "resourceGroupId": {
-            "type": "string",
-            "format": "uuid",
-            "nullable": true
-          },
-          "messages": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ChatMessage"
-            }
-          },
-          "summary": {
-            "type": "string",
-            "nullable": true
-          }
-        }
-      },
-      "ConversationQueryRequest": {
-        "type": "object",
-        "properties": {
-          "query": {
-            "type": "string"
-          },
-          "topK": {
-            "type": "integer",
-            "nullable": true
-          },
-          "groupIds": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "nullable": true
-          },
-          "model": {
-            "type": "string",
-            "nullable": true
-          }
-        },
-        "required": [
-          "query"
-        ]
-      },
-      "CreateConversationRequest": {
-        "type": "object",
-        "properties": {
-          "title": {
-            "type": "string",
-            "nullable": true
-          },
-          "resourceGroupId": {
-            "type": "string",
-            "format": "uuid",
-            "nullable": true
-          }
-        }
       },
       "DocumentChunk": {
         "type": "object",
@@ -3135,46 +2307,6 @@
           }
         }
       },
-      "GroupConversationMapping": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "resourceGroupId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "conversationId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "updatedAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "resourceGroupId",
-          "conversationId"
-        ]
-      },
-      "GroupRequest": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string",
-            "nullable": true
-          }
-        },
-        "required": [
-          "name"
-        ]
-      },
       "HighlightRequest": {
         "type": "object",
         "properties": {
@@ -3236,53 +2368,6 @@
         "type": "object",
         "properties": {
           "managedFileId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "resourceGroupId": {
-            "type": "string",
-            "format": "uuid"
-          }
-        }
-      },
-      "ManagedPrompt": {
-        "type": "object",
-        "description": "A prompt that can be used with the middleware",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "name": {
-            "type": "string"
-          },
-          "promptText": {
-            "type": "string"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "updatedAt": {
-            "type": "string",
-            "format": "date-time",
-            "nullable": true
-          },
-          "isPinned": {
-            "type": "boolean"
-          },
-          "promptGroups": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ManagedPromptGroup"
-            }
-          }
-        }
-      },
-      "ManagedPromptGroup": {
-        "type": "object",
-        "properties": {
-          "managedPromptId": {
             "type": "string",
             "format": "uuid"
           },
@@ -3496,21 +2581,6 @@
         },
         "required": [
           "input"
-        ]
-      },
-      "PromptRequest": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string"
-          },
-          "promptText": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "promptText"
         ]
       },
       "QueryRequest": {
@@ -3731,45 +2801,6 @@
           }
         }
       },
-      "ResourceGroup": {
-        "type": "object",
-        "description": "A group that can contain files and prompts",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "name": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string",
-            "nullable": true
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "fileGroups": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ManagedFileGroup"
-            }
-          },
-          "promptGroups": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ManagedPromptGroup"
-            }
-          },
-          "documentGroups": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/DocumentGroup"
-            }
-          }
-        }
-      },
       "TextLocation": {
         "type": "object",
         "properties": {
@@ -3814,36 +2845,6 @@
             "type": "string"
           }
         }
-      },
-      "UpdateConversationRequest": {
-        "type": "object",
-        "properties": {
-          "title": {
-            "type": "string",
-            "nullable": true
-          }
-        }
-      },
-      "UpdateConversationGroupRequest": {
-        "type": "object",
-        "properties": {
-          "resourceGroupId": {
-            "type": "string",
-            "format": "uuid",
-            "nullable": true
-          }
-        }
-      },
-      "UpdateReminderRequest": {
-        "type": "object",
-        "properties": {
-          "text": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "text"
-        ]
       }
     }
   }

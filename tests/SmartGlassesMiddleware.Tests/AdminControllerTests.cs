@@ -20,7 +20,7 @@ namespace SmartGlassesMiddleware.Tests
         private Mock<ICacheService> _mockCache;
         private Mock<ILogger<AdminController>> _mockLogger;
         private Mock<IRequestMonitoringService> _mockMonitoring;
-        private Mock<IServerSettingsService> _mockSettings;
+        private Mock<IGroqTranscriptionLogService> _mockGroqLog;
         private Mock<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory> _mockScopeFactory;
 
         [SetUp]
@@ -36,7 +36,7 @@ namespace SmartGlassesMiddleware.Tests
             _mockCache = new Mock<ICacheService>();
             _mockLogger = new Mock<ILogger<AdminController>>();
             _mockMonitoring = new Mock<IRequestMonitoringService>();
-            _mockSettings = new Mock<IServerSettingsService>();
+            _mockGroqLog = new Mock<IGroqTranscriptionLogService>();
             _mockScopeFactory = new Mock<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>();
 
             _controller = new AdminController(
@@ -45,25 +45,24 @@ namespace SmartGlassesMiddleware.Tests
                 _mockCache.Object,
                 _mockLogger.Object,
                 _mockMonitoring.Object,
-                _mockSettings.Object,
+                _mockGroqLog.Object,
                 _mockScopeFactory.Object
             );
         }
 
         [Test]
-        public async Task GetPreventSleepSetting_ReturnsExpected()
+        public void GetGroqTranscriptions_ReturnsEntries()
         {
-            _mockSettings.Setup(s => s.GetPreventSleepStateAsync(It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new SmartGlassesMiddleware.Services.PreventSleepSettingState(true, false, DateTime.UtcNow));
+            _mockGroqLog.Setup(s => s.GetRecent(It.IsAny<int>()))
+                .Returns(new List<GroqTranscriptionEntry>
+                {
+                    new() { Text = "hello world", Type = "wakeword", TimestampUtc = DateTime.UtcNow }
+                });
 
-            var result = await _controller.GetPreventSleepSetting(CancellationToken.None);
+            var result = _controller.GetGroqTranscriptions();
 
             Assert.That(result, Is.Not.Null);
             Assert.That(result.Result, Is.InstanceOf<OkObjectResult>());
-
-            var okResult = result.Result as OkObjectResult;
-            Assert.That(okResult, Is.Not.Null);
-            Assert.That(okResult.Value, Is.Not.Null);
         }
 
         [Test]

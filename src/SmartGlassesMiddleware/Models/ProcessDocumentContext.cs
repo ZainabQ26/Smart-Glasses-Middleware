@@ -7,6 +7,7 @@ public class ProcessDocumentContext
     public int? TotalPages { get; set; }
     public List<ProcessDocumentPageContext> Pages { get; set; } = new();
     public List<ProcessDocumentHighlightContext> Highlights { get; set; } = new();
+    public Conversation? ConversationContext { get; set; }
 }
 
 public class ProcessDocumentPageContext

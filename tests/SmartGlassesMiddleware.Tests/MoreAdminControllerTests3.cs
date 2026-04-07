@@ -24,7 +24,7 @@ public class MoreAdminControllerTests3
     private Mock<ICacheService> _cacheMock = null!;
     private Mock<ILogger<AdminController>> _loggerMock = null!;
     private Mock<IRequestMonitoringService> _monitoringMock = null!;
-    private Mock<IServerSettingsService> _settingsMock = null!;
+    private Mock<IGroqTranscriptionLogService> _groqLogMock = null!;
     private Mock<IServiceScopeFactory> _scopeFactoryMock = null!;
 
     [SetUp]
@@ -39,7 +39,7 @@ public class MoreAdminControllerTests3
         _cacheMock = new Mock<ICacheService>();
         _loggerMock = new Mock<ILogger<AdminController>>();
         _monitoringMock = new Mock<IRequestMonitoringService>();
-        _settingsMock = new Mock<IServerSettingsService>();
+        _groqLogMock = new Mock<IGroqTranscriptionLogService>();
         _scopeFactoryMock = new Mock<IServiceScopeFactory>();
 
         _cacheMock.Setup(c => c.GetAsync<object>(It.IsAny<string>())).ReturnsAsync((object?)null);
@@ -65,7 +65,7 @@ public class MoreAdminControllerTests3
             _cacheMock.Object,
             _loggerMock.Object,
             _monitoringMock.Object,
-            _settingsMock.Object,
+            _groqLogMock.Object,
             _scopeFactoryMock.Object);
 
         controller.ControllerContext = new ControllerContext
@@ -350,10 +350,13 @@ public class MoreAdminControllerTests3
     // ── DownloadAbbreviationsCsv ─────────────────────────────────────────────
 
     [Test]
-    public async Task DownloadAbbreviationsCsv_EmptyDb_ReturnsCsvWithHeaderOnly()
+    public void DownloadAbbreviationsCsv_EmptyDb_ReturnsCsvWithHeaderOnly()
     {
+        var abbreviationServiceMock = new Mock<IAbbreviationService>();
+        abbreviationServiceMock.Setup(s => s.GetAllCachedAbbreviations()).Returns(new List<Abbreviation>());
+
         var controller = CreateController();
-        var result = await controller.DownloadAbbreviationsCsv();
+        var result = controller.DownloadAbbreviationsCsv(abbreviationServiceMock.Object);
 
         Assert.That(result, Is.InstanceOf<FileContentResult>());
         var file = (FileContentResult)result;
@@ -364,30 +367,35 @@ public class MoreAdminControllerTests3
     }
 
     [Test]
-    public async Task DownloadAbbreviationsCsv_WithAbbreviations_IncludesRows()
+    public void DownloadAbbreviationsCsv_WithAbbreviations_IncludesRows()
     {
-        _context.Abbreviations.Add(new Abbreviation
+        var fakeAbbreviations = new List<Abbreviation>
         {
-            Id = Guid.NewGuid(),
-            ShortForm = "BP",
-            ExpandedForm = "blood pressure",
-            Source = "FDA",
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        });
-        _context.Abbreviations.Add(new Abbreviation
-        {
-            Id = Guid.NewGuid(),
-            ShortForm = "HR",
-            ExpandedForm = "heart rate",
-            Source = "FDA",
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        });
-        await _context.SaveChangesAsync();
+            new Abbreviation
+            {
+                Id = Guid.NewGuid(),
+                ShortForm = "BP",
+                ExpandedForm = "blood pressure",
+                Source = "FDA",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            },
+            new Abbreviation
+            {
+                Id = Guid.NewGuid(),
+                ShortForm = "HR",
+                ExpandedForm = "heart rate",
+                Source = "FDA",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            }
+        };
+
+        var abbreviationServiceMock = new Mock<IAbbreviationService>();
+        abbreviationServiceMock.Setup(s => s.GetAllCachedAbbreviations()).Returns(fakeAbbreviations);
 
         var controller = CreateController();
-        var result = await controller.DownloadAbbreviationsCsv();
+        var result = controller.DownloadAbbreviationsCsv(abbreviationServiceMock.Object);
 
         var file = (FileContentResult)result;
         var csv = System.Text.Encoding.UTF8.GetString(file.FileContents);

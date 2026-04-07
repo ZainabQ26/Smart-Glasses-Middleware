@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Moq;
 using NUnit.Framework;
@@ -14,7 +15,15 @@ public class NoOpBackgroundTaskQueueTests
     [SetUp]
     public void Setup()
     {
-        _queue = new NoOpBackgroundTaskQueue(new Mock<ILogger<NoOpBackgroundTaskQueue>>().Object);
+        var inMemorySettings = new Dictionary<string, string?> {
+            {"BackgroundTasks:DelayBetweenChecksMs", "100"}
+        };
+
+        Microsoft.Extensions.Configuration.IConfiguration configuration = new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+            .AddInMemoryCollection(inMemorySettings)
+            .Build();
+
+        _queue = new NoOpBackgroundTaskQueue(new Mock<ILogger<NoOpBackgroundTaskQueue>>().Object, configuration);
     }
 
     [Test]

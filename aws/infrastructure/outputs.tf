@@ -8,11 +8,6 @@ output "s3_media_bucket" {
   value       = aws_s3_bucket.media.id
 }
 
-output "s3_documents_bucket" {
-  description = "S3 bucket for document storage"
-  value       = aws_s3_bucket.documents.id
-}
-
 output "cloudfront_distribution_domain" {
   description = "CloudFront distribution domain name"
   value       = aws_cloudfront_distribution.frontend.domain_name
@@ -53,7 +48,3 @@ output "cloudfront_distribution_id" {
   value       = aws_cloudfront_distribution.frontend.id
 }
 
-output "ecs_wake_url" {
-  description = "Lambda Function URL for direct ECS wake (called by WakeupGate via /wake CF behavior)"
-  value       = local.enable_ecs_idle_autoscaler_effective ? aws_lambda_function_url.ecs_idle_scaler[0].function_url : ""
-}

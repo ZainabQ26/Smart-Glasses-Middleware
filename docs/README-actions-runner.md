@@ -62,7 +62,6 @@ Defaults used by scripts:
 
 - `DEPLOY_REF=main`
 - `DEPLOY_ENVIRONMENT=dev`
-- `DEPLOY_SKIP_MIGRATIONS=true`
 - `DEPLOY_FORCE_RECREATE_DEV=false`
 
 Override defaults via environment variables before running the script.
@@ -77,7 +76,6 @@ Lifecycle flags:
 gh workflow run deploy-main.yml \
   --ref main \
   --field environment=dev \
-  --field skip_migrations=true \
   --field force_recreate_dev=false
 ```
 

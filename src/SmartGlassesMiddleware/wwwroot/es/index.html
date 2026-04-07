@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>👓</text></svg>" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Lentes inteligentes - Interfaz de RA</title>
+  </head>
+  <body>
+    <div id="root" data-language="es"></div>
+    <script type="module">
+      // Load the React bundle from the built main page so we always run the
+      // same compiled assets without duplicating the Vite build output.
+      (async () => {
+        try {
+          const resp = await fetch('/');
+          if (!resp.ok) return;
+          const contentType = resp.headers.get('content-type') || '';
+          if (!contentType.includes('text/html')) return;
+          const text = await resp.text();
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(text, 'text/html');
+          doc.querySelectorAll('script[type="module"]').forEach(s => {
+            const pathname = s.src ? new URL(s.src, location.origin).pathname : null;
+            if (!pathname) return;
+            const el = document.createElement('script');
+            el.type = 'module';
+            el.src = pathname;
+            document.head.appendChild(el);
+          });
+        } catch (e) {
+          console.warn('[es] Failed to load React bundle:', e);
+        }
+      })();
+    </script>
+  </body>
+</html>

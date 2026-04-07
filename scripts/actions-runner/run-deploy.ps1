@@ -84,7 +84,6 @@ try {
 
   $ref = if ($env:DEPLOY_REF) { $env:DEPLOY_REF } else { "main" }
   $environment = if ($env:DEPLOY_ENVIRONMENT) { $env:DEPLOY_ENVIRONMENT } else { "dev" }
-  $skipMigrations = if ($env:DEPLOY_SKIP_MIGRATIONS) { $env:DEPLOY_SKIP_MIGRATIONS } else { "true" }
   $forceRecreateDev = if ($env:DEPLOY_FORCE_RECREATE_DEV) { $env:DEPLOY_FORCE_RECREATE_DEV } else { "false" }
 
   if ($useLocalRunnerOverride) {
@@ -116,7 +115,6 @@ try {
   gh workflow run deploy-main.yml `
     --ref "$ref" `
     --field "environment=$environment" `
-    --field "skip_migrations=$skipMigrations" `
     --field "force_recreate_dev=$forceRecreateDev"
 
   Write-Host "Waiting for dispatched run id..."

@@ -1,11 +1,14 @@
 using Microsoft.EntityFrameworkCore;
 using SmartGlassesMiddleware.Models;
 using Pgvector.EntityFrameworkCore;
+using System.Linq;
 
 namespace SmartGlassesMiddleware.Data;
 
 public class ApplicationDbContext : DbContext
 {
+    private bool _isInMemoryProvider;
+
     public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
         : base(options)
     {
@@ -14,6 +17,11 @@ public class ApplicationDbContext : DbContext
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
         base.OnConfiguring(optionsBuilder);
+
+        // Cache provider details here so OnModelCreating doesn't query Database services.
+        _isInMemoryProvider = optionsBuilder.Options.Extensions
+            .Any(e => e.GetType().Name.Contains("InMemory"));
+
         // Suppress pending model changes warning to allow migrations to run
         optionsBuilder.ConfigureWarnings(warnings =>
             warnings.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
@@ -39,8 +47,8 @@ public class ApplicationDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
 
-        // Enable pgvector extension only for PostgreSQL
-        if (Database.ProviderName != "Microsoft.EntityFrameworkCore.InMemory")
+        // Enable pgvector extension only for relational providers.
+        if (!_isInMemoryProvider)
         {
             modelBuilder.HasPostgresExtension("vector");
         }
@@ -145,8 +153,8 @@ public class ApplicationDbContext : DbContext
             entity.Property(e => e.ChunkIndex).IsRequired();
             entity.Property(e => e.CreatedAt).IsRequired();
 
-            // Only configure vector column for PostgreSQL (not for in-memory testing)
-            if (Database.ProviderName != "Microsoft.EntityFrameworkCore.InMemory")
+            // Only configure vector column for relational providers (not for in-memory testing).
+            if (!_isInMemoryProvider)
             {
                 // Configure vector column for pgvector similarity search
                 entity.Property(e => e.EmbeddingVector)

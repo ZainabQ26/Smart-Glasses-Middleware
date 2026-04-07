@@ -1,5 +1,7 @@
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -16,6 +18,29 @@ namespace SmartGlassesMiddleware.Tests;
 [TestFixture]
 public class ProcessAndTasksControllerGapTests
 {
+    private static (ProcessController controller, ServiceProvider serviceProvider) BuildController(
+        IAIService? aiService = null,
+        IPageSummaryService? pageSummaryService = null,
+        IGroqTranscriptionLogService? groqLog = null,
+        ILogger<ProcessController>? logger = null,
+        IConfiguration? configuration = null)
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(aiService ?? new Mock<IAIService>().Object);
+        services.AddSingleton(pageSummaryService ?? new Mock<IPageSummaryService>().Object);
+        services.AddSingleton(groqLog ?? new Mock<IGroqTranscriptionLogService>().Object);
+        services.AddSingleton(logger ?? NullLogger<ProcessController>.Instance);
+        services.AddSingleton(configuration ?? new ConfigurationBuilder().Build() as IConfiguration);
+        var sp = services.BuildServiceProvider();
+
+        var controller = new ProcessController();
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext { RequestServices = sp }
+        };
+        return (controller, sp);
+    }
+
     // ── ProcessController – Preview exception (lines 54-55) ──────────────────
 
     [Test]
@@ -25,11 +50,8 @@ public class ProcessAndTasksControllerGapTests
         aiMock.Setup(s => s.WillUseAdvancedModelAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new Exception("Bedrock unavailable"));
 
-        var controller = new ProcessController(
-            aiMock.Object,
-            new Mock<IPageSummaryService>().Object,
-            NullLogger<ProcessController>.Instance,
-            new ConfigurationBuilder().Build());
+        var (controller, sp) = BuildController(aiService: aiMock.Object);
+        using var _ = sp;
 
         var result = await controller.Preview(new ProcessRequest { Input = "test" }, CancellationToken.None);
 
@@ -46,11 +68,8 @@ public class ProcessAndTasksControllerGapTests
         aiMock.Setup(s => s.ProcessRequestAsync(It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<ProcessDocumentContext?>()))
             .ThrowsAsync(new InvalidOperationException("AI unavailable"));
 
-        var controller = new ProcessController(
-            aiMock.Object,
-            new Mock<IPageSummaryService>().Object,
-            NullLogger<ProcessController>.Instance,
-            new ConfigurationBuilder().Build());
+        var (controller, sp) = BuildController(aiService: aiMock.Object);
+        using var _ = sp;
 
         var result = await controller.Process(new ProcessRequest { Input = "hello" }, CancellationToken.None);
 
@@ -58,54 +77,8 @@ public class ProcessAndTasksControllerGapTests
         Assert.That(status?.StatusCode, Is.EqualTo(500));
     }
 
-    // ── ProcessController – GetClientSettings default mode (line 60 switch) ──
-
-    [Test]
-    public void GetClientSettings_UnrecognizedMode_ReturnsAuto()
-    {
-        var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["AI:SpeechTranscriptionMode"] = "some-unknown-mode",
-                ["AI:ActivationWord"] = "Hey"
-            })
-            .Build();
-
-        var controller = new ProcessController(
-            new Mock<IAIService>().Object,
-            new Mock<IPageSummaryService>().Object,
-            NullLogger<ProcessController>.Instance,
-            config);
-
-        var result = controller.GetClientSettings() as OkObjectResult;
-
-        Assert.That(result, Is.Not.Null);
-        var json = System.Text.Json.JsonSerializer.Serialize(result!.Value);
-        Assert.That(json, Does.Contain("auto"));
-    }
-
-    [Test]
-    public void GetClientSettings_WhisperOnlyMode_ReturnsWhisperOnly()
-    {
-        var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["AI:SpeechTranscriptionMode"] = "whisper-only",
-                ["AI:ActivationWord"] = "Iris"
-            })
-            .Build();
-
-        var controller = new ProcessController(
-            new Mock<IAIService>().Object,
-            new Mock<IPageSummaryService>().Object,
-            NullLogger<ProcessController>.Instance,
-            config);
-
-        var result = controller.GetClientSettings() as OkObjectResult;
-        Assert.That(result, Is.Not.Null);
-        var json = System.Text.Json.JsonSerializer.Serialize(result!.Value);
-        Assert.That(json, Does.Contain("whisper-only"));
-    }
+    // GetClientSettings endpoint moved to minimal API in Program.cs.
+    // Integration tests for this endpoint are in ClientSettingsIntegrationTests.cs.
 
     // ── TasksController – GetTask queue.Get throws (lines 60-62) ─────────────
 
@@ -152,11 +125,8 @@ public class ProcessAndTasksControllerGapTests
         summaryMock.Setup(s => s.SummarizePageAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new ArgumentException("Invalid page"));
 
-        var controller = new ProcessController(
-            new Mock<IAIService>().Object,
-            summaryMock.Object,
-            NullLogger<ProcessController>.Instance,
-            new ConfigurationBuilder().Build());
+        var (controller, sp) = BuildController(pageSummaryService: summaryMock.Object);
+        using var _ = sp;
 
         var result = await controller.SummarizePage(
             new PageSummaryRequest { PageText = "Some text" }, CancellationToken.None);
@@ -171,11 +141,8 @@ public class ProcessAndTasksControllerGapTests
         summaryMock.Setup(s => s.SummarizePageAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Service unavailable"));
 
-        var controller = new ProcessController(
-            new Mock<IAIService>().Object,
-            summaryMock.Object,
-            NullLogger<ProcessController>.Instance,
-            new ConfigurationBuilder().Build());
+        var (controller, sp) = BuildController(pageSummaryService: summaryMock.Object);
+        using var _ = sp;
 
         var result = await controller.SummarizePage(
             new PageSummaryRequest { PageText = "Some text" }, CancellationToken.None);
@@ -191,11 +158,8 @@ public class ProcessAndTasksControllerGapTests
         summaryMock.Setup(s => s.SummarizePageAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new Exception("Unexpected error"));
 
-        var controller = new ProcessController(
-            new Mock<IAIService>().Object,
-            summaryMock.Object,
-            NullLogger<ProcessController>.Instance,
-            new ConfigurationBuilder().Build());
+        var (controller, sp) = BuildController(pageSummaryService: summaryMock.Object);
+        using var _ = sp;
 
         var result = await controller.SummarizePage(
             new PageSummaryRequest { PageText = "Some text" }, CancellationToken.None);
@@ -211,11 +175,8 @@ public class ProcessAndTasksControllerGapTests
         summaryMock.Setup(s => s.SummarizePageAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new OperationCanceledException());
 
-        var controller = new ProcessController(
-            new Mock<IAIService>().Object,
-            summaryMock.Object,
-            NullLogger<ProcessController>.Instance,
-            new ConfigurationBuilder().Build());
+        var (controller, sp) = BuildController(pageSummaryService: summaryMock.Object);
+        using var _ = sp;
 
         var result = await controller.SummarizePage(
             new PageSummaryRequest { PageText = "Some text" }, CancellationToken.None);

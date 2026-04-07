@@ -15,11 +15,6 @@ on:
           - dev
           - staging
           - prod
-      skip_migrations:
-        description: 'Skip EF Core migrations (recommended for fresh dev setup)'
-        required: false
-        default: true
-        type: boolean
       force_recreate_dev:
         description: 'DANGER: delete existing dev resources before apply'
         required: false
@@ -111,10 +106,55 @@ jobs:
             ${{ steps.ecr-login.outputs.registry }}/smart-glasses-dev-api:${{ github.sha }}
             ${{ steps.ecr-login.outputs.registry }}/smart-glasses-dev-api:latest
           platforms: linux/amd64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          no-cache: true
+          # Use gha cache backend to avoid large local cache directories on runner disk.
+          cache-from: type=gha,scope=smart-glasses-api
+          cache-to: type=gha,mode=max,scope=smart-glasses-api
 
-      # No local cache rotation required when using gha cache.
+      - name: Apply ECR lifecycle policy (prune old images)
+        run: |
+          set -euo pipefail
+          cat > /tmp/ecr-lifecycle.json <<'EOF'
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Expire untagged images after 1 day",
+                "selection": {
+                  "tagStatus": "untagged",
+                  "countType": "sinceImagePushed",
+                  "countUnit": "days",
+                  "countNumber": 1
+                },
+                "action": { "type": "expire" }
+              },
+              {
+                "rulePriority": 2,
+                "description": "Keep last 30 tagged images",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 30
+                },
+                "action": { "type": "expire" }
+              }
+            ]
+          }
+          EOF
+          aws ecr put-lifecycle-policy \
+            --repository-name smart-glasses-dev-api \
+            --region "${{ secrets.AWS_REGION }}" \
+            --lifecycle-policy-text file:///tmp/ecr-lifecycle.json
+
+      - name: Cleanup Docker and build caches
+        if: always()
+        run: |
+          # Remove all dangling Docker images and build cache
+          docker system prune -af --volumes || true
+          # Clean up Docker buildx build state
+          docker buildx du --verbose || true
+          docker buildx prune -af || true
+          echo "Docker cleanup complete"
 
   # Packages the Document Processor Lambda zip. Runs in PARALLEL with build-api — no shared deps.
   # Whisper Lambda removed: audio transcription now handled entirely browser-side via Whisper worker.
@@ -136,6 +176,15 @@ jobs:
           chmod +x build.sh
           ./build.sh
 
+      - name: Clean up Python cache
+        if: always()
+        run: |
+          # Clean up Python and pip caches to save space
+          rm -rf ~/.cache/pip ~/.cache/python || true
+          find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+          find . -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
+          echo "Python cleanup complete"
+
       - name: Upload Document Processor zip
         uses: actions/upload-artifact@v4
         with:
@@ -147,6 +196,7 @@ jobs:
     needs: [build-api, build-lambda]
     runs-on: ubuntu-latest
     permissions:
+      actions: write
       id-token: write
       contents: read
     env:
@@ -266,43 +316,24 @@ jobs:
           SHA="${{ github.sha }}"
           IMAGE_URI="${REGISTRY}/${REPOSITORY}:${SHA}"
 
-          # Guard against stale/missing image tags so Terraform never updates ECS
-          # to a non-existent image (which would make the backend unavailable).
-          if aws ecr describe-images \
-            --repository-name "$REPOSITORY" \
-            --image-ids imageTag="$SHA" \
-            --region "$AWS_REGION" >/dev/null 2>&1; then
-            SELECTED_IMAGE="$IMAGE_URI"
-          else
-            echo "::warning::Image tag $SHA not found in ECR; falling back to currently running ECS image."
-
-            CLUSTER="smart-glasses-dev-cluster"
-            SERVICE="smart-glasses-dev-api-service"
-            TASK_DEF_ARN=$(aws ecs describe-services \
-              --cluster "$CLUSTER" \
-              --services "$SERVICE" \
-              --region "$AWS_REGION" \
-              --query 'services[0].taskDefinition' \
-              --output text 2>/dev/null || true)
-
-            if [ -z "$TASK_DEF_ARN" ] || [ "$TASK_DEF_ARN" = "None" ] || [ "$TASK_DEF_ARN" = "null" ]; then
-              echo "Unable to resolve running ECS task definition for fallback image."
-              exit 1
+          # Wait for ECR tag availability to avoid deploying an older fallback image.
+          SELECTED_IMAGE=""
+          for attempt in {1..20}; do
+            if aws ecr describe-images \
+              --repository-name "$REPOSITORY" \
+              --image-ids imageTag="$SHA" \
+              --region "$AWS_REGION" >/dev/null 2>&1; then
+              SELECTED_IMAGE="$IMAGE_URI"
+              echo "Using freshly built image: $SELECTED_IMAGE"
+              break
             fi
+            echo "Image tag $SHA not visible in ECR yet (attempt $attempt/20); retrying in 15s..."
+            sleep 15
+          done
 
-            FALLBACK_IMAGE=$(aws ecs describe-task-definition \
-              --task-definition "$TASK_DEF_ARN" \
-              --region "$AWS_REGION" \
-              --query 'taskDefinition.containerDefinitions[?name==`api`].image | [0]' \
-              --output text 2>/dev/null || true)
-
-            if [ -z "$FALLBACK_IMAGE" ] || [ "$FALLBACK_IMAGE" = "None" ] || [ "$FALLBACK_IMAGE" = "null" ]; then
-              echo "Unable to resolve fallback image from ECS task definition $TASK_DEF_ARN."
-              exit 1
-            fi
-
-            SELECTED_IMAGE="$FALLBACK_IMAGE"
-            echo "Using fallback image: $SELECTED_IMAGE"
+          if [ -z "$SELECTED_IMAGE" ]; then
+            echo "::error::Image tag $SHA was not found in ECR after retries. Aborting deploy to avoid stale rollback."
+            exit 1
           fi
 
           cat > aws/infrastructure/tf_image_vars.auto.tfvars <<EOF
@@ -373,6 +404,33 @@ jobs:
             PAGE=$((PAGE+1))
           done
           echo "lambda-document-zip cleanup complete."
+
+      - name: Delete old workflow artifacts (keep 3 days)
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          CUTOFF_EPOCH=$(date -u -d '3 days ago' +%s)
+          PAGE=1
+          echo "Deleting workflow artifacts older than 3 days..."
+          while :; do
+            RESP=$(curl -s -H "Authorization: token $GH_TOKEN" "https://api.github.com/repos/${REPO}/actions/artifacts?per_page=100&page=${PAGE}") || true
+            COUNT=$(echo "$RESP" | jq '.artifacts | length')
+            if [ "$COUNT" -eq 0 ]; then
+              break
+            fi
+            echo "$RESP" | jq -r '.artifacts[] | [.id, .name, .created_at] | @tsv' | while IFS=$'\t' read -r ID NAME CREATED; do
+              CREATED_EPOCH=$(date -u -d "$CREATED" +%s)
+              if [ "$CREATED_EPOCH" -lt "$CUTOFF_EPOCH" ]; then
+                echo "Deleting artifact id=$ID name=$NAME created=$CREATED"
+                curl -s -X DELETE -H "Authorization: token $GH_TOKEN" "https://api.github.com/repos/${REPO}/actions/artifacts/${ID}" >/dev/null || true
+              fi
+            done
+            PAGE=$((PAGE+1))
+          done
+          echo "Old artifact cleanup complete."
 
       - name: Patch IAM role with application-autoscaling permission
         run: |
@@ -473,7 +531,9 @@ jobs:
 
           # ── S3 (data must never be destroyed) ─────────────────────────────────
           safe_import aws_s3_bucket.media     "${PREFIX}-media"
-          safe_import aws_s3_bucket.documents "${PREFIX}-documents"
+          # aws_s3_bucket.documents was removed when storage was collapsed to one bucket.
+          # Remove any stale state entry to prevent Terraform planning a destroy action.
+          terraform state rm -lock=false "aws_s3_bucket.documents" 2>/dev/null || true
           safe_import aws_s3_bucket.frontend  "${PREFIX}-frontend"
 
           # ── KMS ───────────────────────────────────────────────────────────────
@@ -492,7 +552,7 @@ jobs:
               --query 'ARN' --output text --region "$REGION" 2>/dev/null || true)
             safe_import "$TF_RES" "$ARN"
           }
-          import_secret aws_secretsmanager_secret.db_credentials    "${PREFIX}-db-credentials"
+          import_secret aws_secretsmanager_secret.db_connection "smart-glasses-db-connection-${ENV}"
           # app_secrets is now prod-only. Ensure stale dev state is removed.
           if [ "$ENV" = "dev" ]; then
             terraform state rm -lock=false "aws_secretsmanager_secret.app_secrets" 2>/dev/null || true
@@ -506,14 +566,11 @@ jobs:
           else
             import_secret "aws_secretsmanager_secret.app_secrets[0]" "${PREFIX}-app-secrets"
           fi
-          # redis_credentials count=0 for dev (cost_optimized_non_prod=true disables redis).
-          # Importing it would leave a count=0 resource in state, causing a
-          # prevent_destroy-blocked destroy on apply. Remove from state instead.
+          # redis_credentials does not exist in Terraform config (Redis is disabled for dev/cost-optimized).
+          # Remove any stale state entry to prevent Terraform planning a destroy action.
           if [ "$ENV" = "dev" ]; then
             terraform state rm -lock=false "aws_secretsmanager_secret.redis_credentials[0]" 2>/dev/null || true
             EXISTING_STATE=$(printf '%s\n' "$EXISTING_STATE" | grep -vxF "aws_secretsmanager_secret.redis_credentials[0]" || true)
-          else
-            import_secret aws_secretsmanager_secret.redis_credentials "${PREFIX}-redis-credentials"
           fi
 
           # ── CloudFront ────────────────────────────────────────────────────────
@@ -613,14 +670,6 @@ jobs:
           ECS_CLUSTER="${PREFIX}-cluster"
           safe_import aws_ecs_cluster.main "$ECS_CLUSTER"
           safe_import aws_ecs_service.api  "${ECS_CLUSTER}/${PREFIX}-api-service"
-
-          # ── Lambda wake permissions (Function URL) ───────────────────────────
-          # These statements may already exist if they were added manually to
-          # hotfix wake-up behavior. Import them so terraform apply does not hit
-          # ResourceConflictException (statement id already exists).
-          WAKE_LAMBDA_NAME="${PREFIX}-ecs-idle-scaler"
-          safe_import "aws_lambda_permission.allow_function_url_public[0]" "${WAKE_LAMBDA_NAME}/FunctionURLAllowPublicAccess"
-          safe_import "aws_lambda_permission.allow_function_url_invoke[0]" "${WAKE_LAMBDA_NAME}/FunctionURLAllowInvokeFunction"
 
           # ── VPC and all sub-resources ─────────────────────────────────────────
           # Use the ALB's VPC as authoritative so all sub-resources land in the
@@ -854,8 +903,6 @@ jobs:
             -var "ecs_api_desired_count=1" \
             -var "ecs_api_min_capacity=1" \
             -var "ecs_api_max_capacity=1" \
-            -var "enable_ecs_idle_autoscaler=false" \
-            -var "ecs_idle_timeout_minutes=5" \
             -var "domain_name=" \
             -var "certificate_arn=${CERTIFICATE_ARN}" \
             -var "db_host=${DB_HOST}"
@@ -863,7 +910,7 @@ jobs:
       - name: Seed empty Secrets Manager secrets with placeholder values
         run: |
           # When enable_rds=false (free-tier), Terraform does NOT create a version
-          # for aws_secretsmanager_secret.db_credentials or .redis_credentials.
+          # for aws_secretsmanager_secret.db_connection.
           # ECS fails at ResourceInitializationError if a secret it references has
           # no AWSCURRENT staging label, so we seed those secrets here.
           ENV=dev
@@ -891,7 +938,7 @@ jobs:
           # DB credentials placeholder – allows the container to start even when
           # Aurora does not exist (free-tier).  The app will fail to connect but
           # will at least boot so health checks can return a non-503.
-          seed_secret_if_empty "${PREFIX}-db-credentials" \
+          seed_secret_if_empty "smart-glasses-db-connection-${ENV}" \
             '{"username":"placeholder","password":"placeholder","engine":"postgres","host":"localhost","port":5432,"dbname":"placeholder","connection_string":"Host=localhost;Port=5432;Database=placeholder;Username=placeholder;Password=placeholder"}'
 
           echo "Secret seeding complete."
@@ -922,6 +969,29 @@ jobs:
           name: tf-outputs
           path: aws/infrastructure/tf_outputs.json
           retention-days: 1
+
+      - name: Final storage cleanup
+        if: always()
+        run: |
+          echo "=== Final Storage Cleanup ==="
+          # Clean up Terraform state and working files
+          rm -rf aws/infrastructure/.terraform aws/infrastructure/.terraform.lock.hcl aws/infrastructure/tf_image_vars.auto.tfvars || true
+          # Clean up any leftover build artifacts
+          rm -rf aws/lambda-document-processor/deployment.zip aws/lambda-document-processor/venv || true
+          # Clean up Docker system
+          docker system prune -af --volumes || true
+          docker buildx prune -af || true
+          # Clean up node modules from successful builds
+          rm -rf src/SmartGlassesMiddleware/client/node_modules || true
+          # Clean up dotnet and NuGet caches
+          dotnet nuget locals all --clear || true
+          rm -rf ~/.dotnet/temp || true
+          # Clean npm cache if present
+          npm cache clean --force || true
+          # Clean up any temp files
+          rm -rf /tmp/* /var/tmp/* || true
+          df -h
+          echo "Storage cleanup complete"
 
   deploy-frontend:
     name: Build & deploy frontend to S3
@@ -1041,105 +1111,23 @@ jobs:
             --output json)
           echo "Invalidation: $RESULT"
 
-  run-migrations:
-    name: Run EF Core database migrations
-    needs: terraform-apply
-    # Fresh dev setups usually have no schema to migrate; only run when
-    # explicitly requested from workflow_dispatch with skip_migrations=false.
-    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.skip_migrations == 'false' }}
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
-    env:
-      AWS_REGION: ${{ secrets.AWS_REGION }}
-    steps:
-      - name: Download tf outputs
-        uses: actions/download-artifact@v4
-        with:
-          name: tf-outputs
-          path: ./tf
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_TERRAFORM_ROLE }}
-          aws-region: ${{ secrets.AWS_REGION }}
-
-      - name: Run one-shot migration task
+      - name: Cleanup frontend build artifacts
+        if: always()
         run: |
-          CLUSTER=$(jq -r '.ecs_cluster_name.value // empty' ./tf/tf_outputs.json 2>/dev/null || true)
-          CLUSTER=${CLUSTER:-smart-glasses-dev-cluster}
-          SERVICE="smart-glasses-dev-api-service"
-
-          echo "Fetching task definition and network config from ECS service..."
-          SERVICE_JSON=$(aws ecs describe-services \
-            --cluster "$CLUSTER" --services "$SERVICE" \
-            --region "$AWS_REGION" \
-            --query 'services[0]' --output json)
-
-          TASK_DEF=$(echo "$SERVICE_JSON" | jq -r '.taskDefinition')
-          SUBNETS=$(echo "$SERVICE_JSON" | jq -r '[.networkConfiguration.awsvpcConfiguration.subnets[]] | join(",")')
-          SGS=$(echo "$SERVICE_JSON"    | jq -r '[.networkConfiguration.awsvpcConfiguration.securityGroups[]] | join(",")')
-          ASSIGN_PUBLIC_IP=$(echo "$SERVICE_JSON" | jq -r '.networkConfiguration.awsvpcConfiguration.assignPublicIp // "DISABLED"')
-
-          echo "Using task definition: $TASK_DEF"
-          echo "Migration task network: assignPublicIp=$ASSIGN_PUBLIC_IP"
-
-          TASK_ARN=$(aws ecs run-task \
-            --cluster "$CLUSTER" \
-            --task-definition "$TASK_DEF" \
-            --launch-type FARGATE \
-            --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SGS],assignPublicIp=$ASSIGN_PUBLIC_IP}" \
-            --overrides '{"containerOverrides":[{"name":"api","environment":[{"name":"MIGRATE_ONLY","value":"true"},{"name":"MIGRATE_ON_STARTUP","value":"false"}]}]}' \
-            --count 1 \
-            --query 'tasks[0].taskArn' \
-            --output text)
-
-          echo "Migration task: $TASK_ARN"
-          echo "Waiting for task to stop (up to 10 min)..."
-          aws ecs wait tasks-stopped \
-            --cluster "$CLUSTER" --tasks "$TASK_ARN" \
-            --region "$AWS_REGION"
-
-          EXIT_CODE=$(aws ecs describe-tasks \
-            --cluster "$CLUSTER" --tasks "$TASK_ARN" \
-            --region "$AWS_REGION" \
-            --query 'tasks[0].containers[0].exitCode' \
-            --output text)
-
-          STOP_REASON=$(aws ecs describe-tasks \
-            --cluster "$CLUSTER" --tasks "$TASK_ARN" \
-            --region "$AWS_REGION" \
-            --query 'tasks[0].stoppedReason' \
-            --output text)
-
-          CONTAINER_REASON=$(aws ecs describe-tasks \
-            --cluster "$CLUSTER" --tasks "$TASK_ARN" \
-            --region "$AWS_REGION" \
-            --query 'tasks[0].containers[0].reason' \
-            --output text)
-
-          echo "Migration task exit code: $EXIT_CODE"
-          echo "Migration task stopped reason: ${STOP_REASON:-n/a}"
-          echo "Migration task container reason: ${CONTAINER_REASON:-n/a}"
-          if [ "$EXIT_CODE" != "0" ]; then
-            echo "Migration task failed — fetching logs..."
-            LOG_GROUP="/ecs/smart-glasses-dev/api"
-            TASK_ID=$(basename "$TASK_ARN")
-            aws logs get-log-events \
-              --log-group-name "$LOG_GROUP" \
-              --log-stream-name "ecs/api/$TASK_ID" \
-              --limit 80 --region "$AWS_REGION" \
-              --query 'events[*].message' --output text 2>/dev/null || true
-            exit 1
-          fi
-          echo "Migrations applied successfully."
+          echo "Cleaning up frontend build artifacts..."
+          # Remove node_modules to save space
+          rm -rf src/SmartGlassesMiddleware/client/node_modules || true
+          rm -rf src/SmartGlassesMiddleware/client/.next || true
+          # Clean npm cache
+          npm cache clean --force || true
+          # Clean build cache
+          rm -rf /tmp/npm-* || true
+          echo "Frontend cleanup complete"
 
   verify-deployment:
     name: Wait for ECS service stability
-    needs: [terraform-apply, deploy-frontend, run-migrations]
-    if: ${{ always() && needs.terraform-apply.result == 'success' && needs.deploy-frontend.result == 'success' && (needs.run-migrations.result == 'success' || needs.run-migrations.result == 'skipped') }}
+    needs: [terraform-apply, deploy-frontend]
+    if: ${{ always() && needs.terraform-apply.result == 'success' && needs.deploy-frontend.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -1221,6 +1209,58 @@ jobs:
             exit 1
           fi
 
+      - name: Verify ECS is running the new API image (no rollback)
+        run: |
+          set -euo pipefail
+
+          CLUSTER=$(jq -r '.ecs_cluster_name.value // empty' ./tf/tf_outputs.json 2>/dev/null || true)
+          CLUSTER=${CLUSTER:-smart-glasses-dev-cluster}
+          SERVICE=$(aws ecs list-services \
+            --cluster "$CLUSTER" --region "$AWS_REGION" \
+            --query 'serviceArns[?ends_with(@, `-api-service`)] | [0]' \
+            --output text 2>/dev/null | awk -F/ '{print $NF}')
+          if [ -z "$SERVICE" ] || [ "$SERVICE" = "None" ] || [ "$SERVICE" = "null" ]; then
+            SERVICE="smart-glasses-dev-api-service"
+          fi
+
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          EXPECTED_IMAGE="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/smart-glasses-dev-api:${GITHUB_SHA}"
+
+          SERVICE_JSON=$(aws ecs describe-services \
+            --cluster "$CLUSTER" --services "$SERVICE" --region "$AWS_REGION" \
+            --query 'services[0]' --output json)
+
+          PRIMARY_TASK_DEF=$(echo "$SERVICE_JSON" | jq -r '(.deployments // []) | map(select(.status == "PRIMARY"))[0].taskDefinition // empty')
+          if [ -z "$PRIMARY_TASK_DEF" ] || [ "$PRIMARY_TASK_DEF" = "null" ] || [ "$PRIMARY_TASK_DEF" = "None" ]; then
+            PRIMARY_TASK_DEF=$(echo "$SERVICE_JSON" | jq -r '.taskDefinition // empty')
+          fi
+
+          if [ -z "$PRIMARY_TASK_DEF" ] || [ "$PRIMARY_TASK_DEF" = "null" ] || [ "$PRIMARY_TASK_DEF" = "None" ]; then
+            echo "::error::Unable to resolve PRIMARY task definition for ${SERVICE}."
+            exit 1
+          fi
+
+          ACTUAL_IMAGE=$(aws ecs describe-task-definition \
+            --task-definition "$PRIMARY_TASK_DEF" \
+            --region "$AWS_REGION" \
+            --query 'taskDefinition.containerDefinitions[?name==`api`].image | [0]' \
+            --output text)
+
+          echo "Expected image: ${EXPECTED_IMAGE}"
+          echo "PRIMARY task definition: ${PRIMARY_TASK_DEF}"
+          echo "Actual api image: ${ACTUAL_IMAGE}"
+
+          if [ "$ACTUAL_IMAGE" != "$EXPECTED_IMAGE" ]; then
+            echo "::error::ECS PRIMARY deployment is not using the new image tag ${GITHUB_SHA}. Possible rollback detected."
+            aws ecs describe-services \
+              --cluster "$CLUSTER" --services "$SERVICE" --region "$AWS_REGION" \
+              --query 'services[0].events[0:10].[createdAt,message]' \
+              --output text 2>/dev/null || true
+            exit 1
+          fi
+
+          echo "ECS PRIMARY deployment is running the expected image tag ${GITHUB_SHA}."
+
       - name: Fetch ECS container logs from CloudWatch
         if: always()
         run: |
@@ -1272,7 +1312,7 @@ jobs:
             --cluster "$CLUSTER" --services "$SERVICE" --region "$AWS_REGION" \
             --query 'services[0].desiredCount' --output text 2>/dev/null || echo "0")
 
-          # In scale-to-zero mode there may be no healthy endpoint until wake-up.
+          # If desired count is 0, strict health verification is skipped.
           if [ "$DESIRED" = "0" ]; then
             echo "ECS desired count is 0; skipping strict health smoke test."
             exit 0
@@ -1325,6 +1365,50 @@ jobs:
             sleep 15
           done
           echo "Health check did not return 200 after retries while desired count is $DESIRED."
+          exit 1
+
+      - name: Smoke-test client-settings endpoint
+        run: |
+          CLUSTER=$(jq -r '.ecs_cluster_name.value // empty' ./tf/tf_outputs.json 2>/dev/null || true)
+          CLUSTER=${CLUSTER:-smart-glasses-dev-cluster}
+          SERVICE=$(aws ecs list-services \
+            --cluster "$CLUSTER" --region "$AWS_REGION" \
+            --query 'serviceArns[?ends_with(@, `-api-service`)] | [0]' \
+            --output text 2>/dev/null | awk -F/ '{print $NF}')
+          if [ -z "$SERVICE" ] || [ "$SERVICE" = "None" ] || [ "$SERVICE" = "null" ]; then
+            SERVICE="smart-glasses-dev-api-service"
+          fi
+          DESIRED=$(aws ecs describe-services \
+            --cluster "$CLUSTER" --services "$SERVICE" --region "$AWS_REGION" \
+            --query 'services[0].desiredCount' --output text 2>/dev/null || echo "0")
+
+          if [ "$DESIRED" = "0" ]; then
+            echo "ECS desired count is 0; skipping strict client-settings smoke test."
+            exit 0
+          fi
+
+          CF_DOMAIN=$(jq -r '.cloudfront_distribution_domain.value // empty' ./tf/tf_outputs.json 2>/dev/null || true)
+          if [ -z "$CF_DOMAIN" ] || [ "$CF_DOMAIN" = "None" ] || [ "$CF_DOMAIN" = "null" ]; then
+            echo "Could not resolve CloudFront domain from outputs; skipping client-settings smoke test."
+            exit 0
+          fi
+
+          URL="https://${CF_DOMAIN}/api/process/client-settings"
+          echo "Client settings check: $URL"
+          for i in $(seq 1 8); do
+            BODY=$(mktemp)
+            STATUS=$(curl -sS -m 20 -o "$BODY" -w "%{http_code}" "$URL" || true)
+            echo "Attempt $i: HTTP $STATUS"
+            if [ "$STATUS" = "200" ] && jq -e '.activationWord and .speechTranscriptionMode' "$BODY" >/dev/null 2>&1; then
+              echo "client-settings endpoint healthy and payload shape is valid"
+              rm -f "$BODY"
+              exit 0
+            fi
+            echo "Response body:"; cat "$BODY" || true
+            rm -f "$BODY"
+            sleep 15
+          done
+          echo "client-settings endpoint smoke test failed."
           exit 1
 
       - name: Print deployed website URL

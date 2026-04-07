@@ -1,49 +1,173 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import WhisperWorker from "./whisperWorker?worker";
 import PdfViewer from "./PdfViewer.jsx";
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 //
-// Voice pipeline: Whisper WebGPU (single multilingual whisper-base model)
-//   - AudioContext + ScriptProcessorNode captures mic at 16 kHz
+// Voice pipeline: Groq API (server-side Whisper transcription)
+//   - AudioContext + AudioWorklet captures mic at 16 kHz
 //   - Amplitude VAD detects speech vs silence
-//   - Wake-word mode: each speech chunk sent to Whisper; "activate" triggers command mode
+//   - Wake-word mode: each speech chunk sent to server Groq; "Iris" triggers command mode
 //   - Command mode: chunks sent as partial results; sentence-end pattern or 2.5 s
 //     silence submits the full accumulated audio for final transcription via
-//     Groq Whisper Turbo, with local Whisper fallback if Groq is unavailable
+//     Groq Whisper Turbo on the server
 //
 import glassesImg from "./pdf/image/Gemini_Generated_Image_8mwak58mwak58mwa.png";
+import psuLogo from "./pdf/image/Penn-State-University-Emblem.png";
 
-export default function App() {
+// ─── TRANSLATIONS ─────────────────────────────────────────────────────────────
+const TRANSLATIONS = {
+  en: {
+    title: "This is Eye-RIS!\nHow can I help?",
+    subtitleTemplate: 'Say "{word}" to start, then speak your command.',
+    connectingMic: "Connecting microphone…",
+    readyTemplate: 'Ready — say "{word}" to begin',
+    howItWorksTitle: "🎤 How It Works",
+    steps: [
+      'Say "{word}" to wake the assistant and speak your command.',
+      "The assistant will respond or perform the action.",
+      'Say "Iris" again for the next command.',
+      'After "search recent files", you can specify a file number without reactivating.',
+    ],
+    commonCommandsTitle: "📋 Common Commands",
+    commandsOverlayTitle: "📋 Commands",
+    commandList: [
+      ["search recent files", "browse recent uploaded files"],
+      ["number #", "go to file number in recent files list"],
+      ["open last document", "Open the last uploaded document"],
+      ["next/previous page", "Go to the next/previous page"],
+      ["go to page 5", "Jump to a specific page"],
+      ["highlight aspirin", "Highlight a word in the open document"],
+      ["clear highlights", "Remove all highlights"],
+      ["search for blood pressure", "Search for text in documents"],
+      ["search for BP", "Search using FDA SPL abbreviations"],
+      ["remind me to…", "Set a reminder"],
+      ["show my reminders", "List all your reminders"],
+      ["print document", "Print the open document with highlights"],
+      ["admin panel", "Open the admin panel"],
+    ],
+    sendingAI: "🤖 Sending to AI…",
+    transcribing: "⏳ Transcribing…",
+    listening: "🗣️ Listening…",
+    connectingMicShort: "⏳ Connecting mic…",
+    sayWordTemplate: 'Say "{word}"',
+    you: "You",
+    aiThinking: "AI is thinking…",
+    aiLabel: "AI",
+    advanced: "Advanced",
+    recentFiles: "📂 Recent Uploaded Files",
+    recentFilesHintTemplate: "Say a number (1–{n}) or tap a file to open it.",
+    lastDocument: "📄 Last Uploaded Document",
+    previewDocument: "Preview Document →",
+    remindersTitle: "📝 Your Reminders",
+    noReminders: "No reminders yet.",
+    textInputPlaceholderTemplate: 'type "{word}" to start, followed by your command.',
+    send: "Send",
+    closeLog: "✕ Close Log",
+    activityLogBtn: "📋 Activity Log",
+    activityLogTitle: "Activity Log",
+    noActivityTemplate: 'No activity yet. Say "{word}".',
+    noClearCommandTemplate: 'I didn\'t hear a clear command. Please say "{word}" again.',
+    commandTooBrief: "That was too brief. Please say a full command.",
+    didntCatch: "I didn't catch that command. Please try again.",
+  },
+  es: {
+    title: "Hola, aquí Eye-ris. ¿En qué puedo ayudarte?",
+    subtitleTemplate: 'Di "{word}" para empezar, luego habla tu comando.',
+    connectingMic: "Conectando micrófono…",
+    readyTemplate: 'Listo — di "{word}" para comenzar',
+    howItWorksTitle: "🎤 Cómo funciona",
+    steps: [
+      'Di "{word}" para activar el asistente.',
+      "Habla tu comando claramente.",
+      "El asistente responderá o realizará la acción.",
+      'Di "{word}" de nuevo para el siguiente comando.',
+      'Tras "buscar archivos recientes", puedes indicar el número sin reactivar.',
+    ],
+    commonCommandsTitle: "📋 Comandos comunes",
+    commandsOverlayTitle: "📋 Comandos",
+    commandList: [
+      ["buscar archivos recientes", "explorar archivos subidos recientemente"],
+      ["número #", "ir al número de archivo en la lista reciente"],
+      ["abrir último documento", "Abrir el último documento subido"],
+      ["página siguiente/anterior", "Ir a la página siguiente/anterior"],
+      ["ir a la página 5", "Saltar a una página específica"],
+      ["resaltar aspirina", "Resaltar una palabra en el documento abierto"],
+      ["borrar resaltados", "Eliminar todos los resaltados"],
+      ["buscar presión arterial", "Buscar texto en documentos"],
+      ["buscar PA", "Buscar usando abreviaciones FDA SPL"],
+      ["recuérdame…", "Establecer un recordatorio"],
+      ["mostrar mis recordatorios", "Listar todos tus recordatorios"],
+      ["imprimir documento", "Imprimir el documento abierto con resaltados"],
+      ["panel de administración", "Abrir el panel de administración"],
+    ],
+    sendingAI: "🤖 Enviando a IA…",
+    transcribing: "⏳ Transcribiendo…",
+    listening: "🗣️ Escuchando…",
+    connectingMicShort: "⏳ Conectando mic…",
+    sayWordTemplate: 'Di "{word}"',
+    you: "Tú",
+    aiThinking: "La IA está pensando…",
+    aiLabel: "IA",
+    advanced: "Avanzado",
+    recentFiles: "📂 Archivos subidos recientes",
+    recentFilesHintTemplate: "Di un número (1–{n}) o toca un archivo para abrirlo.",
+    lastDocument: "📄 Último documento subido",
+    previewDocument: "Vista previa →",
+    remindersTitle: "📝 Tus recordatorios",
+    noReminders: "Aún no hay recordatorios.",
+    textInputPlaceholderTemplate: 'escribe "{word}" para empezar, seguido de tu comando.',
+    send: "Enviar",
+    closeLog: "✕ Cerrar registro",
+    activityLogBtn: "📋 Registro de actividad",
+    activityLogTitle: "Registro de actividad",
+    noActivityTemplate: 'Sin actividad aún. Di "{word}".',
+    noClearCommandTemplate: 'No escuché un comando claro. Di "{word}" de nuevo.',
+    commandTooBrief: "Eso fue demasiado breve. Por favor di un comando completo.",
+    didntCatch: "No capturé ese comando. Por favor intenta de nuevo.",
+  },
+};
+
+// Interpolate {key} placeholders in a translation template string.
+function tpl(str, vals) {
+  return str.replace(/\{(\w+)\}/g, (_, k) => (vals[k] !== undefined ? vals[k] : k));
+}
+
+// Render a translation template that contains a single {word} placeholder as
+// React nodes, wrapping the word in a highlighted <strong> element.
+function renderWithHighlight(template, word) {
+  const parts = template.split('{word}');
+  if (parts.length < 2) return tpl(template, { word });
+  return (
+    <>
+      {parts[0]}<strong style={{color:"#f97316"}}>"{word}"</strong>{parts[1]}
+    </>
+  );
+}
+
+export default function App({ mode = "voice", language = "en" }) {
   const [status, setStatus]       = useState("idle"); // idle | listening | processing | sending
   const [logs, setLogs]           = useState([]);
+  const [inputText, setInputText] = useState("");
   const [transcript, setTranscript] = useState(null);
   const [aiResponse, setAiResponse] = useState(null);
   const [usedAdvancedModel, setUsedAdvancedModel] = useState(false);
-  const [backendReady, setBackendReady] = useState(false);
-  const [backendStatusText, setBackendStatusText] = useState("Checking server status…");
   const [wakeWordReady, setWakeWordReady] = useState(false);
-  // Loading message received from the Whisper worker while it downloads / initialises.
-  const [whisperLoadingMsg, setWhisperLoadingMsg] = useState("Initializing…");
-  // Whisper model readiness flag (shows loading UI until model is ready)
-  const [whisperReady, setWhisperReady] = useState(false);
   const [pendingAction, _setPendingActionState] = useState(null); // { type: "SHOW_RECENT_FILES", files } | { type: "SELECT_DOCUMENT", id, name } | null
   // Reminders toast: null | { reminders: [], phase: 'visible'|'fading' }
   const [remindersToast, setRemindersToast] = useState(null);
-  // Show landing screen until the user says "activate" for the first time.
-  const [showLanding, setShowLanding] = useState(() => {
-    try { return !localStorage.getItem("sgm_activated"); } catch (_) { return true; }
-  });
-  const [groqCommandTranscriptionEnabled, setGroqCommandTranscriptionEnabled] = useState(true);
-  // Configurable activation word — stored in localStorage and updated live when
-  // the admin panel changes it (via the storage event).
-  const [activationWord, setActivationWord] = useState(() => {
-    try { return localStorage.getItem("sgm_activation_word")?.trim() || "activate"; } catch (_) { return "activate"; }
-  });
+  // Show landing screen until the user says the activation word for the first time.
+  const [showLanding, setShowLanding] = useState(true);
+  // Activation word is sourced from backend app settings via /api/process/client-settings.
+  const [activationWord, setActivationWord] = useState("Hello Iris");
   // Ref copy so the async voice pipeline always reads the current value without
   // needing to restart the AudioContext effect.
   const activationWordRef = useRef(activationWord);
-  const groqCommandTranscriptionEnabledRef = useRef(groqCommandTranscriptionEnabled);
+  // Ref copy of the current language so async callbacks always read the latest value.
+  const languageRef = useRef(language);
+  // Keep languageRef in sync whenever the language prop changes.
+  useEffect(() => { languageRef.current = language; }, [language]);
+  // Active translation bundle.
+  const t = TRANSLATIONS[language] || TRANSLATIONS.en;
   // Wrapper keeps the ref in sync so async callbacks always read the current value.
   const setPendingAction = useCallback((val) => {
     pendingActionRef.current = typeof val === "function" ? val(pendingActionRef.current) : val;
@@ -59,7 +183,6 @@ export default function App() {
   const activatedRef        = useRef(false);
   const vadRef              = useRef(null);   // VAD removed; kept so optional calls are no-ops
   const listeningTimeoutRef = useRef(null);
-  const workerRef           = useRef(null);
   const sendToAIRef         = useRef(null);
   const commandSubmitTimeoutRef = useRef(null); // sentence-end short timer
   // Audio pipeline refs
@@ -198,19 +321,91 @@ export default function App() {
     );
   }, []);
 
-  const transcribeCommandWithGroq = useCallback(async (audio) => {
-    if (!groqCommandTranscriptionEnabledRef.current) {
-      addLog("ℹ️ Groq command transcription is disabled in admin settings", "info");
-      return null;
+  // Hydrated from /api/process/client-settings (AI:Groq:ClientMaxRequestsPerMinute).
+  const [groqMaxRequestsPerMinute, setGroqMaxRequestsPerMinute] = useState(1);
+  const GROQ_MAX_REQUESTS_PER_SECOND = 1;
+  const GROQ_MIN_INTERVAL_MS = Math.max(
+    Math.ceil(1000 / GROQ_MAX_REQUESTS_PER_SECOND),
+    Math.ceil(60_000 / Math.max(1, groqMaxRequestsPerMinute)),
+  );
+  const groqLimiterRef = useRef({
+    windowStartMs: Date.now(),
+    count: 0,
+    lastRequestAtMs: 0,
+    lastThrottleLogAtMs: 0,
+  });
+
+  const tryAcquireGroqBudget = useCallback(async ({ canWait = false, maxWaitMs = 0 } = {}) => {
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const limiter = groqLimiterRef.current;
+    const now = Date.now();
+
+    if (now - limiter.windowStartMs >= 60_000) {
+      limiter.windowStartMs = now;
+      limiter.count = 0;
     }
 
+    const waitMs = Math.max(0, GROQ_MIN_INTERVAL_MS - (now - limiter.lastRequestAtMs));
+    if (waitMs > 0) {
+      if (!canWait || waitMs > maxWaitMs) {
+        return false;
+      }
+      await sleep(waitMs);
+    }
+
+    const nowAfterWait = Date.now();
+    if (nowAfterWait - limiter.windowStartMs >= 60_000) {
+      limiter.windowStartMs = nowAfterWait;
+      limiter.count = 0;
+    }
+
+    if (limiter.count >= groqMaxRequestsPerMinute) {
+      return false;
+    }
+
+    limiter.count += 1;
+    limiter.lastRequestAtMs = nowAfterWait;
+    return true;
+  }, [groqMaxRequestsPerMinute, GROQ_MIN_INTERVAL_MS]);
+
+  const logGroqThrottle = useCallback((message) => {
+    const limiter = groqLimiterRef.current;
+    const now = Date.now();
+    if (now - limiter.lastThrottleLogAtMs < 5000) {
+      return;
+    }
+    limiter.lastThrottleLogAtMs = now;
+    addLog(message, "warn");
+  }, [addLog]);
+
+  const transcribeCommandWithGroq = useCallback(async (audio, { isFinal = false } = {}) => {
     try {
+      if (!audio || audio.length === 0) {
+        return null;
+      }
+
+      const allowed = await tryAcquireGroqBudget({
+        canWait: isFinal,
+        maxWaitMs: isFinal ? 5000 : 0,
+      });
+      if (!allowed) {
+        if (!isFinal) {
+          logGroqThrottle("⏳ Skipping partial transcription to stay under Groq rate limit.");
+          return null;
+        }
+
+        // Never drop the final command due to local throttling; let the backend/provider decide.
+        addLog("⏳ Local throttle active — sending final command transcription anyway.", "warn");
+      }
+
+      const audioBlob = float32ToWavBlob(audio);
       const formData = new FormData();
-      formData.append("audio", float32ToWavBlob(audio), "command.wav");
-      formData.append("language", "en");
+      formData.append("audio", audioBlob, "audio.wav");
+      formData.append("language", languageRef.current);
+      formData.append("checkWakeword", "false");
 
       const payload = await fetchJsonWithTimeout(
-        "/api/process/transcribe-command",
+        "/api/process/transcribe",
         {
           method: "POST",
           body: formData,
@@ -219,12 +414,64 @@ export default function App() {
       );
 
       const text = (payload?.text || "").trim();
+      const model = (payload?.model || "").trim();
+      if (text) {
+        addLog(`🧠 Command model: ${model || "unknown"}`, "info");
+      }
+      console.log("[Voice Debug] Heard command transcription (raw):", text);
       return text || null;
     } catch (err) {
-      addLog(`⚠️ Groq Whisper Turbo unavailable (${err?.message || "unknown error"}) — using local Whisper fallback`, "warn");
+      addLog(`⚠️ Groq transcription error: ${err?.message || "unknown error"}`, "warn");
       return null;
     }
-  }, [API_TIMEOUT_MS, addLog, fetchJsonWithTimeout, float32ToWavBlob]);
+  }, [API_TIMEOUT_MS, addLog, fetchJsonWithTimeout, float32ToWavBlob, tryAcquireGroqBudget, logGroqThrottle]);
+
+  const transcribeWakewordWithGroq = useCallback(async (audio) => {
+    try {
+      if (!audio || audio.length === 0) {
+        return { text: "", matched: false, commandAfterWakeword: "" };
+      }
+
+      const allowed = await tryAcquireGroqBudget();
+      if (!allowed) {
+        logGroqThrottle("⏳ Skipping wake-word check to stay under Groq rate limit.");
+        return { text: "", matched: false, commandAfterWakeword: "" };
+      }
+
+      const audioBlob = float32ToWavBlob(audio);
+      const formData = new FormData();
+      formData.append("audio", audioBlob, "audio.wav");
+      formData.append("language", languageRef.current);
+      formData.append("checkWakeword", "true");
+
+      const payload = await fetchJsonWithTimeout(
+        "/api/process/transcribe",
+        {
+          method: "POST",
+          body: formData,
+        },
+        5000,
+      );
+
+      const text = (payload?.text || "").trim();
+      const model = (payload?.model || "").trim();
+      const matched = payload?.matched ?? text.toLowerCase().includes("hello iris");
+      const commandAfterWakeword = (payload?.commandAfterWakeword || "").trim();
+      const target = (activationWordRef.current || "Hello Iris").trim();
+      console.log(`[Voice Debug] Wake-word check: "${text}" (target "${target}") → ${matched ? "MATCH ✅" : "no match"}`);
+      if (text) {
+        addLog(`👂 Wake-word heard: "${text}" (${model || "unknown"})`, "info");
+      } else {
+        console.log("[Voice Debug] Wake-word transcription was empty.");
+      }
+      return { text, matched, commandAfterWakeword };
+    } catch (err) {
+      addLog(`⚠️ Wake-word transcription failed: ${err?.message || "unknown"}`, "warn");
+      return { text: "", matched: false, commandAfterWakeword: "" };
+    }
+  }, [addLog, fetchJsonWithTimeout, float32ToWavBlob, tryAcquireGroqBudget, logGroqThrottle]);
+
+
 
   useEffect(() => {
     return () => {
@@ -234,8 +481,9 @@ export default function App() {
   }, []);
 
   // Keep activationWordRef in sync with the state value.
-  useEffect(() => { activationWordRef.current = activationWord; }, [activationWord]);
-  useEffect(() => { groqCommandTranscriptionEnabledRef.current = groqCommandTranscriptionEnabled; }, [groqCommandTranscriptionEnabled]);
+  useEffect(() => {
+    activationWordRef.current = activationWord;
+  }, [activationWord]);
 
 
 
@@ -249,13 +497,8 @@ export default function App() {
 
     const probeBackend = async () => {
       let attempts = 0;
-      let isReady = false;
 
       while (!cancelled) {
-        if (!isReady) {
-          setBackendStatusText(attempts === 0 ? "Checking server status…" : "Waking backend server…");
-        }
-
         try {
           const response = await fetch("/api/process/client-settings", {
             method: "GET",
@@ -273,25 +516,18 @@ export default function App() {
             activationWordRef.current = w;
           }
 
-          const groqEnabled = typeof data?.groqCommandTranscriptionEnabled === "boolean"
-            ? data.groqCommandTranscriptionEnabled
-            : true;
-          setGroqCommandTranscriptionEnabled(groqEnabled);
-          groqCommandTranscriptionEnabledRef.current = groqEnabled;
-
-          if (!cancelled && !isReady) {
-            setBackendReady(true);
-            setBackendStatusText("Backend is ready");
-            addLog("✅ Backend server is ready.", "info");
-            isReady = true;
+          const configuredRpm = Number(data?.groqClientMaxRequestsPerMinute);
+          if (Number.isFinite(configuredRpm) && configuredRpm >= 1) {
+            setGroqMaxRequestsPerMinute(Math.max(1, Math.floor(configuredRpm)));
           }
+
+          // Groq transcription is handled entirely server-side via /api/process/transcribe-* endpoints
 
           if (!cancelled) {
             await sleep(POLL_INTERVAL_MS);
           }
         } catch (_) {
           attempts += 1;
-          isReady = false; // if the server goes offline, we revert to waking
           if (!cancelled) {
             await sleep(Math.min(2000 + attempts * 1000, 10000));
           }
@@ -305,20 +541,6 @@ export default function App() {
       cancelled = true;
     };
   }, []);
-
-  // Track whether we've already shown the landing on first backend ready so
-  // the effect only fires once even if backendReady were to re-toggle.
-  const hasRestoredLandingRef = useRef(false);
-
-  // When the backend becomes ready (server finishes loading), restore the
-  // initial Smart Glasses Assistant landing screen so the user is always
-  // greeted by it after server wake-up.
-  useEffect(() => {
-    if (backendReady && !hasRestoredLandingRef.current) {
-      hasRestoredLandingRef.current = true;
-      setShowLanding(true);
-    }
-  }, [backendReady]);
 
   // VAD/Whisper removed: keep a harmless placeholder used by the UI so
   // existing button/label logic doesn't need widespread changes.
@@ -436,6 +658,7 @@ export default function App() {
       }
 
       if (recentFiles.length === 0) {
+        addLog("ℹ️ No uploaded files were found.", "info");
         setPendingAction(null);
         showAiResponse("No uploaded files were found. Please upload a file first.");
         return;
@@ -520,8 +743,8 @@ export default function App() {
 
     const trimmed = text.trim().toLowerCase();
     
-    // Very short fragments are likely noise
-    if (trimmed.length <= 2) return true;
+    // Very short fragments are likely noise, unless they are digits (e.g. file numbers)
+    if (trimmed.length <= 2 && !/^\d+$/.test(trimmed)) return true;
 
     // Common background noise interjections and filler words
     // (patterns that appear repeatedly or alone with no meaningful content)
@@ -531,7 +754,7 @@ export default function App() {
       /^(?:yeah|yep|yup|nope|nah|mmm|huh|eh|shh)+\s*$/,       // common interjections alone
       /^[aeiou]{3,}$/,                                         // long vowel sounds (aaaa, uuuu)
       /^([a-z])\1{2,}\s*$/,                                    // repeated character (aaa, bbb)
-      /^(?:[a-z]\s*){2,}$/,                                    // just single letters separated
+      /^[a-z](\s+[a-z])+\s*$/,                                  // just single letters separated by whitespace (e.g. "a b c")
       /^(?:ggs|pfft|tsk|shhh|brr|shh)+\s*$/,                  // exclamations/sound effects
     ];
 
@@ -567,40 +790,19 @@ export default function App() {
     // the user can say a number without repeating "activate".
     let keepMicActive = false;
     try {
+      console.log("[Voice Debug] Heard input before interpretation:", text);
       const commandText = normalizeCommandText(text);
+      console.log("[Voice Debug] Interpreted command:", commandText);
       if (!commandText) {
         addLog("⚠️ Command was empty after wake-word cleanup.", "warn");
         setPendingAction(null);
-        showAiResponse("I didn't catch that command. Please try again.");
+        showAiResponse(t.didntCatch);
         return;
       }
 
-      // ── Check for blank audio or background noise ──────────────────────
-      if (isBlankAudioOrNoise(commandText)) {
-        addLog("🔊 Detected blank audio or background noise — requiring reactivation.", "warn");
-        setPendingAction(null);
-        showAiResponse("I didn't hear a clear command. Please say \"Iris\" again.");
-        // Return to idle/wake-word mode — requires reactivation
-        resumeListeningRef.current?.();
-        return;
-      }
-
-      // ── Require minimum command length (filter out single-word stray background noise) ─
-      // ── Require minimum command length (but allow known single-word commands) ─
-      const commandWords = commandText.trim().split(/\s+/);
-      const knownSingleWordCommands = ['activate', 'next', 'previous', 'back', 'help', 'menu', 'close'];
-      const isSingleWordCommand = commandWords.length === 1 && knownSingleWordCommands.includes(commandWords[0].toLowerCase());
-      const requiresTwoWords = !isSingleWordCommand && commandWords.length < 2;
-      
-      if (requiresTwoWords) {
-        addLog("⏱️ Command too brief — likely background noise.", "warn");
-        setPendingAction(null);
-        showAiResponse("That was too brief. Please say a full command.");
-        resumeListeningRef.current?.();
-        return;
-      }
-
-      // ── Shortcut: numeric file selection when the recent-files list is shown ─
+      // Prioritize numeric file selection while recent-files mode is active.
+      // This must run before generic noise/length filters because ASR often
+      // returns short variants (for example, "to" for "two").
       const capturedPending = pendingActionRef.current;
       if (capturedPending?.type === "SHOW_RECENT_FILES") {
         const num = parseFileSelectionNumber(commandText);
@@ -611,17 +813,48 @@ export default function App() {
             showTranscript(commandText);
             setPendingAction(null);
             openDocumentPreview(files[num - 1]);
-            return; // mic will reset via finally (keepMicActive = false)
-          } else {
-            // Number out of range — keep the list visible and stay listening.
-            addLog(`⚠️ File number ${num} is not in the list (1–${files.length}).`, "warn");
-            showTranscript(commandText);
-            showAiResponse(`There are only ${files.length} files. Say a number between 1 and ${files.length}.`);
-            setPendingAction(capturedPending); // restore list
-            keepMicActive = true;
             return;
           }
+
+          // Number out of range — keep the list visible and continue listening.
+          addLog(`⚠️ File number ${num} is not in the list (1–${files.length}).`, "warn");
+          showTranscript(commandText);
+          showAiResponse(`There are only ${files.length} files. Say a number between 1 and ${files.length}.`);
+          setPendingAction(capturedPending);
+          keepMicActive = true;
+          return;
         }
+      }
+
+      // ── Check for blank audio or background noise ──────────────────────
+      if (isBlankAudioOrNoise(commandText)) {
+        addLog("🔊 Detected blank audio or background noise — requiring reactivation.", "warn");
+        if (capturedPending?.type === "SHOW_RECENT_FILES") {
+          showAiResponse("Please say just the file number, like 1, 2, or 3.");
+          setPendingAction(capturedPending);
+          keepMicActive = true;
+        } else {
+          setPendingAction(null);
+          showAiResponse(tpl(t.noClearCommandTemplate, { word: activationWordRef.current }));
+          // Return to idle/wake-word mode — requires reactivation
+          resumeListeningRef.current?.();
+        }
+        return;
+      }
+
+      // ── Require minimum command length (filter out single-word stray background noise) ─
+      // ── Require minimum command length (but allow known single-word commands) ─
+      const commandWords = commandText.trim().split(/\s+/);
+      const knownSingleWordCommands = ['iris', 'activate', 'next', 'previous', 'back', 'help', 'menu', 'close', 'print', 'time', 'reminders', 'summary', 'admin', 'summarize'];
+      const isSingleWordCommand = commandWords.length === 1 && (knownSingleWordCommands.includes(commandWords[0].toLowerCase()) || /^\d+$/.test(commandWords[0]));
+      const requiresTwoWords = !isSingleWordCommand && commandWords.length < 2;
+      
+      if (requiresTwoWords) {
+        addLog("⏱️ Command too brief — likely background noise.", "warn");
+        setPendingAction(null);
+        showAiResponse(t.commandTooBrief);
+        resumeListeningRef.current?.();
+        return;
       }
 
       // If a PDF is open, execute common viewer commands locally so commands
@@ -889,26 +1122,36 @@ export default function App() {
   const transcribeCommandWithGroqRef = useRef(transcribeCommandWithGroq);
   useEffect(() => { transcribeCommandWithGroqRef.current = transcribeCommandWithGroq; }, [transcribeCommandWithGroq]);
 
-  // ── Voice pipeline: Whisper WebGPU + AudioContext mic capture ────────────
+  const transcribeWakewordWithGroqRef = useRef(transcribeWakewordWithGroq);
+  useEffect(() => { transcribeWakewordWithGroqRef.current = transcribeWakewordWithGroq; }, [transcribeWakewordWithGroq]);
+
+  // ── Voice pipeline: Groq API + AudioContext mic capture ────────────────
   //
-  // One multilingual whisper-base model handles all modes:
-  //   'wake-word' — short bursts checked for the keyword "activate"
-  //   'partial'   — each speech burst during a command; result streams to UI
-  //   'command'   — full accumulated audio; final high-quality transcription
+  // All transcription goes through the server-side Groq Whisper API.
+  //   'wake-word' — short bursts sent to /api/process/transcribe-wakeword; checked for keyword
+  //   'partial'   — each speech burst during a command; transcribed via Groq for streaming UI
+  //   'command'   — full accumulated audio; final transcription via Groq
   //
-  // Sentence-end detection: Whisper naturally adds `.` `?` `!` when it hears
-  // a complete thought.  We detect these patterns and submit the command after
-  // a short pause (SENTENCE_END_SILENCE_MS) rather than waiting for the full
-  // force-submit timeout — this gives a much more natural end-of-utterance feel.
+  // Sentence-end detection: Groq Whisper naturally adds `.` `?` `!` when it
+  // hears a complete thought.  We detect these patterns and submit the command
+  // after a short pause (SENTENCE_END_MS) rather than waiting for the full
+  // force-submit timeout.
   useEffect(() => {
+    if (mode !== "voice") {
+      setWakeWordReady(false);
+      return undefined;
+    }
+
     const SAMPLE_RATE          = 16_000;
-    const BUFFER_SIZE          = 1024;       // 64 ms per ScriptProcessor callback
-    const RMS_THRESHOLD        = 0.022;      // RMS below this → silence (increased to filter background chatter)
-    const WAKE_SILENCE_MS      = 220;        // wake-word path: short silence for snappier activation
-    const COMMAND_SILENCE_MS   = 650;        // command path: larger chunks for better transcription context
+    const BUFFER_SIZE          = 1024;       // 64 ms per AudioWorklet callback
+    const RMS_THRESHOLD        = 0.007;      // RMS below this → silence (lowered for better speaker detection)
+    const WAKE_SILENCE_MS      = 400;        // wake-word path: 400ms to capture "hi iris" as one chunk
+    const COMMAND_SILENCE_MS   = 1_200;      // command path: 1.2s delay for better speech capture and noise tolerance
     const SENTENCE_END_MS      = 350;        // pause after sentence-end pattern → submit
-    const FORCE_SUBMIT_MS      = 2_500;      // max silence during command → force submit
+    const FORCE_SUBMIT_MS      = 4_000;      // max silence during command → force submit (increased for longer pauses)
     const MIN_COMMAND_SEC      = 0.3;        // minimum audio duration (s) to bother submitting
+    const MAX_COMMAND_WINDOW_MS = 7_000;     // hard cap after activation so noise cannot keep command mode open forever
+    const MAX_COMMAND_AUDIO_SEC = 8.0;       // max accumulated command audio before forced finalization
     const WAKE_MIN_CHUNK_SEC   = 0.08;       // wake-word path: allow smaller chunks to reduce delay
     const COMMAND_MIN_CHUNK_SEC = 0.35;      // command path: larger chunks improve recognition stability
 
@@ -916,13 +1159,21 @@ export default function App() {
 
     // Per-effect mutable state (local vars, no re-render on change)
     let speechChunks  = [];   // Float32Array chunks of the current speech burst
+    let preSpeechBuffer = []; // Rolling buffer of the last ~500ms of audio before speech
+    const MAX_PRE_SPEECH_CHUNKS = Math.ceil((SAMPLE_RATE * 0.5) / BUFFER_SIZE);
     let commandChunks = [];   // all audio accumulated since activation
-    let partialTexts  = [];   // Whisper partial transcriptions so far
+    let commandSampleCount = 0;
+    let commandStartedAt = 0;
+    let partialTexts  = [];   // Groq partial transcriptions so far
     let isSpeaking    = false;
     let silenceSince  = 0;
+    let lastWakeCheckTime = 0;
+    let wakewordInFlight = false; // prevent overlapping wake-word API calls
+    let pendingWakeAudio = null;   // queued audio when a wake-word call is in flight
 
     let forceSubmitTimer    = null;
     let sentenceEndTimer    = null;
+    let submitInFlight      = false;
 
     function concatF32(chunks) {
       const total = chunks.reduce((s, c) => s + c.length, 0);
@@ -932,9 +1183,10 @@ export default function App() {
       return out;
     }
 
-    // Detect whether Whisper thinks the utterance is a complete sentence.
-    // Whisper adds punctuation naturally; we also match common short commands
-    // that may not get punctuation but are clearly self-contained.
+    function totalSamples(chunks) {
+      return chunks.reduce((sum, c) => sum + c.length, 0);
+    }
+
     function isSentenceComplete(text) {
       if (!text) return false;
       const t = text.trim();
@@ -959,180 +1211,153 @@ export default function App() {
       }
     }
 
-    async function submitCommand() {
-      if (disposed || !activatedRef.current) return;
+    async function submitCommand(reason = "normal") {
+      if (disposed || !activatedRef.current || submitInFlight) return;
+      submitInFlight = true;
       clearTimers();
       const audio   = concatF32(commandChunks);
       commandChunks = [];
+      commandSampleCount = 0;
+      commandStartedAt = 0;
       const partial = partialTexts.join(" ").trim();
       partialTexts  = [];
 
       if (audio.length < SAMPLE_RATE * MIN_COMMAND_SEC) {
         if (partial) {
-          // Wake-word + inline command detected; audio window was too short but the
-          // text from the wake-word utterance is reliable — send it directly to AI.
           activatedRef.current = false;
           showTranscript(partial);
           setAiResponse(null);
           setStatus("sending");
           sendToAIRef.current?.(partial);
         } else {
-          // Too short — almost certainly noise or misfire
           resumeListeningRef.current();
         }
+        submitInFlight = false;
         return;
       }
 
       activatedRef.current = false;
-      if (partial) showTranscript(partial); // preview while final runs
+      if (reason === "max-window") {
+        addLog("⏱️ Max command window reached — finalizing command.", "warn");
+      } else if (reason === "max-audio") {
+        addLog("⏱️ Max command audio reached — finalizing command.", "warn");
+      }
+      if (partial) showTranscript(partial);
       setStatus("processing");
 
-      // Primary path: Groq Whisper Turbo for the final command transcript.
-      // Fallback path: local Whisper worker command mode.
-      const groqText = await transcribeCommandWithGroqRef.current?.(audio);
-      if (groqText && groqText.length >= 2 && /[A-Za-z0-9]/.test(groqText)) {
-        addLog(`🗣️ Groq Whisper Turbo: "${groqText}"`, "voice");
-        showTranscript(groqText);
-        setAiResponse(null);
-        setStatus("sending");
-        sendToAIRef.current?.(groqText);
-        return;
-      }
-
-      addLog("⚠️ Falling back to local Whisper command transcription", "warn");
-      workerRef.current?.postMessage({ type: "transcribe", audio, mode: "command" });
-    }
-
-    // Worker message handler (set synchronously so it is ready before startMic)
-    const worker = new WhisperWorker();
-    workerRef.current = worker;
-
-    worker.onmessage = (e) => {
-      if (disposed) return;
-      const { type, text, message, mode } = e.data;
-
-      if (type === "loading") {
-        addLog(`⏳ ${message}`, "info");
-        setWhisperLoadingMsg(message);
-        return;
-      }
-
-      if (type === "ready") {
-        // Explicit readiness signal from the worker
-        addLog(`✅ ${message}`, "info");
-        setWhisperLoadingMsg(message);
-        // Debug hook: helpful for manual dev verification and tests
-        try { console.debug("Whisper worker ready:", message); } catch (_) {}
-        // Expose a small test hook so automated tests can detect readiness.
-        try { window.__whisper_ready_received = true; } catch (_) {}
-        setWhisperReady(true);
-        return;
-      }
-
-      if (type === "error") {
-        addLog(`❌ Whisper: ${message}`, "error");
-        if (mode === "command") resumeListeningRef.current();
-        return;
-      }
-
-      if (type !== "result") return;
-
-      const cleaned = (text || "").trim();
-
-      if (mode === "wake-word") {
-        // Only act on the configured activation word when not already active and not mid-request.
-        const word    = activationWordRef.current;
-        const wordEsc = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        const wakeRx  = new RegExp(`\\b${wordEsc}\\b`, "i");
-        if (
-          wakeRx.test(cleaned) &&
-          !activatedRef.current &&
-          statusRef.current !== "sending" &&
-          statusRef.current !== "processing"
-        ) {
-          const rest = cleaned.replace(new RegExp(`\\b${wordEsc}\\b[\\s,:-]*`, "i"), "").trim();
-          activatedRef.current = true;
-          commandChunks = [];
-          partialTexts  = [];
-          clearTimers();
-          setStatus("listening");
-          setShowLanding(false);
-          try { localStorage.setItem("sgm_activated", "1"); } catch (_) {}
-          addLog("🎤 Activated — speak your command", "info");
-
-          if (rest.length >= 2) {
-            // Wake word + command in the same utterance
-            partialTexts.push(rest);
-            showTranscript(rest);
-            if (isSentenceComplete(rest)) {
-              sentenceEndTimer = setTimeout(submitCommand, SENTENCE_END_MS);
-            } else {
-              forceSubmitTimer = setTimeout(submitCommand, FORCE_SUBMIT_MS);
-            }
-          } else {
-            // Start idle timeout (no command heard yet)
-            if (listeningTimeoutRef.current) clearTimeout(listeningTimeoutRef.current);
-            listeningTimeoutRef.current = setTimeout(() => {
-              if (activatedRef.current && commandChunks.length === 0) {
-                addLog("⏱️ No command heard — resetting.", "warn");
-                resumeListeningRef.current();
-              }
-            }, LISTENING_IDLE_TIMEOUT_MS);
-          }
-        }
-        return;
-      }
-
-      if (mode === "partial" && activatedRef.current) {
-        if (cleaned.length >= 2) {
-          partialTexts.push(cleaned);
-          setTranscript(partialTexts.join(" ")); // stream to UI
-
-          if (isSentenceComplete(cleaned)) {
-            // Sentence complete — schedule a short-pause submit
-            clearTimers();
-            sentenceEndTimer = setTimeout(submitCommand, SENTENCE_END_MS);
-          } else {
-            // Reset force-submit (user is still mid-sentence)
-            if (forceSubmitTimer) clearTimeout(forceSubmitTimer);
-            forceSubmitTimer = setTimeout(submitCommand, FORCE_SUBMIT_MS);
-          }
-        }
-        return;
-      }
-
-      if (mode === "command") {
-        const meaningful = cleaned.length >= 2 && /[A-Za-z0-9]/.test(cleaned);
-        if (meaningful) {
-          addLog(`🗣️ Whisper: "${cleaned}"`, "voice");
-          showTranscript(cleaned);
+      // Send to Groq for final transcription
+      try {
+        const text = await transcribeCommandWithGroqRef.current?.(audio, { isFinal: true });
+        if (text && text.length >= 2 && /[A-Za-z0-9]/.test(text)) {
+          addLog(`🗣️ Groq: "${text}"`, "voice");
+          showTranscript(text);
           setAiResponse(null);
           setStatus("sending");
-          sendToAIRef.current?.(cleaned);
+          sendToAIRef.current?.(text);
         } else {
-          addLog("(No speech detected in command)", "warn");
+          addLog("(No speech detected in command or transcription deferred by rate limit)", "warn");
           resumeListeningRef.current();
         }
+      } catch (err) {
+        addLog(`❌ Transcription error: ${err?.message || "unknown"}`, "error");
+        resumeListeningRef.current();
+      } finally {
+        submitInFlight = false;
       }
-    };
+    }
 
-    worker.onerror = (err) => {
+    // Handle wake-word transcription result from Groq
+    function handleWakeWordResult(cleaned, trailingCommandOverride = "") {
       if (disposed) return;
-      const msg = err.message || String(err.type) || "unknown";
-      addLog(`❌ Whisper worker crashed: ${msg}`, "error");
-      setWhisperReady(false);
-      resumeListeningRef.current();
-    };
+      const word = activationWordRef.current;
+      // Normalize: strip punctuation, collapse whitespace, lowercase for comparison.
+      // Groq may return "Hi, Iris.", "hi iris", "Iris!", "iris", etc.
+      const normalize = (s) => s.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
+      const normalizedText = normalize(cleaned);
+      const normalizedWord = normalize(word);
+      // Accept the full phrase ("hi iris") OR just the core name ("iris")
+      const coreWord = normalizedWord.split(" ").pop();
+      const matched = normalizedText.includes(normalizedWord) || normalizedText.includes(coreWord);
+      addLog(`🔍 Wake check: "${normalizedText}" vs "${coreWord}" → ${matched ? "MATCH ✅" : "no match"}`, "info");
+      console.log(`[Debug Voice]: handle wake word result: normalizedText: ${coreWord}, normalizedWord: ${normalizedWord}`);
+
+      if (
+        matched &&
+        !activatedRef.current &&
+        statusRef.current !== "sending" &&
+        statusRef.current !== "processing"
+      ) {
+        // Remove the wake-word from the transcription to get any trailing command
+        const overrideRest = normalize(trailingCommandOverride || "");
+        const rest = overrideRest || normalizedText.replace(normalizedWord, "").replace(coreWord, "").trim();
+        activatedRef.current = true;
+        commandChunks = [...speechChunks];
+        commandSampleCount = totalSamples(commandChunks);
+        commandStartedAt = Date.now();
+        speechChunks = [];
+        partialTexts  = [];
+        clearTimers();
+        setStatus("listening");
+        setShowLanding(false);
+        addLog("🎤 Activated — speak your command", "info");
+
+        if (rest.length >= 2) {
+          partialTexts.push(rest);
+          showTranscript(rest);
+          if (isSentenceComplete(rest)) {
+            sentenceEndTimer = setTimeout(submitCommand, SENTENCE_END_MS);
+          } else {
+            forceSubmitTimer = setTimeout(submitCommand, FORCE_SUBMIT_MS);
+          }
+        } else {
+          if (listeningTimeoutRef.current) clearTimeout(listeningTimeoutRef.current);
+          listeningTimeoutRef.current = setTimeout(() => {
+            if (activatedRef.current && commandChunks.length === 0) {
+              addLog("⏱️ No command heard — resetting.", "warn");
+              resumeListeningRef.current();
+            }
+          }, LISTENING_IDLE_TIMEOUT_MS);
+        }
+      }
+    }
+
+    // Handle partial transcription result from Groq
+    function handlePartialResult(cleaned) {
+      if (disposed || !activatedRef.current) return;
+      if (cleaned.length >= 2) {
+        partialTexts.push(cleaned);
+        setTranscript(partialTexts.join(" "));
+
+        if (isSentenceComplete(cleaned)) {
+          clearTimers();
+          sentenceEndTimer = setTimeout(submitCommand, SENTENCE_END_MS);
+        } else {
+          if (forceSubmitTimer) clearTimeout(forceSubmitTimer);
+          forceSubmitTimer = setTimeout(submitCommand, FORCE_SUBMIT_MS);
+        }
+      }
+    }
 
     // Start the mic capture loop
     async function startMic() {
+      addLog("🔄 Starting microphone...", "info");
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         if (disposed) { stream.getTracks().forEach(t => t.stop()); return; }
+        addLog("✅ Mic permission granted", "info");
 
         streamRef.current = stream;
         const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
         audioCtxRef.current = ctx;
+        addLog(`🔊 AudioContext state: ${ctx.state}, sampleRate: ${ctx.sampleRate}`, "info");
+
+        // Mobile Chrome requires explicit resume after user gesture (getUserMedia)
+        if (ctx.state === 'suspended') {
+          addLog("⏸️ AudioContext suspended — resuming...", "warn");
+          await ctx.resume();
+          addLog(`🔊 AudioContext resumed — state: ${ctx.state}`, "info");
+        }
+
         const source    = ctx.createMediaStreamSource(stream);
 
         // Add AudioWorklet module
@@ -1143,17 +1368,60 @@ export default function App() {
         source.connect(processor);
         processor.connect(ctx.destination);
 
+        // Track speech detection diagnostics
+        let speechBurstCount = 0;
+        let lastDiagTime = Date.now();
+
         processor.port.onmessage = (ev) => {
           if (disposed) return;
           const samples = ev.data;
           const rms = Math.sqrt(samples.reduce((s, v) => s + v * v, 0) / samples.length);
           const now = Date.now();
 
+          // Hard-stop command capture if it runs too long (usually caused by sustained background noise).
+          if (activatedRef.current && commandStartedAt > 0) {
+            const commandElapsedMs = now - commandStartedAt;
+            if (commandElapsedMs >= MAX_COMMAND_WINDOW_MS) {
+              if (!submitInFlight) {
+                if (partialTexts.join(" ").trim() || commandSampleCount >= SAMPLE_RATE * MIN_COMMAND_SEC) {
+                  void submitCommand("max-window");
+                } else {
+                  addLog("⏱️ Ignoring long background noise — resetting command mode.", "warn");
+                  resumeListeningRef.current();
+                }
+              }
+              return;
+            }
+          }
+
+          // Periodic diagnostic: log every 10 seconds to show audio is flowing
+          if (now - lastDiagTime > 10000) {
+            addLog(`🔈 Audio flowing — RMS: ${rms.toFixed(4)}, speech bursts: ${speechBurstCount}, activated: ${activatedRef.current}`, "info");
+            lastDiagTime = now;
+            speechBurstCount = 0;
+          }
+
           if (rms >= RMS_THRESHOLD) {
+            if (!isSpeaking) {
+              speechBurstCount++;
+              speechChunks.push(...preSpeechBuffer);
+              if (activatedRef.current) {
+                commandChunks.push(...preSpeechBuffer);
+              }
+              preSpeechBuffer = [];
+            }
             isSpeaking  = true;
             silenceSince = 0;
             speechChunks.push(samples);
-            if (activatedRef.current) commandChunks.push(samples);
+            if (activatedRef.current) {
+              if (commandStartedAt === 0) commandStartedAt = now;
+              commandChunks.push(samples);
+              commandSampleCount += samples.length;
+              if (commandSampleCount >= SAMPLE_RATE * MAX_COMMAND_AUDIO_SEC && !submitInFlight) {
+                void submitCommand("max-audio");
+                return;
+              }
+            }
           } else if (isSpeaking) {
             if (!silenceSince) silenceSince = now;
             const silenceTargetMs = activatedRef.current ? COMMAND_SILENCE_MS : WAKE_SILENCE_MS;
@@ -1165,10 +1433,54 @@ export default function App() {
                 silenceSince = 0;
                 const minChunkSec = activatedRef.current ? COMMAND_MIN_CHUNK_SEC : WAKE_MIN_CHUNK_SEC;
                 if (audio.length >= SAMPLE_RATE * minChunkSec) {
-                  const mode = activatedRef.current ? "partial" : "wake-word";
-                  workerRef.current?.postMessage({ type: "transcribe", audio, mode });
+                  const durationSec = (audio.length / SAMPLE_RATE).toFixed(2);
+                  addLog(`🎙️ Speech chunk: ${durationSec}s, activated: ${activatedRef.current}`, "info");
+                  if (activatedRef.current) {
+                    // Partial transcription during command — send to Groq
+                    (async () => {
+                      try {
+                        const text = await transcribeCommandWithGroqRef.current?.(audio);
+                        if (text && !disposed) handlePartialResult(text.trim());
+                      } catch (_) {}
+                    })();
+                  } else {
+                    // Wake-word check — send to Groq (queue latest if in-flight)
+                    async function sendWakeAudio(chunk) {
+                      wakewordInFlight = true;
+                      try {
+                        const result = await transcribeWakewordWithGroqRef.current?.(chunk);
+                        if (!disposed) {
+                          if (result?.text) {
+                            handleWakeWordResult(result.text.trim(), result.commandAfterWakeword || "");
+                          } else if (result?.matched) {
+                            // Fallback when backend marks wake-word matched but transcription text is empty.
+                            handleWakeWordResult(activationWordRef.current || "Hello Iris");
+                          }
+                        }
+                      } catch (_) {}
+                      finally {
+                        wakewordInFlight = false;
+                        // If a chunk was queued while we were in-flight, send it now
+                        if (pendingWakeAudio && !disposed && !activatedRef.current) {
+                          const queued = pendingWakeAudio;
+                          pendingWakeAudio = null;
+                          sendWakeAudio(queued);
+                        }
+                      }
+                    }
+                    if (!wakewordInFlight) {
+                      sendWakeAudio(audio);
+                    } else {
+                      pendingWakeAudio = audio; // keep latest, discard older
+                    }
+                  }
                 }
               }
+            }
+          } else {
+            preSpeechBuffer.push(samples);
+            if (preSpeechBuffer.length > MAX_PRE_SPEECH_CHUNKS) {
+              preSpeechBuffer.shift();
             }
           }
         };
@@ -1176,8 +1488,6 @@ export default function App() {
         if (!disposed) {
           setWakeWordReady(true);
           addLog(`🎤 Microphone ready — say "${activationWordRef.current}"`, "info");
-          // Warm the model so the first activation is instant
-          worker.postMessage({ type: "preload" });
         }
       } catch (err) {
         if (!disposed) {
@@ -1205,12 +1515,9 @@ export default function App() {
       }
       audioCtxRef.current  = null;
       processorRef.current = null;
-      worker.terminate();
-      workerRef.current = null;
       setWakeWordReady(false);
-      setWhisperReady(false);
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [mode]);
 
   // Keepalive control is server-side and managed from the admin panel toggle.
 
@@ -1226,10 +1533,6 @@ export default function App() {
   // ── Manual tap button ─────────────────────────────────────────────────────
   const handleMicButton = () => {
     if (status === "idle") {
-      if (!backendReady) {
-        addLog("⚠️ Backend is still waking up. Please wait.", "warn");
-        return;
-      }
       if (!wakeWordReady) {
         addLog("⚠️ Microphone not ready yet.", "warn");
         return;
@@ -1254,119 +1557,124 @@ export default function App() {
     }
   };
 
+  const handleTextSubmit = (e) => {
+    e.preventDefault();
+    const text = inputText.trim();
+    if (!text) return;
+    setInputText("");
+    setStatus("sending");
+    setTranscript(null);
+    setAiResponse(null);
+    showTranscript(text);
+    sendToAI(text);
+  };
+
   // ── Render ────────────────────────────────────────────────────────────────
   const isListening  = status === "listening";
   const isProcessing = status === "processing";
   const isSending    = status === "sending";
   const btnLabel = isSending
-    ? "🤖 Sending to AI…"
+    ? t.sendingAI
     : isProcessing
-      ? "⏳ Transcribing…"
-      : !backendReady
-        ? "⏳ Waking server…"
+      ? t.transcribing
       : isListening
-        ? "🗣️ Listening…"
+        ? t.listening
         : !wakeWordReady
-          ? "⏳ Loading Whisper…"
-          : `Say "${activationWord}"`;
+          ? t.connectingMicShort
+          : tpl(t.sayWordTemplate, { word: activationWord });
   const dotColor = isSending    ? "#3498db"
     : isProcessing ? "#9b59b6"
-    : !backendReady ? "#f59e0b"
     : isListening  ? "#e67e22"
     : !wakeWordReady ? "#f97316"
     : "#00b894";
 
-  const shouldPulse = isProcessing || isSending || !wakeWordReady || !backendReady;
+  const shouldPulse = isProcessing || isSending || !wakeWordReady;
   const dotStyle = { ...styles.dot, background: dotColor, ...(shouldPulse ? { animation: "pulse 1s ease-in-out infinite" } : {}) };
 
   // Full command list shown as an overlay in the top-left only while listening.
-  const COMMAND_LIST = [
-    [`"search recent files"`,  "browse recent uploaded files"],
-    [`"number "#"`,            "goes to file number in recent files list"],
-    [`"select document"`,      "open last uploaded document"],
-    [`"next/previous page"`,   "next/previous page"],
-    [`"go to page 5"`,         "jump to page"],
-    [`"highlight [word]"`,     "highlight text"],
-    [`"clear highlights"`,     "delete all highlights"],
-    [`"search for [text]"`,    "search document"],
-    [`"print document"`,       "save document as PDF with highlights"],
-    [`"show my reminders"`,    "list reminders"],
-    [`"remind me to…"`,        "set reminder"],
-    [`"admin panel"`,          "open settings"],
-  ];
+  const COMMAND_LIST = t.commandList.map(([cmd, desc]) => [`"${cmd}"`, desc]);
 
   return (
-    <div style={styles.page}>
-      {!backendReady && (
-        <div style={styles.serverWakeOverlay}>
-          <div style={styles.serverWakeCard}>
-            <h2 style={styles.serverWakeTitle}>Starting Server</h2>
-            <p style={styles.serverWakeText}>{backendStatusText}</p>
-            <p style={styles.serverWakeSubtext}>The backend appears to be offline. This page will continue automatically once it wakes up.</p>
-          </div>
-        </div>
-      )}
-
+    <div style={{ ...styles.page, ...(mode === "admin" ? styles.adminMode : {}) }}>
       {/* ── Landing screen — shown until first activation ─────────────────────── */}
-      {showLanding && (
-        <div style={styles.landing}>
+      {mode === "voice" && showLanding && (
+        <div style={styles.landing} className="sgm-landing">
           <img
             src={glassesImg}
             alt="Smart Glasses"
             className="assistant-logo"
-            style={{ display: 'block', margin: '40px auto 24px auto', maxWidth: '340px', width: '100%', height: 'auto' }}
+            style={{ display: 'block', maxWidth: '280px', width: '100%', height: 'auto', flexShrink: 0 }}
           />
-          <div style={styles.landingCard}>
-            <h1 style={styles.landingTitle}>Hey, Eye-ris here. How can I help?</h1>
-            <p style={styles.landingSubtitle}>
-              Say <strong style={{color:"#f97316"}}>"{activationWord}"</strong> to start, then speak your command.
-            </p>
-
-            {/* ── Initialization status ─────────────────────────────────── */}
-            <div style={styles.landingStatus}>
-              {(!wakeWordReady || !whisperReady) ? (
-                <div style={styles.landingLoadingRow}>
-                  <div style={styles.landingSpinner} />
-                  <span style={styles.landingLoadingText}>{whisperLoadingMsg}</span>
-                </div>
-              ) : (
-                <div style={styles.landingReadyRow}>
-                  <span style={styles.landingReadyBadge}>✓</span>
-                  <span style={styles.landingReadyText}>
-                    Ready — say <strong style={{color:"#f97316"}}>"{activationWord}"</strong> to begin
-                  </span>
-                </div>
-              )}
+          <div style={styles.landingCard} className="sgm-landing-card">
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center' }}>
+              <div />
+              <h1 style={styles.landingTitle}>{t.title}</h1>
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                <img
+                  src={psuLogo}
+                  alt="Penn State shield"
+                  style={{ height: 100, width: 'auto' }}
+                />
+              </div>
             </div>
+
             <div style={styles.landingSection} className="sgm-landing-how">
-              <h2 style={styles.landingH2}>🎤 How It Works</h2>
               <ol style={styles.landingOl}>
-                <li>Say <em>"{activationWord}"</em> to wake the assistant.</li>
-                <li>Speak your command clearly.</li>
-                <li>The assistant will respond or perform the action.</li>
-                <li>Say "{activationWord}" again for the next command.</li>
-                <li>After "search recent files", you can specify file number without reactivating.</li>
+                {t.steps.map((step, i) => (
+                  <li key={i} style={styles.landingOlItem}>
+                    <span style={styles.landingOlNum}>{i + 1}.</span>
+                    {i === 0 ? (
+                      <span>
+                        Say <strong style={{color: '#f97316'}}>"Iris"</strong>
+                        <br />
+                        <span style={{color: '#aaa', fontSize: '0.88rem'}}>(This is to wake the assistant.)</span>
+                      </span>
+                    ) : i === 1 ? (
+                      <span>
+                        Speak command clearly
+                        <br />
+                        <span style={{color: '#aaa', fontSize: '0.88rem'}}>(The assistant will respond or perform the action.)</span>
+                      </span>
+                    ) : i === 2 ? (
+                      <span>Say <strong style={{color: '#f97316'}}>"Iris"</strong> again for the next command.</span>
+                    ) : i === 3 ? (
+                      <span>
+                        After <strong>"search recent files"</strong>
+                        <br />
+                        <span style={{color: '#aaa', fontSize: '0.88rem'}}>(You can specify a file number without reactivating.)</span>
+                      </span>
+                    ) : (
+                      <span>{tpl(step, { word: activationWord })}</span>
+                    )}
+                  </li>
+                ))}
               </ol>
             </div>
+
+            {/* ── Initialization status ─────────────────────────────────── */}
+            {!wakeWordReady ? (
+              <div style={styles.landingStatus}>
+                <div style={styles.landingLoadingRow}>
+                  <div style={styles.landingSpinner} />
+                  <span style={styles.landingLoadingText}>{t.connectingMic}</span>
+                </div>
+              </div>
+            ) : (
+              <div style={styles.landingOlItem}>
+                <span style={styles.landingOlNum}>5.</span>
+                <div style={{ ...styles.landingStatus, flex: 1, margin: 0 }}>
+                  <div style={styles.landingReadyRow}>
+                    <span style={styles.landingReadyBadge}>✓</span>
+                    <span style={styles.landingReadyText}>Ready</span>
+                  </div>
+                </div>
+              </div>
+            )}
             <div style={styles.landingSection} className="sgm-landing-cmds">
-              <h2 style={styles.landingH2}>📋 Common Commands</h2>
+              <h2 style={styles.landingH2}>{t.commonCommandsTitle}</h2>
               <table style={styles.landingTable}>
                 <tbody>
-                  {[
-                    ["search recent files", "browse recent uploaded files"],
-                    ["number #", "go to file number in recent files list"],
-                    ["select document", "Open the last uploaded document"],
-                    ["next/previous page", "Go to the next/previous page"],
-                    ["go to page 5", "Jump to a specific page"],
-                    ["highlight aspirin", "Highlight a word in the open document"],
-                    ["clear highlights", "Remove all highlights"],
-                    ["search for blood pressure", "Search for text in documents"],
-                    ["search for BP", "Search using FDA SPL abbreviations"],
-                    ["remind me to…", "Set a reminder"],
-                    ["show my reminders", "List all your reminders"],
-                    ["print document", "Print the open document with highlights"],
-                    ["admin panel", "Open the admin panel"],
-                  ].map(([cmd, desc]) => (
+                  {t.commandList.map(([cmd, desc]) => (
                     <tr key={cmd}>
                       <td style={styles.landingCmd}>"{cmd}"</td>
                       <td style={styles.landingDesc}>{desc}</td>
@@ -1375,67 +1683,53 @@ export default function App() {
                 </tbody>
               </table>
             </div>
-            <p style={styles.landingDismiss}>This screen will disappear after your first activation.</p>
           </div>
         </div>
       )}
 
-      {/* ── Command list overlay — shown only while actively listening ─────────── */}
-      {isListening && (
-        <div style={styles.commandList}>
-          <p style={styles.commandListTitle}>📋 Commands</p>
-          <div style={styles.commandListGrid}>
-            {COMMAND_LIST.map(([cmd, desc]) => (
-              <div key={cmd} style={styles.commandListRow}>
-                <span style={styles.commandListCmd}>{cmd}</span>
-                <span style={styles.commandListDesc}>{desc}</span>
-              </div>
-            ))}
-          </div>
+      {mode === "voice" && (
+        <div style={styles.indicator} onClick={handleMicButton}>
+          <span style={dotStyle} />
+          <span style={styles.indicatorText}>{btnLabel}</span>
+          {usedAdvancedModel && (
+            <div title="Advanced model selected" style={{display:'inline-flex', alignItems:'center', gap:6, marginLeft:6}}>
+              <span style={{fontSize:14, color:'#7ec8e3'}}>⚡</span>
+            </div>
+          )}
         </div>
       )}
 
-      <div style={styles.indicator} onClick={handleMicButton}>
-        <span style={dotStyle} />
-        <span style={styles.indicatorText}>{btnLabel}</span>
-        {usedAdvancedModel && (
-          <div title="Advanced model selected" style={{display:'inline-flex', alignItems:'center', gap:6, marginLeft:6}}>
-            <span style={{fontSize:14, color:'#7ec8e3'}}>⚡</span>
-          </div>
-        )}
-      </div>
-
-      <main style={styles.main}>
+      <main className="sgm-main" style={styles.main}>
 
         {(transcript || isSending || aiResponse || pendingAction) && (
           <section style={styles.conversationArea}>
             {transcript && (
               <div style={styles.transcriptBubble}>
-                <span style={styles.bubbleLabel}>You</span>
+                <span style={styles.bubbleLabel}>{t.you}</span>
                 <p style={styles.bubbleText}>{transcript}</p>
               </div>
             )}
             {isSending && !aiResponse && !pendingAction && (
               <div style={styles.thinkingBubble}>
-                <span style={styles.thinkingText}>AI is thinking…</span>
+                <span style={styles.thinkingText}>{t.aiThinking}</span>
               </div>
             )}
             {aiResponse && !pendingAction && (
               <div style={styles.aiBubble}>
-                <span style={styles.bubbleLabel}>AI</span>
+                <span style={styles.bubbleLabel}>{t.aiLabel}</span>
                 <p style={styles.bubbleText}>{aiResponse}</p>
                 {usedAdvancedModel && (
                   <div style={{position: 'absolute', right: 12, bottom: 8, background: 'rgba(11,99,166,0.9)', color: 'white', padding: '4px 6px', borderRadius: 6, fontSize: 12, display: 'flex', alignItems: 'center', gap: 6}} title="Generated by advanced model">
                     <span style={{fontSize:12}}>⚡</span>
-                    <span style={{fontSize:11}}>Advanced</span>
+                    <span style={{fontSize:11}}>{t.advanced}</span>
                   </div>
                 )}
               </div>
             )}
             {pendingAction?.type === "SHOW_RECENT_FILES" && (
               <div style={styles.actionCard}>
-                <p style={styles.actionCardTitle}>📂 Recent Uploaded Files</p>
-                <p style={styles.actionCardHint}>Say a number (1–{pendingAction.files.length}) or tap a file to open it.</p>
+                <p style={styles.actionCardTitle}>{t.recentFiles}</p>
+                <p style={styles.actionCardHint}>{tpl(t.recentFilesHintTemplate, { n: pendingAction.files.length })}</p>
                 <div style={styles.actionList}>
                   {pendingAction.files.map((file, index) => (
                     <button
@@ -1458,13 +1752,13 @@ export default function App() {
             )}
             {pendingAction?.type === "SELECT_DOCUMENT" && (
               <div style={styles.actionCard}>
-                <p style={styles.actionCardTitle}>📄 Last Uploaded Document</p>
+                <p style={styles.actionCardTitle}>{t.lastDocument}</p>
                 <p style={styles.actionCardDoc}>{pendingAction.name}</p>
                 <button
                   style={styles.actionBtnSecondary}
                   onClick={() => openDocumentPreview({ previewId: pendingAction.id, name: pendingAction.name })}
                 >
-                  Preview Document →
+                  {t.previewDocument}
                 </button>
               </div>
             )}
@@ -1480,9 +1774,9 @@ export default function App() {
               ? "opacity 0.9s ease-out"
               : "opacity 0.25s ease-in",
           }}>
-            <p style={styles.remindersToastTitle}>📝 Your Reminders</p>
+            <p style={styles.remindersToastTitle}>{t.remindersTitle}</p>
             {remindersToast.reminders.length === 0 ? (
-              <p style={styles.remindersToastEmpty}>No reminders yet.</p>
+              <p style={styles.remindersToastEmpty}>{t.noReminders}</p>
             ) : (
               <ul style={styles.remindersToastList}>
                 {remindersToast.reminders.map((r, i) => (
@@ -1512,18 +1806,55 @@ export default function App() {
         )}
       </main>
 
-      <button
-        style={styles.logToggleBtn}
-        onClick={() => setLogOpen(prev => !prev)}
-      >
-        {logOpen ? "✕ Close Log" : "📋 Activity Log"}
-      </button>
+      {mode === "admin" && (
+        <div style={styles.textInputArea}>
+          <form onSubmit={handleTextSubmit} style={{ display: 'flex', gap: '10px', width: '100%', maxWidth: '680px', margin: '0 auto' }}>
+            <input
+              type="text"
+              value={inputText}
+              onChange={e => setInputText(e.target.value)}
+              placeholder={tpl(t.textInputPlaceholderTemplate, { word: activationWord })}
+              style={styles.textInput}
+              disabled={isSending || isProcessing}
+            />
+            <button type="submit" disabled={isSending || isProcessing || !inputText.trim()} style={styles.textSubmitBtn}>
+              {t.send}
+            </button>
+          </form>
+        </div>
+      )}
 
-      {logOpen && (
+      {mode === "voice" && (
+        <button
+          style={styles.logToggleBtn}
+          onClick={() => setLogOpen(prev => !prev)}
+        >
+          {logOpen ? t.closeLog : t.activityLogBtn}
+        </button>
+      )}
+
+      {/* ── Command list overlay — shown only while actively listening ─────────── */}
+      {isListening && (
+        <div style={styles.commandListBackdrop}>
+          <div style={styles.commandList}>
+            <p style={styles.commandListTitle}>{t.commandsOverlayTitle}</p>
+            <div style={styles.commandListGrid}>
+              {COMMAND_LIST.map(([cmd, desc]) => (
+                <div key={cmd} style={styles.commandListRow}>
+                  <span style={styles.commandListCmd}>{cmd}</span>
+                  <span style={styles.commandListDesc}>{desc}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {mode === "voice" && logOpen && (
         <div style={styles.logPanel}>
-          <h2 style={styles.sectionTitle}>Activity Log</h2>
+          <h2 style={styles.sectionTitle}>{t.activityLogTitle}</h2>
           {logs.length === 0 ? (
-            <p style={styles.emptyLog}>No activity yet. Say "{activationWord}".</p>
+            <p style={styles.emptyLog}>{tpl(t.noActivityTemplate, { word: activationWord })}</p>
           ) : (
             <ul style={styles.logList}>
               {logs.map(entry => (
@@ -1556,19 +1887,26 @@ function formatActionTime(value) {
 function parseFileSelectionNumber(text) {
   if (!text) return null;
   const s = text.trim().toLowerCase();
+  const normalized = s.replace(/[.,!?;:]+$/g, "").trim();
 
   // Word ordinals / cardinals (covers the typical 1–5 list size)
-  const words = { one: 1, first: 1, two: 2, second: 2, three: 3, third: 3, four: 4, fourth: 4, five: 5, fifth: 5 };
+  const words = {
+    one: 1, first: 1,
+    two: 2, second: 2, to: 2, too: 2,
+    three: 3, third: 3,
+    four: 4, fourth: 4, for: 4,
+    five: 5, fifth: 5,
+  };
   for (const [word, num] of Object.entries(words)) {
-    if (new RegExp(`\\b${word}\\b`).test(s)) return num;
+    if (new RegExp(`\\b${word}\\b`).test(normalized)) return num;
   }
 
   // Patterns like "file 2", "number 3", "open 4", "#5", "pick 1", "select 2"
-  const prefixMatch = s.match(/(?:file|number|open|pick|select|item)\s*#?\s*([1-9])\b/);
+  const prefixMatch = normalized.match(/(?:file|number|open|pick|select|item)\s*#?\s*([1-9])\b/);
   if (prefixMatch) return parseInt(prefixMatch[1], 10);
 
   // Bare single digit (possibly surrounded by whitespace or punctuation)
-  const bareMatch = s.match(/^\s*([1-9])\s*$/);
+  const bareMatch = normalized.match(/^\s*#?\s*([1-9])\s*$/);
   if (bareMatch) return parseInt(bareMatch[1], 10);
 
   return null;
@@ -1589,40 +1927,9 @@ const styles = {
     position: "relative",
     overflow: "hidden",
   },
-  serverWakeOverlay: {
-    position: "fixed",
-    inset: 0,
-    background: "rgba(0,0,0,0.86)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 120,
-    padding: 16,
-  },
-  serverWakeCard: {
-    width: "min(520px, 100%)",
-    background: "#121212",
-    border: "1px solid #2d2d2d",
-    borderRadius: 14,
-    padding: "20px 22px",
-    boxShadow: "0 20px 60px rgba(0,0,0,0.45)",
-  },
-  serverWakeTitle: {
-    margin: 0,
-    fontSize: 22,
-    color: "#f6f6f6",
-  },
-  serverWakeText: {
-    margin: "10px 0 0 0",
-    fontSize: 16,
-    color: "#f59e0b",
-    fontWeight: 600,
-  },
-  serverWakeSubtext: {
-    margin: "8px 0 0 0",
-    fontSize: 14,
-    color: "#b9b9b9",
-    lineHeight: 1.45,
+  adminMode: {
+    background: "transparent", // Admin page will provide its own background
+    color: "#333", // Match admin panel text color
   },
   // Landing screen overlay
   landing: {
@@ -1630,26 +1937,25 @@ const styles = {
     inset: 0,
     background: "rgba(0,0,0,0.92)",
     display: "flex",
+    flexDirection: "column",
     alignItems: "center",
-    justifyContent: "center",
+    justifyContent: "flex-start",
     zIndex: 100,
-    padding: 16,
-    overflowY: "hidden",
+    padding: "max(16px, 3vh) 16px 24px",
+    gap: 20,
+    overflowY: "auto",
     overflowX: "hidden",
   },
   landingCard: {
-    background: "#111",
-    border: "1px solid #333",
+    background: "#1E407C",
+    border: "1px solid #2a5aaa",
     borderRadius: 16,
     padding: "min(32px, 5vh) min(28px, 5vw)",
     maxWidth: 620,
     width: "100%",
-    // Keep the card within the visible overlay (overlay has 16px padding on each side = 32px total)
-    maxHeight: "calc(100dvh - 32px)",
     display: "flex",
     flexDirection: "column",
     gap: "min(20px, 3vh)",
-    overflowY: "auto",
   },
   landingTitle: {
     margin: 0,
@@ -1657,6 +1963,7 @@ const styles = {
     fontWeight: 700,
     color: "#fff",
     textAlign: "center",
+    whiteSpace: "pre-line",
   },
   landingSubtitle: {
     margin: 0,
@@ -1679,13 +1986,28 @@ const styles = {
   },
   landingOl: {
     margin: 0,
-    paddingLeft: 22,
+    paddingLeft: 0,
+    listStyle: "none",
     display: "flex",
     flexDirection: "column",
     gap: 6,
     color: "#ddd",
     fontSize: "0.95rem",
     lineHeight: 1.6,
+  },
+  landingOlItem: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: 10,
+  },
+  landingOlNum: {
+    minWidth: 22,
+    textAlign: "right",
+    color: "#ddd",
+    fontSize: "0.95rem",
+    paddingTop: "0.15em",
+    lineHeight: 1.6,
+    flexShrink: 0,
   },
   landingTable: {
     width: "100%",
@@ -1705,13 +2027,6 @@ const styles = {
     padding: "5px 0",
     color: "#bbb",
     verticalAlign: "top",
-  },
-  landingDismiss: {
-    margin: 0,
-    fontSize: "0.8rem",
-    color: "#555",
-    textAlign: "center",
-    fontStyle: "italic",
   },
   // Initialisation status block on the landing screen
   landingStatus: {
@@ -1760,19 +2075,30 @@ const styles = {
     fontSize: "0.9rem",
     color: "#ccc",
   },
-  // Full command list overlay shown at top-left only while the assistant is listening.
-  commandList: {
+  // Full-screen backdrop shown only while the assistant is listening. Covers all content
+  // underneath so nothing bleeds through or overlaps.
+  commandListBackdrop: {
     position: "fixed",
-    top: 60,
-    left: 12,
-    background: "rgba(10,10,10,0.93)",
+    inset: 0,
+    background: "rgba(0,0,0,0.97)",
+    zIndex: 100,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "flex-start",
+    // top padding clears the indicator bar; bottom padding clears the Activity Log button
+    padding: "60px 16px 76px",
+    overflowY: "auto",
+    overflowX: "hidden",
+  },
+  // Commands panel centred within the backdrop.
+  commandList: {
+    background: "rgba(10,10,10,0.98)",
     border: "1px solid #2a2a2a",
     borderRadius: 10,
     padding: "10px 14px",
-    zIndex: 50,
-    maxWidth: 320,
-    maxHeight: "calc(100vh - 80px)",
-    overflowY: "auto",
+    width: "100%",
+    maxWidth: 480,
   },
   commandListTitle: {
     margin: "0 0 8px",
@@ -1804,13 +2130,13 @@ const styles = {
     color: "#777",
   },
   indicator: {
-    position: "absolute",
+    position: "fixed",
     top: 16,
     right: 16,
     display: "flex",
     alignItems: "center",
     gap: 8,
-    zIndex: 40,
+    zIndex: 110,
   },
   dot: { width: 12, height: 12, borderRadius: "50%" },
   indicatorText: { fontSize: "0.85rem", color: "#ccc" },
@@ -1819,12 +2145,39 @@ const styles = {
     minHeight: 0,
     maxWidth: 680,
     width: "100%",
-    margin: "48px auto 32px",
-    padding: "0 16px",
+    margin: "0 auto",
+    // top padding clears the fixed indicator bar; bottom padding clears the fixed log-toggle button
+    padding: "52px 16px 72px",
     display: "flex",
     flexDirection: "column",
     gap: 24,
     overflowY: "auto",
+  },
+  textInputArea: {
+    padding: "16px",
+    background: "rgba(255,255,255,0.05)",
+    borderTop: "1px solid rgba(255,255,255,0.1)",
+    display: "flex",
+    justifyContent: "center",
+  },
+  textInput: {
+    flex: 1,
+    padding: "12px 16px",
+    borderRadius: "8px",
+    border: "2px solid #999",
+    background: "#fff",
+    color: "#000",
+    fontSize: "1rem",
+    outline: "none",
+  },
+  textSubmitBtn: {
+    padding: "0 20px",
+    borderRadius: "8px",
+    background: "#0b63a6",
+    color: "#fff",
+    border: "none",
+    fontWeight: "bold",
+    cursor: "pointer",
   },
   btnWrap: {
     display: "flex",
@@ -2145,11 +2498,19 @@ if (typeof document !== "undefined" && !document.getElementById("app-mobile-styl
   const style = document.createElement("style");
   style.id = "app-mobile-style";
   style.textContent = `
-    @media (max-width: 768px), (max-height: 900px) {
-      .sgm-landing-cmds { display: none !important; }
+    @media (max-width: 600px) {
+      .sgm-landing { gap: 10px !important; padding: 10px 12px 12px !important; }
+      .assistant-logo { max-width: 100px !important; }
+      .sgm-landing-card { padding: 14px 14px !important; gap: 10px !important; }
+      .sgm-landing-card h1 { font-size: 1.2rem !important; }
+      .sgm-landing-card > div > div > img { height: 65px !important; }
+      .sgm-landing-how ol { gap: 3px !important; font-size: 0.82rem !important; }
+      .sgm-landing-how li > span > span { font-size: 0.74rem !important; }
+      .sgm-main { gap: 12px !important; }
     }
-    @media (max-width: 500px), (max-height: 750px) {
-      .sgm-landing-how { display: none !important; }
+    .sgm-landing-cmds { display: none !important; }
+    @media (max-height: 480px) {
+      .assistant-logo { display: none !important; }
     }
   `;
   document.head.appendChild(style);

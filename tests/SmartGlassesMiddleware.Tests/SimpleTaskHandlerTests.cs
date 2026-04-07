@@ -163,6 +163,84 @@ namespace SmartGlassesMiddleware.Tests
             Assert.That(result, Is.EqualTo("__ACTION:PREVIOUS_PDF_PAGE__"));
         }
 
+        // ── NextHighlightTaskHandler ─────────────────────────────────────────
+
+        [Test]
+        public void NextHighlight_Name_ShouldBeNextHighlight()
+        {
+            var handler = new NextHighlightTaskHandler();
+            Assert.That(handler.Name, Is.EqualTo("next-highlight"));
+        }
+
+        [Test]
+        public void NextHighlight_Keywords_ShouldNotBeEmpty()
+        {
+            var handler = new NextHighlightTaskHandler();
+            Assert.That(handler.Keywords, Is.Not.Empty);
+        }
+
+        [Test]
+        public void NextHighlight_Keywords_ShouldContainExpectedTerms()
+        {
+            var handler = new NextHighlightTaskHandler();
+            Assert.That(handler.Keywords, Does.Contain("next highlight"));
+        }
+
+        [Test]
+        public async Task NextHighlight_HandleAsync_ReturnsActionToken()
+        {
+            var handler = new NextHighlightTaskHandler();
+            var result = await handler.HandleAsync("next highlight");
+            Assert.That(result, Is.EqualTo("__ACTION:NEXT_HIGHLIGHT__"));
+        }
+
+        [Test]
+        public async Task NextHighlight_HandleAsync_EmptyInput_ReturnsActionToken()
+        {
+            var handler = new NextHighlightTaskHandler();
+            var result = await handler.HandleAsync(string.Empty);
+            Assert.That(result, Is.EqualTo("__ACTION:NEXT_HIGHLIGHT__"));
+        }
+
+        // ── PreviousHighlightTaskHandler ─────────────────────────────────────
+
+        [Test]
+        public void PreviousHighlight_Name_ShouldBePreviousHighlight()
+        {
+            var handler = new PreviousHighlightTaskHandler();
+            Assert.That(handler.Name, Is.EqualTo("previous-highlight"));
+        }
+
+        [Test]
+        public void PreviousHighlight_Keywords_ShouldNotBeEmpty()
+        {
+            var handler = new PreviousHighlightTaskHandler();
+            Assert.That(handler.Keywords, Is.Not.Empty);
+        }
+
+        [Test]
+        public void PreviousHighlight_Keywords_ShouldContainExpectedTerms()
+        {
+            var handler = new PreviousHighlightTaskHandler();
+            Assert.That(handler.Keywords, Does.Contain("previous highlight"));
+        }
+
+        [Test]
+        public async Task PreviousHighlight_HandleAsync_ReturnsActionToken()
+        {
+            var handler = new PreviousHighlightTaskHandler();
+            var result = await handler.HandleAsync("previous highlight");
+            Assert.That(result, Is.EqualTo("__ACTION:PREVIOUS_HIGHLIGHT__"));
+        }
+
+        [Test]
+        public async Task PreviousHighlight_HandleAsync_EmptyInput_ReturnsActionToken()
+        {
+            var handler = new PreviousHighlightTaskHandler();
+            var result = await handler.HandleAsync(string.Empty);
+            Assert.That(result, Is.EqualTo("__ACTION:PREVIOUS_HIGHLIGHT__"));
+        }
+
         // ── RemoveHighlightsTaskHandler ───────────────────────────────────────
 
         [Test]

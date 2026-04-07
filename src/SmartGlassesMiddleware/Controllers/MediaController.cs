@@ -378,13 +378,16 @@ public class MediaController : ControllerBase
                 }
                 else
                 {
-                    // Upload new file
-                    storageKey = await _mediaStorageService.UploadMediaAsync(uploadStream, file.FileName, contentType);
+                    // Upload new file — attach metadata so S3FileIndexService can reconstruct the
+                    // ManagedFile record on next boot without a separate database save.
+                    fileId = Guid.NewGuid();
+                    var uploadMeta = S3FileIndexService.BuildUploadMetadata(fileId, file.FileName, file.FileName);
+                    storageKey = await _mediaStorageService.UploadMediaAsync(uploadStream, file.FileName, contentType, uploadMeta);
 
-                    // Create ManagedFile record
+                    // Create ManagedFile record using the same fileId embedded in S3 metadata
                     var managedFile = new ManagedFile
                     {
-                        Id = Guid.NewGuid(),
+                        Id = fileId,
                         FileName = file.FileName,
                         Label = $"Media upload: {file.FileName}",
                         ContentType = contentType,
@@ -395,7 +398,6 @@ public class MediaController : ControllerBase
                     };
                     _context.ManagedFiles.Add(managedFile);
                     await _context.SaveChangesAsync();
-                    fileId = managedFile.Id;
                 }
 
                 var item = new BackgroundMediaItem { FileName = file.FileName, ContentType = contentType, StorageKey = storageKey };

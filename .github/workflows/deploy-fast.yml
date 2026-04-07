@@ -54,8 +54,7 @@ jobs:
             ${{ steps.ecr-login.outputs.registry }}/smart-glasses-dev-api:${{ github.sha }}
             ${{ steps.ecr-login.outputs.registry }}/smart-glasses-dev-api:latest
           platforms: linux/amd64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          no-cache: true
 
   deploy-api:
     name: Roll out API on ECS
@@ -119,23 +118,23 @@ jobs:
             exit 1
           fi
 
-          if aws ecr describe-images \
-            --repository-name "$REPOSITORY" \
-            --image-ids imageTag="$GITHUB_SHA" \
-            --region "$AWS_REGION" >/dev/null 2>&1; then
-            IMAGE="$CANDIDATE_IMAGE"
-          else
-            echo "::warning::Image tag $GITHUB_SHA not found in ECR; keeping currently running API image."
-            IMAGE=$(aws ecs describe-task-definition \
-              --task-definition "$TASK_DEF_ARN" \
-              --region "$AWS_REGION" \
-              --query 'taskDefinition.containerDefinitions[?name==`api`].image | [0]' \
-              --output text 2>/dev/null || true)
-
-            if [ -z "$IMAGE" ] || [ "$IMAGE" = "None" ] || [ "$IMAGE" = "null" ]; then
-              echo "Unable to resolve fallback API image from task definition $TASK_DEF_ARN."
-              exit 1
+          IMAGE=""
+          for attempt in {1..20}; do
+            if aws ecr describe-images \
+              --repository-name "$REPOSITORY" \
+              --image-ids imageTag="$GITHUB_SHA" \
+              --region "$AWS_REGION" >/dev/null 2>&1; then
+              IMAGE="$CANDIDATE_IMAGE"
+              echo "Using freshly built image: $IMAGE"
+              break
             fi
+            echo "Image tag $GITHUB_SHA not visible in ECR yet (attempt $attempt/20); retrying in 15s..."
+            sleep 15
+          done
+
+          if [ -z "$IMAGE" ]; then
+            echo "::error::Image tag $GITHUB_SHA was not found in ECR after retries. Aborting deploy to avoid stale rollback."
+            exit 1
           fi
 
           aws ecs describe-task-definition \
@@ -287,105 +286,9 @@ jobs:
 
           echo "Invalidated CloudFront distribution $CF_ID"
 
-  run-migrations:
-    name: Apply EF Core DB migrations
-    needs: deploy-api
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
-    env:
-      AWS_REGION: ${{ secrets.AWS_REGION }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: Detect migration changes in this deploy commit
-        id: migration-changes
-        run: |
-          set -euo pipefail
-
-          if git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" | grep -q '^src/SmartGlassesMiddleware/Migrations/'; then
-            echo "required=true" >> "$GITHUB_OUTPUT"
-            echo "EF migration files changed in this deploy commit."
-          else
-            echo "required=false" >> "$GITHUB_OUTPUT"
-            echo "No EF migration files changed in this deploy commit; skipping migration task."
-          fi
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_TERRAFORM_ROLE }}
-          aws-region: ${{ secrets.AWS_REGION }}
-
-      - name: Run one-shot migration ECS task
-        if: steps.migration-changes.outputs.required == 'true'
-        run: |
-          set -euo pipefail
-
-          CLUSTER="smart-glasses-dev-cluster"
-          SERVICE="smart-glasses-dev-api-service"
-
-          SERVICE_JSON=$(aws ecs describe-services \
-            --cluster "$CLUSTER" --services "$SERVICE" \
-            --region "$AWS_REGION" \
-            --query 'services[0]' --output json)
-
-          TASK_DEF=$(echo "$SERVICE_JSON"   | jq -r '.taskDefinition')
-          SUBNETS=$(echo "$SERVICE_JSON"    | jq -r '[.networkConfiguration.awsvpcConfiguration.subnets[]] | join(",")')
-          SGS=$(echo "$SERVICE_JSON"        | jq -r '[.networkConfiguration.awsvpcConfiguration.securityGroups[]] | join(",")')
-          ASSIGN_PUB=$(echo "$SERVICE_JSON" | jq -r '.networkConfiguration.awsvpcConfiguration.assignPublicIp // "DISABLED"')
-
-          for attempt in 1 2 3; do
-            echo "Running migration task on $TASK_DEF (attempt $attempt/3) ..."
-            TASK_ARN=$(aws ecs run-task \
-              --cluster "$CLUSTER" \
-              --task-definition "$TASK_DEF" \
-              --launch-type FARGATE \
-              --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SGS],assignPublicIp=$ASSIGN_PUB}" \
-              --overrides '{"containerOverrides":[{"name":"api","environment":[{"name":"MIGRATE_ONLY","value":"true"},{"name":"MIGRATE_ON_STARTUP","value":"false"}]}]}' \
-              --count 1 \
-              --query 'tasks[0].taskArn' \
-              --output text)
-
-            echo "Migration task ARN: $TASK_ARN"
-            aws ecs wait tasks-stopped \
-              --cluster "$CLUSTER" --tasks "$TASK_ARN" \
-              --region "$AWS_REGION"
-
-            EXIT_CODE=$(aws ecs describe-tasks \
-              --cluster "$CLUSTER" --tasks "$TASK_ARN" \
-              --region "$AWS_REGION" \
-              --query 'tasks[0].containers[0].exitCode' --output text)
-
-            if [ "$EXIT_CODE" = "0" ]; then
-              echo "Migrations applied successfully."
-              exit 0
-            fi
-
-            echo "Migration task failed (exit $EXIT_CODE). Fetching logs..."
-            LOG_GROUP="/ecs/smart-glasses-dev/api"
-            TASK_ID=$(basename "$TASK_ARN")
-            aws logs get-log-events \
-              --log-group-name "$LOG_GROUP" \
-              --log-stream-name "ecs/api/$TASK_ID" \
-              --limit 60 --region "$AWS_REGION" \
-              --query 'events[*].message' --output text 2>/dev/null || true
-
-            if [ "$attempt" -lt 3 ]; then
-              echo "Retrying migration task after 45 seconds to allow the database/network path to warm up..."
-              sleep 45
-            fi
-          done
-
-          echo "Migration task failed after 3 attempts."
-          exit 1
-
   verify-deployment:
     name: Verify API stability and health
-    needs: [deploy-api, deploy-frontend, run-migrations]
+    needs: [deploy-api, deploy-frontend]
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -450,6 +353,53 @@ jobs:
             echo "ECS service did not stabilize in time."
             exit 1
           fi
+
+      - name: Verify ECS is running the new API image (no rollback)
+        run: |
+          set -euo pipefail
+
+          CLUSTER="${{ needs.deploy-api.outputs.cluster }}"
+          SERVICE="${{ needs.deploy-api.outputs.service }}"
+          CLUSTER=${CLUSTER:-smart-glasses-dev-cluster}
+          SERVICE=${SERVICE:-smart-glasses-dev-api-service}
+
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          EXPECTED_IMAGE="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/smart-glasses-dev-api:${GITHUB_SHA}"
+
+          SERVICE_JSON=$(aws ecs describe-services \
+            --cluster "$CLUSTER" --services "$SERVICE" --region "$AWS_REGION" \
+            --query 'services[0]' --output json)
+
+          PRIMARY_TASK_DEF=$(echo "$SERVICE_JSON" | jq -r '(.deployments // []) | map(select(.status == "PRIMARY"))[0].taskDefinition // empty')
+          if [ -z "$PRIMARY_TASK_DEF" ] || [ "$PRIMARY_TASK_DEF" = "null" ] || [ "$PRIMARY_TASK_DEF" = "None" ]; then
+            PRIMARY_TASK_DEF=$(echo "$SERVICE_JSON" | jq -r '.taskDefinition // empty')
+          fi
+
+          if [ -z "$PRIMARY_TASK_DEF" ] || [ "$PRIMARY_TASK_DEF" = "null" ] || [ "$PRIMARY_TASK_DEF" = "None" ]; then
+            echo "::error::Unable to resolve PRIMARY task definition for ${SERVICE}."
+            exit 1
+          fi
+
+          ACTUAL_IMAGE=$(aws ecs describe-task-definition \
+            --task-definition "$PRIMARY_TASK_DEF" \
+            --region "$AWS_REGION" \
+            --query 'taskDefinition.containerDefinitions[?name==`api`].image | [0]' \
+            --output text)
+
+          echo "Expected image: ${EXPECTED_IMAGE}"
+          echo "PRIMARY task definition: ${PRIMARY_TASK_DEF}"
+          echo "Actual api image: ${ACTUAL_IMAGE}"
+
+          if [ "$ACTUAL_IMAGE" != "$EXPECTED_IMAGE" ]; then
+            echo "::error::ECS PRIMARY deployment is not using the new image tag ${GITHUB_SHA}. Possible rollback detected."
+            aws ecs describe-services \
+              --cluster "$CLUSTER" --services "$SERVICE" --region "$AWS_REGION" \
+              --query 'services[0].events[0:10].[createdAt,message]' \
+              --output text 2>/dev/null || true
+            exit 1
+          fi
+
+          echo "ECS PRIMARY deployment is running the expected image tag ${GITHUB_SHA}."
 
       - name: Smoke-test health endpoint
         run: |
