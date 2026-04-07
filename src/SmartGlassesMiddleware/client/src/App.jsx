@@ -12,6 +12,7 @@ import PdfViewer from "./PdfViewer.jsx";
 //     Groq Whisper Turbo on the server
 //
 import glassesImg from "./pdf/image/Gemini_Generated_Image_8mwak58mwak58mwa.png";
+import pennStateEmblemImg from "./pdf/image/Penn-State-University-Emblem.png";
 
 // ─── PENN STATE SHIELD SVG ────────────────────────────────────────────────────
 function PennStateShield({ size = 72 }) {
@@ -63,11 +64,10 @@ const TRANSLATIONS = {
     readyShort: "Ready",
     howItWorksTitle: "🎤 How It Works",
     steps: [
-      'Say "{word}" to wake the assistant.',
-      "Speak your command clearly.",
-      "The assistant will respond or perform the action.",
-      'Say "{word}" again for the next command.',
-      'After "search recent files", you can specify a file number without reactivating.',
+      'Say "Iris" to wake the assistant.',
+      "Speak command clearly",
+      'Say "Iris" again for the next command.',
+      'After "search recent files"',
     ],
     commonCommandsTitle: "📋 Common Commands",
     commandsOverlayTitle: "📋 Commands",
@@ -1642,22 +1642,43 @@ export default function App({ mode = "voice", language = "en" }) {
             src={glassesImg}
             alt="Smart Glasses"
             className="assistant-logo"
-            style={{ display: 'block', maxWidth: '280px', width: '100%', height: 'auto', flexShrink: 0 }}
+            style={{ display: 'block', maxWidth: '280px', width: '100%', height: 'auto', flexShrink: 0, clipPath: 'inset(0 0 12% 0)' }}
           />
-          <div style={styles.landingCard}>
-            {/* ── Title row: title left, Penn State shield right ─────────── */}
-            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-              <h1 style={styles.landingTitle}>{t.title}</h1>
-              <PennStateShield size={68} />
+          <div style={styles.landingCard} className="sgm-landing-card-inner">
+            {/* ── Title row: title centered in full box, lion at right edge ── */}
+            <div style={{ position: 'relative' }} className="sgm-landing-title-row">
+              <h1 style={{ ...styles.landingTitle }} className="sgm-landing-title">This is Eye-RIS!<br />How can I help?</h1>
+              <div className="sgm-landing-logo" style={{
+                position: 'absolute',
+                right: 0,
+                top: '50%',
+                transform: 'translateY(-50%)',
+                width: 68,
+                height: 68,
+                backgroundImage: `url(${pennStateEmblemImg})`,
+                backgroundSize: '165%',
+                backgroundRepeat: 'no-repeat',
+                backgroundPosition: 'center',
+              }} />
             </div>
 
             {/* ── Numbered steps + Ready as final step ──────────────────── */}
             <ol style={styles.landingOl} className="sgm-landing-how">
-              {t.steps.map((step, i) => (
-                <li key={i}>
-                  {step.includes('{word}') ? renderWithHighlight(step, activationWord) : step}
-                </li>
-              ))}
+              <li>
+                <span>Say <strong style={{color:'#f97316'}}>"Iris"</strong></span>
+                <br /><span className="sub-line" style={{color:'#aaa',fontSize:'0.88rem'}}>(This is to wake the assistant.)</span>
+              </li>
+              <li>
+                <span>Speak command clearly</span>
+                <br /><span className="sub-line" style={{color:'#aaa',fontSize:'0.88rem'}}>(The assistant will respond or perform the action.)</span>
+              </li>
+              <li>
+                <span>Say <strong style={{color:'#f97316'}}>"Iris"</strong> again for the next command</span>
+              </li>
+              <li>
+                <span>After <strong>"search recent files"</strong></span>
+                <br /><span className="sub-line" style={{color:'#aaa',fontSize:'0.88rem'}}>(You can specify a file number without reactivating.)</span>
+              </li>
               {/* Step n+1: initialisation status (loading or Ready) */}
               <li>
                 <div style={styles.landingStatus}>
@@ -1694,7 +1715,7 @@ export default function App({ mode = "voice", language = "en" }) {
         </div>
       )}
 
-      {mode === "voice" && (
+      {mode === "voice" && !showLanding && (
         <div style={styles.indicator} onClick={handleMicButton}>
           <span style={dotStyle} />
           <span style={styles.indicatorText}>{btnLabel}</span>
@@ -1952,7 +1973,7 @@ const styles = {
     fontSize: "1.7rem",
     fontWeight: 700,
     color: "#fff",
-    textAlign: "left",
+    textAlign: "center",
     lineHeight: 1.25,
   },
   landingSubtitle: {
@@ -2459,19 +2480,18 @@ if (typeof document !== "undefined" && !document.getElementById("app-spin-style"
 }
 
 // Inject mobile-responsive rules once.
-// On small screens (narrow or short) the landing card commands table and numbered steps
-// list are hidden so all remaining content fits within the viewport without scrolling.
+// On small screens the landing card scales down so all content fits within the viewport.
 if (typeof document !== "undefined" && !document.getElementById("app-mobile-style")) {
   const style = document.createElement("style");
   style.id = "app-mobile-style";
   style.textContent = `
-    @media (max-width: 768px), (max-height: 900px) {
-      .sgm-landing-cmds { display: none !important; }
-    }
-    @media (max-width: 500px), (max-height: 750px) {
-      .sgm-landing-how { max-height: 180px !important; overflow: hidden !important; }
-    }
-    @media (max-width: 500px), (max-height: 600px) {
+    .sgm-landing-cmds { display: none !important; }
+    @media (max-width: 600px) {
+      .sgm-landing-card-inner { padding: 14px 16px !important; gap: 10px !important; }
+      .sgm-landing-title { font-size: 1.25rem !important; }
+      .sgm-landing-logo { width: 54px !important; height: 54px !important; }
+      .sgm-landing-how { font-size: 0.82rem !important; gap: 6px !important; }
+      .sgm-landing-how .sub-line { font-size: 0.74rem !important; }
       .assistant-logo { max-width: 160px !important; }
     }
     @media (max-height: 480px) {
