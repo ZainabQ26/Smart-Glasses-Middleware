@@ -13,13 +13,54 @@ import PdfViewer from "./PdfViewer.jsx";
 //
 import glassesImg from "./pdf/image/Gemini_Generated_Image_8mwak58mwak58mwa.png";
 
+// ─── PENN STATE SHIELD SVG ────────────────────────────────────────────────────
+function PennStateShield({ size = 72 }) {
+  const h = Math.round(size * 1.08);
+  return (
+    <svg
+      width={size}
+      height={h}
+      viewBox="0 0 72 78"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-label="Penn State shield"
+      style={{ flexShrink: 0 }}
+    >
+      {/* Shield body */}
+      <path
+        d="M36 3 L69 15 L69 47 Q69 67 36 76 Q3 67 3 47 L3 15 Z"
+        fill="rgba(255,255,255,0.13)"
+        stroke="white"
+        strokeWidth="2.5"
+        strokeLinejoin="round"
+      />
+      {/* Mane (outer circle) */}
+      <circle cx="36" cy="42" r="18" fill="rgba(255,255,255,0.55)" />
+      {/* Head (inner circle) */}
+      <circle cx="36" cy="42" r="13" fill="white" />
+      {/* Left ear */}
+      <polygon points="23,32 17,23 29,29" fill="white" />
+      {/* Right ear */}
+      <polygon points="49,32 55,23 43,29" fill="white" />
+      {/* Eyes */}
+      <circle cx="30" cy="39" r="2.4" fill="#1d3461" />
+      <circle cx="42" cy="39" r="2.4" fill="#1d3461" />
+      {/* Nose */}
+      <path d="M34 45 L36 43 L38 45 Z" fill="#1d3461" />
+      {/* Mouth */}
+      <path d="M31 48 Q36 51 41 48" stroke="#1d3461" strokeWidth="1.4" fill="none" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 // ─── TRANSLATIONS ─────────────────────────────────────────────────────────────
 const TRANSLATIONS = {
   en: {
-    title: "Hey, Eye-ris here. How can I help?",
+    title: "This is Eye-RIS! How can I help?",
     subtitleTemplate: 'Say "{word}" to start, then speak your command.',
     connectingMic: "Connecting microphone…",
     readyTemplate: 'Ready — say "{word}" to begin',
+    readyShort: "Ready",
     howItWorksTitle: "🎤 How It Works",
     steps: [
       'Say "{word}" to wake the assistant.',
@@ -71,10 +112,11 @@ const TRANSLATIONS = {
     didntCatch: "I didn't catch that command. Please try again.",
   },
   es: {
-    title: "Hola, aquí Eye-ris. ¿En qué puedo ayudarte?",
+    title: "¡Esto es Eye-RIS! ¿En qué puedo ayudarte?",
     subtitleTemplate: 'Di "{word}" para empezar, luego habla tu comando.',
     connectingMic: "Conectando micrófono…",
     readyTemplate: 'Listo — di "{word}" para comenzar',
+    readyShort: "Listo",
     howItWorksTitle: "🎤 Cómo funciona",
     steps: [
       'Di "{word}" para activar el asistente.',
@@ -1591,9 +1633,6 @@ export default function App({ mode = "voice", language = "en" }) {
   const shouldPulse = isProcessing || isSending || !wakeWordReady;
   const dotStyle = { ...styles.dot, background: dotColor, ...(shouldPulse ? { animation: "pulse 1s ease-in-out infinite" } : {}) };
 
-  // Full command list shown as an overlay in the top-left only while listening.
-  const COMMAND_LIST = t.commandList.map(([cmd, desc]) => [`"${cmd}"`, desc]);
-
   return (
     <div style={{ ...styles.page, ...(mode === "admin" ? styles.adminMode : {}) }}>
       {/* ── Landing screen — shown until first activation ─────────────────────── */}
@@ -1606,35 +1645,38 @@ export default function App({ mode = "voice", language = "en" }) {
             style={{ display: 'block', maxWidth: '280px', width: '100%', height: 'auto', flexShrink: 0 }}
           />
           <div style={styles.landingCard}>
-            <h1 style={styles.landingTitle}>{t.title}</h1>
-            <p style={styles.landingSubtitle}>
-              {renderWithHighlight(t.subtitleTemplate, activationWord)}
-            </p>
+            {/* ── Title row: title left, Penn State shield right ─────────── */}
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+              <h1 style={styles.landingTitle}>{t.title}</h1>
+              <PennStateShield size={68} />
+            </div>
 
-            {/* ── Initialization status ─────────────────────────────────── */}
-            <div style={styles.landingStatus}>
-              {!wakeWordReady ? (
-                <div style={styles.landingLoadingRow}>
-                  <div style={styles.landingSpinner} />
-                  <span style={styles.landingLoadingText}>{t.connectingMic}</span>
+            {/* ── Numbered steps + Ready as final step ──────────────────── */}
+            <ol style={styles.landingOl} className="sgm-landing-how">
+              {t.steps.map((step, i) => (
+                <li key={i}>
+                  {step.includes('{word}') ? renderWithHighlight(step, activationWord) : step}
+                </li>
+              ))}
+              {/* Step n+1: initialisation status (loading or Ready) */}
+              <li>
+                <div style={styles.landingStatus}>
+                  {!wakeWordReady ? (
+                    <div style={styles.landingLoadingRow}>
+                      <div style={styles.landingSpinner} />
+                      <span style={styles.landingLoadingText}>{t.connectingMic}</span>
+                    </div>
+                  ) : (
+                    <div style={styles.landingReadyRow}>
+                      <span style={styles.landingReadyBadge}>✓</span>
+                      <span style={styles.landingReadyText}>{t.readyShort}</span>
+                    </div>
+                  )}
                 </div>
-              ) : (
-                <div style={styles.landingReadyRow}>
-                  <span style={styles.landingReadyBadge}>✓</span>
-                  <span style={styles.landingReadyText}>
-                    {renderWithHighlight(t.readyTemplate, activationWord)}
-                  </span>
-                </div>
-              )}
-            </div>
-            <div style={styles.landingSection} className="sgm-landing-how">
-              <h2 style={styles.landingH2}>{t.howItWorksTitle}</h2>
-              <ol style={styles.landingOl}>
-                {t.steps.map((step, i) => (
-                  <li key={i}>{tpl(step, { word: activationWord })}</li>
-                ))}
-              </ol>
-            </div>
+              </li>
+            </ol>
+
+            {/* ── Common commands table (hidden on narrow / short screens) ─ */}
             <div style={styles.landingSection} className="sgm-landing-cmds">
               <h2 style={styles.landingH2}>{t.commonCommandsTitle}</h2>
               <table style={styles.landingTable}>
@@ -1648,21 +1690,6 @@ export default function App({ mode = "voice", language = "en" }) {
                 </tbody>
               </table>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Command list overlay — shown only while actively listening ─────────── */}
-      {isListening && (
-        <div style={styles.commandList}>
-          <p style={styles.commandListTitle}>{t.commandsOverlayTitle}</p>
-          <div style={styles.commandListGrid}>
-            {COMMAND_LIST.map(([cmd, desc]) => (
-              <div key={cmd} style={styles.commandListRow}>
-                <span style={styles.commandListCmd}>{cmd}</span>
-                <span style={styles.commandListDesc}>{desc}</span>
-              </div>
-            ))}
           </div>
         </div>
       )}
@@ -1910,8 +1937,8 @@ const styles = {
     overflowX: "hidden",
   },
   landingCard: {
-    background: "#111",
-    border: "1px solid #333",
+    background: "#1d3461",
+    border: "1px solid rgba(255,255,255,0.15)",
     borderRadius: 16,
     padding: "min(32px, 5vh) min(28px, 5vw)",
     maxWidth: 620,
@@ -1925,7 +1952,8 @@ const styles = {
     fontSize: "1.7rem",
     fontWeight: 700,
     color: "#fff",
-    textAlign: "center",
+    textAlign: "left",
+    lineHeight: 1.25,
   },
   landingSubtitle: {
     margin: 0,
@@ -1951,8 +1979,8 @@ const styles = {
     paddingLeft: 22,
     display: "flex",
     flexDirection: "column",
-    gap: 6,
-    color: "#ddd",
+    gap: 8,
+    color: "#e8eef8",
     fontSize: "0.95rem",
     lineHeight: 1.6,
   },
@@ -1975,12 +2003,15 @@ const styles = {
     color: "#bbb",
     verticalAlign: "top",
   },
-  // Initialisation status block on the landing screen
+  // Initialisation status block rendered as the last step in the list
   landingStatus: {
-    padding: "12px 16px",
+    marginTop: 4,
+    padding: "10px 14px",
     borderRadius: 10,
-    background: "rgba(255,255,255,0.04)",
-    border: "1px solid #222",
+    background: "rgba(255,255,255,0.09)",
+    border: "1px solid rgba(255,255,255,0.15)",
+    display: "inline-flex",
+    alignItems: "center",
   },
   landingLoadingRow: {
     display: "flex",
@@ -2006,8 +2037,8 @@ const styles = {
     gap: 10,
   },
   landingReadyBadge: {
-    width: 22,
-    height: 22,
+    width: 28,
+    height: 28,
     borderRadius: "50%",
     background: "#00b894",
     color: "#000",
@@ -2015,12 +2046,13 @@ const styles = {
     alignItems: "center",
     justifyContent: "center",
     fontWeight: 700,
-    fontSize: "0.85rem",
+    fontSize: "1rem",
     flexShrink: 0,
   },
   landingReadyText: {
-    fontSize: "0.9rem",
-    color: "#ccc",
+    fontSize: "1rem",
+    color: "#e8eef8",
+    fontWeight: 600,
   },
   // Full command list overlay shown at top-left only while the assistant is listening.
   commandList: {
@@ -2099,7 +2131,7 @@ const styles = {
     flex: 1,
     padding: "12px 16px",
     borderRadius: "8px",
-    border: "1px solid rgba(255,255,255,0.2)",
+    border: "1px solid #cccccc",
     background: "#fff",
     color: "#000",
     fontSize: "1rem",
@@ -2427,7 +2459,7 @@ if (typeof document !== "undefined" && !document.getElementById("app-spin-style"
 }
 
 // Inject mobile-responsive rules once.
-// On small screens (narrow or short) the landing card commands table and "How It Works"
+// On small screens (narrow or short) the landing card commands table and numbered steps
 // list are hidden so all remaining content fits within the viewport without scrolling.
 if (typeof document !== "undefined" && !document.getElementById("app-mobile-style")) {
   const style = document.createElement("style");
@@ -2437,7 +2469,7 @@ if (typeof document !== "undefined" && !document.getElementById("app-mobile-styl
       .sgm-landing-cmds { display: none !important; }
     }
     @media (max-width: 500px), (max-height: 750px) {
-      .sgm-landing-how { display: none !important; }
+      .sgm-landing-how { max-height: 180px !important; overflow: hidden !important; }
     }
     @media (max-width: 500px), (max-height: 600px) {
       .assistant-logo { max-width: 160px !important; }

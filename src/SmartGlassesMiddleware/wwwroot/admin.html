@@ -491,6 +491,22 @@
             display: block;
         }
 
+        /* Dark mode for Commands tab rows */
+        body.dark .cmd-row {
+            background-color: #1e2535 !important;
+            border-color: #2d3750 !important;
+            color: #d7e6f6 !important;
+        }
+        body.dark .cmd-row:nth-child(even) {
+            background-color: #161b28 !important;
+        }
+        body.dark .cmd-row span[style*="color:#555"] {
+            color: #b8c5d9 !important;
+        }
+        body.dark .cmd-row span[style*="background:#f0f2f5"] {
+            background: #1e2535 !important;
+        }
+
         .section {
             margin-bottom: 30px;
         }
@@ -1505,6 +1521,7 @@
             <button class="tab active" data-tab="files" data-testid="tab-files" aria-controls="files">Files</button>
             <button class="tab" data-tab="prompts" data-testid="tab-prompts" aria-controls="prompts">Conversation</button>
             <button class="tab" data-tab="groq-live" data-testid="tab-groq-live" aria-controls="groq-live">🎙 Groq Live</button>
+            <button class="tab" data-tab="commands" data-testid="tab-commands" aria-controls="commands">📋 Commands</button>
             <button id="lang-toggle" type="button" title="Cambiar a Español" aria-label="Cambiar a Español" data-testid="lang-toggle">🇪🇸 ES</button>
             <button id="theme-toggle" class="theme-toggle" type="button" title="Toggle dark mode" aria-label="Toggle dark mode" data-testid="theme-toggle">🌙</button>
         </div>
@@ -1563,6 +1580,73 @@
                 </p>
                 <div id="groq-live-list" style="display: flex; flex-direction: column; gap: 6px; max-height: 600px; overflow-y: auto; background: #f8f9fa; border: 1px solid #e0e0e0; border-radius: 8px; padding: 12px;">
                     <div class="empty-state" id="groq-live-empty"><p>No transcriptions yet. Groq results will appear here when a device is active.</p></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Commands Reference Tab -->
+        <div id="commands" class="tab-content">
+            <div class="section">
+                <h2>📋 Voice Commands</h2>
+                <p style="color: #7f8c8d; font-size: 14px; margin-bottom: 20px;">
+                    Say the activation word first, then speak one of the commands below.
+                </p>
+                <div style="display: flex; flex-direction: column; gap: 0; border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden;">
+                    <div class="cmd-row" style="display:grid;grid-template-columns:220px 1fr;background:#f0f2f5;padding:10px 16px;font-weight:700;font-size:13px;color:#555;">
+                        <span>Command</span><span>Description</span>
+                    </div>
+                    <div class="cmd-row" style="display:grid;grid-template-columns:220px 1fr;padding:10px 16px;border-top:1px solid #e8e8e8;align-items:start;">
+                        <span style="font-family:monospace;color:#e05c00;font-size:13px;">"search recent files"</span>
+                        <span style="color:#555;font-size:14px;">Browse recent uploaded files</span>
+                    </div>
+                    <div class="cmd-row" style="display:grid;grid-template-columns:220px 1fr;padding:10px 16px;border-top:1px solid #e8e8e8;background:#fafafa;align-items:start;">
+                        <span style="font-family:monospace;color:#e05c00;font-size:13px;">"number #"</span>
+                        <span style="color:#555;font-size:14px;">Go to file number in recent files list</span>
+                    </div>
+                    <div class="cmd-row" style="display:grid;grid-template-columns:220px 1fr;padding:10px 16px;border-top:1px solid #e8e8e8;align-items:start;">
+                        <span style="font-family:monospace;color:#e05c00;font-size:13px;">"open last document"</span>
+                        <span style="color:#555;font-size:14px;">Open the last uploaded document</span>
+                    </div>
+                    <div class="cmd-row" style="display:grid;grid-template-columns:220px 1fr;padding:10px 16px;border-top:1px solid #e8e8e8;background:#fafafa;align-items:start;">
+                        <span style="font-family:monospace;color:#e05c00;font-size:13px;">"next/previous page"</span>
+                        <span style="color:#555;font-size:14px;">Go to the next/previous page</span>
+                    </div>
+                    <div class="cmd-row" style="display:grid;grid-template-columns:220px 1fr;padding:10px 16px;border-top:1px solid #e8e8e8;align-items:start;">
+                        <span style="font-family:monospace;color:#e05c00;font-size:13px;">"go to page 5"</span>
+                        <span style="color:#555;font-size:14px;">Jump to a specific page</span>
+                    </div>
+                    <div class="cmd-row" style="display:grid;grid-template-columns:220px 1fr;padding:10px 16px;border-top:1px solid #e8e8e8;background:#fafafa;align-items:start;">
+                        <span style="font-family:monospace;color:#e05c00;font-size:13px;">"highlight aspirin"</span>
+                        <span style="color:#555;font-size:14px;">Highlight a word in the open document</span>
+                    </div>
+                    <div class="cmd-row" style="display:grid;grid-template-columns:220px 1fr;padding:10px 16px;border-top:1px solid #e8e8e8;align-items:start;">
+                        <span style="font-family:monospace;color:#e05c00;font-size:13px;">"clear highlights"</span>
+                        <span style="color:#555;font-size:14px;">Remove all highlights</span>
+                    </div>
+                    <div class="cmd-row" style="display:grid;grid-template-columns:220px 1fr;padding:10px 16px;border-top:1px solid #e8e8e8;background:#fafafa;align-items:start;">
+                        <span style="font-family:monospace;color:#e05c00;font-size:13px;">"search for blood pressure"</span>
+                        <span style="color:#555;font-size:14px;">Search for text in documents</span>
+                    </div>
+                    <div class="cmd-row" style="display:grid;grid-template-columns:220px 1fr;padding:10px 16px;border-top:1px solid #e8e8e8;align-items:start;">
+                        <span style="font-family:monospace;color:#e05c00;font-size:13px;">"search for BP"</span>
+                        <span style="color:#555;font-size:14px;">Search using FDA SPL abbreviations</span>
+                    </div>
+                    <div class="cmd-row" style="display:grid;grid-template-columns:220px 1fr;padding:10px 16px;border-top:1px solid #e8e8e8;background:#fafafa;align-items:start;">
+                        <span style="font-family:monospace;color:#e05c00;font-size:13px;">"remind me to…"</span>
+                        <span style="color:#555;font-size:14px;">Set a reminder</span>
+                    </div>
+                    <div class="cmd-row" style="display:grid;grid-template-columns:220px 1fr;padding:10px 16px;border-top:1px solid #e8e8e8;align-items:start;">
+                        <span style="font-family:monospace;color:#e05c00;font-size:13px;">"show my reminders"</span>
+                        <span style="color:#555;font-size:14px;">List all your reminders</span>
+                    </div>
+                    <div class="cmd-row" style="display:grid;grid-template-columns:220px 1fr;padding:10px 16px;border-top:1px solid #e8e8e8;background:#fafafa;align-items:start;">
+                        <span style="font-family:monospace;color:#e05c00;font-size:13px;">"print document"</span>
+                        <span style="color:#555;font-size:14px;">Print the open document with highlights</span>
+                    </div>
+                    <div class="cmd-row" style="display:grid;grid-template-columns:220px 1fr;padding:10px 16px;border-top:1px solid #e8e8e8;align-items:start;">
+                        <span style="font-family:monospace;color:#e05c00;font-size:13px;">"admin panel"</span>
+                        <span style="color:#555;font-size:14px;">Open the admin panel</span>
+                    </div>
                 </div>
             </div>
         </div>
