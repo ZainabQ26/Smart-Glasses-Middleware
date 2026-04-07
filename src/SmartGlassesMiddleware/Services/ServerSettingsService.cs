@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Threading;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace SmartGlassesMiddleware.Services;
 
@@ -30,6 +31,7 @@ public class ServerSettingsService : IServerSettingsService
     private readonly TimeZoneInfo _easternTimeZone;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
+    [ActivatorUtilitiesConstructor]
     public ServerSettingsService(ICacheService cache, IConfiguration configuration, ILogger<ServerSettingsService> logger, TimeProvider? timeProvider = null)
     {
         _cache = cache;

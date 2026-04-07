@@ -135,9 +135,7 @@ resource "aws_iam_role_policy" "ecs_task" {
         ]
         Resource = [
           aws_s3_bucket.media.arn,
-          "${aws_s3_bucket.media.arn}/*",
-          aws_s3_bucket.documents.arn,
-          "${aws_s3_bucket.documents.arn}/*"
+          "${aws_s3_bucket.media.arn}/*"
         ]
       },
       {
@@ -251,19 +249,8 @@ locals {
             value = aws_s3_bucket.media.id
           },
           {
-            name  = "AWS__S3__DocumentsBucket"
-            value = aws_s3_bucket.documents.id
-          },
-          {
             name  = "DEPLOYMENT_ID"
             value = var.deployment_id
-          },
-          {
-            # Migrations are applied by the CI run-migrations job (one-shot Fargate task
-            # with MIGRATE_ONLY=true) before new tasks handle traffic. No migration on
-            # every cold start.
-            name  = "MIGRATE_ON_STARTUP"
-            value = "false"
           },
         ],
         trimspace(var.groq_api_key) != "" ? [
@@ -285,16 +272,16 @@ locals {
 
       healthCheck = {
         command     = ["CMD-SHELL", "curl -f http://localhost:5000/health || exit 1"]
-        interval    = 10  # reduced from 30 s; matches ALB interval
+        interval    = 10
         timeout     = 5
-        retries     = 3
-        startPeriod = 20  # reduced from 60 s; .NET 10 + ReadyToRun starts in ~15-20 s
+        retries     = 6
+        startPeriod = 60  # allow time for Roslyn task compilation + R2R startup
       }
 
         secrets = [
           {
             name      = "ConnectionStrings__DefaultConnection"
-            valueFrom = "${aws_secretsmanager_secret.db_connection.arn}:username::"
+            valueFrom = "${aws_secretsmanager_secret.db_connection.arn}:connection_string::"
           }
         ]
     }
@@ -327,7 +314,7 @@ resource "aws_ecs_service" "api" {
     container_port   = 5000
   }
 
-  health_check_grace_period_seconds = 30  # reduced from 120 s; ECS container is healthy by ~20-25 s with new intervals
+  health_check_grace_period_seconds = 120  # allow time for R2R + Roslyn task compilation on cold Fargate Spot
 
   deployment_maximum_percent         = 200
   deployment_minimum_healthy_percent = 100

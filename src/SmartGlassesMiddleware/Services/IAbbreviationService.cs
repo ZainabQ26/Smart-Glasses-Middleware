@@ -38,4 +38,9 @@ public interface IAbbreviationService
     /// Returns the count of newly added/updated abbreviations.
     /// </summary>
     Task<int> SyncFromDailyMedAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Retrieves all abbreviations currently stored in the cache.
+    /// </summary>
+    IEnumerable<Abbreviation> GetAllCachedAbbreviations();
 }

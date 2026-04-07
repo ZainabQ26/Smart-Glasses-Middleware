@@ -43,7 +43,6 @@ public class AIService : IAIService
     private readonly ILogger<AIService> _logger;
     private readonly string _advancedModelEndpoint;
     private readonly bool _useAdvancedModel;
-    private readonly bool _allowBedrockProcessing;
     private readonly List<string> _knownTasks;
     private readonly ITaskDispatcher _dispatcher;
 
@@ -56,7 +55,6 @@ public class AIService : IAIService
         {
             _advancedModelEndpoint = string.Empty;
             _useAdvancedModel = false;
-            _allowBedrockProcessing = false;
         }
         else
         {
@@ -68,15 +66,6 @@ public class AIService : IAIService
             catch
             {
                 _useAdvancedModel = false;
-            }
-
-            try
-            {
-                _allowBedrockProcessing = configuration.GetValue<bool?>("AI:AllowBedrockProcessing") ?? false;
-            }
-            catch
-            {
-                _allowBedrockProcessing = false;
             }
         }
         _dispatcher = dispatcher;
@@ -115,21 +104,12 @@ public class AIService : IAIService
                 }
             }
 
-            // ── 2. AI/rule-based classification ───────────────────────────────────
-            // Classify with intent-aware prompt + normalization (reuse ClassifyOnlyAsync)
+            // ── 2. Local-only classification (rule-based + keyword matching, no external AI) ──
             string detectedTask;
             try
             {
                 var sw = Stopwatch.StartNew();
                 detectedTask = await ClassifyOnlyAsync(input, cancellationToken);
-                var forcedTask = TryRuleBasedTask(input);
-                if (!string.IsNullOrWhiteSpace(forcedTask)
-                    && _knownTasks.Contains(forcedTask)
-                    && !string.Equals(detectedTask, forcedTask, StringComparison.OrdinalIgnoreCase))
-                {
-                    _logger.LogInformation("Overriding detected task {Detected} -> {Forced} using rule-based routing for input: {Input}", detectedTask, forcedTask, input);
-                    detectedTask = forcedTask;
-                }
                 sw.Stop();
                 _logger.LogInformation("Detected task: {Task} for input: {Input} (taskDetectionMs={Ms})", detectedTask, input, sw.ElapsedMilliseconds);
             }
@@ -216,40 +196,8 @@ public class AIService : IAIService
                 }
             }
 
-            if (!_allowBedrockProcessing)
-            {
-                _logger.LogInformation("Local Bedrock processing disabled; cannot process task {Task}", detectedTask);
-                return (detectedTask, "Local model processing is disabled for this deployment. Please enable an advanced model to handle this request.", false);
-            }
-
-            // Process with local Bedrock model if allowed
-            try
-            {
-                var chatService = _kernel.GetRequiredService<IChatCompletionService>();
-                var processingPrompt = $@"
-You are a helpful assistant processing a {detectedTask} task.
-
-User request: {input}
-
-Please provide a helpful and concise response:";
-
-                _logger.LogDebug("Calling chatService.GetChatMessageContentAsync for processing prompt (detectedTask={Task})", detectedTask);
-                var swProc = Stopwatch.StartNew();
-                var response = await chatService.GetChatMessageContentAsync(processingPrompt, cancellationToken: cancellationToken);
-                swProc.Stop();
-                _logger.LogInformation("Local model processing completed (detectedTask={Task}) in {Ms}ms, responseLen={Len}", detectedTask, swProc.ElapsedMilliseconds, response.Content?.Length ?? 0);
-                return (detectedTask, response.Content ?? "I couldn't process that request.", false);
-            }
-            catch (OperationCanceledException)
-            {
-                _logger.LogWarning("Local model processing was cancelled");
-                throw;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Local model processing failed");
-                return (detectedTask, "I'm currently unable to process your request. Please try again later.", false);
-            }
+            _logger.LogInformation("Task '{Task}' was not handled and advanced model is disabled; returning unrecognised response", detectedTask);
+            return (detectedTask, "I didn't recognise that command. Please try rephrasing or enable the advanced model for open-ended requests.", false);
         }
         catch (Exception ex)
         {
@@ -260,11 +208,6 @@ Please provide a helpful and concise response:";
 
     private static readonly Dictionary<string, string> TaskDescriptions = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["time"]               = "user wants to know the current time or date",
-        ["reminder"]           = "user wants to set, add, or create a new reminder or alarm",
-        ["edit-reminder"]      = "user wants to change or update an existing reminder",
-        ["delete-reminder"]    = "user wants to remove, cancel, or delete a reminder",
-        ["show-reminders"]     = "user wants to see, list, view, or show their reminders",
         ["document-query"]     = "user wants to ask a question about the contents of a document",
         ["summarize-page"]     = "user wants a summary of the currently open or visible page in a document",
         ["highlight-word"]     = "user wants to highlight, search for, or find a word or phrase in the currently open document. Use when the user says 'highlight X', 'search for X', 'find X', or any variant of highlighting or searching text.",
@@ -274,53 +217,60 @@ Please provide a helpful and concise response:";
         ["select-document"]    = "user wants to immediately open/preview the most recently uploaded document without browsing. Use when the user says 'select document', 'open last file', 'open latest document', 'select and open', or wants the last/most-recent document directly.",
         ["next-page"]          = "user wants to go to the next page in a document or PDF",
         ["previous-page"]      = "user wants to go to the previous page in a document or PDF",
+        ["next-highlight"]     = "user wants to jump to the next highlighted match in a document or PDF",
+        ["previous-highlight"] = "user wants to jump to the previous highlighted match in a document or PDF",
         ["open-admin-panel"]   = "user wants to open, navigate to, or access the admin panel or administration page",
         ["advanced"]           = "user wants advanced features, settings, or RAG document processing",
         ["template"]           = "user wants to use or fill in a template",
     };
 
-    public async Task<string> ClassifyOnlyAsync(string input, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Classifies input entirely locally — no external AI call.
+    /// Uses rule-based matching first, then keyword matching from registered handlers.
+    /// Returns "unknown" when no local match is found (caller should route to advanced handler).
+    /// </summary>
+    public Task<string> ClassifyOnlyAsync(string input, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(input)) return "unknown";
+        if (string.IsNullOrWhiteSpace(input)) return Task.FromResult("unknown");
         EnsureKnownTasksLoaded();
 
+        // 1. Rule-based patterns (fastest, highest priority)
         var forcedTask = TryRuleBasedTask(input);
         if (!string.IsNullOrWhiteSpace(forcedTask) && _knownTasks.Contains(forcedTask))
         {
-            return forcedTask;
+            return Task.FromResult(forcedTask);
         }
 
-        var taskLines = _knownTasks
-            .Select(t => TaskDescriptions.TryGetValue(t, out var desc)
-                ? $"- {t}: {desc}"
-                : $"- {t}")
-            .ToList();
-
-        var prompt = $@"You are a voice command classifier for smart glasses. Match the user's request to the most fitting task by INTENT, not exact wording.
-
-Available tasks:
-{string.Join("\n", taskLines)}
-
-Rules:
-- Respond with ONLY the task name (e.g. open-file). No explanation.
-- If none match, respond with UNKNOWN.
-- Interpret variations: ""can you open a file"" → open-file, ""what's the time"" → time, ""pick a document"" → select-document, etc.
-
-User request: {input}
-Task:";
-        try
+        // 2. Keyword matching via registered handler Keywords lists
+        var keywordTask = _dispatcher.TryMatchByKeyword(input);
+        if (!string.IsNullOrWhiteSpace(keywordTask) && _knownTasks.Contains(keywordTask))
         {
-            var chatService = _kernel.GetRequiredService<IChatCompletionService>();
-            var result = await chatService.GetChatMessageContentAsync(prompt, cancellationToken: cancellationToken);
-            var raw = result.Content?.Trim().ToLowerInvariant() ?? "unknown";
-            return NormalizeDetectedTask(raw);
+            return Task.FromResult(keywordTask);
         }
-        catch { return "unknown"; }
+
+        // 3. No local match — caller routes to advanced handler if configured
+        return Task.FromResult("unknown");
     }
 
     private static bool ContainsAnyPhrase(string normalizedInput, params string[] phrases)
     {
         return phrases.Any(p => normalizedInput.Contains(p, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// NLP helper: returns true when every keyword appears as a whole word in
+    /// <paramref name="normalizedInput"/>, in any order. Filler words between
+    /// key terms are ignored. Also matches common morphological variants so
+    /// that e.g. "highlight" matches "highlights", "highlighted", "highlighting".
+    /// </summary>
+    private static bool ContainsAllWords(string normalizedInput, params string[] keywords)
+    {
+        var padded = " " + normalizedInput + " ";
+        return keywords.All(w =>
+            padded.Contains(" " + w + " ",     StringComparison.Ordinal) ||
+            padded.Contains(" " + w + "s ",    StringComparison.Ordinal) ||
+            padded.Contains(" " + w + "ed ",   StringComparison.Ordinal) ||
+            padded.Contains(" " + w + "ing ",  StringComparison.Ordinal));
     }
 
     private string? TryRuleBasedTask(string input)
@@ -330,9 +280,186 @@ Task:";
         var normalized = Regex.Replace(input.ToLowerInvariant(), @"[^a-z0-9\s-]", " ");
         normalized = Regex.Replace(normalized, @"\s+", " ").Trim();
 
-        // "select document" family → auto-open the most recently uploaded file (no browsing)
+        // ── time ──────────────────────────────────────────────────────────────
+        if (ContainsAnyPhrase(normalized,
+            "what time",
+            "what is the time",
+            "current time",
+            "time right now",
+            "tell me the time",
+            "what hour",
+            "what day",
+            "what is today",
+            "today's date",
+            "current date",
+            "date and time",
+            "what's the time"))
+        {
+            return "time";
+        }
+
+        // ── reminder ──────────────────────────────────────────────────────────
+        if (ContainsAnyPhrase(normalized,
+            "remind me",
+            "set a reminder",
+            "add a reminder",
+            "create reminder",
+            "create a reminder",
+            "set reminder",
+            "new reminder",
+            "remember to",
+            "don t forget to",   // apostrophe stripped by normalization: "don't" → "don t"
+            "dont forget to",
+            "make a note to"))
+        {
+            return "reminder";
+        }
+
+        // ── edit-reminder ─────────────────────────────────────────────────────
+        if (ContainsAnyPhrase(normalized,
+            "edit reminder",
+            "update reminder",
+            "change reminder",
+            "modify reminder",
+            "edit my reminder",
+            "change my reminder",
+            "update my reminder"))
+        {
+            return "edit-reminder";
+        }
+
+        // ── delete-reminder ───────────────────────────────────────────────────
+        if (ContainsAnyPhrase(normalized,
+            "delete reminder",
+            "remove reminder",
+            "cancel reminder",
+            "delete the reminder",
+            "remove the reminder",
+            "cancel the reminder"))
+        {
+            return "delete-reminder";
+        }
+
+        // ── show-reminders ────────────────────────────────────────────────────
+        if (ContainsAnyPhrase(normalized,
+            "show reminders",
+            "show my reminders",
+            "list reminders",
+            "my reminders",
+            "view reminders",
+            "see my reminders",
+            "what are my reminders",
+            "upcoming reminders",
+            "all reminders",
+            "read my reminders"))
+        {
+            return "show-reminders";
+        }
+
+        // ── close-document ────────────────────────────────────────────────────
+        if (ContainsAnyPhrase(normalized,
+            "close document",
+            "close the document",
+            "close pdf",
+            "close the pdf",
+            "close file",
+            "exit document",
+            "exit pdf",
+            "exit the document")
+            || ContainsAllWords(normalized, "close", "document")
+            || ContainsAllWords(normalized, "close", "pdf")
+            || ContainsAllWords(normalized, "exit", "document")
+            || ContainsAllWords(normalized, "quit", "document"))
+        {
+            return "close-document";
+        }
+
+        // ── go-to-page ────────────────────────────────────────────────────────
+        if (ContainsAnyPhrase(normalized,
+            "go to page",
+            "jump to page",
+            "navigate to page",
+            "turn to page",
+            "open page",
+            "go to the page",
+            "skip to page")
+            || (ContainsAllWords(normalized, "go", "page") && Regex.IsMatch(normalized, @"\b\d+\b"))
+            || (ContainsAllWords(normalized, "navigate", "page") && Regex.IsMatch(normalized, @"\b\d+\b"))
+            || (ContainsAllWords(normalized, "take", "page") && Regex.IsMatch(normalized, @"\b\d+\b"))
+            || (ContainsAllWords(normalized, "jump", "page") && Regex.IsMatch(normalized, @"\b\d+\b"))
+            || (ContainsAllWords(normalized, "turn", "page") && Regex.IsMatch(normalized, @"\b\d+\b"))
+            || (ContainsAllWords(normalized, "skip", "page") && Regex.IsMatch(normalized, @"\b\d+\b"))
+            || (ContainsAllWords(normalized, "move", "page") && Regex.IsMatch(normalized, @"\b\d+\b")))
+        {
+            return "go-to-page";
+        }
+
+        // ── go-to-loinc ───────────────────────────────────────────────────────
+        if (ContainsAnyPhrase(normalized,
+            "loinc code",
+            "go to loinc",
+            "find loinc",
+            "navigate to loinc",
+            "open loinc")
+            // Also match bare "loinc " followed by a code (e.g. "loinc 8480-6")
+            || (normalized.Contains("loinc ") && normalized.IndexOf("loinc ", StringComparison.Ordinal) >= 0
+                && normalized.Length > normalized.IndexOf("loinc ", StringComparison.Ordinal) + 6))
+        {
+            return "go-to-loinc";
+        }
+
+        // ── print-highlighted-pages (before print to avoid prefix clash) ──────
+        if (ContainsAnyPhrase(normalized,
+            "print highlighted pages",
+            "print highlighted",
+            "print highlighted page",
+            "print the highlighted")
+            || ContainsAllWords(normalized, "print", "highlight"))
+        {
+            return "print-highlighted-pages";
+        }
+
+        // ── print ─────────────────────────────────────────────────────────────
+        // Note: "print-highlighted-pages" is checked above to avoid a prefix conflict.
+        if (ContainsAnyPhrase(normalized,
+            "print document",
+            "print the document",
+            "print pdf",
+            "print the pdf",
+            "print page",
+            "print this",
+            "print all",
+            "print current")
+            || ContainsAllWords(normalized, "print", "document")
+            || ContainsAllWords(normalized, "print", "pdf")
+            || ContainsAllWords(normalized, "print", "file"))
+        {
+            return "print";
+        }
+
+        // ── remove-highlights ─────────────────────────────────────────────────
+        if (ContainsAnyPhrase(normalized,
+            "remove highlights",
+            "clear highlights",
+            "delete highlights",
+            "remove all highlights",
+            "clear all highlights",
+            "remove highlight",
+            "clear highlight",
+            "delete highlight")
+            || ContainsAllWords(normalized, "remove", "highlight")
+            || ContainsAllWords(normalized, "clear", "highlight")
+            || ContainsAllWords(normalized, "delete", "highlight")
+            || ContainsAllWords(normalized, "erase", "highlight")
+            || ContainsAllWords(normalized, "get", "rid", "highlight"))
+        {
+            return "remove-highlights";
+        }
+
+        // ── select-document (open most-recent file directly) ──────────────────
         if (ContainsAnyPhrase(normalized,
             "select document",
+            "open last document",
             "select file",
             "select and open",
             "choose document",
@@ -358,12 +485,20 @@ Task:";
             "most recent document",
             "most recent file",
             "last document",
-            "recently uploaded document"))
+            "recently uploaded document")
+            || ContainsAllWords(normalized, "open", "last", "document")
+            || ContainsAllWords(normalized, "open", "last", "file")
+            || ContainsAllWords(normalized, "open", "latest", "document")
+            || ContainsAllWords(normalized, "open", "latest", "file")
+            || ContainsAllWords(normalized, "open", "most", "recent")
+            || ContainsAllWords(normalized, "select", "last", "document")
+            || ContainsAllWords(normalized, "show", "last", "document")
+            || ContainsAllWords(normalized, "view", "last", "document"))
         {
             return "select-document";
         }
 
-        // "open file" family → show a browseable list of 5 recent files to pick from
+        // ── open-file (browse list of recent files) ───────────────────────────
         if (ContainsAnyPhrase(normalized,
             "open file",
             "open document",
@@ -398,35 +533,125 @@ Task:";
             "pick a file",
             "pick a document",
             "choose a file",
-            "choose a document"))
+            "choose a document")
+            || ContainsAllWords(normalized, "search", "file")
+            || ContainsAllWords(normalized, "search", "document")
+            || ContainsAllWords(normalized, "find", "file")
+            || ContainsAllWords(normalized, "find", "document")
+            || ContainsAllWords(normalized, "show", "file")
+            || ContainsAllWords(normalized, "browse", "file")
+            || ContainsAllWords(normalized, "recent", "file")
+            || ContainsAllWords(normalized, "recent", "document"))
         {
             return "open-file";
         }
 
-        if (ContainsAnyPhrase(normalized, "next page", "page down"))
+        // ── next-page ─────────────────────────────────────────────────────────
+        if (ContainsAnyPhrase(normalized, "next page", "page down", "go forward", "forward page")
+            || ContainsAllWords(normalized, "next", "page")
+            || ContainsAllWords(normalized, "scroll", "down")
+            || ContainsAllWords(normalized, "move", "forward")
+            || ContainsAllWords(normalized, "advance", "page"))
         {
             return "next-page";
         }
 
-        if (ContainsAnyPhrase(normalized, "previous page", "prev page", "back page", "page up"))
+        // ── next-highlight ────────────────────────────────────────────────────
+        if (ContainsAnyPhrase(normalized,
+            "next highlight",
+            "next highlighted",
+            "next highlighted word",
+            "next highlighted phrase",
+            "go to next highlight",
+            "find next highlight")
+            || ContainsAllWords(normalized, "next", "highlight")
+            || ContainsAllWords(normalized, "jump", "next", "highlight")
+            || ContainsAllWords(normalized, "move", "next", "highlight"))
+        {
+            return "next-highlight";
+        }
+
+        // ── previous-page ─────────────────────────────────────────────────────
+        if (ContainsAnyPhrase(normalized, "previous page", "prev page", "back page", "page up", "go back a page")
+            || ContainsAllWords(normalized, "previous", "page")
+            || ContainsAllWords(normalized, "prev", "page")
+            || ContainsAllWords(normalized, "go", "back", "page")
+            || ContainsAllWords(normalized, "scroll", "up")
+            || ContainsAllWords(normalized, "back", "page"))
         {
             return "previous-page";
         }
 
+        // ── previous-highlight ────────────────────────────────────────────────
+        if (ContainsAnyPhrase(normalized,
+            "previous highlight",
+            "prev highlight",
+            "back highlight",
+            "previous highlighted",
+            "previous highlighted word",
+            "go to previous highlight",
+            "find previous highlight")
+            || ContainsAllWords(normalized, "previous", "highlight")
+            || ContainsAllWords(normalized, "prev", "highlight")
+            || ContainsAllWords(normalized, "back", "highlight")
+            || ContainsAllWords(normalized, "last", "highlight"))
+        {
+            return "previous-highlight";
+        }
+
+        // ── summarize-page ────────────────────────────────────────────────────
         if (ContainsAnyPhrase(normalized,
             "summarize this page",
             "summarize current page",
             "summarize page",
             "summary of this page",
             "summary of the page",
-            "what is on this page"))
+            "what is on this page",
+            "summarise this page",
+            "summarise page")
+            || ContainsAllWords(normalized, "summarize", "page")
+            || ContainsAllWords(normalized, "summarise", "page")
+            || ContainsAllWords(normalized, "summary", "page")
+            || ContainsAllWords(normalized, "explain", "page")
+            || ContainsAllWords(normalized, "describe", "page"))
         {
             return "summarize-page";
         }
 
-        // "highlight" / "search" / "find" commands → highlight word in the open PDF (client-side)
+        // ── document-query ────────────────────────────────────────────────────
+        if (ContainsAnyPhrase(normalized,
+            "ask the document",
+            "query document",
+            "what does the document say",
+            "summarize document",
+            "summarise document",
+            "explain in the document",
+            "according to the document",
+            "based on the document",
+            "search document for",
+            "ask document")
+            || ContainsAllWords(normalized, "ask", "document")
+            || ContainsAllWords(normalized, "query", "document")
+            || ContainsAllWords(normalized, "summarize", "document")
+            || ContainsAllWords(normalized, "summarise", "document")
+            || ContainsAllWords(normalized, "question", "document"))
+        {
+            return "document-query";
+        }
+
+        // ── document-highlight ────────────────────────────────────────────────
+        if (ContainsAnyPhrase(normalized,
+            "highlight in document",
+            "document highlight",
+            "highlight in the document"))
+        {
+            return "document-highlight";
+        }
+
+        // ── highlight-word (generic client-side PDF highlight / find) ──────────
         if (ContainsAnyPhrase(normalized,
             "highlight ",
+            "highlights ",
             "search for ",
             "search the ",
             "find the word",
@@ -436,7 +661,45 @@ Task:";
             return "highlight-word";
         }
 
-        // "open admin panel" / "go to admin" family → open the admin panel page
+        // ── ocr-retry (before ocr to avoid prefix clash) ──────────────────────
+        if (ContainsAnyPhrase(normalized,
+            "retry ocr",
+            "redo ocr",
+            "redo the ocr",
+            "ocr retry",
+            "try ocr again",
+            "scan again")
+            || ContainsAllWords(normalized, "retry", "scan")
+            || ContainsAllWords(normalized, "redo", "scan")
+            || ContainsAllWords(normalized, "scan", "again")
+            || ContainsAllWords(normalized, "retry", "ocr")
+            || ContainsAllWords(normalized, "redo", "ocr"))
+        {
+            return "ocr-retry";
+        }
+
+        // ── ocr ───────────────────────────────────────────────────────────────
+        if (ContainsAnyPhrase(normalized,
+            "scan text",
+            "read text from",
+            "perform ocr",
+            "run ocr",
+            "do ocr",
+            "ocr this",
+            "scan image",
+            "scan document",
+            "scan the document",
+            "extract text")
+            || ContainsAllWords(normalized, "scan", "document")
+            || ContainsAllWords(normalized, "scan", "text")
+            || ContainsAllWords(normalized, "scan", "image")
+            || ContainsAllWords(normalized, "extract", "text")
+            || ContainsAllWords(normalized, "read", "text"))
+        {
+            return "ocr";
+        }
+
+        // ── open-admin-panel ──────────────────────────────────────────────────
         if (ContainsAnyPhrase(normalized,
             "open admin",
             "admin panel",
@@ -444,7 +707,12 @@ Task:";
             "show admin",
             "administration panel",
             "go to administration",
-            "open administration"))
+            "open administration")
+            || ContainsAllWords(normalized, "open", "admin")
+            || ContainsAllWords(normalized, "go", "admin")
+            || ContainsAllWords(normalized, "show", "admin")
+            || ContainsAllWords(normalized, "admin", "panel")
+            || ContainsAllWords(normalized, "admin", "setting"))
         {
             return "open-admin-panel";
         }
@@ -458,7 +726,7 @@ Task:";
         try
         {
             var detected = await ClassifyOnlyAsync(input, cancellationToken);
-            // If classification yields unknown and advanced model is enabled, we will delegate
+            // Advanced model is used only when local classification yields "unknown"
             return string.Equals(detected, "unknown", StringComparison.OrdinalIgnoreCase) && _useAdvancedModel;
         }
         catch
@@ -492,6 +760,17 @@ Task:";
         }
 
         var builder = new StringBuilder();
+
+        if (documentContext.ConversationContext != null && documentContext.ConversationContext.Messages.Any())
+        {
+            builder.AppendLine("Previous conversation context:");
+            foreach (var message in documentContext.ConversationContext.Messages.OrderBy(m => m.Timestamp))
+            {
+                builder.AppendLine($"[{message.Role.ToUpper()}]: {message.Content}");
+            }
+            builder.AppendLine();
+        }
+
         builder.AppendLine("User request:");
         builder.AppendLine(input);
         builder.AppendLine();

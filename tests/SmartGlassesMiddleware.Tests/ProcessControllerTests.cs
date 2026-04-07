@@ -1,5 +1,7 @@
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Moq;
 using NUnit.Framework;
@@ -14,23 +16,58 @@ public class ProcessControllerTests
 {
     private Mock<IAIService> _aiServiceMock;
     private Mock<IPageSummaryService> _pageSummaryServiceMock;
+    private Mock<IGroqTranscriptionLogService> _groqTranscriptionLogMock;
     private Mock<ILogger<ProcessController>> _loggerMock;
     private Mock<IConfiguration> _configMock;
     private ProcessController _controller;
+    private ServiceProvider? _serviceProvider;
 
     [SetUp]
     public void Setup()
     {
         _aiServiceMock = new Mock<IAIService>();
         _pageSummaryServiceMock = new Mock<IPageSummaryService>();
+        _groqTranscriptionLogMock = new Mock<IGroqTranscriptionLogService>();
         _loggerMock = new Mock<ILogger<ProcessController>>();
         _configMock = new Mock<IConfiguration>();
 
-        _controller = new ProcessController(
+        _controller = BuildController(
             _aiServiceMock.Object,
             _pageSummaryServiceMock.Object,
+            _groqTranscriptionLogMock.Object,
             _loggerMock.Object,
-            _configMock.Object);
+            _configMock.Object,
+            out _serviceProvider);
+    }
+
+    [TearDown]
+    public void TearDown()
+    {
+        _serviceProvider?.Dispose();
+    }
+
+    private static ProcessController BuildController(
+        IAIService aiService,
+        IPageSummaryService pageSummaryService,
+        IGroqTranscriptionLogService groqTranscriptionLog,
+        ILogger<ProcessController> logger,
+        IConfiguration configuration,
+        out ServiceProvider serviceProvider)
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(aiService);
+        services.AddSingleton(pageSummaryService);
+        services.AddSingleton(groqTranscriptionLog);
+        services.AddSingleton(logger);
+        services.AddSingleton(configuration);
+        serviceProvider = services.BuildServiceProvider();
+
+        var controller = new ProcessController();
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext { RequestServices = serviceProvider }
+        };
+        return controller;
     }
 
     [Test]
@@ -50,18 +87,7 @@ public class ProcessControllerTests
         Assert.That(result!.Value!.ToString(), Contains.Substring("willUseAdvanced = True"));
     }
 
-    [Test]
-    public void GetClientSettings_ReturnsOkWithConfiguredValues()
-    {
-        _configMock.Setup(x => x["AI:SpeechTranscriptionMode"]).Returns("webspeech-only");
-        _configMock.Setup(x => x["AI:ActivationWord"]).Returns("TestWord");
-
-        var result = _controller.GetClientSettings() as OkObjectResult;
-
-        Assert.That(result, Is.Not.Null);
-        Assert.That(result!.Value!.ToString(), Contains.Substring("speechTranscriptionMode = webspeech-only"));
-        Assert.That(result.Value.ToString(), Contains.Substring("activationWord = testword"));
-    }
+    // GetClientSettings tests removed — endpoint moved to minimal API in Program.cs
 
     [Test]
     public async Task Process_NullInput_ReturnsBadRequest()

@@ -239,6 +239,14 @@ public class AbbreviationService : IAbbreviationService
         }
     }
 
+    public IEnumerable<Abbreviation> GetAllCachedAbbreviations()
+    {
+        // Both caches contain the same Abbreviation references.
+        // We can just take the values from one and distinct them.
+        var all = _shortFormCache.Values.SelectMany(x => x).DistinctBy(a => new { a.ShortForm, a.ExpandedForm }).ToList();
+        return all;
+    }
+
     public async Task<int> SyncFromDailyMedAsync(CancellationToken ct = default)
     {
         try

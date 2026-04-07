@@ -1,8 +1,10 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
 using SmartGlassesMiddleware.Models;
 using SmartGlassesMiddleware.Services;
 using System.Net.Http.Headers;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace SmartGlassesMiddleware.Controllers;
 
@@ -10,25 +12,11 @@ namespace SmartGlassesMiddleware.Controllers;
 [Route("api/process")]
 public class ProcessController : ControllerBase
 {
-    private readonly IAIService _aiService;
-    private readonly IPageSummaryService _pageSummaryService;
-    private readonly IServerSettingsService? _serverSettingsService;
-    private readonly ILogger<ProcessController> _logger;
-    private readonly IConfiguration _configuration;
-
-    public ProcessController(IAIService aiService, IPageSummaryService pageSummaryService, ILogger<ProcessController> logger, IConfiguration configuration)
-    {
-        _aiService = aiService;
-        _pageSummaryService = pageSummaryService;
-        _logger = logger;
-        _configuration = configuration;
-    }
-
-    public ProcessController(IAIService aiService, IPageSummaryService pageSummaryService, IServerSettingsService serverSettingsService, ILogger<ProcessController> logger, IConfiguration configuration)
-        : this(aiService, pageSummaryService, logger, configuration)
-    {
-        _serverSettingsService = serverSettingsService;
-    }
+    private IAIService AiService => HttpContext.RequestServices.GetRequiredService<IAIService>();
+    private IPageSummaryService PageSummaryService => HttpContext.RequestServices.GetRequiredService<IPageSummaryService>();
+    private IGroqTranscriptionLogService GroqTranscriptionLog => HttpContext.RequestServices.GetRequiredService<IGroqTranscriptionLogService>();
+    private ILogger<ProcessController> Logger => HttpContext.RequestServices.GetRequiredService<ILogger<ProcessController>>();
+    private IConfiguration Configuration => HttpContext.RequestServices.GetRequiredService<IConfiguration>();
 
     /// <summary>
     /// Send a voice transcript to the AI service and return the response.
@@ -42,89 +30,76 @@ public class ProcessController : ControllerBase
 
         try
         {
-            var willUse = await _aiService.WillUseAdvancedModelAsync(request.Input, cancellationToken);
+            var willUse = await AiService.WillUseAdvancedModelAsync(request.Input, cancellationToken);
             return Ok(new { willUseAdvanced = willUse });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Preview failed");
+            Logger.LogError(ex, "Preview failed");
             return StatusCode(500, new { error = "Preview failed" });
         }
     }
 
-    [HttpGet]
-    [Route("client-settings")]
-    public IActionResult GetClientSettings()
-    {
-        var configuredMode = _configuration["AI:SpeechTranscriptionMode"]?.Trim().ToLowerInvariant();
-        var mode = configuredMode switch
-        {
-            "webspeech-only" => "webspeech-only",
-            "whisper-only" => "whisper-only",
-            _ => "auto"
-        };
-
-        var activationWord = _configuration["AI:ActivationWord"]?.Trim().ToLowerInvariant();
-        if (string.IsNullOrWhiteSpace(activationWord))
-            activationWord = "Iris";
-
-        var groqEnabled = true;
-        if (_serverSettingsService is not null)
-        {
-            groqEnabled = _serverSettingsService.GetGroqCommandTranscriptionSettingAsync(HttpContext?.RequestAborted ?? CancellationToken.None)
-                .GetAwaiter()
-                .GetResult()
-                .Enabled;
-        }
-
-        return Ok(new { speechTranscriptionMode = mode, activationWord, groqCommandTranscriptionEnabled = groqEnabled });
-    }
+    // client-settings endpoint moved to minimal API in Program.cs to avoid DI issues
 
     [HttpPost]
-    [Route("transcribe-command")]
+    [Route("transcribe")]
     [RequestSizeLimit(12 * 1024 * 1024)]
-    public async Task<IActionResult> TranscribeCommand([FromForm] IFormFile? audio, [FromForm] string? language, CancellationToken cancellationToken)
+    public async Task<IActionResult> Transcribe(
+        [FromForm] IFormFile? audio, 
+        [FromForm] string? language,
+        [FromForm] bool checkWakeword = false,
+        CancellationToken cancellationToken = default)
     {
         if (audio is null || audio.Length == 0)
             return BadRequest(new { error = "Audio is required" });
 
-        if (_serverSettingsService is not null)
-        {
-            var groqSetting = await _serverSettingsService.GetGroqCommandTranscriptionSettingAsync(cancellationToken);
-            if (!groqSetting.Enabled)
-                return StatusCode(503, new { error = "Groq transcription is disabled" });
-        }
-
-        var configuredGroqEnabled = _configuration["AI:Groq:Enabled"]?.Trim();
-        if (bool.TryParse(configuredGroqEnabled, out var configEnabled) && !configEnabled)
-            return StatusCode(503, new { error = "Groq transcription is disabled" });
-
-        var apiKey = _configuration["AI:Groq:ApiKey"]?.Trim();
+        var apiKey = Configuration["AI:Groq:ApiKey"]?.Trim();
         if (string.IsNullOrWhiteSpace(apiKey))
             return StatusCode(503, new { error = "Groq transcription is not configured" });
 
-        var endpoint = _configuration["AI:Groq:WhisperEndpoint"]?.Trim();
+        var endpoint = Configuration["AI:Groq:WhisperEndpoint"]?.Trim();
         if (string.IsNullOrWhiteSpace(endpoint))
             endpoint = "https://api.groq.com/openai/v1/audio/transcriptions";
 
-        var model = _configuration["AI:Groq:WhisperModel"]?.Trim();
+        var legacyModel = Configuration["AI:Groq:WhisperModel"]?.Trim();
+        var wakewordModel = Configuration["AI:Groq:WhisperWakewordModel"]?.Trim();
+        var commandModel = Configuration["AI:Groq:WhisperCommandModel"]?.Trim();
+
+        var model = checkWakeword
+            ? (string.IsNullOrWhiteSpace(wakewordModel)
+                ? (string.IsNullOrWhiteSpace(legacyModel) ? "whisper-large-v3-turbo" : legacyModel)
+                : wakewordModel)
+            : (string.IsNullOrWhiteSpace(commandModel)
+                ? (string.IsNullOrWhiteSpace(legacyModel) ? "whisper-large-v3" : legacyModel)
+                : commandModel);
+
         if (string.IsNullOrWhiteSpace(model))
-            model = "whisper-large-v3-turbo";
+            model = checkWakeword ? "whisper-large-v3-turbo" : "whisper-large-v3";
 
         try
         {
             var factory = HttpContext.RequestServices.GetService<IHttpClientFactory>();
             using var http = factory?.CreateClient() ?? new HttpClient();
 
-            http.Timeout = TimeSpan.FromSeconds(20);
+            // Use shorter timeout for wake-word detection, longer for full commands
+            http.Timeout = TimeSpan.FromSeconds(checkWakeword ? 5 : 20);
             http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
 
             using var content = new MultipartFormDataContent();
             await using var stream = audio.OpenReadStream();
             using var streamContent = new StreamContent(stream);
             streamContent.Headers.ContentType = new MediaTypeHeaderValue(audio.ContentType ?? "audio/wav");
-            content.Add(streamContent, "file", string.IsNullOrWhiteSpace(audio.FileName) ? "command.wav" : audio.FileName);
+            content.Add(streamContent, "file", string.IsNullOrWhiteSpace(audio.FileName) ? "audio.wav" : audio.FileName);
             content.Add(new StringContent(model), "model");
+
+            // For wake-word detection, bias Whisper toward the activation word to reduce hallucination on short clips
+            if (checkWakeword)
+            {
+                var activationWord = Configuration["AI:ActivationWord"]?.Trim();
+                if (string.IsNullOrWhiteSpace(activationWord)) activationWord = "Hello Iris";
+                content.Add(new StringContent(activationWord), "prompt");
+            }
 
             if (!string.IsNullOrWhiteSpace(language))
                 content.Add(new StringContent(language), "language");
@@ -135,26 +110,87 @@ public class ProcessController : ControllerBase
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("Groq transcription failed ({StatusCode}): {Body}", (int)response.StatusCode, body);
+                var logType = checkWakeword ? "wakeword" : "command";
+                Logger.LogWarning("Groq {Type} transcription failed ({StatusCode}) for model {Model}: {Body}", logType, (int)response.StatusCode, model, body);
                 return StatusCode(502, new { error = "Groq transcription failed" });
             }
 
-            using var jsonDoc = JsonDocument.Parse(body);
-            var text = jsonDoc.RootElement.TryGetProperty("text", out var textElement)
-                ? (textElement.GetString() ?? string.Empty).Trim()
-                : string.Empty;
+            try
+            {
+                using var jsonDoc = JsonDocument.Parse(body);
+                var text = jsonDoc.RootElement.TryGetProperty("text", out var textElement)
+                    ? (textElement.GetString() ?? string.Empty).Trim()
+                    : string.Empty;
 
-            return Ok(new { text, provider = "groq", model });
+                var logType = checkWakeword ? "wakeword" : "command";
+                GroqTranscriptionLog.Add(text, logType, model);
+
+                // For wake-word detection, check if the transcription contains the activation word
+                if (checkWakeword)
+                {
+                    var activationWord = Configuration["AI:ActivationWord"]?.Trim() ?? "Iris";
+                    var wakeRegex = new Regex($@"\b{Regex.Escape(activationWord)}\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+                    var wakeMatch = wakeRegex.Match(text);
+                    var matched = wakeMatch.Success;
+
+                    var commandAfterWakeword = string.Empty;
+                    if (matched)
+                    {
+                        commandAfterWakeword = text[(wakeMatch.Index + wakeMatch.Length)..]
+                            .TrimStart(' ', ',', ':', ';', '-', '.', '!', '?')
+                            .Trim();
+                    }
+
+                    return Ok(new { text, matched, commandAfterWakeword, provider = "groq", model });
+                }
+
+                return Ok(new { text, provider = "groq", model });
+            }
+            catch (JsonException jsonEx)
+            {
+                Logger.LogWarning(jsonEx, "Failed to parse Groq response as JSON. Response: {Body}", body);
+                return StatusCode(502, new { error = "Invalid response from Groq API" });
+            }
         }
         catch (OperationCanceledException)
         {
-            return StatusCode(408, new { error = "Groq transcription timed out or was cancelled" });
+            var timeoutMsg = checkWakeword ? "Groq wakeword transcription timed out" : "Groq transcription timed out or was cancelled";
+            return StatusCode(408, new { error = timeoutMsg });
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Groq command transcription unavailable; caller should fallback to local Whisper.");
+            var logType = checkWakeword ? "wakeword" : "command";
+            Logger.LogError(ex, "Groq {Type} transcription error.", logType);
             return StatusCode(503, new { error = "Groq transcription unavailable" });
         }
+    }
+
+    [HttpPost]
+    [Route("transcribe-wakeword")]
+    [RequestSizeLimit(2 * 1024 * 1024)]
+    [Obsolete("Use /transcribe with checkWakeword=true instead")]
+    public async Task<IActionResult> TranscribeWakeword([FromForm] IFormFile? audio, [FromForm] string? language, CancellationToken cancellationToken)
+    {
+        // Redirect to unified endpoint for backward compatibility
+        var form = await Request.ReadFormAsync(cancellationToken);
+        var audioFile = form.Files.FirstOrDefault();
+        var lang = form["language"].FirstOrDefault();
+        
+        return await Transcribe(audioFile, lang, checkWakeword: true, cancellationToken);
+    }
+
+    [HttpPost]
+    [Route("transcribe-command")]
+    [RequestSizeLimit(12 * 1024 * 1024)]
+    [Obsolete("Use /transcribe with checkWakeword=false instead")]
+    public async Task<IActionResult> TranscribeCommand([FromForm] IFormFile? audio, [FromForm] string? language, CancellationToken cancellationToken)
+    {
+        // Redirect to unified endpoint for backward compatibility
+        var form = await Request.ReadFormAsync(cancellationToken);
+        var audioFile = form.Files.FirstOrDefault();
+        var lang = form["language"].FirstOrDefault();
+        
+        return await Transcribe(audioFile, lang, checkWakeword: false, cancellationToken);
     }
 
     [HttpPost]
@@ -166,7 +202,7 @@ public class ProcessController : ControllerBase
         try
         {
             // usedAdvancedModel is not relevant for the UI — discard it
-            var (task, response, usedAdvanced) = await _aiService.ProcessRequestAsync(request.Input, cancellationToken, request.DocumentContext);
+            var (task, response, usedAdvanced) = await AiService.ProcessRequestAsync(request.Input, cancellationToken, request.DocumentContext);
             return Ok(new { task, response, usedAdvancedModel = usedAdvanced });
         }
         catch (OperationCanceledException)
@@ -175,7 +211,7 @@ public class ProcessController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error processing AI request for transcript");
+            Logger.LogError(ex, "Error processing AI request for transcript");
             return StatusCode(500, new { error = "Failed to process request" });
         }
     }
@@ -189,7 +225,7 @@ public class ProcessController : ControllerBase
 
         try
         {
-            var summary = await _pageSummaryService.SummarizePageAsync(
+            var summary = await PageSummaryService.SummarizePageAsync(
                 request.PageText,
                 request.DocumentName,
                 request.PageNumber,
@@ -203,7 +239,7 @@ public class ProcessController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            _logger.LogWarning(ex, "Page summary request could not be completed");
+            Logger.LogWarning(ex, "Page summary request could not be completed");
             return StatusCode(503, new { error = ex.Message });
         }
         catch (OperationCanceledException)
@@ -212,7 +248,7 @@ public class ProcessController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error summarizing current page");
+            Logger.LogError(ex, "Error summarizing current page");
             return StatusCode(500, new { error = "Failed to summarize page" });
         }
     }

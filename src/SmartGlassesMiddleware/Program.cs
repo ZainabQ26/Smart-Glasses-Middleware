@@ -55,6 +55,16 @@ static async Task ResetStalePendingUploadsAsync(IServiceProvider services, ILogg
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Single appsettings source: load only appsettings.json, then allow env vars/CLI overrides.
+builder.Configuration.Sources.Clear();
+builder.Configuration
+    .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+    .AddEnvironmentVariables();
+if (args is { Length: > 0 })
+{
+    builder.Configuration.AddCommandLine(args);
+}
+
 // Configure QuestPDF license for community usage to avoid runtime license validation errors
 QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
 
@@ -108,7 +118,7 @@ builder.Services.AddOpenApi(options =>
                 Provides a multi-modal AI API for voice-driven task dispatch, document processing,
                 audio transcription, and conversation management.
 
-                **Voice pipeline:** Audio is transcribed by an on-device Whisper WebGPU worker.
+                **Voice pipeline:** Audio is transcribed by the server-side Groq Whisper API.
                 Transcripts are sent to `POST /api/process`, which classifies the intent with
                 AWS Bedrock and routes to the matching task handler.
 
@@ -282,10 +292,9 @@ builder.Services.AddScoped<IEmbeddingClient, SmartGlassesMiddleware.Services.Bed
 builder.Services.AddScoped<IConversationService, ConversationService>();
 builder.Services.AddScoped<IPageSummaryService, BedrockPageSummaryService>();
 // Global mapping service for ResourceGroup -> Conversation
-builder.Services.AddScoped<IGroupConversationMappingService, GroupConversationMappingService>();
-builder.Services.AddScoped<IServerSettingsService, ServerSettingsService>();
+builder.Services.AddSingleton<IGroqTranscriptionLogService, GroqTranscriptionLogService>();
 
-// Audio transcription service removed: transcription now handled entirely in-browser via Whisper worker
+// Audio transcription is handled server-side via Groq at /api/process/transcribe.
 
 // Auto-register ITaskHandler implementations from this assembly and optional plugin DLLs in the 'tasks' folder.
 
@@ -442,7 +451,7 @@ if (e2eMode)
 {
     builder.Services.AddSingleton<IBackgroundTaskQueue, SynchronousBackgroundTaskQueue>();
 }
-else if (!builder.Environment.IsEnvironment("Testing") && !string.IsNullOrWhiteSpace(redisConnection))
+else if (!builder.Environment.IsEnvironment("Testing") && redisAvailable)
 {
     builder.Services.AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();
 }
@@ -460,7 +469,7 @@ if (!e2eMode)
     builder.Services.AddHostedService<BackgroundTaskHostedService>();
 }
 
-if (!builder.Environment.IsEnvironment("Testing") && !string.IsNullOrWhiteSpace(redisConnection) && !e2eMode)
+if (!builder.Environment.IsEnvironment("Testing") && redisAvailable && !e2eMode)
 {
     builder.Services.AddHostedService<BackgroundTaskCleanupService>();
 }
@@ -468,10 +477,9 @@ if (!builder.Environment.IsEnvironment("Testing") && !string.IsNullOrWhiteSpace(
 
 // Monthly FDA abbreviation sync background service
 builder.Services.AddHostedService<AbbreviationSyncBackgroundService>();
-builder.Services.AddHostedService<PreventSleepResetBackgroundService>();
 
-// Database state loading/saving using S3
-builder.Services.AddHostedService<StatePersistenceService>();
+// On startup, scan S3 and rebuild the in-memory ManagedFile index — no separate persistence needed.
+builder.Services.AddHostedService<S3FileIndexService>();
 
 // Add SignalR for real-time notifications with WebSocket optimizations
 builder.Services.AddSignalR(options =>
@@ -490,8 +498,8 @@ builder.Services.AddSignalR(options =>
     options.MaximumParallelInvocationsPerClient = 10;
 });
 
-// Add Redis pub/sub bridge to forward messages to SignalR clients (only if Redis is configured)
-if (!builder.Environment.IsEnvironment("Testing") && !string.IsNullOrWhiteSpace(redisConnection))
+// Add Redis pub/sub bridge to forward messages to SignalR clients (only if Redis is connected)
+if (!builder.Environment.IsEnvironment("Testing") && redisAvailable)
 {
     builder.Services.AddSingleton<RedisPubSubBridge>();
     builder.Services.AddHostedService(sp => sp.GetRequiredService<RedisPubSubBridge>());
@@ -669,6 +677,33 @@ app.UseResponseCompression();
 // Enable built-in HTTP logging so we can see headers and bodies
 app.UseHttpLogging();
 
+// Global exception handler returning RFC7807 ProblemDetails.
+// Placed early so exceptions from ANY downstream middleware (CORS, routing,
+// rate-limiter, metrics, security-headers, etc.) are caught and surfaced as
+// a proper JSON error instead of a bare 500 from Kestrel.
+app.UseExceptionHandler(errorApp =>
+{
+    errorApp.Run(async context =>
+    {
+        var exFeature = context.Features.Get<IExceptionHandlerFeature>();
+        var ex = exFeature?.Error;
+        var traceId = Activity.Current?.Id ?? context.TraceIdentifier;
+
+        var pd = new ProblemDetails
+        {
+            Title = "An unexpected error occurred",
+            Detail = ex?.Message,
+            Status = StatusCodes.Status500InternalServerError,
+            Instance = context.Request.Path
+        };
+        pd.Extensions["requestId"] = traceId;
+
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        context.Response.ContentType = "application/problem+json";
+        await JsonSerializer.SerializeAsync(context.Response.Body, pd, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+    });
+});
+
 static string GetFrameOptionsForPath(PathString path)
 {
     var value = path.Value ?? string.Empty;
@@ -685,6 +720,26 @@ static string GetFrameOptionsForPath(PathString path)
     }
 
     return "DENY";
+}
+
+static string ToTitleCaseWords(string value)
+{
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return value;
+    }
+
+    var parts = value
+        .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+        .Select(part => char.ToUpperInvariant(part[0]) + part[1..].ToLowerInvariant());
+
+    return string.Join(' ', parts);
+}
+
+static int GetGroqClientMaxRequestsPerMinute(IConfiguration? configuration)
+{
+    var rpm = configuration?.GetValue<int?>("AI:Groq:ClientMaxRequestsPerMinute") ?? 30;
+    return rpm < 1 ? 1 : rpm;
 }
 
 // Add request logging middleware FIRST to track all requests
@@ -743,6 +798,33 @@ var contentTypeProvider = new Microsoft.AspNetCore.StaticFiles.FileExtensionCont
 contentTypeProvider.Mappings[".wasm"] = "application/wasm";
 contentTypeProvider.Mappings[".mjs"]  = "application/javascript";
 contentTypeProvider.Mappings[".onnx"] = "application/octet-stream";
+
+// Allow extensionless admin URL while preserving existing /admin.html access.
+app.Use(async (context, next) =>
+{
+    if (HttpMethods.IsGet(context.Request.Method) &&
+        (context.Request.Path.Equals("/admin", StringComparison.OrdinalIgnoreCase) ||
+         context.Request.Path.Equals("/admin/", StringComparison.OrdinalIgnoreCase)))
+    {
+        context.Request.Path = "/admin.html";
+    }
+
+    await next();
+});
+
+// Serve the Spanish-language home page at /es and /es/.
+app.Use(async (context, next) =>
+{
+    if (HttpMethods.IsGet(context.Request.Method) &&
+        (context.Request.Path.Equals("/es", StringComparison.OrdinalIgnoreCase) ||
+         context.Request.Path.Equals("/es/", StringComparison.OrdinalIgnoreCase)))
+    {
+        context.Request.Path = "/es/index.html";
+    }
+
+    await next();
+});
+
 app.UseStaticFiles(new StaticFileOptions
 {
     ContentTypeProvider = contentTypeProvider,
@@ -786,6 +868,64 @@ if (!app.Environment.IsEnvironment("Testing"))
     app.UseHttpsRedirection();
 }
 app.UseCors();
+
+// Short-circuit client-settings before MVC controller selection so a broken
+// ProcessController activation path cannot take down this GET endpoint.
+app.Use(async (context, next) =>
+{
+    if (HttpMethods.IsGet(context.Request.Method) && context.Request.Path.Equals("/api/process/client-settings", StringComparison.OrdinalIgnoreCase))
+    {
+        context.Response.Headers.CacheControl = "no-store, no-cache, must-revalidate";
+        context.Response.Headers.Pragma = "no-cache";
+        var configuration = context.RequestServices.GetRequiredService<IConfiguration>();
+        var groqClientMaxRequestsPerMinute = GetGroqClientMaxRequestsPerMinute(configuration);
+
+        try
+        {
+            var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+
+            var mode = "groq-only";
+
+            var activationWord = configuration["AI:ActivationWord"]?.Trim();
+            if (string.IsNullOrWhiteSpace(activationWord))
+                activationWord = "Hello Iris";
+            else
+                activationWord = ToTitleCaseWords(activationWord);
+
+            await context.Response.WriteAsJsonAsync(new
+            {
+                speechTranscriptionMode = mode,
+                activationWord,
+                groqCommandTranscriptionEnabled = true,
+                groqClientMaxRequestsPerMinute
+            });
+        }
+        catch (Exception ex)
+        {
+            try
+            {
+                var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+                logger.LogError(ex, "client-settings middleware failed");
+            }
+            catch
+            {
+                // Avoid cascading failure if logging itself is unavailable.
+            }
+
+            await context.Response.WriteAsJsonAsync(new
+            {
+                speechTranscriptionMode = "groq-only",
+                activationWord = "Hello Iris",
+                groqCommandTranscriptionEnabled = true,
+                groqClientMaxRequestsPerMinute
+            });
+        }
+
+        return;
+    }
+
+    await next();
+});
 
 // CRITICAL: UseRouting() is required for controller endpoints to work
 app.UseRouting();
@@ -849,29 +989,6 @@ app.Use(async (context, next) =>
     await next();
 });
 
-// Global exception handler returning RFC7807 ProblemDetails
-app.UseExceptionHandler(errorApp =>
-{
-    errorApp.Run(async context =>
-    {
-        var exFeature = context.Features.Get<IExceptionHandlerFeature>();
-        var ex = exFeature?.Error;
-        var traceId = Activity.Current?.Id ?? context.TraceIdentifier;
-
-        var pd = new ProblemDetails
-        {
-            Title = "An unexpected error occurred",
-            Detail = ex?.Message,
-            Status = StatusCodes.Status500InternalServerError,
-            Instance = context.Request.Path
-        };
-        pd.Extensions["requestId"] = traceId;
-
-        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-        context.Response.ContentType = "application/problem+json";
-        await JsonSerializer.SerializeAsync(context.Response.Body, pd, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
-    });
-});
 
 app.MapControllers();
 
@@ -909,6 +1026,50 @@ app.MapGet("/health", async (IServiceProvider services, HttpContext context) =>
     context.Response.Headers.Pragma = "no-cache";
     return Results.Ok(new { status = "Healthy", timestamp = DateTime.UtcNow });
 });
+
+// Minimal API client-settings endpoint — bypasses ProcessController DI.
+app.MapGet("/api/process/client-settings", (IConfiguration configuration, HttpContext context, ILogger<Program> logger) =>
+{
+    // Prevent CloudFront / browser / proxy caching — matches /health and /ready.
+    context.Response.Headers.CacheControl = "no-store, no-cache, must-revalidate";
+    context.Response.Headers.Pragma = "no-cache";
+
+    try
+    {
+        var groqClientMaxRequestsPerMinute = GetGroqClientMaxRequestsPerMinute(configuration);
+
+        var mode = "groq-only";
+
+        var activationWord = configuration["AI:ActivationWord"]?.Trim();
+        if (string.IsNullOrWhiteSpace(activationWord))
+            activationWord = "Hello Iris";
+        else
+            activationWord = ToTitleCaseWords(activationWord);
+
+        return Results.Ok(new { 
+            speechTranscriptionMode = mode, 
+            activationWord, 
+            groqCommandTranscriptionEnabled = true,
+            groqClientMaxRequestsPerMinute
+        });
+    }
+    catch (Exception ex)
+    {
+        try
+        {
+            logger.LogError(ex, "client-settings endpoint failed");
+        }
+        catch
+        {
+            // If logging fails, silently continue - don't escalate to 500 error
+        }
+
+        // Return safe defaults so the frontend can still function.
+        return Results.Ok(new { speechTranscriptionMode = "groq-only", activationWord = "Hello Iris", groqCommandTranscriptionEnabled = true, groqClientMaxRequestsPerMinute = GetGroqClientMaxRequestsPerMinute(configuration) });
+    }
+})
+// Ensure this endpoint wins even if a stale controller action with the same route exists.
+.WithOrder(int.MinValue);
 
 // DB + Redis readiness endpoint.
 // The admin page's waitForAPI() polls this before loading data so it waits out
@@ -1200,15 +1361,15 @@ app.MapGet("/debug/resolve-components", async (IServiceProvider sp, ILoggerFacto
         {
             logger.LogWarning("Component resolution timed out");
             // attempt to read partial results
-            kernelResolved = kTask.IsCompletedSuccessfully ? kTask.Result : null;
-            dispatcherResolved = dTask.IsCompletedSuccessfully ? dTask.Result : null;
-            httpFactoryResolved = hTask.IsCompletedSuccessfully ? hTask.Result : null;
+            kernelResolved = kTask.IsCompletedSuccessfully ? await kTask : null;
+            dispatcherResolved = dTask.IsCompletedSuccessfully ? await dTask : null;
+            httpFactoryResolved = hTask.IsCompletedSuccessfully ? await hTask : null;
             return Results.StatusCode(504);
         }
 
-        kernelResolved = kTask.Result;
-        dispatcherResolved = dTask.Result;
-        httpFactoryResolved = hTask.Result;
+        kernelResolved = await kTask;
+        dispatcherResolved = await dTask;
+        httpFactoryResolved = await hTask;
 
         return Results.Ok(new
         {
