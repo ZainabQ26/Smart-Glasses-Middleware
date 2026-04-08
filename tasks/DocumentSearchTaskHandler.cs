@@ -31,7 +31,16 @@ public class DocumentSearchTaskHandler : ITaskHandler
 
     public IReadOnlyList<string> Keywords => new[]
     {
-        "search for", "search document", "find in document", "locate", "search in document",
+        "search for",
+        "buscar",
+        "search document",
+        "buscar documento",
+        "find in document",
+        "encontrar en documento",
+        "locate",
+        "localizar",
+        "search in document",
+        "buscar en documento",
         "look for"
     };
 

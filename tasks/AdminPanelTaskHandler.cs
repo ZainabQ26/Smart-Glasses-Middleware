@@ -16,7 +16,16 @@ public class AdminPanelTaskHandler : ITaskHandler
 
     public IReadOnlyList<string> Keywords => new[]
     {
-        "open admin panel", "go to admin", "show admin", "admin panel", "admin"
+        "open admin panel",
+        "abrir panel de control",
+        "go to admin",
+        "ir a administración",
+        "show admin",
+        "mostrar administración",
+        "admin panel",
+        "panel de control",
+        "admin",
+        "administración"
     };
 
     public Task<string> HandleAsync(string input)

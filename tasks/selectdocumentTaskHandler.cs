@@ -12,8 +12,20 @@ public class SelectDocumentTaskHandler : ITaskHandler
 
     public IReadOnlyList<string> Keywords => new[]
     {
-        "open document", "open last document", "open the document", "open pdf", "open the pdf",
-        "load document", "view document"
+        "open document",
+        "abrir documento",
+        "open last document",
+        "abrir último documento",
+        "open the document",
+        "abrir el documento",
+        "open pdf",
+        "abrir pdf",
+        "open the pdf",
+        "abrir el pdf",
+        "load document",
+        "cargar documento",
+        "view document",
+        "ver documento"
     };
 
     public SelectDocumentTaskHandler(ApplicationDbContext context)
