@@ -1520,13 +1520,14 @@ public class AdminController : ControllerBase
             counts["aiInteractionLogs"] = await _context.AIInteractionLogs.ExecuteDeleteAsync();
             counts["transcriptionJobs"] = await _context.TranscriptionJobs.ExecuteDeleteAsync();
 
-            // Delete all prompt templates (ManagedPromptGroup join rows cascade from this)
-
+            // Delete all prompt templates (ManagedPromptGroup join rows cascade at DB level)
+            counts["managedPrompts"] = await _context.ManagedPrompts.ExecuteDeleteAsync();
 
             // Delete all resource groups (including reminders).
             // ManagedFiles are already gone (cascaded ManagedFileGroup entries).
             // DocumentGroups already deleted. Conversations already deleted.
             // ManagedPromptGroup entries already gone (cascaded from ManagedPrompts deletion above).
+            counts["resourceGroups"] = await _context.ResourceGroups.ExecuteDeleteAsync();
 
 
             // Invalidate all caches so stale data doesn't surface
