@@ -1727,7 +1727,7 @@ export default function App({ mode = "voice", language = "en" }) {
         <div style={styles.commandList}>
           <p style={styles.commandListTitle}>{t.commandsOverlayTitle}</p>
           <div style={styles.commandListGrid}>
-            {t.commandList.map(([cmd, desc]) => (
+            {(t.commandList || []).map(([cmd, desc]) => (
               <div key={cmd} style={styles.commandListRow}>
                 <span style={styles.commandListCmd}>"{cmd}"</span>
                 <span style={styles.commandListDesc}>{desc}</span>
