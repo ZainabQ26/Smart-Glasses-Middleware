@@ -6,7 +6,15 @@ public class NextPageTaskHandler : ITaskHandler
 
     public IReadOnlyList<string> Keywords => new[]
     {
-        "next page", "go to next page", "page down", "forward page", "page forward"
+        "next page",
+        "siguiente página",
+        "go to next page",
+        "ir a la siguiente página",
+        "page down",
+        "avanzar página",
+        "forward page",
+        "página adelante",
+        "page forward"
     };
 
     public Task<string> HandleAsync(string input)

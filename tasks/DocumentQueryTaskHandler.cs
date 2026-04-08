@@ -13,10 +13,23 @@ public class DocumentQueryTaskHandler : ITaskHandler
 
     public string Name => "document-query";
 
-    public IReadOnlyList<string> Keywords => new[]
+    public IReadOnlyList<string> Keywords =>
+    new[]
     {
-        "ask the document", "query document", "what does the document say", "summarize document",
-        "explain in the document", "according to the document", "based on the document"
+        "ask the document",
+        "preguntar al documento",
+        "query document",
+        "consultar documento",
+        "what does the document say",
+        "qué dice el documento",
+        "summarize document",
+        "resumir documento",
+        "explain in the document",
+        "explicar en el documento",
+        "according to the document",
+        "según el documento",
+        "based on the document",
+        "basado en el documento"
     };
 
     public DocumentQueryTaskHandler(IAIService aiService, ILogger<DocumentQueryTaskHandler> logger)
