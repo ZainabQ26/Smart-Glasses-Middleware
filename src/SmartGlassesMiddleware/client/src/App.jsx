@@ -57,32 +57,36 @@ function PennStateShield({ size = 72 }) {
 // ─── TRANSLATIONS ─────────────────────────────────────────────────────────────
 const TRANSLATIONS = {
   en: {
-    title: "This is Eye-RIS! How can I help?",
+    title: "This is Eye-RIS!\nHow can I help?",
     subtitleTemplate: 'Say "{word}" to start, then speak your command.',
     connectingMic: "Connecting microphone…",
     readyTemplate: 'Ready — say "{word}" to begin',
     readyShort: "Ready",
     howItWorksTitle: "🎤 How It Works",
     steps: [
-      'Say "Iris" to wake the assistant.',
+      'Say {word}',
       "Speak command clearly",
-      'Say "Iris" again for the next command.',
-      'After "search recent files"',
+      'Say {word} again for the next command',
+    ],
+    stepSubs: [
+      "(This is to wake the assistant.)",
+      "(The assistant will respond or perform the action.)",
+      null,
     ],
     commonCommandsTitle: "📋 Common Commands",
     commandsOverlayTitle: "📋 Commands",
     commandList: [
-      ["search recent files", "browse recent uploaded files"],
-      ["number #", "go to file number in recent files list"],
-      ["open last document", "Open the last uploaded document"],
+      ["search recent files", "Browse recent uploaded files"],
+      ["number #", "Go to file number in recent files list"],
+      ["open last document", "Opens last uploaded document"],
       ["next/previous page", "Go to the next/previous page"],
       ["go to page 5", "Jump to a specific page"],
-      ["highlight aspirin", "Highlight a word in the open document"],
+      ["highlight aspirin", "Highlight word in open document"],
       ["clear highlights", "Remove all highlights"],
-      ["search for blood pressure", "Search for text in documents"],
+      ["search for blood pressure", "Search for text"],
       ["search for BP", "Search using FDA SPL abbreviations"],
-      ["print document", "Print the open document with highlights"],
-      ["print highlighted", "Print the open document highlighted "],
+      ["print document", "Print open document with highlights"],
+      ["print highlight", "Print the highlighted pages only"],
     ],
     sendingAI: "🤖 Sending to AI…",
     transcribing: "⏳ Transcribing…",
@@ -110,33 +114,36 @@ const TRANSLATIONS = {
     didntCatch: "I didn't catch that command. Please try again.",
   },
   es: {
-    title: "¡Esto es Eye-RIS! ¿En qué puedo ayudarte?",
+    title: "¡Esto es Eye-RIS!\n¿En qué puedo ayudarte?",
     subtitleTemplate: 'Di "{word}" para empezar, luego habla tu comando.',
     connectingMic: "Conectando micrófono…",
     readyTemplate: 'Listo — di "{word}" para comenzar',
     readyShort: "Listo",
     howItWorksTitle: "🎤 Cómo funciona",
     steps: [
-      'Di "{word}" para activar el asistente.',
-      "Habla tu comando claramente.",
-      "El asistente responderá o realizará la acción.",
-      'Di "{word}" de nuevo para el siguiente comando.',
-      'Tras "buscar archivos recientes", puedes indicar el número sin reactivar.',
+      'Di {word}',
+      "Habla tu comando claramente",
+      'Di {word} de nuevo para el siguiente comando',
+    ],
+    stepSubs: [
+      "(Esto activa el asistente.)",
+      "(El asistente responderá o realizará la acción.)",
+      null,
     ],
     commonCommandsTitle: "📋 Comandos comunes",
     commandsOverlayTitle: "📋 Comandos",
     commandList: [
-      ["buscar archivos recientes", "explorar archivos subidos recientemente"],
-      ["número #", "ir al número de archivo en la lista reciente"],
-      ["abrir último documento", "Abrir el último documento subido"],
+      ["buscar archivos recientes", "Explorar archivos subidos recientemente"],
+      ["número #", "Ir al número de archivo en la lista reciente"],
+      ["abrir último documento", "Abre el último documento subido"],
       ["página siguiente/anterior", "Ir a la página siguiente/anterior"],
       ["ir a la página 5", "Saltar a una página específica"],
-      ["resaltar aspirina", "Resaltar una palabra en el documento abierto"],
+      ["resaltar aspirina", "Resaltar palabra en el documento abierto"],
       ["borrar resaltados", "Eliminar todos los resaltados"],
-      ["buscar presión arterial", "Buscar texto en documentos"],
+      ["buscar presión arterial", "Buscar texto"],
       ["buscar PA", "Buscar usando abreviaciones FDA SPL"],
-      ["imprimir documento", "Imprimir el documento abierto con resaltados"],
-      ["imprimir resaltados", "Imprimir el documento abierto resaltado"],
+      ["imprimir documento", "Imprimir documento con resaltados"],
+      ["imprimir resaltado", "Imprimir solo las páginas resaltadas"],
     ],
     sendingAI: "🤖 Enviando a IA…",
     transcribing: "⏳ Transcribiendo…",
@@ -854,12 +861,11 @@ export default function App({ mode = "voice", language = "en" }) {
             return;
           }
 
-          // Number out of range — keep the list visible and continue listening.
+          // Number out of range — keep the list visible and require reactivation.
           addLog(`⚠️ File number ${num} is not in the list (1–${files.length}).`, "warn");
           showTranscript(commandText);
           showAiResponse(`There are only ${files.length} files. Say a number between 1 and ${files.length}.`);
           setPendingAction(capturedPending);
-          keepMicActive = true;
           return;
         }
       }
@@ -870,7 +876,6 @@ export default function App({ mode = "voice", language = "en" }) {
         if (capturedPending?.type === "SHOW_RECENT_FILES") {
           showAiResponse("Please say just the file number, like 1, 2, or 3.");
           setPendingAction(capturedPending);
-          keepMicActive = true;
         } else {
           setPendingAction(null);
           showAiResponse(tpl(t.noClearCommandTemplate, { word: activationWordRef.current }));
@@ -1010,8 +1015,7 @@ export default function App({ mode = "voice", language = "en" }) {
         addLog("📂 Command: show recent uploaded files", "voice");
         setAiResponse(null);
         await fetchRecentDocuments();
-        // Keep mic active so the user can immediately say a number.
-        keepMicActive = true;
+        // File list stays visible; user must reactivate to say a number.
       } else if (answer.startsWith("__ACTION:SELECT_DOCUMENT:")) {
         const parts = answer.split(":");
         const docId   = parts[2];
@@ -1643,7 +1647,7 @@ export default function App({ mode = "voice", language = "en" }) {
           <div style={styles.landingCard} className="sgm-landing-card-inner">
             {/* ── Title row: title centered in full box, lion at right edge ── */}
             <div style={{ position: 'relative' }} className="sgm-landing-title-row">
-              <h1 style={{ ...styles.landingTitle }} className="sgm-landing-title">This is Eye-RIS!<br />How can I help?</h1>
+              <h1 style={{ ...styles.landingTitle, paddingRight: 76, whiteSpace: 'pre-line' }} className="sgm-landing-title">{t.title}</h1>
               <div className="sgm-landing-logo" style={{
                 position: 'absolute',
                 right: 0,
@@ -1660,21 +1664,12 @@ export default function App({ mode = "voice", language = "en" }) {
 
             {/* ── Numbered steps + Ready as final step ──────────────────── */}
             <ol style={styles.landingOl} className="sgm-landing-how">
-              <li>
-                <span>Say <strong style={{color:'#f97316'}}>"Iris"</strong></span>
-                <br /><span className="sub-line" style={{color:'#aaa',fontSize:'0.88rem'}}>(This is to wake the assistant.)</span>
-              </li>
-              <li>
-                <span>Speak command clearly</span>
-                <br /><span className="sub-line" style={{color:'#aaa',fontSize:'0.88rem'}}>(The assistant will respond or perform the action.)</span>
-              </li>
-              <li>
-                <span>Say <strong style={{color:'#f97316'}}>"Iris"</strong> again for the next command</span>
-              </li>
-              <li>
-                <span>After <strong>"search recent files"</strong></span>
-                <br /><span className="sub-line" style={{color:'#aaa',fontSize:'0.88rem'}}>(You can specify a file number without reactivating.)</span>
-              </li>
+              {t.steps.map((step, i) => (
+                <li key={i}>
+                  <span>{renderWithHighlight(step, activationWord)}</span>
+                  {t.stepSubs[i] && <><br /><span className="sub-line" style={{color:'#aaa',fontSize:'0.88rem'}}>{t.stepSubs[i]}</span></>}
+                </li>
+              ))}
               {/* Step n+1: initialisation status (loading or Ready) */}
               <li>
                 <div style={styles.landingStatus}>

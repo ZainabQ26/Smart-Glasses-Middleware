@@ -1587,11 +1587,11 @@
         <!-- Commands Reference Tab -->
         <div id="commands" class="tab-content">
             <div class="section">
-                <h2>📋 Voice Commands</h2>
-                <p style="color: #7f8c8d; font-size: 14px; margin-bottom: 20px;">
+                <h2 id="commands-title">📋 Voice Commands</h2>
+                <p id="commands-subtitle" style="color: #7f8c8d; font-size: 14px; margin-bottom: 20px;">
                     Say the activation word first, then speak one of the commands below.
                 </p>
-                <div style="display: flex; flex-direction: column; gap: 0; border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden;">
+                <div id="commands-grid" style="display: flex; flex-direction: column; gap: 0; border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden;">
                     <div class="cmd-row" style="display:grid;grid-template-columns:220px 1fr;background:#f0f2f5;padding:10px 16px;font-weight:700;font-size:13px;color:#555;">
                         <span>Command</span><span>Description</span>
                     </div>
@@ -1605,7 +1605,7 @@
                     </div>
                     <div class="cmd-row" style="display:grid;grid-template-columns:220px 1fr;padding:10px 16px;border-top:1px solid #e8e8e8;align-items:start;">
                         <span style="font-family:monospace;color:#e05c00;font-size:13px;">"open last document"</span>
-                        <span style="color:#555;font-size:14px;">Open the last uploaded document</span>
+                        <span style="color:#555;font-size:14px;">Opens last uploaded document</span>
                     </div>
                     <div class="cmd-row" style="display:grid;grid-template-columns:220px 1fr;padding:10px 16px;border-top:1px solid #e8e8e8;background:#fafafa;align-items:start;">
                         <span style="font-family:monospace;color:#e05c00;font-size:13px;">"next/previous page"</span>
@@ -1617,7 +1617,7 @@
                     </div>
                     <div class="cmd-row" style="display:grid;grid-template-columns:220px 1fr;padding:10px 16px;border-top:1px solid #e8e8e8;background:#fafafa;align-items:start;">
                         <span style="font-family:monospace;color:#e05c00;font-size:13px;">"highlight aspirin"</span>
-                        <span style="color:#555;font-size:14px;">Highlight a word in the open document</span>
+                        <span style="color:#555;font-size:14px;">Highlight word in open document</span>
                     </div>
                     <div class="cmd-row" style="display:grid;grid-template-columns:220px 1fr;padding:10px 16px;border-top:1px solid #e8e8e8;align-items:start;">
                         <span style="font-family:monospace;color:#e05c00;font-size:13px;">"clear highlights"</span>
@@ -1625,33 +1625,95 @@
                     </div>
                     <div class="cmd-row" style="display:grid;grid-template-columns:220px 1fr;padding:10px 16px;border-top:1px solid #e8e8e8;background:#fafafa;align-items:start;">
                         <span style="font-family:monospace;color:#e05c00;font-size:13px;">"search for blood pressure"</span>
-                        <span style="color:#555;font-size:14px;">Search for text in documents</span>
+                        <span style="color:#555;font-size:14px;">Search for text</span>
                     </div>
                     <div class="cmd-row" style="display:grid;grid-template-columns:220px 1fr;padding:10px 16px;border-top:1px solid #e8e8e8;align-items:start;">
                         <span style="font-family:monospace;color:#e05c00;font-size:13px;">"search for BP"</span>
                         <span style="color:#555;font-size:14px;">Search using FDA SPL abbreviations</span>
                     </div>
                     <div class="cmd-row" style="display:grid;grid-template-columns:220px 1fr;padding:10px 16px;border-top:1px solid #e8e8e8;background:#fafafa;align-items:start;">
-                        <span style="font-family:monospace;color:#e05c00;font-size:13px;">"remind me to…"</span>
-                        <span style="color:#555;font-size:14px;">Set a reminder</span>
-                    </div>
-                    <div class="cmd-row" style="display:grid;grid-template-columns:220px 1fr;padding:10px 16px;border-top:1px solid #e8e8e8;align-items:start;">
-                        <span style="font-family:monospace;color:#e05c00;font-size:13px;">"show my reminders"</span>
-                        <span style="color:#555;font-size:14px;">List all your reminders</span>
-                    </div>
-                    <div class="cmd-row" style="display:grid;grid-template-columns:220px 1fr;padding:10px 16px;border-top:1px solid #e8e8e8;background:#fafafa;align-items:start;">
                         <span style="font-family:monospace;color:#e05c00;font-size:13px;">"print document"</span>
-                        <span style="color:#555;font-size:14px;">Print the open document with highlights</span>
+                        <span style="color:#555;font-size:14px;">Print open document with highlights</span>
                     </div>
                     <div class="cmd-row" style="display:grid;grid-template-columns:220px 1fr;padding:10px 16px;border-top:1px solid #e8e8e8;align-items:start;">
-                        <span style="font-family:monospace;color:#e05c00;font-size:13px;">"admin panel"</span>
-                        <span style="color:#555;font-size:14px;">Open the admin panel</span>
+                        <span style="font-family:monospace;color:#e05c00;font-size:13px;">"print highlight"</span>
+                        <span style="color:#555;font-size:14px;">Print the highlighted pages only</span>
                     </div>
                 </div>
             </div>
         </div>
 
     <script>
+        // ── Commands tab language support ────────────────────────────────────
+        (function () {
+            var ADMIN_COMMANDS = {
+                en: {
+                    title: '📋 Voice Commands',
+                    subtitle: 'Say the activation word first, then speak one of the commands below.',
+                    header: ['Command', 'Description'],
+                    rows: [
+                        ['search recent files', 'Browse recent uploaded files'],
+                        ['number #', 'Go to file number in recent files list'],
+                        ['open last document', 'Opens last uploaded document'],
+                        ['next/previous page', 'Go to the next/previous page'],
+                        ['go to page 5', 'Jump to a specific page'],
+                        ['highlight aspirin', 'Highlight word in open document'],
+                        ['clear highlights', 'Remove all highlights'],
+                        ['search for blood pressure', 'Search for text'],
+                        ['search for BP', 'Search using FDA SPL abbreviations'],
+                        ['print document', 'Print open document with highlights'],
+                        ['print highlight', 'Print the highlighted pages only'],
+                    ]
+                },
+                es: {
+                    title: '📋 Comandos de Voz',
+                    subtitle: 'Di la palabra de activación primero, luego habla uno de los comandos de abajo.',
+                    header: ['Comando', 'Descripción'],
+                    rows: [
+                        ['buscar archivos recientes', 'Explorar archivos subidos recientemente'],
+                        ['número #', 'Ir al número de archivo en la lista reciente'],
+                        ['abrir último documento', 'Abre el último documento subido'],
+                        ['página siguiente/anterior', 'Ir a la página siguiente/anterior'],
+                        ['ir a la página 5', 'Saltar a una página específica'],
+                        ['resaltar aspirina', 'Resaltar palabra en el documento abierto'],
+                        ['borrar resaltados', 'Eliminar todos los resaltados'],
+                        ['buscar presión arterial', 'Buscar texto'],
+                        ['buscar PA', 'Buscar usando abreviaciones FDA SPL'],
+                        ['imprimir documento', 'Imprimir documento con resaltados'],
+                        ['imprimir resaltado', 'Imprimir solo las páginas resaltadas'],
+                    ]
+                }
+            };
+
+            function applyCommandsLang(lang) {
+                var data = ADMIN_COMMANDS[lang] || ADMIN_COMMANDS.en;
+                var title = document.getElementById('commands-title');
+                var subtitle = document.getElementById('commands-subtitle');
+                var grid = document.getElementById('commands-grid');
+                if (title) title.textContent = data.title;
+                if (subtitle) subtitle.textContent = data.subtitle;
+                if (!grid) return;
+                var html = '<div class="cmd-row" style="display:grid;grid-template-columns:220px 1fr;background:#f0f2f5;padding:10px 16px;font-weight:700;font-size:13px;color:#555;"><span>' + data.header[0] + '</span><span>' + data.header[1] + '</span></div>';
+                data.rows.forEach(function (row, i) {
+                    var bg = i % 2 === 1 ? 'background:#fafafa;' : '';
+                    html += '<div class="cmd-row" style="display:grid;grid-template-columns:220px 1fr;padding:10px 16px;border-top:1px solid #e8e8e8;' + bg + 'align-items:start;"><span style="font-family:monospace;color:#e05c00;font-size:13px;">&quot;' + row[0] + '&quot;</span><span style="color:#555;font-size:14px;">' + row[1] + '</span></div>';
+                });
+                grid.innerHTML = html;
+            }
+
+            function getLang() {
+                return localStorage.getItem('adminLanguage') === 'es' ? 'es' : 'en';
+            }
+
+            // Apply on language toggle
+            window.addEventListener('adminlanguagechange', function () { applyCommandsLang(getLang()); });
+            // Apply on initial page load
+            document.addEventListener('DOMContentLoaded', function () { applyCommandsLang(getLang()); });
+            // Also apply immediately in case DOMContentLoaded already fired
+            if (document.readyState !== 'loading') applyCommandsLang(getLang());
+        })();
+        // ── End Commands tab language support ────────────────────────────────
+
         // Early shims to ensure tests can access these functions immediately on page load
         // The real implementations in admin.js will overwrite these when loaded.
         window.toggleSourceExpand = window.toggleSourceExpand || function() { /* noop until admin.js loads */ };
