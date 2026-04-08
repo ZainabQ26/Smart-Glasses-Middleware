@@ -17,7 +17,16 @@ public class GoToPageTaskHandler : ITaskHandler
 
     public IReadOnlyList<string> Keywords => new[]
     {
-        "go to page", "jump to page", "navigate to page", "turn to page", "open page"
+        "go to page",
+        "ir a página",
+        "jump to page",
+        "saltar a página",
+        "navigate to page",
+        "navegar a página",
+        "turn to page",
+        "cambiar a página",
+        "open page",
+        "abrir página"
     };
 
     // Matches one or more digits optionally preceded by ordinal suffixes (e.g. "1st", "2nd").

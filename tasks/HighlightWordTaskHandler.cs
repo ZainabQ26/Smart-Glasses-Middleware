@@ -28,10 +28,36 @@ public class HighlightWordTaskHandler : ITaskHandler
 
     public IReadOnlyList<string> Keywords => new[]
     {
-        "highlight the word", "highlight word", "highlight the phrase", "highlight phrase",
-        "highlight the", "highlight", "highlights the", "highlights",
-        "search for the word", "search for the phrase",
-        "search for the", "search for", "find the word", "find the phrase", "find the"
+        "highlight the word",
+        "resaltar la palabra",
+        "highlight word",
+        "resaltar palabra",
+        "highlight the phrase",
+        "resaltar la frase",
+        "highlight phrase",
+        "resaltar frase",
+        "highlight the",
+        "resaltar el",
+        "highlight",
+        "resaltar",
+        "highlights the",
+        "resalta el",
+        "highlights",
+        "resaltados",
+        "search for the word",
+        "buscar la palabra",
+        "search for the phrase",
+        "buscar la frase",
+        "search for the",
+        "buscar el",
+        "search for",
+        "buscar",
+        "find the word",
+        "encontrar la palabra",
+        "find the phrase",
+        "encontrar la frase",
+        "find the",
+        "encontrar el"
     };
 
     public HighlightWordTaskHandler(IAbbreviationService abbreviationService)

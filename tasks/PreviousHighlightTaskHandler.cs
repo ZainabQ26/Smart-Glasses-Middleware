@@ -7,15 +7,20 @@ public class PreviousHighlightTaskHandler : ITaskHandler
 {
     public string Name => "previous-highlight";
 
-    public IReadOnlyList<string> Keywords => new[]
+    public IReadOnlyList<string> Keywords =>
+    new[]
     {
         "previous highlight",
+        "resaltado anterior",
         "prev highlight",
         "back highlight",
         "previous highlighted",
         "previous highlighted word",
+        "palabra resaltada anterior",
         "go to previous highlight",
-        "find previous highlight"
+        "ir al resaltado anterior",
+        "find previous highlight",
+        "encontrar resaltado anterior"
     };
 
     public Task<string> HandleAsync(string input)

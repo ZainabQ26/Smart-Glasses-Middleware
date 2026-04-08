@@ -20,7 +20,14 @@ public class DocumentHighlightTaskHandler : ITaskHandler
 
     public IReadOnlyList<string> Keywords => new[]
     {
-        "highlight in document", "document highlight", "highlights in document", "document highlights"
+        "highlight in document",
+        "resaltar en documento",
+        "document highlight",
+        "resaltado de documento",
+        "highlights in document",
+        "resaltados en documento",
+        "document highlights",
+        "resaltados del documento"
     };
 
     public DocumentHighlightTaskHandler(IAbbreviationService abbreviationService)

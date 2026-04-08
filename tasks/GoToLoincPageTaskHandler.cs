@@ -21,7 +21,15 @@ public class GoToLoincPageTaskHandler : ITaskHandler
 
     public IReadOnlyList<string> Keywords => new[]
     {
-        "loinc", "go to loinc", "find loinc", "navigate to loinc", "loinc code"
+        "loinc",
+        "go to loinc",
+        "ir a loinc",
+        "find loinc",
+        "encontrar loinc",
+        "navigate to loinc",
+        "navegar a loinc",
+        "loinc code",
+        "código loinc"
     };
 
     // Standard LOINC code pattern: one or more digits, a hyphen, one or more digits.

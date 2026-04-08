@@ -12,11 +12,17 @@ public class SummarizePageTaskHandler : ITaskHandler
     public IReadOnlyList<string> Keywords =>
     [
         "summarize page",
+        "resumir página",
         "summarize this page",
+        "resumir esta página",
         "summarize current page",
+        "resumir página actual",
         "summary of this page",
+        "resumen de esta página",
         "summary of the page",
-        "what is on this page"
+        "resumen de la página",
+        "what is on this page",
+        "qué hay en esta página"
     ];
 
     public Task<string> HandleAsync(string input)
