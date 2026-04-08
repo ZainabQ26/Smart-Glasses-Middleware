@@ -6,7 +6,17 @@ public class PreviousPageTaskHandler : ITaskHandler
 
     public IReadOnlyList<string> Keywords => new[]
     {
-        "previous page", "prev page", "go back page", "page up", "back page", "go to previous page"
+        "previous page",
+        "página anterior",
+        "prev page",
+        "pág anterior",
+        "go back page",
+        "retroceder página",
+        "page up",
+        "back page",
+        "página atrás",
+        "go to previous page",
+        "ir a la página anterior"
     };
 
     public Task<string> HandleAsync(string input)

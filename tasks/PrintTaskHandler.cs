@@ -9,10 +9,23 @@ public class PrintTaskHandler : ITaskHandler
 {
     public string Name => "print";
 
-    public IReadOnlyList<string> Keywords => new[]
+    public IReadOnlyList<string> Keywords =>
+    new[]
     {
-        "print", "print document", "print the document", "print pdf", "print the pdf",
-        "print page", "print this"
+        "print",
+        "imprimir",
+        "print document",
+        "imprimir documento",
+        "print the document",
+        "imprimir el documento",
+        "print pdf",
+        "imprimir pdf",
+        "print the pdf",
+        "imprimir el pdf",
+        "print page",
+        "imprimir página",
+        "print this",
+        "imprimir esto"
     };
 
     public Task<string> HandleAsync(string input)
