@@ -16,6 +16,7 @@ public class SelectDocumentTaskHandler : ITaskHandler
         "abrir documento",
         "open last document",
         "abrir último documento",
+        "abrir ultimo documento",
         "open the document",
         "abrir el documento",
         "open pdf",
@@ -25,7 +26,10 @@ public class SelectDocumentTaskHandler : ITaskHandler
         "load document",
         "cargar documento",
         "view document",
-        "ver documento"
+        "ver documento",
+        "seleccionar documento",
+        "ultimo documento",
+        "ver ultimo documento"
     };
 
     public SelectDocumentTaskHandler(ApplicationDbContext context)
