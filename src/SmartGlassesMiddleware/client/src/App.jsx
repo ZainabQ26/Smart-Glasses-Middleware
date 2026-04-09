@@ -888,7 +888,7 @@ export default function App({ mode = "voice", language = "en" }) {
       // ── Require minimum command length (filter out single-word stray background noise) ─
       // ── Require minimum command length (but allow known single-word commands) ─
       const commandWords = commandText.trim().split(/\s+/);
-      const knownSingleWordCommands = ['iris', 'activate', 'next', 'previous', 'back', 'help', 'menu', 'close', 'print', 'time', 'reminders', 'summary', 'admin', 'summarize'];
+      const knownSingleWordCommands = ['iris', 'activate', 'next', 'previous', 'back', 'help', 'menu', 'close', 'print', 'reminders', 'summary', 'admin', 'summarize'];
       const isSingleWordCommand = commandWords.length === 1 && (knownSingleWordCommands.includes(commandWords[0].toLowerCase()) || /^\d+$/.test(commandWords[0]));
       const requiresTwoWords = !isSingleWordCommand && commandWords.length < 2;
       
