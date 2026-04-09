@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using System.Globalization;
 using System.Text;
 
 namespace SmartGlassesMiddleware.Services;
@@ -137,11 +138,30 @@ public class TaskDispatcher : ITaskDispatcher
                 StringComparer.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Removes Unicode diacritical marks from a string so that accent-insensitive
+    /// matching works for Spanish and other languages. For example, "último" becomes
+    /// "ultimo" and "página" becomes "pagina".
+    /// </summary>
+    internal static string StripDiacritics(string text)
+    {
+        var normalized = text.Normalize(NormalizationForm.FormD);
+        var sb = new StringBuilder(normalized.Length);
+        foreach (var c in normalized)
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
+                sb.Append(c);
+        }
+        return sb.ToString().Normalize(NormalizationForm.FormC);
+    }
+
     public string? TryMatchByKeyword(string input)
     {
         if (string.IsNullOrWhiteSpace(input)) return null;
 
-        var normalizedInput = input.ToLowerInvariant();
+        // Normalize diacritics so Spanish accented letters (á,é,í,ó,ú,ñ,ü) match
+        // regardless of whether Whisper includes or omits accent marks.
+        var normalizedInput = StripDiacritics(input.ToLowerInvariant());
         var allowed = new HashSet<string>(
             (KnownTasks ?? Array.Empty<string>()).Select(t => t.ToLowerInvariant()),
             StringComparer.OrdinalIgnoreCase);
@@ -169,7 +189,9 @@ public class TaskDispatcher : ITaskDispatcher
             foreach (var keyword in handler.Keywords)
             {
                 if (string.IsNullOrWhiteSpace(keyword)) continue;
-                var lowerKeyword = keyword.ToLowerInvariant().Trim();
+                // Strip diacritics from keyword too so "abrir último documento"
+                // matches "abrir ultimo documento" (Whisper may or may not include accents).
+                var lowerKeyword = StripDiacritics(keyword.ToLowerInvariant().Trim());
                 // Use word-boundary matching so "print" doesn't match "fingerprint".
                 // A keyword matches when it appears in the input surrounded by
                 // non-alphanumeric characters (or at the start/end of the string).

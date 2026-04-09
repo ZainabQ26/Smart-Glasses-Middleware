@@ -888,7 +888,7 @@ export default function App({ mode = "voice", language = "en" }) {
       // ── Require minimum command length (filter out single-word stray background noise) ─
       // ── Require minimum command length (but allow known single-word commands) ─
       const commandWords = commandText.trim().split(/\s+/);
-      const knownSingleWordCommands = ['iris', 'activate', 'next', 'previous', 'back', 'help', 'menu', 'close', 'print', 'time', 'reminders', 'summary', 'admin', 'summarize'];
+      const knownSingleWordCommands = ['iris', 'activate', 'next', 'previous', 'back', 'help', 'menu', 'close', 'print', 'reminders', 'summary', 'admin', 'summarize'];
       const isSingleWordCommand = commandWords.length === 1 && (knownSingleWordCommands.includes(commandWords[0].toLowerCase()) || /^\d+$/.test(commandWords[0]));
       const requiresTwoWords = !isSingleWordCommand && commandWords.length < 2;
       
@@ -934,7 +934,7 @@ export default function App({ mode = "voice", language = "en" }) {
           }
         }
 
-        if (/\b(?:remove|clear)\s+(?:all\s+)?highlights?\b/.test(lowered)) {
+        if (/\b(?:remove|clear)\s+(?:all\s+)?highlights?\b|\b(?:borrar|eliminar|quitar|limpiar)\s+(?:todos?\s+(?:los\s+)?)?resaltados?\b/.test(lowered)) {
           addLog("🗑️ Command: remove all highlights", "voice");
           setAiResponse(null);
           setPendingAction(null);
@@ -942,7 +942,7 @@ export default function App({ mode = "voice", language = "en" }) {
           return;
         }
 
-        if (/\bclose\s+(?:the\s+)?(?:document|pdf)\b/.test(lowered)) {
+        if (/\bclose\s+(?:the\s+)?(?:document|pdf)\b|\bcerrar\s+(?:el\s+)?(?:documento|pdf)\b/.test(lowered)) {
           addLog("📄 Command: close document", "voice");
           setAiResponse(null);
           setPendingAction(null);
@@ -950,10 +950,10 @@ export default function App({ mode = "voice", language = "en" }) {
           return;
         }
 
-        const highlightMatch = commandText.match(/\bhighlight\s+(.+)$/i);
+        const highlightMatch = commandText.match(/\b(?:highlight|resaltar)\s+(.+)$/i);
         if (highlightMatch) {
           const phrase = highlightMatch[1]
-            .replace(/^the\s+/i, "")
+            .replace(/^(?:the|el|la|los|las)\s+/i, "")
             .replace(/\s+please\.?$/i, "")
             .trim();
 
@@ -1905,20 +1905,33 @@ function parseFileSelectionNumber(text) {
   const s = text.trim().toLowerCase();
   const normalized = s.replace(/[.,!?;:]+$/g, "").trim();
 
-  // Word ordinals / cardinals (covers the typical 1–5 list size)
+  // Word ordinals / cardinals — English and Spanish (covers the typical 1–5 list size)
   const words = {
     one: 1, first: 1,
     two: 2, second: 2, to: 2, too: 2,
     three: 3, third: 3,
     four: 4, fourth: 4, for: 4,
     five: 5, fifth: 5,
+    // Spanish cardinals
+    uno: 1, una: 1,
+    dos: 2,
+    tres: 3,
+    cuatro: 4,
+    cinco: 5,
+    // Spanish ordinals
+    primero: 1, primera: 1, primer: 1,
+    segundo: 2, segunda: 2,
+    tercero: 3, tercera: 3, tercer: 3,
+    cuarto: 4, cuarta: 4,
+    quinto: 5, quinta: 5,
   };
   for (const [word, num] of Object.entries(words)) {
     if (new RegExp(`\\b${word}\\b`).test(normalized)) return num;
   }
 
   // Patterns like "file 2", "number 3", "open 4", "#5", "pick 1", "select 2"
-  const prefixMatch = normalized.match(/(?:file|number|open|pick|select|item)\s*#?\s*([1-9])\b/);
+  // Also Spanish: "archivo 2", "número 3", "abrir 4", "seleccionar 2"
+  const prefixMatch = normalized.match(/(?:file|number|open|pick|select|item|archivo|numero|abrir|seleccionar)\s*#?\s*([1-9])\b/);
   if (prefixMatch) return parseInt(prefixMatch[1], 10);
 
   // Bare single digit (possibly surrounded by whitespace or punctuation)

@@ -1493,16 +1493,16 @@
 </head>
 <body>
     <!-- Server connectivity warning bar (hidden by default). Sticky/fixed at top when visible. -->
-    <div id="signalr-warning" role="status" aria-live="polite" style="display: none; position: fixed; top: 0; left: 0; width: 100%; background: #e74c3c; color: white; padding: 10px 16px; text-align: center; font-weight: 600; z-index: 20000; box-shadow: 0 2px 6px rgba(0,0,0,0.15);">Server unreachable. Retrying...</div>
+    <div id="signalr-warning" role="status" aria-live="polite" data-i18n="serverUnreachable" style="display: none; position: fixed; top: 0; left: 0; width: 100%; background: #e74c3c; color: white; padding: 10px 16px; text-align: center; font-weight: 600; z-index: 20000; box-shadow: 0 2px 6px rgba(0,0,0,0.15);">Server unreachable. Retrying...</div>
     <header>
-        <h1>Smart Glasses - Admin Panel</h1>
+        <h1 data-i18n="pageTitle">Smart Glasses - Admin Panel</h1>
         <div class="header-nav">
-            <a href="/" data-testid="admin-home-link">🏠 Home</a>
-            <a href="/monitoring.html" data-testid="monitoring-link">📊 Request Monitoring</a>
-            <button id="btn-download-abbreviations-header" data-testid="btn-download-abbreviations-header" title="Download all abbreviations as CSV"
+            <a href="/" data-testid="admin-home-link" data-i18n="navHome">🏠 Home</a>
+            <a href="/monitoring.html" data-testid="monitoring-link" data-i18n="navMonitoring">📊 Request Monitoring</a>
+            <button id="btn-download-abbreviations-header" data-testid="btn-download-abbreviations-header" data-i18n-title="downloadAbbreviationsTitle" title="Download all abbreviations as CSV"
                 style="font-size:0.85rem;font-weight:600;padding:6px 14px;background:#0b63a6;color:white;border:none;border-radius:4px;cursor:pointer;transition:background 0.2s; margin-right: 8px;"
                 onmouseover="this.style.background='#1976d2'" onmouseout="this.style.background='#0b63a6'">
-                ⬇ Abbreviations CSV
+                <span data-i18n="downloadAbbreviations">⬇ Abbreviations CSV</span>
             </button>
             <!-- SignalR indicator removed in favor of a top warning bar when disconnected -->
         </div>
@@ -1512,10 +1512,10 @@
         <!-- Toast container is created by toasts.js and appended to document.body -->
 
         <div class="tabs" data-testid="admin-tabs">
-            <button class="tab active" data-tab="files" data-testid="tab-files" aria-controls="files">Files</button>
-            <button class="tab" data-tab="prompts" data-testid="tab-prompts" aria-controls="prompts">Conversation</button>
-            <button class="tab" data-tab="groq-live" data-testid="tab-groq-live" aria-controls="groq-live">🎙 Groq Live</button>
-            <button class="tab" data-tab="commands" data-testid="tab-commands" aria-controls="commands">📋 Commands</button>
+            <button class="tab active" data-tab="files" data-testid="tab-files" aria-controls="files" data-i18n="tabFiles">Files</button>
+            <button class="tab" data-tab="prompts" data-testid="tab-prompts" aria-controls="prompts" data-i18n="tabConversation">Conversation</button>
+            <button class="tab" data-tab="groq-live" data-testid="tab-groq-live" aria-controls="groq-live" data-i18n="tabGroqLive">🎙 Groq Live</button>
+            <button class="tab" data-tab="commands" data-testid="tab-commands" aria-controls="commands" data-i18n="tabCommands">📋 Commands</button>
             <button id="lang-toggle" type="button" title="Cambiar a Español" aria-label="Cambiar a Español" data-testid="lang-toggle">🇪🇸 ES</button>
             <button id="theme-toggle" class="theme-toggle" type="button" title="Toggle dark mode" aria-label="Toggle dark mode" data-testid="theme-toggle">🌙</button>
         </div>
@@ -1524,25 +1524,25 @@
         <div id="files" class="tab-content active">
             <section id="files-section">
             <div class="section">
-                <h2>Upload File</h2>
+                <h2 data-i18n="uploadFileTitle">Upload File</h2>
                 <form id="upload-form">
                     <div class="form-group">
-                        <label for="file-input">Select File (auto-upload on select)</label>
+                        <label for="file-input" data-i18n="uploadFileLabel">Select File (auto-upload on select)</label>
                         <input type="file" id="file-input" accept="image/*,.pdf,.docx,.txt,.xml" required>
                     </div>
                 </form>
             </div>
 
 <div class="section">
-    <h2>Uploads</h2>
+    <h2 data-i18n="uploadsTitle">Uploads</h2>
     <div id="file-preview" style="display: none; margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 6px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-            <strong>Preview:</strong>
+            <strong data-i18n="previewLabel">Preview:</strong>
             <div>
-                <button type="button" id="download-file" class="secondary" style="padding: 5px 10px; font-size: 12px; margin-right: 8px;">
+                <button type="button" id="download-file" class="secondary" style="padding: 5px 10px; font-size: 12px; margin-right: 8px;" data-i18n="downloadBtn">
                     Download
                 </button>
-                <button type="button" id="close-preview" class="secondary" style="padding: 5px 10px; font-size: 12px;">
+                <button type="button" id="close-preview" class="secondary" style="padding: 5px 10px; font-size: 12px;" data-i18n="closeBtn">
                     Close
                 </button>
             </div>
@@ -1563,17 +1563,17 @@
         <div id="groq-live" class="tab-content">
             <div class="section">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; flex-wrap: wrap; gap: 10px;">
-                    <h2 style="margin: 0;">🎙 Groq Live Transcription</h2>
+                    <h2 style="margin: 0;" data-i18n="groqLiveTitle">🎙 Groq Live Transcription</h2>
                     <div style="display: flex; gap: 8px; align-items: center;">
-                        <span id="groq-live-status" style="font-size: 12px; color: #7f8c8d; padding: 4px 10px; border-radius: 12px; background: #ecf0f1;">Inactive</span>
-                        <button id="groq-live-clear" class="secondary" style="padding: 6px 14px; font-size: 13px;">Clear</button>
+                        <span id="groq-live-status" style="font-size: 12px; color: #7f8c8d; padding: 4px 10px; border-radius: 12px; background: #ecf0f1;" data-i18n="groqLiveInactive">Inactive</span>
+                        <button id="groq-live-clear" class="secondary" style="padding: 6px 14px; font-size: 13px;" data-i18n="groqLiveClear">Clear</button>
                     </div>
                 </div>
-                <p style="font-size: 13px; color: #7f8c8d; margin-top: 0; margin-bottom: 16px;">
+                <p id="groq-live-desc" style="font-size: 13px; color: #7f8c8d; margin-top: 0; margin-bottom: 16px;" data-i18n="groqLiveDesc">
                     Shows every result Groq Whisper returns — wakeword checks and full commands — in real time, regardless of whether the activation keyword was heard.
                 </p>
                 <div id="groq-live-list" style="display: flex; flex-direction: column; gap: 6px; max-height: 600px; overflow-y: auto; background: #f8f9fa; border: 1px solid #e0e0e0; border-radius: 8px; padding: 12px;">
-                    <div class="empty-state" id="groq-live-empty"><p>No transcriptions yet. Groq results will appear here when a device is active.</p></div>
+                    <div class="empty-state" id="groq-live-empty"><p data-i18n="groqLiveEmpty">No transcriptions yet. Groq results will appear here when a device is active.</p></div>
                 </div>
             </div>
         </div>
@@ -1638,6 +1638,110 @@
         </div>
 
     <script>
+        // ── Full admin page UI translation ────────────────────────────────────
+        (function () {
+            var ADMIN_UI = {
+                en: {
+                    pageTitle: 'Smart Glasses - Admin Panel',
+                    serverUnreachable: 'Server unreachable. Retrying...',
+                    navHome: '🏠 Home',
+                    navMonitoring: '📊 Request Monitoring',
+                    downloadAbbreviationsTitle: 'Download all abbreviations as CSV',
+                    downloadAbbreviations: '⬇ Abbreviations CSV',
+                    tabFiles: 'Files',
+                    tabConversation: 'Conversation',
+                    tabGroqLive: '🎙 Groq Live',
+                    tabCommands: '📋 Commands',
+                    uploadFileTitle: 'Upload File',
+                    uploadFileLabel: 'Select File (auto-upload on select)',
+                    uploadsTitle: 'Uploads',
+                    previewLabel: 'Preview:',
+                    downloadBtn: 'Download',
+                    closeBtn: 'Close',
+                    groqLiveTitle: '🎙 Groq Live Transcription',
+                    groqLiveInactive: 'Inactive',
+                    groqLiveClear: 'Clear',
+                    groqLiveDesc: 'Shows every result Groq Whisper returns — wakeword checks and full commands — in real time, regardless of whether the activation keyword was heard.',
+                    groqLiveEmpty: 'No transcriptions yet. Groq results will appear here when a device is active.',
+                    // Dynamic strings used by admin.js
+                    loading: 'Loading...',
+                    serverUnavailable: 'Server is temporarily unavailable. File list will refresh automatically.',
+                    serverBusy: 'Server is busy. File list will refresh automatically.',
+                    noUploadsYet: 'No uploads yet',
+                    noUploadsToShow: 'No uploads to show',
+                    noRecentFiles: 'No recent files found. Upload one first, then try again.',
+                    loadingPreview: 'Loading preview...',
+                    noPreviewAvailable: 'No preview available for this file type. Use download.',
+                },
+                es: {
+                    pageTitle: 'Smart Glasses - Panel de Administración',
+                    serverUnreachable: 'Servidor no disponible. Reintentando...',
+                    navHome: '🏠 Inicio',
+                    navMonitoring: '📊 Monitoreo de Solicitudes',
+                    downloadAbbreviationsTitle: 'Descargar todas las abreviaturas como CSV',
+                    downloadAbbreviations: '⬇ CSV de Abreviaturas',
+                    tabFiles: 'Archivos',
+                    tabConversation: 'Conversación',
+                    tabGroqLive: '🎙 Groq en Vivo',
+                    tabCommands: '📋 Comandos',
+                    uploadFileTitle: 'Subir Archivo',
+                    uploadFileLabel: 'Seleccionar Archivo (se sube automáticamente)',
+                    uploadsTitle: 'Archivos Subidos',
+                    previewLabel: 'Vista previa:',
+                    downloadBtn: 'Descargar',
+                    closeBtn: 'Cerrar',
+                    groqLiveTitle: '🎙 Transcripción en Vivo Groq',
+                    groqLiveInactive: 'Inactivo',
+                    groqLiveClear: 'Limpiar',
+                    groqLiveDesc: 'Muestra cada resultado que devuelve Groq Whisper — verificaciones de palabra de activación y comandos completos — en tiempo real, independientemente de si se escuchó la palabra de activación.',
+                    groqLiveEmpty: 'Aún no hay transcripciones. Los resultados de Groq aparecerán aquí cuando un dispositivo esté activo.',
+                    // Dynamic strings used by admin.js
+                    loading: 'Cargando...',
+                    serverUnavailable: 'El servidor no está disponible temporalmente. La lista se actualizará automáticamente.',
+                    serverBusy: 'El servidor está ocupado. La lista se actualizará automáticamente.',
+                    noUploadsYet: 'Aún no hay archivos subidos',
+                    noUploadsToShow: 'No hay archivos para mostrar',
+                    noRecentFiles: 'No se encontraron archivos recientes. Sube uno primero.',
+                    loadingPreview: 'Cargando vista previa...',
+                    noPreviewAvailable: 'Vista previa no disponible para este tipo de archivo. Usa la descarga.',
+                }
+            };
+
+            function applyAdminUiLang(lang) {
+                var strings = ADMIN_UI[lang] || ADMIN_UI.en;
+                // Translate textContent for all [data-i18n] elements
+                document.querySelectorAll('[data-i18n]').forEach(function (el) {
+                    var key = el.getAttribute('data-i18n');
+                    if (strings[key] !== undefined) el.textContent = strings[key];
+                });
+                // Translate title attributes for [data-i18n-title] elements
+                document.querySelectorAll('[data-i18n-title]').forEach(function (el) {
+                    var key = el.getAttribute('data-i18n-title');
+                    if (strings[key] !== undefined) el.title = strings[key];
+                });
+                // Update <html lang> attribute
+                document.documentElement.lang = lang;
+                // Update <title>
+                if (strings.pageTitle) document.title = strings.pageTitle;
+                // Expose the current strings on window so admin.js can use them
+                window.adminUiStrings = strings;
+            }
+
+            // Expose globally so admin.js and the language toggle can call it
+            window.applyAdminUiLang = applyAdminUiLang;
+
+            function getLang() {
+                return localStorage.getItem('adminLanguage') === 'es' ? 'es' : 'en';
+            }
+
+            // Apply on language toggle
+            window.addEventListener('adminlanguagechange', function () { applyAdminUiLang(getLang()); });
+            // Apply on initial page load
+            document.addEventListener('DOMContentLoaded', function () { applyAdminUiLang(getLang()); });
+            // Also apply immediately in case DOMContentLoaded already fired
+            if (document.readyState !== 'loading') applyAdminUiLang(getLang());
+        })();
+
         // ── Commands tab language support ────────────────────────────────────
         (function () {
             var ADMIN_COMMANDS = {

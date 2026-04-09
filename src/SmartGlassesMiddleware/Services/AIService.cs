@@ -1,6 +1,7 @@
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
 using Microsoft.SemanticKernel.Connectors.OpenAI;
+using System.Globalization;
 using System.Text.Json;
 using System.Linq;
 using System.Diagnostics;
@@ -23,7 +24,6 @@ public class AIService : IAIService
 {
     private static readonly Dictionary<string, string> TaskSummaryMap = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["time"] = "Returns the current date and time.",
         ["reminder"] = "Creates and saves a reminder.",
         ["delete-reminder"] = "Deletes a reminder that matches provided text.",
         ["edit-reminder"] = "Updates an existing reminder.",
@@ -277,26 +277,15 @@ public class AIService : IAIService
     {
         if (string.IsNullOrWhiteSpace(input)) return null;
 
-        var normalized = Regex.Replace(input.ToLowerInvariant(), @"[^a-z0-9\s-]", " ");
+        // Normalize: strip diacritics so Spanish accent variants ("último"→"ultimo",
+        // "página"→"pagina") match the same rule. Then keep only ASCII alphanumeric,
+        // space, and hyphen to strip remaining non-Latin symbols.
+        var decomposed = input.ToLowerInvariant().Normalize(NormalizationForm.FormD);
+        var withoutDiacritics = new string(decomposed
+            .Where(c => CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
+            .ToArray());
+        var normalized = Regex.Replace(withoutDiacritics, @"[^a-z0-9\s-]", " ");
         normalized = Regex.Replace(normalized, @"\s+", " ").Trim();
-
-        // ── time ──────────────────────────────────────────────────────────────
-        if (ContainsAnyPhrase(normalized,
-            "what time",
-            "what is the time",
-            "current time",
-            "time right now",
-            "tell me the time",
-            "what hour",
-            "what day",
-            "what is today",
-            "today's date",
-            "current date",
-            "date and time",
-            "what's the time"))
-        {
-            return "time";
-        }
 
         // ── reminder ──────────────────────────────────────────────────────────
         if (ContainsAnyPhrase(normalized,
@@ -310,7 +299,16 @@ public class AIService : IAIService
             "remember to",
             "don t forget to",   // apostrophe stripped by normalization: "don't" → "don t"
             "dont forget to",
-            "make a note to"))
+            "make a note to",
+            // Spanish
+            "recuerdame",
+            "recordarme",
+            "crear recordatorio",
+            "agregar recordatorio",
+            "nuevo recordatorio",
+            "establecer recordatorio",
+            "pon un recordatorio",
+            "ponme un recordatorio"))
         {
             return "reminder";
         }
@@ -323,7 +321,12 @@ public class AIService : IAIService
             "modify reminder",
             "edit my reminder",
             "change my reminder",
-            "update my reminder"))
+            "update my reminder",
+            // Spanish
+            "editar recordatorio",
+            "actualizar recordatorio",
+            "cambiar recordatorio",
+            "modificar recordatorio"))
         {
             return "edit-reminder";
         }
@@ -335,7 +338,11 @@ public class AIService : IAIService
             "cancel reminder",
             "delete the reminder",
             "remove the reminder",
-            "cancel the reminder"))
+            "cancel the reminder",
+            // Spanish
+            "eliminar recordatorio",
+            "borrar recordatorio",
+            "cancelar recordatorio"))
         {
             return "delete-reminder";
         }
@@ -351,7 +358,12 @@ public class AIService : IAIService
             "what are my reminders",
             "upcoming reminders",
             "all reminders",
-            "read my reminders"))
+            "read my reminders",
+            // Spanish
+            "mostrar recordatorios",
+            "ver recordatorios",
+            "mis recordatorios",
+            "listar recordatorios"))
         {
             return "show-reminders";
         }
@@ -365,7 +377,14 @@ public class AIService : IAIService
             "close file",
             "exit document",
             "exit pdf",
-            "exit the document")
+            "exit the document",
+            // Spanish
+            "cerrar documento",
+            "cerrar el documento",
+            "cerrar pdf",
+            "cerrar el pdf",
+            "salir del documento",
+            "salir del pdf")
             || ContainsAllWords(normalized, "close", "document")
             || ContainsAllWords(normalized, "close", "pdf")
             || ContainsAllWords(normalized, "exit", "document")
@@ -382,14 +401,22 @@ public class AIService : IAIService
             "turn to page",
             "open page",
             "go to the page",
-            "skip to page")
+            "skip to page",
+            // Spanish
+            "ir a la pagina",
+            "ir a pagina",
+            "saltar a la pagina",
+            "navegar a la pagina",
+            "pagina numero",
+            "abrir pagina")
             || (ContainsAllWords(normalized, "go", "page") && Regex.IsMatch(normalized, @"\b\d+\b"))
             || (ContainsAllWords(normalized, "navigate", "page") && Regex.IsMatch(normalized, @"\b\d+\b"))
             || (ContainsAllWords(normalized, "take", "page") && Regex.IsMatch(normalized, @"\b\d+\b"))
             || (ContainsAllWords(normalized, "jump", "page") && Regex.IsMatch(normalized, @"\b\d+\b"))
             || (ContainsAllWords(normalized, "turn", "page") && Regex.IsMatch(normalized, @"\b\d+\b"))
             || (ContainsAllWords(normalized, "skip", "page") && Regex.IsMatch(normalized, @"\b\d+\b"))
-            || (ContainsAllWords(normalized, "move", "page") && Regex.IsMatch(normalized, @"\b\d+\b")))
+            || (ContainsAllWords(normalized, "move", "page") && Regex.IsMatch(normalized, @"\b\d+\b"))
+            || (ContainsAllWords(normalized, "pagina") && Regex.IsMatch(normalized, @"\b\d+\b")))
         {
             return "go-to-page";
         }
@@ -413,8 +440,14 @@ public class AIService : IAIService
             "print highlighted pages",
             "print highlighted",
             "print highlighted page",
-            "print the highlighted")
-            || ContainsAllWords(normalized, "print", "highlight"))
+            "print the highlighted",
+            // Spanish
+            "imprimir resaltado",
+            "imprimir paginas resaltadas",
+            "imprimir pagina resaltada",
+            "imprimir solo resaltado")
+            || ContainsAllWords(normalized, "print", "highlight")
+            || ContainsAllWords(normalized, "imprimir", "resaltado"))
         {
             return "print-highlighted-pages";
         }
@@ -429,10 +462,17 @@ public class AIService : IAIService
             "print page",
             "print this",
             "print all",
-            "print current")
+            "print current",
+            // Spanish
+            "imprimir documento",
+            "imprimir el documento",
+            "imprimir pdf",
+            "imprimir pagina",
+            "imprimir todo")
             || ContainsAllWords(normalized, "print", "document")
             || ContainsAllWords(normalized, "print", "pdf")
-            || ContainsAllWords(normalized, "print", "file"))
+            || ContainsAllWords(normalized, "print", "file")
+            || ContainsAllWords(normalized, "imprimir", "documento"))
         {
             return "print";
         }
@@ -446,12 +486,21 @@ public class AIService : IAIService
             "clear all highlights",
             "remove highlight",
             "clear highlight",
-            "delete highlight")
+            "delete highlight",
+            // Spanish
+            "borrar resaltados",
+            "eliminar resaltados",
+            "quitar resaltados",
+            "limpiar resaltados",
+            "borrar resaltado",
+            "eliminar resaltado")
             || ContainsAllWords(normalized, "remove", "highlight")
             || ContainsAllWords(normalized, "clear", "highlight")
             || ContainsAllWords(normalized, "delete", "highlight")
             || ContainsAllWords(normalized, "erase", "highlight")
-            || ContainsAllWords(normalized, "get", "rid", "highlight"))
+            || ContainsAllWords(normalized, "get", "rid", "highlight")
+            || ContainsAllWords(normalized, "borrar", "resaltado")
+            || ContainsAllWords(normalized, "eliminar", "resaltado"))
         {
             return "remove-highlights";
         }
@@ -485,7 +534,17 @@ public class AIService : IAIService
             "most recent document",
             "most recent file",
             "last document",
-            "recently uploaded document")
+            "recently uploaded document",
+            // Spanish
+            "seleccionar documento",
+            "abrir ultimo documento",
+            "abrir el ultimo documento",
+            "abrir documento reciente",
+            "abrir el documento mas reciente",
+            "documento mas reciente",
+            "ultimo documento",
+            "ultimo archivo",
+            "ver ultimo documento")
             || ContainsAllWords(normalized, "open", "last", "document")
             || ContainsAllWords(normalized, "open", "last", "file")
             || ContainsAllWords(normalized, "open", "latest", "document")
@@ -493,7 +552,9 @@ public class AIService : IAIService
             || ContainsAllWords(normalized, "open", "most", "recent")
             || ContainsAllWords(normalized, "select", "last", "document")
             || ContainsAllWords(normalized, "show", "last", "document")
-            || ContainsAllWords(normalized, "view", "last", "document"))
+            || ContainsAllWords(normalized, "view", "last", "document")
+            || ContainsAllWords(normalized, "abrir", "ultimo")
+            || ContainsAllWords(normalized, "abrir", "reciente"))
         {
             return "select-document";
         }
@@ -533,7 +594,25 @@ public class AIService : IAIService
             "pick a file",
             "pick a document",
             "choose a file",
-            "choose a document")
+            "choose a document",
+            // Spanish
+            "buscar archivos recientes",
+            "buscar archivos",
+            "ver archivos recientes",
+            "mostrar archivos recientes",
+            "archivos recientes",
+            "documentos recientes",
+            "seleccionar un documento",
+            "seleccionar un archivo",
+            "ver documentos",
+            "listar archivos",
+            "listar documentos",
+            "mis archivos",
+            "mis documentos",
+            "lista de archivos",
+            "lista de documentos",
+            "todos los archivos",
+            "todos los documentos")
             || ContainsAllWords(normalized, "search", "file")
             || ContainsAllWords(normalized, "search", "document")
             || ContainsAllWords(normalized, "find", "file")
@@ -541,17 +620,33 @@ public class AIService : IAIService
             || ContainsAllWords(normalized, "show", "file")
             || ContainsAllWords(normalized, "browse", "file")
             || ContainsAllWords(normalized, "recent", "file")
-            || ContainsAllWords(normalized, "recent", "document"))
+            || ContainsAllWords(normalized, "recent", "document")
+            || ContainsAllWords(normalized, "buscar", "archivo")
+            || ContainsAllWords(normalized, "buscar", "documento")
+            || ContainsAllWords(normalized, "ver", "archivo")
+            || ContainsAllWords(normalized, "mostrar", "archivo"))
         {
             return "open-file";
         }
 
         // ── next-page ─────────────────────────────────────────────────────────
-        if (ContainsAnyPhrase(normalized, "next page", "page down", "go forward", "forward page")
+        if (ContainsAnyPhrase(normalized,
+            "next page",
+            "page down",
+            "go forward",
+            "forward page",
+            // Spanish
+            "pagina siguiente",
+            "siguiente pagina",
+            "ir adelante",
+            "avanzar pagina",
+            "pagina adelante")
             || ContainsAllWords(normalized, "next", "page")
             || ContainsAllWords(normalized, "scroll", "down")
             || ContainsAllWords(normalized, "move", "forward")
-            || ContainsAllWords(normalized, "advance", "page"))
+            || ContainsAllWords(normalized, "advance", "page")
+            || ContainsAllWords(normalized, "siguiente", "pagina")
+            || ContainsAllWords(normalized, "avanzar", "pagina"))
         {
             return "next-page";
         }
@@ -563,21 +658,39 @@ public class AIService : IAIService
             "next highlighted word",
             "next highlighted phrase",
             "go to next highlight",
-            "find next highlight")
+            "find next highlight",
+            // Spanish
+            "siguiente resaltado",
+            "próximo resaltado",
+            "ir al siguiente resaltado")
             || ContainsAllWords(normalized, "next", "highlight")
             || ContainsAllWords(normalized, "jump", "next", "highlight")
-            || ContainsAllWords(normalized, "move", "next", "highlight"))
+            || ContainsAllWords(normalized, "move", "next", "highlight")
+            || ContainsAllWords(normalized, "siguiente", "resaltado"))
         {
             return "next-highlight";
         }
 
         // ── previous-page ─────────────────────────────────────────────────────
-        if (ContainsAnyPhrase(normalized, "previous page", "prev page", "back page", "page up", "go back a page")
+        if (ContainsAnyPhrase(normalized,
+            "previous page",
+            "prev page",
+            "back page",
+            "page up",
+            "go back a page",
+            // Spanish
+            "pagina anterior",
+            "anterior pagina",
+            "ir atras",
+            "retroceder pagina",
+            "pagina atras")
             || ContainsAllWords(normalized, "previous", "page")
             || ContainsAllWords(normalized, "prev", "page")
             || ContainsAllWords(normalized, "go", "back", "page")
             || ContainsAllWords(normalized, "scroll", "up")
-            || ContainsAllWords(normalized, "back", "page"))
+            || ContainsAllWords(normalized, "back", "page")
+            || ContainsAllWords(normalized, "anterior", "pagina")
+            || ContainsAllWords(normalized, "retroceder", "pagina"))
         {
             return "previous-page";
         }
@@ -590,11 +703,16 @@ public class AIService : IAIService
             "previous highlighted",
             "previous highlighted word",
             "go to previous highlight",
-            "find previous highlight")
+            "find previous highlight",
+            // Spanish
+            "resaltado anterior",
+            "anterior resaltado",
+            "ir al resaltado anterior")
             || ContainsAllWords(normalized, "previous", "highlight")
             || ContainsAllWords(normalized, "prev", "highlight")
             || ContainsAllWords(normalized, "back", "highlight")
-            || ContainsAllWords(normalized, "last", "highlight"))
+            || ContainsAllWords(normalized, "last", "highlight")
+            || ContainsAllWords(normalized, "anterior", "resaltado"))
         {
             return "previous-highlight";
         }
@@ -608,12 +726,20 @@ public class AIService : IAIService
             "summary of the page",
             "what is on this page",
             "summarise this page",
-            "summarise page")
+            "summarise page",
+            // Spanish
+            "resumir esta pagina",
+            "resumir pagina",
+            "resumen de esta pagina",
+            "resumen de la pagina",
+            "resumir pagina actual")
             || ContainsAllWords(normalized, "summarize", "page")
             || ContainsAllWords(normalized, "summarise", "page")
             || ContainsAllWords(normalized, "summary", "page")
             || ContainsAllWords(normalized, "explain", "page")
-            || ContainsAllWords(normalized, "describe", "page"))
+            || ContainsAllWords(normalized, "describe", "page")
+            || ContainsAllWords(normalized, "resumir", "pagina")
+            || ContainsAllWords(normalized, "resumen", "pagina"))
         {
             return "summarize-page";
         }
@@ -629,12 +755,20 @@ public class AIService : IAIService
             "according to the document",
             "based on the document",
             "search document for",
-            "ask document")
+            "ask document",
+            // Spanish
+            "pregunta al documento",
+            "pregunta sobre el documento",
+            "que dice el documento",
+            "resumir documento",
+            "segun el documento")
             || ContainsAllWords(normalized, "ask", "document")
             || ContainsAllWords(normalized, "query", "document")
             || ContainsAllWords(normalized, "summarize", "document")
             || ContainsAllWords(normalized, "summarise", "document")
-            || ContainsAllWords(normalized, "question", "document"))
+            || ContainsAllWords(normalized, "question", "document")
+            || ContainsAllWords(normalized, "pregunta", "documento")
+            || ContainsAllWords(normalized, "resumir", "documento"))
         {
             return "document-query";
         }
@@ -643,12 +777,17 @@ public class AIService : IAIService
         if (ContainsAnyPhrase(normalized,
             "highlight in document",
             "document highlight",
-            "highlight in the document"))
+            "highlight in the document",
+            // Spanish
+            "resaltar en el documento",
+            "resaltado en el documento"))
         {
             return "document-highlight";
         }
 
         // ── highlight-word (generic client-side PDF highlight / find) ──────────
+        // NOTE: Spanish "buscar" is only matched here when not already caught by
+        // open-file rules above (e.g. "buscar archivos recientes").
         if (ContainsAnyPhrase(normalized,
             "highlight ",
             "highlights ",
@@ -656,7 +795,13 @@ public class AIService : IAIService
             "search the ",
             "find the word",
             "find the phrase",
-            "find "))
+            "find ",
+            // Spanish
+            "resaltar ",
+            "buscar ",
+            "encontrar la palabra",
+            "encontrar la frase",
+            "encontrar "))
         {
             return "highlight-word";
         }
@@ -668,12 +813,17 @@ public class AIService : IAIService
             "redo the ocr",
             "ocr retry",
             "try ocr again",
-            "scan again")
+            "scan again",
+            // Spanish
+            "reintentar ocr",
+            "volver a escanear",
+            "repetir escaneo")
             || ContainsAllWords(normalized, "retry", "scan")
             || ContainsAllWords(normalized, "redo", "scan")
             || ContainsAllWords(normalized, "scan", "again")
             || ContainsAllWords(normalized, "retry", "ocr")
-            || ContainsAllWords(normalized, "redo", "ocr"))
+            || ContainsAllWords(normalized, "redo", "ocr")
+            || ContainsAllWords(normalized, "reintentar", "ocr"))
         {
             return "ocr-retry";
         }
@@ -689,12 +839,22 @@ public class AIService : IAIService
             "scan image",
             "scan document",
             "scan the document",
-            "extract text")
+            "extract text",
+            // Spanish
+            "escanear texto",
+            "leer texto",
+            "extraer texto",
+            "realizar ocr",
+            "ejecutar ocr",
+            "escanear imagen",
+            "escanear documento")
             || ContainsAllWords(normalized, "scan", "document")
             || ContainsAllWords(normalized, "scan", "text")
             || ContainsAllWords(normalized, "scan", "image")
             || ContainsAllWords(normalized, "extract", "text")
-            || ContainsAllWords(normalized, "read", "text"))
+            || ContainsAllWords(normalized, "read", "text")
+            || ContainsAllWords(normalized, "escanear", "documento")
+            || ContainsAllWords(normalized, "extraer", "texto"))
         {
             return "ocr";
         }
@@ -707,12 +867,24 @@ public class AIService : IAIService
             "show admin",
             "administration panel",
             "go to administration",
-            "open administration")
+            "open administration",
+            // Spanish
+            "abrir admin",
+            "panel de administración",
+            "panel admin",
+            "ir al admin",
+            "abrir administración",
+            "subir archivo",
+            "subir un archivo",
+            "cargar archivo",
+            "cargar un archivo")
             || ContainsAllWords(normalized, "open", "admin")
             || ContainsAllWords(normalized, "go", "admin")
             || ContainsAllWords(normalized, "show", "admin")
             || ContainsAllWords(normalized, "admin", "panel")
-            || ContainsAllWords(normalized, "admin", "setting"))
+            || ContainsAllWords(normalized, "admin", "setting")
+            || ContainsAllWords(normalized, "subir", "archivo")
+            || ContainsAllWords(normalized, "cargar", "archivo"))
         {
             return "open-admin-panel";
         }
