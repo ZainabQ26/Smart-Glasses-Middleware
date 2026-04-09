@@ -43,8 +43,8 @@ namespace SmartGlassesMiddleware.Tests
         public async Task ProcessSpeech_ValidTranscript_ReturnsMatchedHandlerAction()
         {
             var mockAiService = new Mock<IAIService>();
-            mockAiService.Setup(a => a.ProcessRequestAsync("what time is it", It.IsAny<CancellationToken>(), It.IsAny<ProcessDocumentContext>()))
-                         .ReturnsAsync(("time", "The current time is 12:00 PM.", false));
+            mockAiService.Setup(a => a.ProcessRequestAsync("remind me to call John", It.IsAny<CancellationToken>(), It.IsAny<ProcessDocumentContext>()))
+                         .ReturnsAsync(("reminder", "Reminder saved.", false));
 
             var mockConfig = new Mock<IConfiguration>();
             var mockConfigSection = new Mock<IConfigurationSection>();
@@ -67,7 +67,7 @@ namespace SmartGlassesMiddleware.Tests
             );
             using var _sp1 = sp1;
 
-            var req = new ProcessRequest { Input = "what time is it" };
+            var req = new ProcessRequest { Input = "remind me to call John" };
 
             var result = await controller.Process(req, CancellationToken.None);
 
@@ -80,7 +80,7 @@ namespace SmartGlassesMiddleware.Tests
             var taskProp = System.Array.Find(props, p => p.Name == "task");
             Assert.That(taskProp, Is.Not.Null);
             var taskVal = taskProp.GetValue(okResult.Value) as string;
-            Assert.That(taskVal, Is.EqualTo("time"));
+            Assert.That(taskVal, Is.EqualTo("reminder"));
         }
 
         [Test]
