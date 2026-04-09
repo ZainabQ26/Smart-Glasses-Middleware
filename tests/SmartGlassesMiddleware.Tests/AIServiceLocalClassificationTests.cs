@@ -32,32 +32,31 @@ public class AIServiceLocalClassificationTests
             {
                 ["AI:UseAdvancedModel"] = "false",
                 ["AI:AdvancedModelEndpoint"] = "",
-                ["AI:KnownTasks:0"] = "time",
-                ["AI:KnownTasks:1"] = "reminder",
-                ["AI:KnownTasks:2"] = "edit-reminder",
-                ["AI:KnownTasks:3"] = "delete-reminder",
-                ["AI:KnownTasks:4"] = "show-reminders",
-                ["AI:KnownTasks:5"] = "open-file",
-                ["AI:KnownTasks:6"] = "select-document",
-                ["AI:KnownTasks:7"] = "next-page",
-                ["AI:KnownTasks:8"] = "previous-page",
-                ["AI:KnownTasks:9"] = "next-highlight",
-                ["AI:KnownTasks:10"] = "previous-highlight",
-                ["AI:KnownTasks:11"] = "summarize-page",
-                ["AI:KnownTasks:12"] = "highlight-word",
-                ["AI:KnownTasks:13"] = "open-admin-panel",
-                ["AI:KnownTasks:14"] = "close-document",
-                ["AI:KnownTasks:15"] = "go-to-page",
-                ["AI:KnownTasks:16"] = "go-to-loinc",
-                ["AI:KnownTasks:17"] = "print",
-                ["AI:KnownTasks:18"] = "print-highlighted-pages",
-                ["AI:KnownTasks:19"] = "remove-highlights",
-                ["AI:KnownTasks:20"] = "document-search",
-                ["AI:KnownTasks:21"] = "document-query",
-                ["AI:KnownTasks:22"] = "document-highlight",
-                ["AI:KnownTasks:23"] = "ocr",
-                ["AI:KnownTasks:24"] = "ocr-retry",
-                ["AI:KnownTasks:25"] = "advanced",
+                ["AI:KnownTasks:0"] = "reminder",
+                ["AI:KnownTasks:1"] = "edit-reminder",
+                ["AI:KnownTasks:2"] = "delete-reminder",
+                ["AI:KnownTasks:3"] = "show-reminders",
+                ["AI:KnownTasks:4"] = "open-file",
+                ["AI:KnownTasks:5"] = "select-document",
+                ["AI:KnownTasks:6"] = "next-page",
+                ["AI:KnownTasks:7"] = "previous-page",
+                ["AI:KnownTasks:8"] = "next-highlight",
+                ["AI:KnownTasks:9"] = "previous-highlight",
+                ["AI:KnownTasks:10"] = "summarize-page",
+                ["AI:KnownTasks:11"] = "highlight-word",
+                ["AI:KnownTasks:12"] = "open-admin-panel",
+                ["AI:KnownTasks:13"] = "close-document",
+                ["AI:KnownTasks:14"] = "go-to-page",
+                ["AI:KnownTasks:15"] = "go-to-loinc",
+                ["AI:KnownTasks:16"] = "print",
+                ["AI:KnownTasks:17"] = "print-highlighted-pages",
+                ["AI:KnownTasks:18"] = "remove-highlights",
+                ["AI:KnownTasks:19"] = "document-search",
+                ["AI:KnownTasks:20"] = "document-query",
+                ["AI:KnownTasks:21"] = "document-highlight",
+                ["AI:KnownTasks:22"] = "ocr",
+                ["AI:KnownTasks:23"] = "ocr-retry",
+                ["AI:KnownTasks:24"] = "advanced",
             })
             .Build();
 
@@ -66,7 +65,7 @@ public class AIServiceLocalClassificationTests
         // Return known tasks from config
         var knownTasks = new List<string>
         {
-            "time","reminder","edit-reminder","delete-reminder","show-reminders",
+            "reminder","edit-reminder","delete-reminder","show-reminders",
             "open-file","select-document","next-page","previous-page","next-highlight","previous-highlight","summarize-page",
             "highlight-word","open-admin-panel","close-document","go-to-page","go-to-loinc",
             "print","print-highlighted-pages","remove-highlights","document-search",
@@ -78,19 +77,6 @@ public class AIServiceLocalClassificationTests
 
         var logger = Mock.Of<ILogger<AIService>>();
         _service = new AIService(kernel, new HttpClient(), config, logger, _dispatcherMock.Object);
-    }
-
-    // ── time ─────────────────────────────────────────────────────────────────
-
-    [TestCase("what time is it")]
-    [TestCase("What is the current time?")]
-    [TestCase("Tell me the time")]
-    [TestCase("what's the time right now")]
-    [TestCase("date and time please")]
-    public async Task ClassifyOnlyAsync_TimeVariants_ReturnsTime(string input)
-    {
-        var result = await _service.ClassifyOnlyAsync(input);
-        Assert.That(result, Is.EqualTo("time"), $"Input: '{input}'");
     }
 
     // ── reminder ──────────────────────────────────────────────────────────────
@@ -356,7 +342,7 @@ public class AIServiceLocalClassificationTests
     [Test]
     public async Task WillUseAdvancedModelAsync_RecognisedCommand_ReturnsFalse()
     {
-        var result = await _service.WillUseAdvancedModelAsync("what time is it");
+        var result = await _service.WillUseAdvancedModelAsync("remind me to call John");
         Assert.That(result, Is.False);
     }
 
@@ -374,14 +360,14 @@ public class AIServiceLocalClassificationTests
     public async Task ProcessRequestAsync_KnownCommand_HandledLocally_NoAdvancedModel()
     {
         _dispatcherMock
-            .Setup(d => d.TryHandleAsync("time", It.IsAny<string>()))
-            .ReturnsAsync((true, "The current time is 3:00 PM."));
+            .Setup(d => d.TryHandleAsync("reminder", It.IsAny<string>()))
+            .ReturnsAsync((true, "Reminder saved."));
 
-        var (task, response, usedAdvanced) = await _service.ProcessRequestAsync("what time is it");
+        var (task, response, usedAdvanced) = await _service.ProcessRequestAsync("remind me to call John");
 
-        Assert.That(task, Is.EqualTo("time"));
+        Assert.That(task, Is.EqualTo("reminder"));
         Assert.That(usedAdvanced, Is.False);
-        Assert.That(response, Does.Contain("3:00 PM"));
+        Assert.That(response, Does.Contain("Reminder saved"));
         // Advanced handler must NOT have been called
         _dispatcherMock.Verify(d => d.TryHandleAsync("advanced", It.IsAny<string>()), Times.Never);
     }
