@@ -122,7 +122,7 @@ const TRANSLATIONS = {
     howItWorksTitle: "🎤 Cómo funciona",
     steps: [
       'Di {word}',
-      "Habla tu comando claramente",
+      "Pronuncia tu comando claramente",
       'Di {word} de nuevo para el siguiente comando',
     ],
     stepSubs: [
