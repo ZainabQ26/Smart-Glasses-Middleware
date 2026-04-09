@@ -1,3 +1,13 @@
+/**
+ * Returns a translated UI string for the current admin language.
+ * Falls back to the English string if the key is missing in the current language.
+ * Reads from window.adminUiStrings which is populated by the inline script in admin.html.
+ */
+function adminT(key, fallback) {
+    var strings = window.adminUiStrings;
+    return (strings && strings[key] !== undefined) ? strings[key] : (fallback || key);
+}
+
 async function loadPrompts(reset = false) {
     if (state.prompts.loading) return;
     state.prompts.loading = true;
@@ -871,7 +881,7 @@ function showLoading(listId) {
     const loading = document.createElement('div');
     loading.className = 'loading-indicator';
     loading.id = `${listId}-loading`;
-    loading.innerHTML = '<p style="text-align: center; padding: 20px; color: #2f3a3f;">Loading...</p>';
+    loading.innerHTML = `<p style="text-align: center; padding: 20px; color: #2f3a3f;">${adminT('loading', 'Loading...')}</p>`;
     list.appendChild(loading);
 }
 
@@ -905,7 +915,7 @@ async function loadFiles(reset = false) {
                 hideLoading('files-list');
 
                 if (reset && state.files.data.length === 0) {
-                    list.innerHTML = '<div class="empty-state"><p>Server is temporarily unavailable. File list will refresh automatically.</p></div>';
+                    list.innerHTML = `<div class="empty-state"><p>${adminT('serverUnavailable', 'Server is temporarily unavailable. File list will refresh automatically.')}</p></div>`;
                 }
 
                 filesDegradedRetryCount += 1;
@@ -941,7 +951,7 @@ async function loadFiles(reset = false) {
 
         if (degraded) {
             if (reset && state.files.data.length === 0) {
-                list.innerHTML = '<div class="empty-state"><p>Server is busy. File list will refresh automatically.</p></div>';
+                list.innerHTML = `<div class="empty-state"><p>${adminT('serverBusy', 'Server is busy. File list will refresh automatically.')}</p></div>`;
             }
 
             filesDegradedRetryCount += 1;
@@ -976,7 +986,7 @@ async function loadFiles(reset = false) {
             state.files.hasMore = pagination.hasNext || pagination.HasNext;
             state.files.page++;
         } else if (reset) {
-            list.innerHTML = '<div class="empty-state"><p>No uploads yet</p></div>';
+            list.innerHTML = `<div class="empty-state"><p>${adminT('noUploadsYet', 'No uploads yet')}</p></div>`;
         }
         
         state.files.loading = false;
@@ -2072,7 +2082,7 @@ async function openMostRecentDocumentPreview(responseContent) {
         if (!recentFiles.length) {
             clearPendingRecentFileChoices();
             if (responseContent) {
-                responseContent.innerHTML = '<div style="padding: 15px; white-space: pre-wrap;">No recent files found. Upload one first, then try again.</div>';
+                responseContent.innerHTML = `<div style="padding: 15px; white-space: pre-wrap;">${adminT('noRecentFiles', 'No recent files found. Upload one first, then try again.')}</div>`;
             }
             return true;
         }
@@ -2181,7 +2191,7 @@ async function previewFile(id, fileName) {
     // Store file info for download button
     currentPreviewFile = { id, fileName };
     
-    previewContent.innerHTML = '<p style="color: #2f3a3f;">Loading preview...</p>';
+    previewContent.innerHTML = `<p style="color: #2f3a3f;">${adminT('loadingPreview', 'Loading preview...')}</p>`;
     previewContainer.style.display = 'block';
     
     // Scroll to preview
@@ -2244,7 +2254,7 @@ async function previewFile(id, fileName) {
         }
 
         // Unknown binary: show download link
-        previewContent.innerHTML = '<p style="color: #e74c3c;">No preview available for this file type. Use download.</p>';
+        previewContent.innerHTML = `<p style="color: #e74c3c;">${adminT('noPreviewAvailable', 'No preview available for this file type. Use download.')}</p>`;
     } catch (error) {
         previewContent.innerHTML = `<div style="padding: 12px; text-align: center;">
             <p style="color: #e74c3c; margin-bottom: 10px;">Failed to load file preview. The file may still be processing or the server encountered an error.</p>
@@ -2319,7 +2329,7 @@ function updatePromptFilesList() {
     }
     
     if (promptSelectedFiles.length === 0) {
-        filesList.innerHTML = '<div style="color: #2f3a3f; text-align: center; padding: 20px; font-size: 14px;">No uploads to show</div>';
+        filesList.innerHTML = `<div style="color: #2f3a3f; text-align: center; padding: 20px; font-size: 14px;">${adminT('noUploadsToShow', 'No uploads to show')}</div>`;
     } else {
         filesList.innerHTML = promptSelectedFiles.map((fileObj, index) => {
             const fileName = fileObj.file?.name || fileObj.name || 'Document';
@@ -3023,7 +3033,7 @@ async function previewDocumentFile(documentId, fileName) {
     const safeName = fileName || 'Document';
 
     modalTitle.textContent = safeName;
-    modalContent.innerHTML = '<p style="color: #95a5a6; text-align: center; padding: 20px;">Loading preview...</p>';
+    modalContent.innerHTML = `<p style="color: #95a5a6; text-align: center; padding: 20px;">${adminT('loadingPreview', 'Loading preview...')}</p>`;
     modal.style.display = 'flex';
 
     const cacheBuster = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
