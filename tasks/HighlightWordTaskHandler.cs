@@ -1,4 +1,6 @@
 using SmartGlassesMiddleware.Services;
+using System.Globalization;
+using System.Text;
 
 /// <summary>
 /// Handles the "highlight word" and "search" voice commands.
@@ -89,9 +91,26 @@ public class HighlightWordTaskHandler : ITaskHandler
     }
 
     /// <summary>
+    /// Strips diacritics from a string so that prefix matching works regardless
+    /// of whether Whisper includes or omits accent marks.
+    /// </summary>
+    private static string StripDiacritics(string text)
+    {
+        var decomposed = text.Normalize(NormalizationForm.FormD);
+        var sb = new StringBuilder(decomposed.Length);
+        foreach (var c in decomposed)
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
+                sb.Append(c);
+        }
+        return sb.ToString().Normalize(NormalizationForm.FormC);
+    }
+
+    /// <summary>
     /// Strips common leading phrases from the raw input to extract the target
     /// word or phrase. Supports both "highlight" and "search"/"find" prefixes
-    /// so either command highlights the same term in the open PDF.
+    /// (English and Spanish) so either command highlights the same term in the
+    /// open PDF.
     /// </summary>
     private static string ExtractHighlightTarget(string input)
     {
@@ -99,8 +118,11 @@ public class HighlightWordTaskHandler : ITaskHandler
             return string.Empty;
 
         var trimmed = input.Trim();
+        // Normalize diacritics for accent-insensitive prefix matching
+        var normalizedTrimmed = StripDiacritics(trimmed);
 
         // Remove leading prefixes. Order matters — longer/more-specific prefixes first.
+        // Each entry is (normalizedPrefix, originalPrefixLength).
         string[] prefixes =
         [
             "highlight the word ",
@@ -127,13 +149,35 @@ public class HighlightWordTaskHandler : ITaskHandler
             "find the phrase ",
             "find the ",
             "find ",
+            // Spanish
+            "resaltar la palabra ",
+            "resaltar la frase ",
+            "resaltar el ",
+            "resaltar la ",
+            "resaltar ",
+            "buscar la palabra ",
+            "buscar la frase ",
+            "buscar el ",
+            "buscar la ",
+            "buscar ",
+            "encontrar la palabra ",
+            "encontrar la frase ",
+            "encontrar el ",
+            "encontrar la ",
+            "encontrar ",
         ];
 
         foreach (var prefix in prefixes)
         {
-            if (trimmed.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            var normalizedPrefix = StripDiacritics(prefix);
+            if (normalizedTrimmed.StartsWith(normalizedPrefix, StringComparison.OrdinalIgnoreCase))
             {
-                return trimmed[prefix.Length..].Trim();
+                // Slice using the normalized prefix length.  All prefixes are ASCII-only
+                // so normalizedPrefix.Length == prefix.Length and the lengths of trimmed
+                // and normalizedTrimmed are identical (diacritic stripping is a
+                // character-by-character replacement that never changes string length in
+                // NFC).  We slice trimmed so the original casing/accents are preserved.
+                return trimmed[normalizedPrefix.Length..].Trim();
             }
         }
 
