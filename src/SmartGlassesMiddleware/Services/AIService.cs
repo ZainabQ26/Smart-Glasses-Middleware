@@ -1,6 +1,7 @@
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
 using Microsoft.SemanticKernel.Connectors.OpenAI;
+using System.Globalization;
 using System.Text.Json;
 using System.Linq;
 using System.Diagnostics;
@@ -23,7 +24,6 @@ public class AIService : IAIService
 {
     private static readonly Dictionary<string, string> TaskSummaryMap = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["time"] = "Returns the current date and time.",
         ["reminder"] = "Creates and saves a reminder.",
         ["delete-reminder"] = "Deletes a reminder that matches provided text.",
         ["edit-reminder"] = "Updates an existing reminder.",
@@ -277,26 +277,15 @@ public class AIService : IAIService
     {
         if (string.IsNullOrWhiteSpace(input)) return null;
 
-        var normalized = Regex.Replace(input.ToLowerInvariant(), @"[^a-z0-9\s-]", " ");
+        // Normalize: strip diacritics so Spanish accent variants ("último"→"ultimo",
+        // "página"→"pagina") match the same rule. Then keep only ASCII alphanumeric,
+        // space, and hyphen to strip remaining non-Latin symbols.
+        var decomposed = input.ToLowerInvariant().Normalize(NormalizationForm.FormD);
+        var withoutDiacritics = new string(decomposed
+            .Where(c => CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
+            .ToArray());
+        var normalized = Regex.Replace(withoutDiacritics, @"[^a-z0-9\s-]", " ");
         normalized = Regex.Replace(normalized, @"\s+", " ").Trim();
-
-        // ── time ──────────────────────────────────────────────────────────────
-        if (ContainsAnyPhrase(normalized,
-            "what time",
-            "what is the time",
-            "current time",
-            "time right now",
-            "tell me the time",
-            "what hour",
-            "what day",
-            "what is today",
-            "today's date",
-            "current date",
-            "date and time",
-            "what's the time"))
-        {
-            return "time";
-        }
 
         // ── reminder ──────────────────────────────────────────────────────────
         if (ContainsAnyPhrase(normalized,
@@ -310,7 +299,16 @@ public class AIService : IAIService
             "remember to",
             "don t forget to",   // apostrophe stripped by normalization: "don't" → "don t"
             "dont forget to",
-            "make a note to"))
+            "make a note to",
+            // Spanish
+            "recuerdame",
+            "recordarme",
+            "crear recordatorio",
+            "agregar recordatorio",
+            "nuevo recordatorio",
+            "establecer recordatorio",
+            "pon un recordatorio",
+            "ponme un recordatorio"))
         {
             return "reminder";
         }
@@ -323,7 +321,12 @@ public class AIService : IAIService
             "modify reminder",
             "edit my reminder",
             "change my reminder",
-            "update my reminder"))
+            "update my reminder",
+            // Spanish
+            "editar recordatorio",
+            "actualizar recordatorio",
+            "cambiar recordatorio",
+            "modificar recordatorio"))
         {
             return "edit-reminder";
         }
@@ -335,7 +338,11 @@ public class AIService : IAIService
             "cancel reminder",
             "delete the reminder",
             "remove the reminder",
-            "cancel the reminder"))
+            "cancel the reminder",
+            // Spanish
+            "eliminar recordatorio",
+            "borrar recordatorio",
+            "cancelar recordatorio"))
         {
             return "delete-reminder";
         }
@@ -351,7 +358,12 @@ public class AIService : IAIService
             "what are my reminders",
             "upcoming reminders",
             "all reminders",
-            "read my reminders"))
+            "read my reminders",
+            // Spanish
+            "mostrar recordatorios",
+            "ver recordatorios",
+            "mis recordatorios",
+            "listar recordatorios"))
         {
             return "show-reminders";
         }
@@ -365,7 +377,14 @@ public class AIService : IAIService
             "close file",
             "exit document",
             "exit pdf",
-            "exit the document")
+            "exit the document",
+            // Spanish
+            "cerrar documento",
+            "cerrar el documento",
+            "cerrar pdf",
+            "cerrar el pdf",
+            "salir del documento",
+            "salir del pdf")
             || ContainsAllWords(normalized, "close", "document")
             || ContainsAllWords(normalized, "close", "pdf")
             || ContainsAllWords(normalized, "exit", "document")
