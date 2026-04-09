@@ -24,7 +24,9 @@ public class OpenFileTaskHandler : ITaskHandler
         "mostrar archivos recientes",
         "buscar archivos recientes",
         "seleccionar un documento",
-        "seleccionar un archivo"
+        "seleccionar un archivo",
+        "seleccionar documento",
+        "select document",
     };
 
     public OpenFileTaskHandler(ApplicationDbContext context)

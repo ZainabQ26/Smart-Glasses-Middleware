@@ -27,7 +27,6 @@ public class SelectDocumentTaskHandler : ITaskHandler
         "cargar documento",
         "view document",
         "ver documento",
-        "seleccionar documento",
         "ultimo documento",
         "ver ultimo documento"
     };
