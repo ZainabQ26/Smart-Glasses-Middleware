@@ -1,5 +1,7 @@
 # Smart Glasses Middleware
 
+> 📚 **Documentation:** Full API reference and developer docs are available at **[https://robertbiv.github.io/Smart-Glasses-Middleware/](https://robertbiv.github.io/Smart-Glasses-Middleware/)**, published automatically via GitHub Pages on every push to `main`.
+
 ## Overview
 
 Backend middleware and frontend for a smart glasses application. Provides a multi-modal API for AI interaction, document processing, audio transcription, and task management. It operates as an always-online, single-server architecture deployed on AWS ECS Fargate, utilizing a pure in-memory state serialized to S3/MinIO.
