@@ -894,9 +894,14 @@ export default function App({ mode = "voice", language = "en" }) {
       
       if (requiresTwoWords) {
         addLog("⏱️ Command too brief — likely background noise.", "warn");
-        setPendingAction(null);
-        showAiResponse(t.commandTooBrief);
-        resumeListeningRef.current?.();
+        if (capturedPending?.type === "SHOW_RECENT_FILES") {
+          showAiResponse("Please say just the file number, like 1, 2, or 3.");
+          setPendingAction(capturedPending);
+        } else {
+          setPendingAction(null);
+          showAiResponse(t.commandTooBrief);
+          resumeListeningRef.current?.();
+        }
         return;
       }
 
@@ -1314,7 +1319,11 @@ export default function App({ mode = "voice", language = "en" }) {
       const word = activationWordRef.current;
       // Normalize: strip punctuation, collapse whitespace, lowercase for comparison.
       // Groq may return "Hi, Iris.", "hi iris", "Iris!", "iris", etc.
-      const normalize = (s) => s.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
+      // NFD-normalize first so accented letters lose their diacritic marks (e.g. "ú"→"u",
+      // "é"→"e", "ñ"→"n") before stripping any remaining non-ASCII characters.  Without
+      // this step the old replace would remove "ú" entirely, turning "número" into "nmero"
+      // instead of "numero", which broke prefix matching for Spanish file-selection commands.
+      const normalize = (s) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
       const normalizedText = normalize(cleaned);
       const normalizedWord = normalize(word);
       // Accept the full phrase ("hi iris") OR just the core name ("iris")
@@ -1904,6 +1913,10 @@ function parseFileSelectionNumber(text) {
   if (!text) return null;
   const s = text.trim().toLowerCase();
   const normalized = s.replace(/[.,!?;:]+$/g, "").trim();
+  // Strip diacritics so accented Spanish words match their ASCII counterparts in the
+  // prefix/digit patterns below (e.g. Whisper may return "Número 1." for a Spanish
+  // speaker saying "número uno", and "número" must match the "numero" prefix).
+  const normalizedAscii = normalized.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s#]/g, "").trim();
 
   // Word ordinals / cardinals — English and Spanish (covers the typical 1–5 list size)
   const words = {
@@ -1927,15 +1940,17 @@ function parseFileSelectionNumber(text) {
   };
   for (const [word, num] of Object.entries(words)) {
     if (new RegExp(`\\b${word}\\b`).test(normalized)) return num;
+    if (new RegExp(`\\b${word}\\b`).test(normalizedAscii)) return num;
   }
 
   // Patterns like "file 2", "number 3", "open 4", "#5", "pick 1", "select 2"
   // Also Spanish: "archivo 2", "número 3", "abrir 4", "seleccionar 2"
-  const prefixMatch = normalized.match(/(?:file|number|open|pick|select|item|archivo|numero|abrir|seleccionar)\s*#?\s*([1-9])\b/);
+  // Use the diacritic-stripped text so "número 1" matches the "numero" prefix.
+  const prefixMatch = normalizedAscii.match(/(?:file|number|open|pick|select|item|archivo|numero|abrir|seleccionar)\s*#?\s*([1-9])\b/);
   if (prefixMatch) return parseInt(prefixMatch[1], 10);
 
   // Bare single digit (possibly surrounded by whitespace or punctuation)
-  const bareMatch = normalized.match(/^\s*#?\s*([1-9])\s*$/);
+  const bareMatch = normalizedAscii.match(/^\s*#?\s*([1-9])\s*$/);
   if (bareMatch) return parseInt(bareMatch[1], 10);
 
   return null;
