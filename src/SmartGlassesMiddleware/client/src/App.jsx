@@ -111,6 +111,7 @@ const TRANSLATIONS = {
     noActivityTemplate: 'No activity yet. Say "{word}".',
     noClearCommandTemplate: 'I didn\'t hear a clear command. Please say "{word}" again.',
     commandTooBrief: "That was too brief. Please say a full command.",
+    fileSelectionPrompt: "Please say just the file number, like 1, 2, or 3.",
     didntCatch: "I didn't catch that command. Please try again.",
   },
   es: {
@@ -168,6 +169,7 @@ const TRANSLATIONS = {
     noActivityTemplate: 'Sin actividad aún. Di "{word}".',
     noClearCommandTemplate: 'No escuché un comando claro. Di "{word}" de nuevo.',
     commandTooBrief: "Eso fue demasiado breve. Por favor di un comando completo.",
+    fileSelectionPrompt: "Por favor di solo el número del archivo, como 1, 2 o 3.",
     didntCatch: "No capturé ese comando. Por favor intenta de nuevo.",
   },
 };
@@ -874,7 +876,7 @@ export default function App({ mode = "voice", language = "en" }) {
       if (isBlankAudioOrNoise(commandText)) {
         addLog("🔊 Detected blank audio or background noise — requiring reactivation.", "warn");
         if (capturedPending?.type === "SHOW_RECENT_FILES") {
-          showAiResponse("Please say just the file number, like 1, 2, or 3.");
+          showAiResponse(t.fileSelectionPrompt);
           setPendingAction(capturedPending);
         } else {
           setPendingAction(null);
@@ -895,7 +897,7 @@ export default function App({ mode = "voice", language = "en" }) {
       if (requiresTwoWords) {
         addLog("⏱️ Command too brief — likely background noise.", "warn");
         if (capturedPending?.type === "SHOW_RECENT_FILES") {
-          showAiResponse("Please say just the file number, like 1, 2, or 3.");
+          showAiResponse(t.fileSelectionPrompt);
           setPendingAction(capturedPending);
         } else {
           setPendingAction(null);
@@ -1319,11 +1321,12 @@ export default function App({ mode = "voice", language = "en" }) {
       const word = activationWordRef.current;
       // Normalize: strip punctuation, collapse whitespace, lowercase for comparison.
       // Groq may return "Hi, Iris.", "hi iris", "Iris!", "iris", etc.
-      // NFD-normalize first so accented letters lose their diacritic marks (e.g. "ú"→"u",
-      // "é"→"e", "ñ"→"n") before stripping any remaining non-ASCII characters.  Without
-      // this step the old replace would remove "ú" entirely, turning "número" into "nmero"
-      // instead of "numero", which broke prefix matching for Spanish file-selection commands.
-      const normalize = (s) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
+      // stripDiacritics() is called first so accented letters are reduced to their
+      // ASCII base (e.g. "ú"→"u", "número"→"numero") before the non-ASCII filter
+      // removes remaining special characters.  Without this the old approach removed
+      // "ú" entirely, turning "número" into "nmero" instead of "numero", which broke
+      // prefix matching for Spanish file-selection commands.
+      const normalize = (s) => stripDiacritics(s.toLowerCase()).replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
       const normalizedText = normalize(cleaned);
       const normalizedWord = normalize(word);
       // Accept the full phrase ("hi iris") OR just the core name ("iris")
@@ -1905,6 +1908,16 @@ function formatActionTime(value) {
   return parsed.toLocaleString();
 }
 
+/**
+ * Strip diacritical marks from a string so accented characters are reduced to
+ * their ASCII base letter (e.g. "ú"→"u", "é"→"e", "ñ"→"n", "número"→"numero").
+ * Uses NFD normalization to split a combined character into its base + combining
+ * mark(s), then removes the combining marks.
+ */
+function stripDiacritics(s) {
+  return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
 // Parses a voice/typed command into a 1-based file-list index.
 // Handles bare digits ("2"), "file 2", "number 3", "second", "open the third", etc.
 // Returns a number 1–9 when a numeric intent is detected; the caller is
@@ -1916,7 +1929,7 @@ function parseFileSelectionNumber(text) {
   // Strip diacritics so accented Spanish words match their ASCII counterparts in the
   // prefix/digit patterns below (e.g. Whisper may return "Número 1." for a Spanish
   // speaker saying "número uno", and "número" must match the "numero" prefix).
-  const normalizedAscii = normalized.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s#]/g, "").trim();
+  const normalizedAscii = stripDiacritics(normalized).replace(/[^a-z0-9\s#]/g, "").trim();
 
   // Word ordinals / cardinals — English and Spanish (covers the typical 1–5 list size)
   const words = {
