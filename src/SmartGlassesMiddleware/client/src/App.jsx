@@ -956,8 +956,8 @@ export default function App({ mode = "voice", language = "en" }) {
           return;
         }
 
-        if (/\b(?:print|imprimir)\b.*\b(?:highlight|resaltad|destacad|marcad|subrayad)\b/i.test(lowered) ||
-            /\b(?:print|imprimir)\s+(?:pages?\s+with\s+highlights?|paginas?\s+con\s+resaltados?|paginas?\s+con\s+destacados?)\b/i.test(lowered)) {
+        if (/(?:print|imprimir).*(?:highlight|resalt|destac|marcad|subray)/i.test(lowered) ||
+            /(?:highlight|resalt|destac|marcad|subray).*(?:print|imprimir)/i.test(lowered)) {
           addLog("🖨️ Command: print highlighted pages", "voice");
           setAiResponse(null);
           setPendingAction(null);

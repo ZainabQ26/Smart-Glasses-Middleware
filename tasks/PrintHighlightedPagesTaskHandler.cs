@@ -42,18 +42,50 @@ public class PrintHighlightedPagesTaskHandler : ITaskHandler
         "imprimir solo resaltados",
         "imprimir solo resaltado",
         "print just highlighted pages",
-        "print pages with highlights",
         "imprimir páginas con resaltados",
         "imprimir paginas con resaltados",
         "imprimir paginas con destacados",
         "print highlighted",
         "imprimir resaltados",
+        "imprimir resaltado",
+        "imprimir el resaltado",
+        "imprimir los resaltados",
+        "imprimir las paginas con resaltados",
+        "imprimir las paginas con destacados",
         "imprimir destacadas",
+        "imprimir destacada",
+        "imprimir destacado",
+        "imprimir los destacados",
+        "imprimir las destacadas",
+        "imprimir marcadas",
+        "imprimir marcada",
+        "imprimir marcado",
+        "imprimir los marcados",
+        "imprimir las marcadas",
+        "imprimir subrayadas",
+        "imprimir subrayada",
+        "imprimir subrayado",
+        "imprimir los subrayados",
+        "imprimir las subrayadas",
         "stitch highlighted pages",
         "unir páginas resaltadas",
         "unir paginas resaltadas",
         "stitch together highlighted pages"
     };
+
+    public bool IsMatch(string input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return false;
+        var lowered = input.ToLowerInvariant();
+
+        if ((lowered.Contains("imprimir") || lowered.Contains("print") || lowered.Contains("unir") || lowered.Contains("stitch")) &&
+            (lowered.Contains("resalt") || lowered.Contains("destac") || lowered.Contains("marcad") || lowered.Contains("subray") || lowered.Contains("highlight")))
+        {
+            return true;
+        }
+
+        return Keywords.Any(k => lowered.Contains(k.ToLowerInvariant()));
+    }
 
     public Task<string> HandleAsync(string input)
     {

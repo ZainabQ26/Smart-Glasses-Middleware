@@ -28,6 +28,17 @@ public class PrintTaskHandler : ITaskHandler
         "imprimir esto"
     };
 
+    public bool IsMatch(string input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return false;
+        var lowered = input.ToLowerInvariant();
+        if (lowered.Contains("highlight") || lowered.Contains("resaltad") || lowered.Contains("destacad") || lowered.Contains("marcad") || lowered.Contains("subrayad"))
+        {
+            return false;
+        }
+        return Keywords.Any(k => lowered.Contains(k.ToLowerInvariant()));
+    }
+
     public Task<string> HandleAsync(string input)
     {
         return Task.FromResult("__ACTION:PRINT_DOCUMENT__");
