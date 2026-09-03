@@ -720,16 +720,20 @@ export default function App({ mode = "voice", language = "en" }) {
     }
   }, [addLog, fetchJsonWithTimeout]);
 
-  const summarizeCurrentPage = useCallback(async () => {
+  const summarizeCurrentPage = useCallback(async (targetPageNumber = null) => {
     const localPdf = pdfViewerRef.current;
     if (!localPdf || !openPdf) {
       showAiResponse("No document is open. Open a document first.");
       return;
     }
 
-    const pageData = await localPdf.getCurrentPageText?.();
+    const pageData = await localPdf.getCurrentPageText?.(targetPageNumber);
+    if (targetPageNumber !== null && typeof targetPageNumber === "number" && !Number.isNaN(targetPageNumber)) {
+      localPdf.goToPage?.(targetPageNumber);
+    }
+
     if (!pageData?.text) {
-      showAiResponse("I couldn't read the current page.");
+      showAiResponse("I couldn't read the page content.");
       return;
     }
 
@@ -749,7 +753,7 @@ export default function App({ mode = "voice", language = "en" }) {
 
     const summary = (payload?.summary || "").trim();
     if (!summary) {
-      showAiResponse("I couldn't summarize the current page.");
+      showAiResponse("I couldn't summarize the page.");
       return;
     }
 
@@ -929,15 +933,18 @@ export default function App({ mode = "voice", language = "en" }) {
           return;
         }
 
-        const goToPageMatch = lowered.match(/\b(?:go to|goto|open)?\s*page\s+(\d{1,4})\b/);
-        if (goToPageMatch) {
-          const pageNumber = parseInt(goToPageMatch[1], 10);
-          if (!Number.isNaN(pageNumber)) {
-            addLog(`📄 Command: go to page ${pageNumber}`, "voice");
-            setAiResponse(null);
-            setPendingAction(null);
-            localPdf.goToPage(pageNumber);
-            return;
+        const isSummarizeCommand = /\b(?:summarize|resumir|summary|resumen)\b/i.test(lowered);
+        if (!isSummarizeCommand) {
+          const goToPageMatch = lowered.match(/\b(?:go to|goto|open)\s*page\s+(\d{1,4})\b/) || lowered.match(/^\s*#?page\s+(\d{1,4})\s*$/) || lowered.match(/^\s*#?(\d{1,4})\s*$/);
+          if (goToPageMatch) {
+            const pageNumber = parseInt(goToPageMatch[1], 10);
+            if (!Number.isNaN(pageNumber)) {
+              addLog(`📄 Command: go to page ${pageNumber}`, "voice");
+              setAiResponse(null);
+              setPendingAction(null);
+              localPdf.goToPage(pageNumber);
+              return;
+            }
           }
         }
 
@@ -946,6 +953,23 @@ export default function App({ mode = "voice", language = "en" }) {
           setAiResponse(null);
           setPendingAction(null);
           localPdf.removeHighlights();
+          return;
+        }
+
+        if (/\b(?:print|imprimir)\b.*\b(?:highlight|resaltad|destacad|marcad|subrayad)\b/i.test(lowered) ||
+            /\b(?:print|imprimir)\s+(?:pages?\s+with\s+highlights?|paginas?\s+con\s+resaltados?|paginas?\s+con\s+destacados?)\b/i.test(lowered)) {
+          addLog("🖨️ Command: print highlighted pages", "voice");
+          setAiResponse(null);
+          setPendingAction(null);
+          localPdf.printHighlightedPages();
+          return;
+        }
+
+        if (/\b(?:print|imprimir)\s+(?:the\s+|el\s+|este\s+)?(?:document|documento|pdf)\b|^(?:print|imprimir)$/i.test(lowered)) {
+          addLog("🖨️ Command: print document", "voice");
+          setAiResponse(null);
+          setPendingAction(null);
+          localPdf.printDocument();
           return;
         }
 
@@ -1121,6 +1145,10 @@ export default function App({ mode = "voice", language = "en" }) {
         }
       } else if (answer === "__ACTION:SUMMARIZE_CURRENT_PAGE__") {
         await summarizeCurrentPage();
+      } else if (answer.startsWith("__ACTION:SUMMARIZE_PAGE:")) {
+        const pageNumStr = answer.replace("__ACTION:SUMMARIZE_PAGE:", "").replace(/__$/, "").trim();
+        const pageNum = parseInt(pageNumStr, 10);
+        await summarizeCurrentPage(Number.isNaN(pageNum) ? null : pageNum);
       } else if (answer.startsWith("__ACTION:SHOW_REMINDERS:")) {
         addLog("📝 Command: show reminders", "voice");
         setAiResponse(null);

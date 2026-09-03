@@ -6,14 +6,14 @@
 
 services:
   localstack:
-    image: localstack/localstack-pro:latest
+    image: localstack/localstack:3.0.0
     container_name: localstack
     ports:
       - "4566:4566"            # LocalStack Gateway
       - "4510-4559:4510-4559"  # External services port range
     environment:
-      - LOCALSTACK_AUTH_TOKEN=${LOCALSTACK_AUTH_TOKEN}
-      - SERVICES=s3,dynamodb,lambda,secretsmanager,rds,elasticache,ecr,ecs,cloudwatch,logs,bedrock
+      - ACTIVATE_PRO=0
+      - SERVICES=s3,dynamodb,lambda,secretsmanager,cloudwatch,logs
       - DEBUG=1
       - DATA_DIR=/tmp/localstack_data/data
       - LAMBDA_EXECUTOR=docker
@@ -121,6 +121,7 @@ services:
         condition: service_completed_successfully
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
+      - AI__Groq__ApiKey=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
       - AWS_REGION=us-east-1
       - AWS_ACCESS_KEY_ID=test
       - AWS_SECRET_ACCESS_KEY=test

@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using Amazon.BedrockRuntime;
 using Amazon.BedrockRuntime.Model;
 using Microsoft.SemanticKernel;
@@ -7,13 +8,13 @@ using Microsoft.SemanticKernel.ChatCompletion;
 namespace SmartGlassesMiddleware.Services;
 
 /// <summary>
-/// Semantic Kernel IChatCompletionService backed by Amazon Bedrock Converse API.
-/// Supports any Bedrock model that accepts the Converse API (Claude, Titan, Llama, etc.).
+/// Semantic Kernel IChatCompletionService backed by Amazon Bedrock Converse API with Groq LLM fallback.
 /// </summary>
 public class BedrockChatCompletionService : IChatCompletionService
 {
     private readonly IAmazonBedrockRuntime _bedrockRuntime;
     private readonly string _modelId;
+    private readonly IConfiguration _config;
     private readonly ILogger<BedrockChatCompletionService> _logger;
 
     public IReadOnlyDictionary<string, object?> Attributes => new Dictionary<string, object?>();
@@ -25,6 +26,7 @@ public class BedrockChatCompletionService : IChatCompletionService
     {
         _bedrockRuntime = bedrockRuntime;
         _modelId = config["AWS:Bedrock:ModelId"] ?? "us.amazon.nova-2-lite-v1:0";
+        _config = config;
         _logger = logger;
     }
 
@@ -65,7 +67,12 @@ public class BedrockChatCompletionService : IChatCompletionService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Bedrock Converse API call failed for model {ModelId}", _modelId);
+            _logger.LogWarning(ex, "Bedrock Converse API call failed for model {ModelId}, attempting Groq LLM fallback", _modelId);
+            var groqText = await TryGroqCompletionAsync(chatHistory, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(groqText))
+            {
+                return [new ChatMessageContent(AuthorRole.Assistant, groqText)];
+            }
             throw;
         }
     }
@@ -76,11 +83,56 @@ public class BedrockChatCompletionService : IChatCompletionService
         Kernel? kernel = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        // Fall back to non-streaming: get full response then yield it
         var results = await GetChatMessageContentsAsync(chatHistory, executionSettings, kernel, cancellationToken);
         foreach (var msg in results)
         {
             yield return new StreamingChatMessageContent(msg.Role, msg.Content);
         }
+    }
+
+    private async Task<string?> TryGroqCompletionAsync(ChatHistory chatHistory, CancellationToken cancellationToken)
+    {
+        var apiKey = _config["AI:Groq:ApiKey"]?.Trim();
+        if (string.IsNullOrWhiteSpace(apiKey)) return null;
+
+        var candidateModels = new[]
+        {
+            _config["AI:Groq:CompletionModel"],
+            "groq/compound-mini",
+            "openai/gpt-oss-120b",
+            "groq/compound"
+        }.Where(m => !string.IsNullOrWhiteSpace(m)).Select(m => m!.Trim()).Distinct().ToList();
+
+        var messagesPayload = chatHistory.Select(m => new
+        {
+            role = m.Role == AuthorRole.System ? "system" : (m.Role == AuthorRole.User ? "user" : "assistant"),
+            content = m.Content ?? string.Empty
+        }).ToList();
+
+        foreach (var model in candidateModels)
+        {
+            try
+            {
+                using var http = new HttpClient();
+                http.Timeout = TimeSpan.FromSeconds(30);
+                http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+
+                var payload = new { model, messages = messagesPayload };
+                using var content = new StringContent(JsonSerializer.Serialize(payload), System.Text.Encoding.UTF8, "application/json");
+                using var response = await http.PostAsync("https://api.groq.com/openai/v1/chat/completions", content, cancellationToken);
+                if (response.IsSuccessStatusCode)
+                {
+                    var json = await response.Content.ReadAsStringAsync(cancellationToken);
+                    using var doc = JsonDocument.Parse(json);
+                    return doc.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Groq chat completion fallback failed for model {Model}", model);
+            }
+        }
+
+        return null;
     }
 }
