@@ -379,13 +379,23 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
       .join("");
 
     const safeTitle = (documentName || "Document").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    const printWin = window.open("", "_blank", "width=900,height=700");
-    if (!printWin) {
-      showToast("Pop-up blocked — allow pop-ups and try again.", 4000);
-      return;
+    
+    let printFrame = document.getElementById("print-document-iframe");
+    if (!printFrame) {
+      printFrame = document.createElement("iframe");
+      printFrame.id = "print-document-iframe";
+      printFrame.style.position = "fixed";
+      printFrame.style.right = "0";
+      printFrame.style.bottom = "0";
+      printFrame.style.width = "0";
+      printFrame.style.height = "0";
+      printFrame.style.border = "0";
+      document.body.appendChild(printFrame);
     }
 
-    printWin.document.write(`<!DOCTYPE html>
+    const doc = printFrame.contentWindow.document;
+    doc.open();
+    doc.write(`<!DOCTYPE html>
 <html><head>
   <title>${safeTitle}</title>
   <style>
@@ -399,10 +409,17 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
   </style>
 </head>
 <body>${imgsHtml}</body></html>`);
-    printWin.document.close();
-    printWin.onload = () => { printWin.focus(); printWin.print(); };
+    doc.close();
 
-    showToast("Print dialog opened.", 3000);
+    setTimeout(() => {
+      try {
+        printFrame.contentWindow.focus();
+        printFrame.contentWindow.print();
+        showToast("Print dialog opened.", 3000);
+      } catch (err) {
+        showToast("Error opening print dialog.", 3000);
+      }
+    }, 300);
   }, [showToast, documentName]);
 
   /**
@@ -463,13 +480,23 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
       .join("");
 
     const safeTitle = (documentName || "Document").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    const printWin = window.open("", "_blank", "width=900,height=700");
-    if (!printWin) {
-      showToast("Pop-up blocked — allow pop-ups and try again.", 4000);
-      return;
+
+    let printFrame = document.getElementById("print-highlighted-iframe");
+    if (!printFrame) {
+      printFrame = document.createElement("iframe");
+      printFrame.id = "print-highlighted-iframe";
+      printFrame.style.position = "fixed";
+      printFrame.style.right = "0";
+      printFrame.style.bottom = "0";
+      printFrame.style.width = "0";
+      printFrame.style.height = "0";
+      printFrame.style.border = "0";
+      document.body.appendChild(printFrame);
     }
 
-    printWin.document.write(`<!DOCTYPE html>
+    const doc = printFrame.contentWindow.document;
+    doc.open();
+    doc.write(`<!DOCTYPE html>
 <html><head>
   <title>${safeTitle} - Highlighted Pages</title>
   <style>
@@ -483,10 +510,17 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
   </style>
 </head>
 <body>${imgsHtml}</body></html>`);
-    printWin.document.close();
-    printWin.onload = () => { printWin.focus(); printWin.print(); };
+    doc.close();
 
-    showToast("Print dialog opened for highlighted pages.", 3000);
+    setTimeout(() => {
+      try {
+        printFrame.contentWindow.focus();
+        printFrame.contentWindow.print();
+        showToast("Print dialog opened.", 3000);
+      } catch (err) {
+        showToast("Error opening print dialog.", 3000);
+      }
+    }, 300);
   }, [showToast, documentName]);
 
   // ── Expose imperative handle to parent ──────────────────────────────────────
