@@ -95,7 +95,10 @@ public class AIService : IAIService
                 _logger.LogInformation("Keyword match: routing to task '{Task}' for input: {Input}", keywordTask, input);
                 try
                 {
-                    var (kwHandled, kwResponse) = await _dispatcher.TryHandleAsync(keywordTask, input);
+                    var inputToUse = (keywordTask == "document-query" || keywordTask == "advanced")
+                        ? BuildAdvancedInput(input, documentContext)
+                        : input;
+                    var (kwHandled, kwResponse) = await _dispatcher.TryHandleAsync(keywordTask, inputToUse);
                     if (kwHandled) return (keywordTask, kwResponse ?? string.Empty, false);
                 }
                 catch (Exception ex)
@@ -163,7 +166,10 @@ public class AIService : IAIService
             // Try to invoke a concrete handler for the detected task via dispatcher
             try
             {
-                var (handled, handlerResponse) = await _dispatcher.TryHandleAsync(detectedTask, input);
+                var inputToUse = (detectedTask == "document-query" || detectedTask == "advanced")
+                    ? BuildAdvancedInput(input, documentContext)
+                    : input;
+                var (handled, handlerResponse) = await _dispatcher.TryHandleAsync(detectedTask, inputToUse);
                 if (handled) return (detectedTask, handlerResponse ?? string.Empty, false);
             }
             catch (Exception ex)
@@ -970,12 +976,35 @@ public class AIService : IAIService
         }
 
         builder.AppendLine();
-        builder.AppendLine("Full document text:");
+        builder.AppendLine("Document text content:");
+        const int maxCharBudget = 10000;
+        int currentLength = builder.Length;
+
         foreach (var page in documentContext.Pages.Where(p => !string.IsNullOrWhiteSpace(p.Text)).OrderBy(p => p.PageNumber))
         {
-            builder.AppendLine();
-            builder.AppendLine($"[Page {page.PageNumber}]");
-            builder.AppendLine(page.Text);
+            if (currentLength >= maxCharBudget)
+            {
+                builder.AppendLine();
+                builder.AppendLine("[Note: Remaining pages truncated to fit AI context budget]");
+                break;
+            }
+
+            var pageHeader = $"\n[Page {page.PageNumber}]\n";
+            var pageText = page.Text.Trim();
+            if (currentLength + pageHeader.Length + pageText.Length > maxCharBudget)
+            {
+                var remaining = maxCharBudget - currentLength - pageHeader.Length;
+                if (remaining > 100)
+                {
+                    builder.AppendLine(pageHeader);
+                    builder.AppendLine(pageText.Substring(0, remaining) + "...");
+                }
+                break;
+            }
+
+            builder.AppendLine(pageHeader);
+            builder.AppendLine(pageText);
+            currentLength += pageHeader.Length + pageText.Length;
         }
 
         return builder.ToString();

@@ -1,5 +1,6 @@
 using Amazon.BedrockRuntime;
 using Amazon.BedrockRuntime.Model;
+using System.Text.Json;
 
 namespace SmartGlassesMiddleware.Services;
 
@@ -12,6 +13,7 @@ public class BedrockPageSummaryService : IPageSummaryService
 {
     private readonly IAmazonBedrockRuntime _bedrockRuntime;
     private readonly string _modelId;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<BedrockPageSummaryService> _logger;
 
     public BedrockPageSummaryService(
@@ -24,17 +26,13 @@ public class BedrockPageSummaryService : IPageSummaryService
             ?? configuration["AWS:Bedrock:AdvancedModelId"]
             ?? configuration["AWS:Bedrock:ModelId"]
             ?? string.Empty;
+        _configuration = configuration;
         _logger = logger;
     }
 
     public async Task<string> SummarizePageAsync(string pageText, string? documentName, int? pageNumber, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(_modelId))
-        {
-            throw new InvalidOperationException("Page summary model is not configured.");
-        }
-
-        var compactText = pageText.Trim();
+        var compactText = pageText?.Trim();
         if (string.IsNullOrWhiteSpace(compactText))
         {
             throw new ArgumentException("Page text is empty.", nameof(pageText));
@@ -43,52 +41,117 @@ public class BedrockPageSummaryService : IPageSummaryService
         var pageLabel = pageNumber.HasValue ? $"Page {pageNumber.Value}" : "Current page";
         var documentLabel = string.IsNullOrWhiteSpace(documentName) ? "Unknown document" : documentName.Trim();
 
-        var request = new ConverseRequest
+        if (!string.IsNullOrWhiteSpace(_modelId))
         {
-            ModelId = _modelId,
-            System =
-            [
-                new SystemContentBlock
+            try
+            {
+                var request = new ConverseRequest
                 {
-                    Text = "You summarize a single document page for a smart-glasses UI. Keep the summary concise, accurate, and grounded only in the provided page text. Prefer 3 to 6 short bullet points when the content is informational. Mention if the page text appears incomplete or noisy."
-                }
-            ],
-            Messages =
-            [
-                new Message
-                {
-                    Role = ConversationRole.User,
-                    Content =
+                    ModelId = _modelId,
+                    System =
                     [
-                        new ContentBlock
+                        new SystemContentBlock
                         {
-                            Text = $"Document: {documentLabel}\n{pageLabel}\n\nPlease summarize the following page content:\n\n{compactText}"
+                            Text = "You summarize a single document page for a smart-glasses UI. Keep the summary concise, accurate, and grounded only in the provided page text. Prefer 3 to 5 short bullet points."
+                        }
+                    ],
+                    Messages =
+                    [
+                        new Message
+                        {
+                            Role = ConversationRole.User,
+                            Content =
+                            [
+                                new ContentBlock
+                                {
+                                    Text = $"Document: {documentLabel}\n{pageLabel}\n\nPlease summarize the following page content:\n\n{compactText}"
+                                }
+                            ]
                         }
                     ]
+                };
+
+                var response = await _bedrockRuntime.ConverseAsync(request, cancellationToken);
+                var summary = string.Join("\n",
+                    response.Output?.Message?.Content?
+                        .Select(content => content.Text)
+                        .Where(text => !string.IsNullOrWhiteSpace(text))
+                    ?? Array.Empty<string>());
+
+                if (!string.IsNullOrWhiteSpace(summary))
+                {
+                    return summary.Trim();
                 }
-            ]
-        };
-
-        try
-        {
-            var response = await _bedrockRuntime.ConverseAsync(request, cancellationToken);
-            var summary = string.Join("\n",
-                response.Output?.Message?.Content?
-                    .Select(content => content.Text)
-                    .Where(text => !string.IsNullOrWhiteSpace(text))
-                ?? Array.Empty<string>());
-
-            if (string.IsNullOrWhiteSpace(summary))
-            {
-                throw new InvalidOperationException("Bedrock returned an empty page summary.");
             }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to summarize page with Bedrock model {ModelId}, attempting Groq LLM fallback", _modelId);
+            }
+        }
 
-            return summary.Trim();
-        }
-        catch (Exception ex)
+        // Groq LLM Fallback
+        var groqSummary = await TryGroqPageSummaryAsync(compactText, documentLabel, pageLabel, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(groqSummary))
         {
-            _logger.LogError(ex, "Failed to summarize page with Bedrock model {ModelId}", _modelId);
-            throw;
+            return groqSummary;
         }
+
+        throw new InvalidOperationException("Failed to summarize page using available AI models.");
+    }
+
+    private async Task<string?> TryGroqPageSummaryAsync(string compactText, string documentLabel, string pageLabel, CancellationToken cancellationToken)
+    {
+        var apiKey = _configuration["AI:Groq:ApiKey"]?.Trim();
+        if (string.IsNullOrWhiteSpace(apiKey)) return null;
+
+        var candidateModels = new[]
+        {
+            _configuration["AI:Groq:CompletionModel"],
+            "groq/compound-mini",
+            "openai/gpt-oss-120b"
+        }.Where(m => !string.IsNullOrWhiteSpace(m)).Select(m => m!.Trim()).Distinct().ToList();
+
+        var systemPrompt = "You summarize a single document page for a smart-glasses UI. Keep the summary concise, accurate, and grounded only in the provided page text. Return 3 to 5 short, clear bullet points.";
+        var userPrompt = $"Document: {documentLabel}\n{pageLabel}\n\nPlease summarize the following page content:\n\n{compactText}";
+
+        foreach (var model in candidateModels)
+        {
+            try
+            {
+                using var http = new HttpClient();
+                http.Timeout = TimeSpan.FromSeconds(30);
+                http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+
+                var payload = new
+                {
+                    model,
+                    messages = new[]
+                    {
+                        new { role = "system", content = systemPrompt },
+                        new { role = "user", content = userPrompt }
+                    }
+                };
+
+                using var content = new StringContent(JsonSerializer.Serialize(payload), System.Text.Encoding.UTF8, "application/json");
+                using var response = await http.PostAsync("https://api.groq.com/openai/v1/chat/completions", content, cancellationToken);
+                if (response.IsSuccessStatusCode)
+                {
+                    var json = await response.Content.ReadAsStringAsync(cancellationToken);
+                    using var doc = JsonDocument.Parse(json);
+                    return doc.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString()?.Trim();
+                }
+                else
+                {
+                    var errBody = await response.Content.ReadAsStringAsync(cancellationToken);
+                    _logger.LogWarning("Groq page summary API error for model {Model} ({Status}): {Body}", model, response.StatusCode, errBody);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Groq page summary fallback failed for model {Model}", model);
+            }
+        }
+
+        return null;
     }
 }

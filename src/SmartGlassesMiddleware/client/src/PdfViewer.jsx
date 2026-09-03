@@ -299,14 +299,18 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
     showToast("All highlights removed", 2000);
   }, [showToast]);
 
-  const getCurrentPageText = useCallback(async () => {
+  const getCurrentPageText = useCallback(async (requestedPage = null) => {
     const state = viewerStateRef.current;
     if (!state) return null;
 
-    const page = await state.pdf.getPage(state.pageNumber);
+    const targetPage = (typeof requestedPage === "number" && requestedPage >= 1 && requestedPage <= state.pdf.numPages)
+      ? requestedPage
+      : state.pageNumber;
+
+    const page = await state.pdf.getPage(targetPage);
     const { normalized } = await extractPageText(page);
     return {
-      pageNumber: state.pageNumber,
+      pageNumber: targetPage,
       text: normalized.trim(),
     };
   }, []);

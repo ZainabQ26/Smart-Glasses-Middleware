@@ -206,27 +206,42 @@ else
 }
 
 // Configure S3-compatible storage client
-// Always register the AWS SDK clients (use default credential chain — ECS task role on AWS,
-// environment variables or ~/.aws in local dev). Calls gracefully fail at runtime if no creds.
 var awsRegion = builder.Configuration["AWS:Region"] ?? "us-east-1";
 var awsRegionEndpoint = Amazon.RegionEndpoint.GetBySystemName(awsRegion);
-builder.Services.AddSingleton<Amazon.S3.IAmazonS3>(_ => new Amazon.S3.AmazonS3Client(awsRegionEndpoint));
 
-// Use native AWS S3 for media storage unless LocalStack/MinIO is explicitly enabled.
-// Storage backend must not depend on whether Bedrock is enabled.
 var useLocalStack = builder.Configuration.GetValue<bool?>("AWS:UseLocalStack") ?? false;
-var useAwsStorage = !useLocalStack;
+var minioEndpoint = builder.Configuration["MinIO:Endpoint"];
+var useMinio = !string.IsNullOrWhiteSpace(minioEndpoint);
 
-if (!useAwsStorage)
+builder.Services.AddSingleton<Amazon.S3.IAmazonS3>(_ =>
 {
-    builder.Services.AddSingleton<IMinioClient>(sp =>
+    var s3Endpoint = builder.Configuration["AWS:S3:Endpoint"] 
+                     ?? builder.Configuration["AWS:EndpointUrl"] 
+                     ?? builder.Configuration["AWS_ENDPOINT_URL"];
+
+    if (useLocalStack && !string.IsNullOrWhiteSpace(s3Endpoint))
     {
-        var endpoint = builder.Configuration["MinIO:Endpoint"];
-        var accessKey = builder.Configuration["MinIO:AccessKey"];
-        var secretKey = builder.Configuration["MinIO:SecretKey"];
+        var s3Config = new Amazon.S3.AmazonS3Config
+        {
+            ServiceURL = s3Endpoint,
+            ForcePathStyle = true,
+            UseHttp = s3Endpoint.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+        };
+        return new Amazon.S3.AmazonS3Client("test", "test", s3Config);
+    }
+
+    return new Amazon.S3.AmazonS3Client(awsRegionEndpoint);
+});
+
+if (useMinio)
+{
+    builder.Services.AddSingleton<IMinioClient>(_ =>
+    {
+        var accessKey = builder.Configuration["MinIO:AccessKey"] ?? string.Empty;
+        var secretKey = builder.Configuration["MinIO:SecretKey"] ?? string.Empty;
 
         return new MinioClient()
-            .WithEndpoint(endpoint)
+            .WithEndpoint(minioEndpoint)
             .WithCredentials(accessKey, secretKey)
             .Build();
     });
@@ -270,10 +285,10 @@ builder.Services.AddHttpClient<IAbbreviationService, AbbreviationService>((sp, c
 // Register application services
 builder.Services.AddScoped<IHistoryService, HistoryService>();
 // Use native AWS S3 storage service on ECS; MinIO for local dev
-if (useAwsStorage)
-    builder.Services.AddScoped<IMediaStorageService, SmartGlassesMiddleware.Services.AwsS3MediaStorageService>();
-else
+if (useMinio)
     builder.Services.AddScoped<IMediaStorageService, MinioMediaStorageService>();
+else
+    builder.Services.AddScoped<IMediaStorageService, SmartGlassesMiddleware.Services.AwsS3MediaStorageService>();
 // Register cache service: prefer Redis when configured, otherwise fall back to in-memory implementation
 if (!builder.Environment.IsEnvironment("Testing") && redisAvailable)
 {
@@ -824,6 +839,8 @@ app.Use(async (context, next) =>
 
     await next();
 });
+
+app.UseDefaultFiles();
 
 app.UseStaticFiles(new StaticFileOptions
 {
