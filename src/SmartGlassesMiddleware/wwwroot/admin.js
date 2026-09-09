@@ -1008,19 +1008,26 @@ function createFileCard(file) {
     const rawLabel = getProp(file, 'label');
     const fileName = getProp(file, 'fileName') || 'unknown';
     // Use the label only if it has a meaningful value; otherwise fall back to the file name
-    const label = (rawLabel && rawLabel !== 'Untitled') ? rawLabel : (fileName !== 'unknown' ? fileName : 'Untitled');
+    const label = (rawLabel && rawLabel !== 'Untitled' && !rawLabel.startsWith('Media upload:')) ? rawLabel : (fileName !== 'unknown' ? fileName : 'Untitled');
     const fileSize = getProp(file, 'fileSize') || 0;
     const uploadedAt = getProp(file, 'uploadedAt');
+    const storageKey = getProp(file, 'storageKey') || '';
+    const isPending = storageKey.startsWith('PENDING:');
+    const isFailed = storageKey.startsWith('FAILED:');
     const groups = getProp(file, 'groups') || [];
+    
+    const statusBadge = isPending 
+        ? `<span class="badge" style="background:#e3f2fd;color:#1565c0;margin-left:8px;">⏳ Processing…</span>`
+        : (isFailed ? `<span class="badge" style="background:#ffebee;color:#c62828;margin-left:8px;">❌ Failed</span>` : '');
     
     div.innerHTML = `
         <div class="card-header">
-            <div class="card-title">${escapeHtml(label)}</div>
+            <div class="card-title">${escapeHtml(label)} ${statusBadge}</div>
         </div>
         <div class="card-meta">
             File: ${escapeHtml(fileName)} | 
             Size: ${formatFileSize(fileSize)} | 
-            Uploaded: ${uploadedAt ? new Date(uploadedAt).toLocaleString() : 'Unknown'}
+            Uploaded: ${uploadedAt ? new Date(uploadedAt).toLocaleString() : 'Just now'}
         </div>
         ${groups && groups.length > 0 ? `
             <div style="margin-top: 8px;">
