@@ -33,21 +33,28 @@ public class AdvancedTaskHandler : ITaskHandler
 
     public async Task<string> HandleAsync(string input)
     {
-        if (!string.IsNullOrWhiteSpace(_modelId))
+        // Try Groq LLM first (fastest LPU execution < 500ms)
+        var groqText = await TryGroqCompletionAsync(input);
+        if (!string.IsNullOrWhiteSpace(groqText))
+        {
+            return groqText;
+        }
+
+        if (_bedrockRuntime != null && !string.IsNullOrWhiteSpace(_modelId))
         {
             try
             {
                 var request = new ConverseRequest
                 {
                     ModelId = _modelId,
-                    Messages =
-                    [
+                    Messages = new List<Message>
+                    {
                         new Message
                         {
                             Role = ConversationRole.User,
-                            Content = [new ContentBlock { Text = input }]
+                            Content = new List<ContentBlock> { new ContentBlock { Text = input } }
                         }
-                    ]
+                    }
                 };
 
                 var response = await _bedrockRuntime.ConverseAsync(request);
@@ -64,15 +71,8 @@ public class AdvancedTaskHandler : ITaskHandler
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Bedrock call failed for model {ModelId}, attempting Groq LLM fallback", _modelId);
+                _logger.LogWarning(ex, "Bedrock call failed for model {ModelId}", _modelId);
             }
-        }
-
-        // Groq Fallback when Bedrock is unavailable or unconfigured
-        var groqText = await TryGroqCompletionAsync(input);
-        if (!string.IsNullOrWhiteSpace(groqText))
-        {
-            return groqText;
         }
 
         return InvocationFailedMessage;
@@ -85,9 +85,8 @@ public class AdvancedTaskHandler : ITaskHandler
 
         var candidateModels = new[]
         {
-            _configuration["AI:Groq:CompletionModel"],
             "groq/compound-mini",
-            "openai/gpt-oss-120b",
+            _configuration["AI:Groq:CompletionModel"],
             "groq/compound"
         }.Where(m => !string.IsNullOrWhiteSpace(m)).Select(m => m!.Trim()).Distinct().ToList();
 
@@ -96,7 +95,7 @@ public class AdvancedTaskHandler : ITaskHandler
             try
             {
                 using var http = new HttpClient();
-                http.Timeout = TimeSpan.FromSeconds(30);
+                http.Timeout = TimeSpan.FromSeconds(10);
                 http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
 
                 var payload = new
