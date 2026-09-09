@@ -49,14 +49,14 @@ public class DocumentQueryTaskHandler : ITaskHandler
             if (!string.IsNullOrWhiteSpace(apiKey))
             {
                 using var http = new HttpClient();
-                http.Timeout = TimeSpan.FromSeconds(30);
+                http.Timeout = TimeSpan.FromSeconds(10);
                 http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
 
                 var candidateModels = new[]
                 {
-                    _configuration["AI:Groq:CompletionModel"],
                     "groq/compound-mini",
-                    "openai/gpt-oss-120b"
+                    _configuration["AI:Groq:CompletionModel"],
+                    "groq/compound"
                 }.Where(m => !string.IsNullOrWhiteSpace(m)).Select(m => m!.Trim()).Distinct().ToList();
 
                 var prompt = $"You are an AI assistant analyzing a document for smart glasses. Answer the user's request accurately, clearly, and concisely:\n\n{input}";

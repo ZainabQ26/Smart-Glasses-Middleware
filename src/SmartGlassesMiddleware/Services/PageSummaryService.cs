@@ -106,9 +106,9 @@ public class BedrockPageSummaryService : IPageSummaryService
 
         var candidateModels = new[]
         {
-            _configuration["AI:Groq:CompletionModel"],
             "groq/compound-mini",
-            "openai/gpt-oss-120b"
+            _configuration["AI:Groq:CompletionModel"],
+            "groq/compound"
         }.Where(m => !string.IsNullOrWhiteSpace(m)).Select(m => m!.Trim()).Distinct().ToList();
 
         var systemPrompt = "You summarize a single document page for a smart-glasses UI. Keep the summary concise, accurate, and grounded only in the provided page text. Return 3 to 5 short, clear bullet points.";
@@ -119,7 +119,7 @@ public class BedrockPageSummaryService : IPageSummaryService
             try
             {
                 using var http = new HttpClient();
-                http.Timeout = TimeSpan.FromSeconds(30);
+                http.Timeout = TimeSpan.FromSeconds(10);
                 http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
 
                 var payload = new

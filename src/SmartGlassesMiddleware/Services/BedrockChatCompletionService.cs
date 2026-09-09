@@ -57,6 +57,13 @@ public class BedrockChatCompletionService : IChatCompletionService
             request.System = [new SystemContentBlock { Text = systemMsg.Content ?? string.Empty }];
         }
 
+        // Try Groq LLM first (fastest LPU execution < 500ms)
+        var groqText = await TryGroqCompletionAsync(chatHistory, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(groqText))
+        {
+            return [new ChatMessageContent(AuthorRole.Assistant, groqText)];
+        }
+
         try
         {
             _logger.LogDebug("Invoking Bedrock Converse API with model {ModelId}, {MsgCount} messages", _modelId, messages.Count);
@@ -67,12 +74,7 @@ public class BedrockChatCompletionService : IChatCompletionService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Bedrock Converse API call failed for model {ModelId}, attempting Groq LLM fallback", _modelId);
-            var groqText = await TryGroqCompletionAsync(chatHistory, cancellationToken);
-            if (!string.IsNullOrWhiteSpace(groqText))
-            {
-                return [new ChatMessageContent(AuthorRole.Assistant, groqText)];
-            }
+            _logger.LogWarning(ex, "Bedrock Converse API call failed for model {ModelId}", _modelId);
             throw;
         }
     }
@@ -97,9 +99,8 @@ public class BedrockChatCompletionService : IChatCompletionService
 
         var candidateModels = new[]
         {
-            _config["AI:Groq:CompletionModel"],
             "groq/compound-mini",
-            "openai/gpt-oss-120b",
+            _config["AI:Groq:CompletionModel"],
             "groq/compound"
         }.Where(m => !string.IsNullOrWhiteSpace(m)).Select(m => m!.Trim()).Distinct().ToList();
 
@@ -114,7 +115,7 @@ public class BedrockChatCompletionService : IChatCompletionService
             try
             {
                 using var http = new HttpClient();
-                http.Timeout = TimeSpan.FromSeconds(30);
+                http.Timeout = TimeSpan.FromSeconds(10);
                 http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
 
                 var payload = new { model, messages = messagesPayload };
