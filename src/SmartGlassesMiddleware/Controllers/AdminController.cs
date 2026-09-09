@@ -228,14 +228,21 @@ public class AdminController : ControllerBase
         if (page < 1) page = 1;
 
         var cacheKey = $"admin:files:page:{page}:size:{pageSize}";
+        bool bypassCache = HttpContext.Request.Query.ContainsKey("cb") 
+                        || HttpContext.Request.Query.ContainsKey("v") 
+                        || HttpContext.Request.Query.ContainsKey("nocache")
+                        || HttpContext.Request.Query.ContainsKey("_");
 
         try
         {
-            // Try to get from cache first
-            var cachedResult = await _cacheService.GetAsync<object>(cacheKey);
-            if (cachedResult != null)
+            if (!bypassCache)
             {
-                return Ok(cachedResult);
+                // Try to get from cache first
+                var cachedResult = await _cacheService.GetAsync<object>(cacheKey);
+                if (cachedResult != null)
+                {
+                    return Ok(cachedResult);
+                }
             }
 
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted);
@@ -246,7 +253,6 @@ public class AdminController : ControllerBase
                 .AsNoTracking()
                 .Where(f => !string.IsNullOrWhiteSpace(f.StorageKey)
                     && !EF.Functions.Like(f.StorageKey, "FAILED:%")
-                    && !EF.Functions.Like(f.StorageKey, "PENDING:%")
                     && f.FileSize > 0);
 
             var totalCount = await visibleFilesQuery.CountAsync(ct);
