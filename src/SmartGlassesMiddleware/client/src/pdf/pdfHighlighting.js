@@ -65,8 +65,10 @@ function findNearestPage(rectangles, currentPage) {
  * @returns {Promise<import('./pdfClasses.js').HighlightRectangle[]>}
  */
 export async function searchForKeyword(keyword, pdf, viewports) {
-  const [normalizedKeyword] = normalize(keyword);
-  const lowercasedKeyword = normalizedKeyword.toLowerCase();
+  const cleanTerm = (keyword || "").replace(/^[^a-zA-Z0-9_-]+|[^a-zA-Z0-9_-]+$/g, "").trim();
+  if (!cleanTerm) return [];
+  const [normalizedKeyword] = normalize(cleanTerm);
+  const lowercasedKeyword = (normalizedKeyword || "").toLowerCase();
   const locations = [];
   const tempCanvas = document.createElement("canvas");
   const tempCtx = tempCanvas.getContext("2d");
@@ -199,7 +201,7 @@ const KEYWORD_SYNONYMS = {
 };
 
 export function getKeywordVariations(keyword) {
-  const norm = (keyword || "").toLowerCase().trim();
+  const norm = (keyword || "").toLowerCase().replace(/^[^a-zA-Z0-9_-]+|[^a-zA-Z0-9_-]+$/g, "").trim();
   if (!norm) return [];
   const list = new Set();
 

@@ -1121,7 +1121,11 @@ export default function App({ mode = "voice", language = "en" }) {
         } else if (!pdfViewerRef.current) {
           showAiResponse("No document is open. Open a document first.");
         }
-      } else if (answer === "__ACTION:CLOSE_DOCUMENT__") {
+      } else if (
+        answer === "__ACTION:CLOSE_DOCUMENT__" ||
+        /document (?:has been|is now|was) closed/i.test(answer) ||
+        /closing (?:the )?document/i.test(answer)
+      ) {
         addLog("📄 Command: close document", "voice");
         setAiResponse(null);
         setPendingAction(null);
