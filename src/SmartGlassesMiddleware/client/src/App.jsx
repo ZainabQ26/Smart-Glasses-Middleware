@@ -1453,6 +1453,7 @@ export default function App({ mode = "voice", language = "en" }) {
         // Track speech detection diagnostics
         let speechBurstCount = 0;
         let lastDiagTime = Date.now();
+        let micInitializedAt = Date.now();
 
         processor.port.onmessage = (ev) => {
           if (disposed) return;
@@ -1528,6 +1529,9 @@ export default function App({ mode = "voice", language = "en" }) {
                   } else {
                     // Wake-word check — send to Groq (queue latest if in-flight)
                     async function sendWakeAudio(chunk) {
+                      if (Date.now() - micInitializedAt < 1500) {
+                        return;
+                      }
                       wakewordInFlight = true;
                       try {
                         const result = await transcribeWakewordWithGroqRef.current?.(chunk);
@@ -1719,7 +1723,7 @@ export default function App({ mode = "voice", language = "en" }) {
                       <span style={styles.landingLoadingText}>{t.connectingMic}</span>
                     </div>
                   ) : (
-                    <div style={{ ...styles.landingReadyRow, cursor: 'pointer' }} onClick={() => handleWakeWordResult(activationWordRef.current || "Iris")}>
+                    <div style={styles.landingReadyRow}>
                       <span style={styles.landingReadyBadge}>✓</span>
                       <span style={styles.landingReadyText}>{t.readyShort}</span>
                     </div>
