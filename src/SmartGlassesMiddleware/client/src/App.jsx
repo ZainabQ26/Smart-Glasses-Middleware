@@ -287,11 +287,26 @@ export default function App({ mode = "voice", language = "en" }) {
   const normalizeCommandText = useCallback((value) => {
     const raw = (value ?? "").trim();
     if (!raw) return "";
-    const word = activationWordRef.current;
+
+    const word = activationWordRef.current || "Iris";
     const wordEsc = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const withoutWakeWord = raw.replace(new RegExp(`^${wordEsc}[\\s,:-]*`, "i"), "").trim();
-    const clean = (withoutWakeWord || raw).replace(/[.?!,;:]+$/g, "").trim();
-    return clean;
+
+    // 1. Strip activation word from start
+    let text = raw.replace(new RegExp(`^${wordEsc}[\\s,:-]*`, "i"), "").trim();
+    if (!text) text = raw;
+
+    // 2. Strip filler prefix phrases ("could you please", "can you", "please", "i want to", "hey")
+    const fillerPrefixRegex = /^(?:please|could\s+you\s+please|could\s+you|can\s+you\s+please|can\s+you|i\s+want\s+to|i\s+would\s+like\s+to|hey|would\s+you|kindly)\s+/i;
+    text = text.replace(fillerPrefixRegex, "").trim();
+
+    // 3. Strip filler suffix phrases ("please", "thanks", "thank you")
+    const fillerSuffixRegex = /\s+(?:please|thanks|thank\s+you)[.?!,;:]*$/i;
+    text = text.replace(fillerSuffixRegex, "").trim();
+
+    // 4. Strip leading and trailing punctuation (., -, ,, !, ?, ;, :, ", ')
+    text = text.replace(/^[\s,.\-!?:;\\"']+|[\s,.\-!?:;\\"']+$/g, "").trim();
+
+    return text || raw;
   }, []);
 
   const fetchJsonWithTimeout = useCallback(async (url, options = {}, timeoutMs = API_TIMEOUT_MS) => {
@@ -1212,15 +1227,15 @@ export default function App({ mode = "voice", language = "en" }) {
 
     const SAMPLE_RATE          = 16_000;
     const BUFFER_SIZE          = 1024;       // 64 ms per AudioWorklet callback
-    const RMS_THRESHOLD        = 0.007;      // RMS below this → silence (lowered for better speaker detection)
-    const WAKE_SILENCE_MS      = 400;        // wake-word path: 400ms to capture "hi iris" as one chunk
+    const RMS_THRESHOLD        = 0.007;      // RMS below this → silence
+    const WAKE_SILENCE_MS      = 250;        // wake-word path: 250ms to capture "iris" quickly
     const COMMAND_SILENCE_MS   = 1_200;      // command path: 1.2s delay for better speech capture and noise tolerance
     const SENTENCE_END_MS      = 350;        // pause after sentence-end pattern → submit
-    const FORCE_SUBMIT_MS      = 4_000;      // max silence during command → force submit (increased for longer pauses)
+    const FORCE_SUBMIT_MS      = 4_000;      // max silence during command → force submit
     const MIN_COMMAND_SEC      = 0.3;        // minimum audio duration (s) to bother submitting
-    const MAX_COMMAND_WINDOW_MS = 7_000;     // hard cap after activation so noise cannot keep command mode open forever
-    const MAX_COMMAND_AUDIO_SEC = 8.0;       // max accumulated command audio before forced finalization
-    const WAKE_MIN_CHUNK_SEC   = 0.25;       // wake-word path: require at least 250ms of audio to prevent noise bursts from triggering wake check
+    const MAX_COMMAND_WINDOW_MS = 7_000;     // hard cap after activation
+    const MAX_COMMAND_AUDIO_SEC = 8.0;       // max accumulated command audio
+    const WAKE_MIN_CHUNK_SEC   = 0.12;       // wake-word path: 120ms chunk threshold for instant wake word pickup
     const COMMAND_MIN_CHUNK_SEC = 0.35;      // command path: larger chunks improve recognition stability
 
     let disposed = false;
@@ -1523,7 +1538,7 @@ export default function App({ mode = "voice", language = "en" }) {
                   } else {
                     // Wake-word check — send to Groq (queue latest if in-flight)
                     async function sendWakeAudio(chunk) {
-                      if (Date.now() - micInitializedAt < 1500) {
+                      if (Date.now() - micInitializedAt < 800) {
                         return;
                       }
                       wakewordInFlight = true;
