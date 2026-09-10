@@ -67,13 +67,22 @@ function findNearestPage(rectangles, currentPage) {
 export async function searchForKeyword(keyword, pdf, viewports) {
   const cleanTerm = (keyword || "").replace(/^[^a-zA-Z0-9_-]+|[^a-zA-Z0-9_-]+$/g, "").trim();
   if (!cleanTerm) return [];
-  const [normalizedKeyword] = normalize(cleanTerm);
-  const lowercasedKeyword = (normalizedKeyword || "").toLowerCase();
+
+  const candidates = [cleanTerm];
+  if (cleanTerm.includes("-")) {
+    candidates.push(cleanTerm.replace(/-/g, ""));
+    candidates.push(cleanTerm.replace(/-/g, " "));
+  }
+
   const locations = [];
   const tempCanvas = document.createElement("canvas");
   const tempCtx = tempCanvas.getContext("2d");
-
   if (!tempCtx) return locations;
+
+  for (const candidate of candidates) {
+    const [normalizedKeyword] = normalize(candidate);
+    const lowercasedKeyword = (normalizedKeyword || "").toLowerCase();
+    if (!lowercasedKeyword) continue;
 
   const allText = await getAllPdfText(pdf);
 
@@ -137,6 +146,8 @@ export async function searchForKeyword(keyword, pdf, viewports) {
 
       searchIndex++;
     }
+  }
+  if (locations.length > 0) break;
   }
 
   return locations;
