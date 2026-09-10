@@ -290,7 +290,8 @@ export default function App({ mode = "voice", language = "en" }) {
     const word = activationWordRef.current;
     const wordEsc = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const withoutWakeWord = raw.replace(new RegExp(`^${wordEsc}[\\s,:-]*`, "i"), "").trim();
-    return withoutWakeWord || raw;
+    const clean = (withoutWakeWord || raw).replace(/[.?!,;:]+$/g, "").trim();
+    return clean;
   }, []);
 
   const fetchJsonWithTimeout = useCallback(async (url, options = {}, timeoutMs = API_TIMEOUT_MS) => {
@@ -821,16 +822,6 @@ export default function App({ mode = "voice", language = "en" }) {
       return true;
     }
 
-    // Check for gibberish-like text (very low consonant-to-vowel ratio or unusual patterns)
-    const vowels = (trimmed.match(/[aeiou]/gi) || []).length;
-    const consonants = (trimmed.match(/[bcdfghjklmnprstvwxyz]/gi) || []).length;
-    const totalLetters = vowels + consonants;
-    
-    // If mostly vowels or mostly consonants, likely noise
-    if (totalLetters > 3 && (vowels / totalLetters > 0.8 || consonants / totalLetters > 0.8)) {
-      return true;
-    }
-
     return false;
   }, []);
 
@@ -1006,7 +997,7 @@ export default function App({ mode = "voice", language = "en" }) {
 
             // Strip leading/trailing punctuation from each term (e.g., "patient." → "patient")
             terms = terms
-              .map((term) => term.replace(/^[^\w]+|[^\w]+$/g, "").trim())
+              .map((term) => term.replace(/^[^a-zA-Z0-9_-]+|[^a-zA-Z0-9_-]+$/g, "").trim())
               .filter(Boolean);
 
             if (terms.length > 0) {
