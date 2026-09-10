@@ -965,7 +965,7 @@ export default function App({ mode = "voice", language = "en" }) {
           return;
         }
 
-        if (/\b(?:print|imprimir)\s+(?:the\s+|el\s+|este\s+)?(?:document|documento|pdf)\b|^(?:print|imprimir)$/i.test(lowered)) {
+        if (/\b(?:print|printed|printing|imprimir)\s+(?:the\s+|el\s+|este\s+)?(?:document|documento|pdf)\b|^(?:print|printed|printing|imprimir)$/i.test(lowered)) {
           addLog("🖨️ Command: print document", "voice");
           setAiResponse(null);
           setPendingAction(null);
@@ -973,7 +973,7 @@ export default function App({ mode = "voice", language = "en" }) {
           return;
         }
 
-        if (/\bclose\s+(?:the\s+)?(?:document|pdf)\b|\bcerrar\s+(?:el\s+)?(?:documento|pdf)\b/.test(lowered)) {
+        if (/\b(?:close|closed|closing)\s+(?:the\s+)?(?:document|pdf)\b|\b(?:cerrar|cerrado)\s+(?:el\s+)?(?:documento|pdf)\b/i.test(lowered)) {
           addLog("📄 Command: close document", "voice");
           setAiResponse(null);
           setPendingAction(null);
@@ -981,7 +981,7 @@ export default function App({ mode = "voice", language = "en" }) {
           return;
         }
 
-        const highlightMatch = commandText.match(/\b(?:highlight|resaltar)\s+(.+)$/i);
+        const highlightMatch = commandText.match(/\b(?:highlight|highlighted|highlighting|resaltar|resaltado)\s+(.+)$/i);
         if (highlightMatch) {
           const phrase = highlightMatch[1]
             .replace(/^(?:the|el|la|los|las)\s+/i, "")

@@ -180,18 +180,58 @@ export function drawAllHighlights(viewerState, context) {
 
 /**
  * Add a highlight for `keyword` in `viewerState`, then re-render the current
- * page with all highlights applied.
+const KEYWORD_SYNONYMS = {
+  "kg": ["kilogram", "kilograms"],
+  "kilogram": ["kg"],
+  "kilograms": ["kg"],
+  "mg": ["milligram", "milligrams"],
+  "milligram": ["mg"],
+  "bp": ["blood pressure"],
+  "blood pressure": ["bp"],
+  "hr": ["heart rate"],
+  "heart rate": ["hr"],
+  "temp": ["temperature"],
+  "temperature": ["temp"],
+  "dob": ["date of birth"],
+  "rx": ["prescription"],
+  "wbc": ["white blood cell count", "white blood cells"],
+  "rbc": ["red blood cell count", "red blood cells"],
+};
+
+export function getKeywordVariations(keyword) {
+  const norm = (keyword || "").toLowerCase().trim();
+  if (!norm) return [];
+  const list = new Set();
+
+  if (KEYWORD_SYNONYMS[norm]) {
+    KEYWORD_SYNONYMS[norm].forEach(s => list.add(s));
+  }
+
+  if (norm.includes("-")) {
+    list.add(norm.replace(/-/g, ""));
+    list.add(norm.replace(/-/g, " "));
+  } else if (norm.includes(" ")) {
+    list.add(norm.replace(/\s+/g, "-"));
+    list.add(norm.replace(/\s+/g, ""));
+  } else {
+    const prefixMatch = norm.match(/^(non|anti|pre|post|multi|sub)(.+)$/i);
+    if (prefixMatch) {
+      list.add(`${prefixMatch[1]}-${prefixMatch[2]}`);
+      list.add(`${prefixMatch[1]} ${prefixMatch[2]}`);
+    }
+  }
+
+  return Array.from(list);
+}
+
+/**
+ * Add a keyword highlight to the PDF.
  *
- * If the keyword already has a colour slot, its colour cycles to the next
- * available slot (up to HIGHLIGHT_COLOR_COUNT slots total, then wraps).
- * If the keyword is brand-new and the palette is full, the oldest keyword is
- * replaced.
- *
- * @param {import('./pdfClasses.js').ViewerState} viewerState
+ * @param {ViewerState} viewerState
  * @param {string} keyword
- * @param {import('pdfjs-dist').PageViewport[]} viewports
+ * @param {import("pdfjs-dist").PageViewport[]} viewports
  * @param {HTMLCanvasElement} canvas
- * @returns {Promise<boolean>} `true` if the keyword was found and highlighted, `false` otherwise.
+ * @returns {Promise<boolean>} True if the keyword was found and highlighted; false if not found.
  */
 export async function addHighlight(viewerState, keyword, viewports, canvas) {
   const context = canvas.getContext("2d");
@@ -201,7 +241,17 @@ export async function addHighlight(viewerState, keyword, viewports, canvas) {
   if (!lowerKeyword) return false;
 
   // Search for the keyword across all pages.
-  const rectangles = await searchForKeyword(lowerKeyword, viewerState.pdf, viewports);
+  let rectangles = await searchForKeyword(lowerKeyword, viewerState.pdf, viewports);
+  
+  // If keyword not found directly, check abbreviation & hyphen variations
+  if (rectangles.length === 0) {
+    const variations = getKeywordVariations(lowerKeyword);
+    for (const alt of variations) {
+      rectangles = await searchForKeyword(alt, viewerState.pdf, viewports);
+      if (rectangles.length > 0) break;
+    }
+  }
+
   if (rectangles.length === 0) return false; // keyword not found in document
 
   // If keyword already highlighted, remove it so we can re-add with next colour.
