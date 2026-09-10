@@ -1229,7 +1229,7 @@ export default function App({ mode = "voice", language = "en" }) {
     const MIN_COMMAND_SEC      = 0.3;        // minimum audio duration (s) to bother submitting
     const MAX_COMMAND_WINDOW_MS = 7_000;     // hard cap after activation so noise cannot keep command mode open forever
     const MAX_COMMAND_AUDIO_SEC = 8.0;       // max accumulated command audio before forced finalization
-    const WAKE_MIN_CHUNK_SEC   = 0.08;       // wake-word path: allow smaller chunks to reduce delay
+    const WAKE_MIN_CHUNK_SEC   = 0.25;       // wake-word path: require at least 250ms of audio to prevent noise bursts from triggering wake check
     const COMMAND_MIN_CHUNK_SEC = 0.35;      // command path: larger chunks improve recognition stability
 
     let disposed = false;
@@ -1719,7 +1719,7 @@ export default function App({ mode = "voice", language = "en" }) {
                       <span style={styles.landingLoadingText}>{t.connectingMic}</span>
                     </div>
                   ) : (
-                    <div style={styles.landingReadyRow}>
+                    <div style={{ ...styles.landingReadyRow, cursor: 'pointer' }} onClick={() => handleWakeWordResult(activationWordRef.current || "Iris")}>
                       <span style={styles.landingReadyBadge}>✓</span>
                       <span style={styles.landingReadyText}>{t.readyShort}</span>
                     </div>

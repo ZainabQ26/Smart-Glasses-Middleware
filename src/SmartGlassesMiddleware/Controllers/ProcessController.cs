@@ -93,13 +93,8 @@ public class ProcessController : ControllerBase
             content.Add(streamContent, "file", string.IsNullOrWhiteSpace(audio.FileName) ? "audio.wav" : audio.FileName);
             content.Add(new StringContent(model), "model");
 
-            // For wake-word detection, bias Whisper toward the activation word to reduce hallucination on short clips
-            if (checkWakeword)
-            {
-                var activationWord = Configuration["AI:ActivationWord"]?.Trim();
-                if (string.IsNullOrWhiteSpace(activationWord)) activationWord = "Iris";
-                content.Add(new StringContent(activationWord), "prompt");
-            }
+            // For wake-word detection, do not bias Whisper with the activation word as a prompt because it causes Whisper to hallucinate the wake-word on background noise clips.
+
 
             if (!string.IsNullOrWhiteSpace(language))
                 content.Add(new StringContent(language), "language");
