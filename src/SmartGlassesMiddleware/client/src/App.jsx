@@ -1354,14 +1354,17 @@ export default function App({ mode = "voice", language = "en" }) {
       // removes remaining special characters.  Without this the old approach removed
       // "ú" entirely, turning "número" into "nmero" instead of "numero", which broke
       // prefix matching for Spanish file-selection commands.
-      const normalize = (s) => stripDiacritics(s.toLowerCase()).replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
+      const normalize = (s) => stripDiacritics((s || "").toLowerCase()).replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
       const normalizedText = normalize(cleaned);
-      const normalizedWord = normalize(word);
-      // Accept the full phrase ("hi iris") OR just the core name ("iris")
-      const coreWord = normalizedWord.split(" ").pop();
-      const matched = normalizedText.includes(normalizedWord) || normalizedText.includes(coreWord);
+      const normalizedWord = normalize(word || "Iris");
+      const coreWord = (normalizedWord.split(" ").pop() || "iris").trim();
+
+      if (!normalizedText || !coreWord || coreWord.length < 2) return;
+
+      const wordEsc = coreWord.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const matched = new RegExp(`\\b${wordEsc}\\b`, "i").test(normalizedText);
       addLog(`🔍 Wake check: "${normalizedText}" vs "${coreWord}" → ${matched ? "MATCH ✅" : "no match"}`, "info");
-      console.log(`[Debug Voice]: handle wake word result: normalizedText: ${coreWord}, normalizedWord: ${normalizedWord}`);
+      console.log(`[Debug Voice]: handle wake word result: normalizedText: "${normalizedText}", coreWord: "${coreWord}", matched: ${matched}`);
 
       if (
         matched &&
@@ -1538,9 +1541,6 @@ export default function App({ mode = "voice", language = "en" }) {
                         if (!disposed) {
                           if (result?.text) {
                             handleWakeWordResult(result.text.trim(), result.commandAfterWakeword || "");
-                          } else if (result?.matched) {
-                            // Fallback when backend marks wake-word matched but transcription text is empty.
-                            handleWakeWordResult(activationWordRef.current || "Iris");
                           }
                         }
                       } catch (_) {}
