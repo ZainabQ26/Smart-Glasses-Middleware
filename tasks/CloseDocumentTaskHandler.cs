@@ -11,10 +11,21 @@ public class CloseDocumentTaskHandler : ITaskHandler
 
     public IReadOnlyList<string> Keywords => new[]
     {
+        "close",
+        "cerrar",
         "close document",
         "closed document",
         "closing document",
         "cerrar documento",
+        "close viewer",
+        "close the viewer",
+        "cerrar visor",
+        "cerrar el visor",
+        "close photo",
+        "close picture",
+        "close image",
+        "cerrar foto",
+        "cerrar imagen",
         "close pdf",
         "closed pdf",
         "closing pdf",
@@ -26,7 +37,9 @@ public class CloseDocumentTaskHandler : ITaskHandler
         "cerrar el documento",
         "close the pdf",
         "closed the pdf",
-        "cerrar el pdf"
+        "cerrar el pdf",
+        "exit",
+        "salir"
     };
 
     public Task<string> HandleAsync(string input)

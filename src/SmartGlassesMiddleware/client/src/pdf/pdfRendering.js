@@ -57,6 +57,11 @@ export async function renderPdfPage(pdf, pageNumber, canvas, scale = 1.0) {
   canvas.height = viewport.height;
   canvas.width = viewport.width;
 
+  if (context) {
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
   await page.render({ canvasContext: context, viewport }).promise;
   return page;
 }

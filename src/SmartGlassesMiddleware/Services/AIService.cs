@@ -292,6 +292,7 @@ public class AIService : IAIService
             .ToArray());
         var normalized = Regex.Replace(withoutDiacritics, @"[^a-z0-9\s-]", " ");
         normalized = Regex.Replace(normalized, @"\s+", " ").Trim();
+        normalized = GoToPageTaskHandler.NormalizeWordsToDigits(normalized);
 
         // ── reminder ──────────────────────────────────────────────────────────
         if (ContainsAnyPhrase(normalized,
@@ -381,18 +382,39 @@ public class AIService : IAIService
             "close pdf",
             "close the pdf",
             "close file",
+            "close viewer",
+            "close the viewer",
+            "close photo",
+            "close the photo",
+            "close picture",
+            "close the picture",
+            "close image",
             "exit document",
             "exit pdf",
             "exit the document",
+            "exit viewer",
             // Spanish
             "cerrar documento",
             "cerrar el documento",
             "cerrar pdf",
             "cerrar el pdf",
+            "cerrar visor",
+            "cerrar el visor",
+            "cerrar foto",
+            "cerrar la foto",
+            "cerrar imagen",
             "salir del documento",
-            "salir del pdf")
+            "salir del pdf",
+            "salir del visor")
+            || normalized == "close"
+            || normalized == "cerrar"
+            || normalized == "exit"
+            || normalized == "salir"
             || ContainsAllWords(normalized, "close", "document")
             || ContainsAllWords(normalized, "close", "pdf")
+            || ContainsAllWords(normalized, "close", "viewer")
+            || ContainsAllWords(normalized, "close", "photo")
+            || ContainsAllWords(normalized, "close", "picture")
             || ContainsAllWords(normalized, "exit", "document")
             || ContainsAllWords(normalized, "quit", "document"))
         {
@@ -846,6 +868,17 @@ public class AIService : IAIService
             "scan document",
             "scan the document",
             "extract text",
+            "take picture",
+            "take a picture",
+            "take photo",
+            "take a photo",
+            "snap picture",
+            "snap a picture",
+            "snap photo",
+            "snap a photo",
+            "capture photo",
+            "capture image",
+            "capture document",
             // Spanish
             "escanear texto",
             "leer texto",
@@ -853,7 +886,28 @@ public class AIService : IAIService
             "realizar ocr",
             "ejecutar ocr",
             "escanear imagen",
-            "escanear documento")
+            "escanear documento",
+            "tomar foto",
+            "tomar una foto",
+            "sacar foto",
+            "sacar una foto",
+            "capturar foto",
+            "capturar imagen")
+            || normalized == "take picture"
+            || normalized == "take a picture"
+            || normalized == "take photo"
+            || normalized == "take a photo"
+            || normalized == "snap picture"
+            || normalized == "snap photo"
+            || normalized == "tomar foto"
+            || normalized == "foto"
+            || normalized == "picture"
+            || ContainsAllWords(normalized, "take", "picture")
+            || ContainsAllWords(normalized, "take", "photo")
+            || ContainsAllWords(normalized, "snap", "picture")
+            || ContainsAllWords(normalized, "snap", "photo")
+            || ContainsAllWords(normalized, "tomar", "foto")
+            || ContainsAllWords(normalized, "sacar", "foto")
             || ContainsAllWords(normalized, "scan", "document")
             || ContainsAllWords(normalized, "scan", "text")
             || ContainsAllWords(normalized, "scan", "image")

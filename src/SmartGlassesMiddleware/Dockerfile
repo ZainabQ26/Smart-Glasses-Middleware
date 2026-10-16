@@ -37,8 +37,20 @@ RUN dotnet publish "src/SmartGlassesMiddleware/SmartGlassesMiddleware.csproj" \
 # ── Stage 3: Runtime image ────────────────────────────────────────────────────
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl fonts-liberation \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get install -y --no-install-recommends curl fonts-liberation tesseract-ocr tesseract-ocr-eng libtesseract-dev libleptonica-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/lib/x86_64-linux-gnu/libtesseract.so.5 /usr/lib/x86_64-linux-gnu/libtesseract50.so \
+    && ln -sf /usr/lib/x86_64-linux-gnu/liblept.so.5 /usr/lib/x86_64-linux-gnu/libleptonica-1.82.0.so \
+    && ln -sf /usr/lib/x86_64-linux-gnu/liblept.so.5 /usr/lib/x86_64-linux-gnu/liblept.so \
+    && ln -sf /usr/lib/x86_64-linux-gnu/libtesseract.so.5 /usr/lib/x86_64-linux-gnu/libtesseract.so \
+    && ln -sf /usr/lib/x86_64-linux-gnu/libdl.so.2 /usr/lib/x86_64-linux-gnu/libdl.so \
+    && ldconfig \
+    && mkdir -p /app/x64 \
+    && ln -sf /usr/lib/x86_64-linux-gnu/libdl.so.2 /app/libdl.so \
+    && ln -sf /usr/lib/x86_64-linux-gnu/libtesseract.so.5 /app/x64/libtesseract50.so \
+    && ln -sf /usr/lib/x86_64-linux-gnu/libtesseract.so.5 /app/x64/libtesseract.so \
+    && ln -sf /usr/lib/x86_64-linux-gnu/liblept.so.5 /app/x64/libleptonica-1.82.0.so \
+    && ln -sf /usr/lib/x86_64-linux-gnu/liblept.so.5 /app/x64/liblept.so
 WORKDIR /app
 COPY --from=build /app/publish .
 

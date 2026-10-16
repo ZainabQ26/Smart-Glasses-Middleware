@@ -308,6 +308,7 @@ builder.Services.AddScoped<IConversationService, ConversationService>();
 builder.Services.AddScoped<IPageSummaryService, BedrockPageSummaryService>();
 // Global mapping service for ResourceGroup -> Conversation
 builder.Services.AddSingleton<IGroqTranscriptionLogService, GroqTranscriptionLogService>();
+builder.Services.AddSingleton<IOcrBatchService, OcrBatchService>();
 
 // Audio transcription is handled server-side via Groq at /api/process/transcribe.
 

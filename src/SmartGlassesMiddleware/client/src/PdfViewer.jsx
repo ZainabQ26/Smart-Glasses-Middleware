@@ -138,6 +138,77 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
       viewportsRef.current = [];
 
       const url = `/api/admin/files/${documentId}/preview`;
+      let res = null;
+
+      // Retry loop if file is still processing (409 Conflict / 202 Accepted)
+      for (let attempt = 0; attempt < 20; attempt++) {
+        if (cancelled) return;
+        try {
+          res = await fetch(url);
+          if (res.status === 409 || res.status === 202) {
+            await new Promise(r => setTimeout(r, 400));
+            continue;
+          }
+          if (res.ok) break;
+        } catch (_) {
+          await new Promise(r => setTimeout(r, 400));
+        }
+      }
+
+      if (cancelled) return;
+
+      if (!res || !res.ok) {
+        setError("Failed to load the document. Please try again.");
+        setLoading(false);
+        return;
+      }
+
+      const contentType = (res.headers.get("content-type") || "").toLowerCase();
+
+      // If document is an image (e.g. captured camera photo or uploaded PNG/JPG)
+      if (contentType.startsWith("image/")) {
+        const blob = await res.blob();
+        if (cancelled) return;
+
+        const img = new Image();
+        const objectUrl = URL.createObjectURL(blob);
+
+        await new Promise((resolve, reject) => {
+          img.onload = resolve;
+          img.onerror = reject;
+          img.src = objectUrl;
+        });
+
+        if (cancelled) {
+          URL.revokeObjectURL(objectUrl);
+          return;
+        }
+
+        const canvas = canvasRef.current;
+        if (canvas) {
+          canvas.width = img.naturalWidth || 1280;
+          canvas.height = img.naturalHeight || 720;
+          const ctx = canvas.getContext("2d");
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          }
+        }
+
+        viewerStateRef.current = {
+          isImage: true,
+          image: img,
+          pageNumber: 1,
+          pdf: { numPages: 1 },
+          highlights: []
+        };
+
+        setTotalPages(1);
+        setCurrentPage(1);
+        setLoading(false);
+        return;
+      }
+
+      // Otherwise, load as standard PDF
       const pdf = await getPdf(url);
 
       if (cancelled) return;
@@ -340,6 +411,35 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
    * print output), converted to a PNG data URL, and written into a temporary
    * print window.  The browser's native print dialog is then triggered.
    */
+  /**
+   * Helper to dispatch rendered multi-page HTML to Android native print service if available.
+   * Returns true if sent to Android native bridge, false otherwise.
+   */
+  const sendHtmlToAndroid = useCallback((html, jobName) => {
+    if (typeof window !== "undefined" && window.AndroidMic) {
+      if (typeof window.AndroidMic.startPrintHtml === "function") {
+        window.AndroidMic.startPrintHtml(jobName);
+        const CHUNK_SIZE = 256 * 1024; // 256 KB
+        for (let i = 0; i < html.length; i += CHUNK_SIZE) {
+          window.AndroidMic.appendPrintHtml(html.substring(i, i + CHUNK_SIZE));
+        }
+        window.AndroidMic.finishPrintHtml();
+        return true;
+      }
+      if (typeof window.AndroidMic.printHtml === "function") {
+        window.AndroidMic.printHtml(html, jobName);
+        return true;
+      }
+    }
+    return false;
+  }, []);
+
+  /**
+   * Print the entire document.  Every page is rendered to an off-screen canvas
+   * (with active highlights burned in at matching resolution), converted to a JPEG
+   * data URL, and dispatched to Android native print service or written into a hidden
+   * iframe for desktop browser printing.
+   */
   const printDocument = useCallback(async () => {
     const state = viewerStateRef.current;
     if (!state) {
@@ -349,29 +449,35 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
 
     showToast("Preparing print…", 15_000);
 
-    const PRINT_SCALE = 2.0;
-    const offscreen = document.createElement("canvas");
+    const PRINT_SCALE = 1.5;
     const pageImages = [];
 
-    for (let p = 1; p <= state.pdf.numPages; p++) {
-      await renderPdfPage(state.pdf, p, offscreen, PRINT_SCALE);
-      if (state.highlights.length > 0) {
-        const ctx = offscreen.getContext("2d");
-        if (ctx) {
-          state.highlights.forEach((h, colorIndex) => {
-            // Draw at 2× — scale the stored 1× rectangles up to match the canvas.
-            const scaled = h.rectangleArrays.map(r => ({
-              ...r,
-              canvasX:      r.canvasX      * PRINT_SCALE,
-              canvasY:      r.canvasY      * PRINT_SCALE,
-              canvasWidth:  r.canvasWidth  * PRINT_SCALE,
-              canvasHeight: r.canvasHeight * PRINT_SCALE,
-            }));
-            drawSingleHighlights(scaled, colorIndex, p, ctx);
-          });
-        }
+    if (state.isImage) {
+      const canvas = canvasRef.current;
+      if (canvas) {
+        pageImages.push(canvas.toDataURL("image/jpeg", 0.92));
       }
-      pageImages.push(offscreen.toDataURL("image/png"));
+    } else {
+      const offscreen = document.createElement("canvas");
+      for (let p = 1; p <= state.pdf.numPages; p++) {
+        await renderPdfPage(state.pdf, p, offscreen, PRINT_SCALE);
+        if (state.highlights.length > 0) {
+          const ctx = offscreen.getContext("2d");
+          if (ctx) {
+            state.highlights.forEach((h, colorIndex) => {
+              const scaled = h.rectangleArrays.map(r => ({
+                ...r,
+                canvasX:      r.canvasX      * PRINT_SCALE,
+                canvasY:      r.canvasY      * PRINT_SCALE,
+                canvasWidth:  r.canvasWidth  * PRINT_SCALE,
+                canvasHeight: r.canvasHeight * PRINT_SCALE,
+              }));
+              drawSingleHighlights(scaled, colorIndex, p, ctx);
+            });
+          }
+        }
+        pageImages.push(offscreen.toDataURL("image/jpeg", 0.92));
+      }
     }
 
     const imgsHtml = pageImages
@@ -379,7 +485,33 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
       .join("");
 
     const safeTitle = (documentName || "Document").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    
+    const fullHtml = `<!DOCTYPE html>
+<html><head>
+  <meta charset="utf-8"/>
+  <title>${safeTitle}</title>
+  <style>
+    @page { size: auto; margin: 0mm; }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { background:#fff; margin:0; padding:0; }
+    .page { page-break-after: always; text-align:center; margin:0; padding:0; }
+    .page:last-child { page-break-after: avoid; }
+    .page img { width:100%; height:auto; display:block; }
+    @media print {
+      body { margin:0; }
+      .page { page-break-after: always; }
+      .page:last-child { page-break-after: avoid; }
+    }
+  </style>
+</head>
+<body>${imgsHtml}</body></html>`;
+
+    // ── Check for Android native print bridge ──
+    if (sendHtmlToAndroid(fullHtml, safeTitle)) {
+      showToast("Print dialog opened.", 3000);
+      return;
+    }
+
+    // ── Desktop browser fallback (hidden iframe) ──
     let printFrame = document.getElementById("print-document-iframe");
     if (!printFrame) {
       printFrame = document.createElement("iframe");
@@ -395,20 +527,7 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
 
     const doc = printFrame.contentWindow.document;
     doc.open();
-    doc.write(`<!DOCTYPE html>
-<html><head>
-  <title>${safeTitle}</title>
-  <style>
-    @page { size: auto; margin: 0mm; }
-    * { margin:0; padding:0; box-sizing:border-box; }
-    body { background:#fff; }
-    .page { page-break-after: always; text-align:center; }
-    .page:last-child { page-break-after: avoid; }
-    .page img { width:100%; height:auto; display:block; }
-    @media print { body { margin:0; } }
-  </style>
-</head>
-<body>${imgsHtml}</body></html>`);
+    doc.write(fullHtml);
     doc.close();
 
     setTimeout(() => {
@@ -420,7 +539,7 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
         showToast("Error opening print dialog.", 3000);
       }
     }, 300);
-  }, [showToast, documentName]);
+  }, [showToast, documentName, sendHtmlToAndroid]);
 
   /**
    * Print only pages that contain at least one active highlight.
@@ -446,7 +565,7 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
 
     showToast(`Preparing ${highlightedPages.length} highlighted page${highlightedPages.length === 1 ? "" : "s"} for print…`, 15_000);
 
-    const PRINT_SCALE = 2.0;
+    const PRINT_SCALE = 1.5;
     const offscreen = document.createElement("canvas");
     const pageImages = [];
 
@@ -472,7 +591,7 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
         });
       }
 
-      pageImages.push({ pageNumber, src: offscreen.toDataURL("image/png") });
+      pageImages.push({ pageNumber, src: offscreen.toDataURL("image/jpeg", 0.92) });
     }
 
     const imgsHtml = pageImages
@@ -480,7 +599,34 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
       .join("");
 
     const safeTitle = (documentName || "Document").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const jobTitle = `${safeTitle} - Highlighted Pages`;
+    const fullHtml = `<!DOCTYPE html>
+<html><head>
+  <meta charset="utf-8"/>
+  <title>${jobTitle}</title>
+  <style>
+    @page { size: auto; margin: 0mm; }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { background:#fff; margin:0; padding:0; }
+    .page { page-break-after: always; text-align:center; margin:0; padding:0; }
+    .page:last-child { page-break-after: avoid; }
+    .page img { width:100%; height:auto; display:block; }
+    @media print {
+      body { margin:0; }
+      .page { page-break-after: always; }
+      .page:last-child { page-break-after: avoid; }
+    }
+  </style>
+</head>
+<body>${imgsHtml}</body></html>`;
 
+    // ── Check for Android native print bridge ──
+    if (sendHtmlToAndroid(fullHtml, jobTitle)) {
+      showToast("Print dialog opened.", 3000);
+      return;
+    }
+
+    // ── Desktop browser fallback (hidden iframe) ──
     let printFrame = document.getElementById("print-highlighted-iframe");
     if (!printFrame) {
       printFrame = document.createElement("iframe");
@@ -496,20 +642,7 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
 
     const doc = printFrame.contentWindow.document;
     doc.open();
-    doc.write(`<!DOCTYPE html>
-<html><head>
-  <title>${safeTitle} - Highlighted Pages</title>
-  <style>
-    @page { size: auto; margin: 0mm; }
-    * { margin:0; padding:0; box-sizing:border-box; }
-    body { background:#fff; }
-    .page { page-break-after: always; text-align:center; }
-    .page:last-child { page-break-after: avoid; }
-    .page img { width:100%; height:auto; display:block; }
-    @media print { body { margin:0; } }
-  </style>
-</head>
-<body>${imgsHtml}</body></html>`);
+    doc.write(fullHtml);
     doc.close();
 
     setTimeout(() => {
@@ -521,7 +654,25 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
         showToast("Error opening print dialog.", 3000);
       }
     }, 300);
-  }, [showToast, documentName]);
+  }, [showToast, documentName, sendHtmlToAndroid]);
+
+  // ── Register global triggers for external caller (e.g. Android native voice) ──
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.__triggerPrintDocument = () => {
+        printDocument();
+      };
+      window.__triggerPrintHighlightedPages = () => {
+        printHighlightedPages();
+      };
+    }
+    return () => {
+      if (typeof window !== "undefined") {
+        delete window.__triggerPrintDocument;
+        delete window.__triggerPrintHighlightedPages;
+      }
+    };
+  }, [printDocument, printHighlightedPages]);
 
   // ── Expose imperative handle to parent ──────────────────────────────────────
   useImperativeHandle(ref, () => ({

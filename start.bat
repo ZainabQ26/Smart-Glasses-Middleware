@@ -28,4 +28,7 @@ timeout /t 5 >nul
 start http://localhost:5000/
 echo.
 echo Press any key to exit this window (app will keep running in Docker).
+echo.
+echo TIP: First time using camera on the Beam?
+echo   Run beam-camera-fix.bat (connect Beam via USB first)
 pause
