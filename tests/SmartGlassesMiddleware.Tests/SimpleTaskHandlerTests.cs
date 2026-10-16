@@ -357,5 +357,58 @@ namespace SmartGlassesMiddleware.Tests
             var result = await handler.HandleAsync(string.Empty);
             Assert.That(result, Is.EqualTo("__ACTION:PRINT_HIGHLIGHTED_PAGES__"));
         }
+
+        // ── OcrTaskHandler ────────────────────────────────────────────────────
+
+        [Test]
+        public void Ocr_Name_ShouldBeOcr()
+        {
+            var handler = new OcrTaskHandler();
+            Assert.That(handler.Name, Is.EqualTo("ocr"));
+        }
+
+        [Test]
+        public void Ocr_Keywords_ShouldContainExpectedTerms()
+        {
+            var handler = new OcrTaskHandler();
+            Assert.That(handler.Keywords, Does.Contain("scan text"));
+            Assert.That(handler.Keywords, Does.Contain("take picture"));
+            Assert.That(handler.Keywords, Does.Contain("take photo"));
+            Assert.That(handler.Keywords, Does.Contain("do ocr"));
+        }
+
+        [Test]
+        public async Task Ocr_HandleAsync_ReturnsActionToken()
+        {
+            var handler = new OcrTaskHandler();
+            var result = await handler.HandleAsync("take a picture");
+            Assert.That(result, Is.EqualTo("__ACTION:TAKE_PICTURE__"));
+        }
+
+        // ── OcrRetryTaskHandler ───────────────────────────────────────────────
+
+        [Test]
+        public void OcrRetry_Name_ShouldBeOcrRetry()
+        {
+            var handler = new OcrRetryTaskHandler();
+            Assert.That(handler.Name, Is.EqualTo("ocr-retry"));
+        }
+
+        [Test]
+        public void OcrRetry_Keywords_ShouldContainExpectedTerms()
+        {
+            var handler = new OcrRetryTaskHandler();
+            Assert.That(handler.Keywords, Does.Contain("retry ocr"));
+            Assert.That(handler.Keywords, Does.Contain("retake picture"));
+        }
+
+        [Test]
+        public async Task OcrRetry_HandleAsync_ReturnsActionToken()
+        {
+            var handler = new OcrRetryTaskHandler();
+            var result = await handler.HandleAsync("retry ocr");
+            Assert.That(result, Is.EqualTo("__ACTION:TAKE_PICTURE__"));
+        }
     }
 }
+

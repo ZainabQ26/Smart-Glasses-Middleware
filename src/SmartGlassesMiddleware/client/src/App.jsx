@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import PdfViewer from "./PdfViewer.jsx";
+import ScannerModal from "./ScannerModal.jsx";
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 //
@@ -87,6 +88,8 @@ const TRANSLATIONS = {
       ["search for BP", "Search using FDA SPL abbreviations"],
       ["print document", "Print open document with highlights"],
       ["print highlight", "Print the highlighted pages only"],
+      ["take picture", "Capture photo and display document"],
+      ["close document", "Close open document or photo"],
     ],
     sendingAI: "🤖 Sending to AI…",
     transcribing: "⏳ Transcribing…",
@@ -145,6 +148,8 @@ const TRANSLATIONS = {
       ["buscar PA", "Buscar usando abreviaciones FDA SPL"],
       ["imprimir documento", "Imprimir documento con resaltados"],
       ["imprimir resaltado", "Imprimir solo las páginas resaltadas"],
+      ["tomar foto", "Capturar foto y mostrar documento"],
+      ["cerrar documento", "Cerrar documento o foto abierto"],
     ],
     sendingAI: "🤖 Enviando a IA…",
     transcribing: "⏳ Transcribiendo…",
@@ -224,6 +229,7 @@ export default function App({ mode = "voice", language = "en" }) {
 
   // Inline PDF viewer state.
   const [openPdf, setOpenPdf] = useState(null); // { id, name } | null
+  const [scannerOpen, setScannerOpen] = useState(false);
   const pdfViewerRef = useRef(null);
   const handleClosePdf = useCallback(() => setOpenPdf(null), []);
 
@@ -663,6 +669,35 @@ export default function App({ mode = "voice", language = "en" }) {
     setOpenPdf({ id: previewId, name });
     addLog(`📄 Opening document: "${name}"`, "info");
   }, [addLog, setPendingAction]);
+
+  const handleTakePicture = useCallback(() => {
+    addLog("📸 Launching Smart Glasses Document Scanner…", "info");
+    showAiResponse("Opening Document Scanner…");
+    setPendingAction(null);
+    setScannerOpen(true);
+  }, [addLog, setPendingAction, showAiResponse]);
+
+  // Expose global triggers for Android native WebView bridge & external events
+  useEffect(() => {
+    window.__triggerScanDocument = () => {
+      handleTakePicture();
+    };
+    window.__triggerPrintDocument = () => {
+      if (pdfViewerRef.current) {
+        pdfViewerRef.current.printDocument();
+      }
+    };
+    window.__triggerPrintHighlightedPages = () => {
+      if (pdfViewerRef.current) {
+        pdfViewerRef.current.printHighlightedPages();
+      }
+    };
+    return () => {
+      delete window.__triggerScanDocument;
+      delete window.__triggerPrintDocument;
+      delete window.__triggerPrintHighlightedPages;
+    };
+  }, [handleTakePicture]);
 
   const fetchRecentDocuments = useCallback(async () => {
     try {
@@ -1124,12 +1159,23 @@ export default function App({ mode = "voice", language = "en" }) {
       } else if (
         answer === "__ACTION:CLOSE_DOCUMENT__" ||
         /document (?:has been|is now|was) closed/i.test(answer) ||
-        /closing (?:the )?document/i.test(answer)
+        /closing (?:the )?document/i.test(answer) ||
+        /close(?: the)? (?:document|viewer|photo|picture|pdf)/i.test(answer) ||
+        /closing (?:the )?(?:document|viewer|photo|picture|pdf)/i.test(answer) ||
+        /^(?:close|cerrar|exit|salir)$/i.test(answer)
       ) {
         addLog("📄 Command: close document", "voice");
         setAiResponse(null);
         setPendingAction(null);
         setOpenPdf(null);
+      } else if (
+        answer === "__ACTION:TAKE_PICTURE__" ||
+        answer === "__ACTION:CAPTURE_AND_OCR__"
+      ) {
+        addLog("📸 Command: take picture", "voice");
+        setAiResponse(null);
+        setPendingAction(null);
+        await handleTakePicture();
       } else if (answer === "__ACTION:OPEN_ADMIN_PANEL__") {
         addLog("🔧 Command: open admin panel", "voice");
         setAiResponse(null);
@@ -1201,7 +1247,7 @@ export default function App({ mode = "voice", language = "en" }) {
         resumeListeningRef.current();
       }
     }
-  }, [addLog, buildProcessRequestBody, fetchRecentDocuments, fetchJsonWithTimeout, isBlankAudioOrNoise, normalizeCommandText, openDocumentPreview, openPdf, setPendingAction, showAiResponse, showRemindersToast, showTranscript]);
+  }, [addLog, buildProcessRequestBody, fetchRecentDocuments, fetchJsonWithTimeout, handleTakePicture, isBlankAudioOrNoise, normalizeCommandText, openDocumentPreview, openPdf, setPendingAction, showAiResponse, showRemindersToast, showTranscript]);
 
   sendToAIRef.current = sendToAI;
   useEffect(() => { sendToAIRef.current = sendToAI; }, [sendToAI]);
@@ -1436,41 +1482,14 @@ export default function App({ mode = "voice", language = "en" }) {
     // Start the mic capture loop
     async function startMic() {
       addLog("🔄 Starting microphone...", "info");
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        if (disposed) { stream.getTracks().forEach(t => t.stop()); return; }
-        addLog("✅ Mic permission granted", "info");
 
-        streamRef.current = stream;
-        const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
-        audioCtxRef.current = ctx;
-        addLog(`🔊 AudioContext state: ${ctx.state}, sampleRate: ${ctx.sampleRate}`, "info");
+      // Speech detection diagnostics
+      let speechBurstCount = 0;
+      let lastDiagTime = Date.now();
+      let micInitializedAt = Date.now();
 
-        // Mobile Chrome requires explicit resume after user gesture (getUserMedia)
-        if (ctx.state === 'suspended') {
-          addLog("⏸️ AudioContext suspended — resuming...", "warn");
-          await ctx.resume();
-          addLog(`🔊 AudioContext resumed — state: ${ctx.state}`, "info");
-        }
-
-        const source    = ctx.createMediaStreamSource(stream);
-
-        // Add AudioWorklet module
-        await ctx.audioWorklet.addModule('/audioProcessor.js');
-        const processor = new AudioWorkletNode(ctx, 'audio-processor');
-        processorRef.current = processor;
-
-        source.connect(processor);
-        processor.connect(ctx.destination);
-
-        // Track speech detection diagnostics
-        let speechBurstCount = 0;
-        let lastDiagTime = Date.now();
-        let micInitializedAt = Date.now();
-
-        processor.port.onmessage = (ev) => {
-          if (disposed) return;
-          const samples = ev.data;
+      function processAudioSamples(samples) {
+          if (disposed || !samples) return;
           const rms = Math.sqrt(samples.reduce((s, v) => s + v * v, 0) / samples.length);
           const now = Date.now();
 
@@ -1579,6 +1598,52 @@ export default function App({ mode = "voice", language = "en" }) {
               preSpeechBuffer.shift();
             }
           }
+      }
+
+      // ─── Native Android Bridge (bypasses browser origin security & hardware routing) ───
+      if (typeof window !== 'undefined' && window.AndroidMic && typeof window.AndroidMic.startNativeMic === 'function') {
+        addLog("⚡ Native Android Mic Bridge connected (0.001s)", "info");
+        window.onNativeAudioChunk = (pcmArray) => {
+          if (disposed) return;
+          processAudioSamples(new Float32Array(pcmArray));
+        };
+        window.AndroidMic.startNativeMic();
+        if (!disposed) {
+          setWakeWordReady(true);
+          addLog(`🎤 Microphone ready — say "${activationWordRef.current}"`, "info");
+        }
+        return;
+      }
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        if (disposed) { stream.getTracks().forEach(t => t.stop()); return; }
+        addLog("✅ Mic permission granted", "info");
+
+        streamRef.current = stream;
+        const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
+        audioCtxRef.current = ctx;
+        addLog(`🔊 AudioContext state: ${ctx.state}, sampleRate: ${ctx.sampleRate}`, "info");
+
+        // Mobile Chrome requires explicit resume after user gesture (getUserMedia)
+        if (ctx.state === 'suspended') {
+          addLog("⏸️ AudioContext suspended — resuming...", "warn");
+          await ctx.resume();
+          addLog(`🔊 AudioContext resumed — state: ${ctx.state}`, "info");
+        }
+
+        const source    = ctx.createMediaStreamSource(stream);
+
+        // Add AudioWorklet module
+        await ctx.audioWorklet.addModule('/audioProcessor.js');
+        const processor = new AudioWorkletNode(ctx, 'audio-processor');
+        processorRef.current = processor;
+
+        source.connect(processor);
+        processor.connect(ctx.destination);
+
+        processor.port.onmessage = (ev) => {
+          processAudioSamples(ev.data);
         };
 
         if (!disposed) {
@@ -1598,6 +1663,11 @@ export default function App({ mode = "voice", language = "en" }) {
     return () => {
       disposed = true;
       clearTimers();
+      try {
+        if (typeof window !== 'undefined' && window.AndroidMic && typeof window.AndroidMic.stopNativeMic === 'function') {
+          window.AndroidMic.stopNativeMic();
+        }
+      } catch (_) {}
       try {
         if (processorRef.current) {
           processorRef.current.port.close();
@@ -1742,6 +1812,37 @@ export default function App({ mode = "voice", language = "en" }) {
               </li>
             </ol>
 
+            {/* ── Quick Scan Button on Landing Card ── */}
+            <div style={{ display: "flex", gap: "10px", marginTop: "4px" }}>
+              <button
+                type="button"
+                style={{
+                  flex: 1,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "10px",
+                  padding: "13px 20px",
+                  background: "linear-gradient(135deg, #1d4ed8 0%, #0284c7 100%)",
+                  color: "#fff",
+                  border: "1px solid rgba(255,255,255,0.25)",
+                  borderRadius: "12px",
+                  fontSize: "0.98rem",
+                  fontWeight: "700",
+                  cursor: "pointer",
+                  boxShadow: "0 4px 18px rgba(0, 100, 255, 0.35)",
+                  transition: "transform 0.15s, box-shadow 0.15s",
+                }}
+                onClick={() => {
+                  setShowLanding(false);
+                  handleTakePicture();
+                }}
+              >
+                <span style={{ fontSize: "1.2rem" }}>📷</span>
+                <span>Scan Document with Glasses</span>
+              </button>
+            </div>
+
             {/* ── Common commands table (hidden on narrow / short screens) ─ */}
             <div style={styles.landingSection} className="sgm-landing-cmds">
               <h2 style={styles.landingH2}>{t.commonCommandsTitle}</h2>
@@ -1771,6 +1872,8 @@ export default function App({ mode = "voice", language = "en" }) {
           )}
         </div>
       )}
+
+
 
       {mode === "voice" && !showLanding && isListening && (
         <div style={styles.commandList}>
@@ -1882,6 +1985,8 @@ export default function App({ mode = "voice", language = "en" }) {
           </div>
         )}
 
+
+
         {openPdf && (
           <PdfViewer
             key={openPdf.id}
@@ -1892,6 +1997,16 @@ export default function App({ mode = "voice", language = "en" }) {
           />
         )}
       </main>
+
+      <ScannerModal
+        isOpen={scannerOpen}
+        onClose={() => setScannerOpen(false)}
+        onComplete={({ id, name }) => {
+          setOpenPdf({ id, name });
+          addLog(`📄 Opening scanned document: "${name}"`, "info");
+        }}
+        addLog={addLog}
+      />
 
       {mode === "admin" && (
         <div style={styles.textInputArea}>
@@ -2583,7 +2698,7 @@ if (typeof document !== "undefined" && !document.getElementById("app-mobile-styl
       .assistant-logo { max-width: 160px !important; }
     }
     @media (max-height: 480px) {
-      .assistant-logo { display: none !important; }
+      .assistant-logo { max-width: 140px !important; display: block !important; margin: 0 auto !important; }
     }
   `;
   document.head.appendChild(style);

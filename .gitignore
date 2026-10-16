@@ -178,3 +178,6 @@ TestResults/
 CoverageReport/
 TestResults/
 docs/tests/
+
+# Android build packages
+*.apk

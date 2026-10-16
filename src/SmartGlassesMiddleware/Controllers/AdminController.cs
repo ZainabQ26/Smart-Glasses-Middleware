@@ -26,6 +26,7 @@ public class AdminController : ControllerBase
     private readonly IGroqTranscriptionLogService _groqTranscriptionLog;
     private readonly IHubContext<ResourceHub>? _resourceHub;
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly IOcrBatchService _ocrBatchService;
     private static readonly TimeSpan InitEndpointTimeout = TimeSpan.FromSeconds(8);
     private static readonly int UploadProcessingConcurrency = ResolveUploadProcessingConcurrency();
     private static readonly SemaphoreSlim UploadProcessingSemaphore = new(UploadProcessingConcurrency, UploadProcessingConcurrency);
@@ -141,7 +142,8 @@ public class AdminController : ControllerBase
         IRequestMonitoringService monitoringService,
         IGroqTranscriptionLogService groqTranscriptionLog,
         IServiceScopeFactory scopeFactory,
-        IHubContext<ResourceHub>? resourceHub = null)
+        IHubContext<ResourceHub>? resourceHub = null,
+        IOcrBatchService? ocrBatchService = null)
     {
         _context = context;
         _mediaStorageService = mediaStorageService;
@@ -151,6 +153,7 @@ public class AdminController : ControllerBase
         _groqTranscriptionLog = groqTranscriptionLog;
         _resourceHub = resourceHub;
         _scopeFactory = scopeFactory;
+        _ocrBatchService = ocrBatchService ?? new OcrBatchService(new LoggerFactory().CreateLogger<OcrBatchService>());
     }
 
     /// <summary>
@@ -587,6 +590,91 @@ public class AdminController : ControllerBase
         {
             UploadProcessingSemaphore.Release();
         }
+    }
+
+    /// <summary>
+    /// Multi-page OCR batch capture endpoint. Preprocesses captured images, runs Tesseract OCR,
+    /// compiles into a searchable multi-page PDF, stores it in the repository, and returns the file ID.
+    /// </summary>
+    [HttpPost("files/ocr-batch")]
+    [IgnoreAntiforgeryToken]
+    [RequestSizeLimit(MaxAdminUploadBytes)]
+    [RequestFormLimits(MultipartBodyLengthLimit = MaxAdminUploadBytes, ValueLengthLimit = int.MaxValue)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult> ProcessOcrBatch([FromForm] List<IFormFile> files, [FromForm] string? label)
+    {
+        if (files == null || files.Count == 0)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title = "Bad Request",
+                Detail = "At least one page image is required.",
+                Status = StatusCodes.Status400BadRequest
+            });
+        }
+
+        var documentLabel = string.IsNullOrWhiteSpace(label)
+            ? $"Document Scan - {DateTime.Now:yyyy-MM-dd HH:mm}"
+            : label.Trim();
+
+        _logger.LogInformation("Starting OCR batch processing for '{Label}' with {Count} page(s)", documentLabel, files.Count);
+
+        var pageDataList = new List<PageOcrData>();
+        for (int i = 0; i < files.Count; i++)
+        {
+            var file = files[i];
+            using var ms = new MemoryStream();
+            await file.CopyToAsync(ms);
+            var imageBytes = ms.ToArray();
+
+            var pageOcr = await _ocrBatchService.ProcessSinglePageAsync(imageBytes, i + 1);
+            pageDataList.Add(pageOcr);
+        }
+
+        // Generate searchable multi-page PDF with selectable text layer
+        var pdfBytes = await _ocrBatchService.GenerateSearchablePdfAsync(pageDataList);
+        var fileId = Guid.NewGuid();
+        var fileName = $"scan_{DateTime.UtcNow:yyyyMMdd_HHmmss}.pdf";
+        const string contentType = "application/pdf";
+
+        using var pdfStream = new MemoryStream(pdfBytes);
+        var uploadMeta = S3FileIndexService.BuildUploadMetadata(fileId, fileName, documentLabel);
+        var storageKey = await _mediaStorageService.UploadMediaAsync(pdfStream, fileName, contentType, uploadMeta);
+
+        using var hashStream = new MemoryStream(pdfBytes, writable: false);
+        var contentHash = _mediaStorageService.ComputeContentHash(hashStream);
+
+        var managedFile = new ManagedFile
+        {
+            Id = fileId,
+            FileName = fileName,
+            Label = documentLabel,
+            ContentType = contentType,
+            StorageKey = storageKey,
+            ContentHash = contentHash,
+            UploadedAt = DateTime.UtcNow,
+            FileSize = pdfBytes.LongLength
+        };
+
+        _context.ManagedFiles.Add(managedFile);
+        await _context.SaveChangesAsync();
+
+        try { await InvalidateFilesCache(); } catch { /* best-effort */ }
+        try { await NotifyFilesChangedAsync(); } catch { /* best-effort */ }
+
+        _logger.LogInformation("OCR batch processing complete: '{Label}' saved as {FileId} ({PageCount} pages, {Bytes} bytes)",
+            documentLabel, fileId, files.Count, pdfBytes.Length);
+
+        return Ok(new
+        {
+            id = fileId,
+            name = documentLabel,
+            fileName = fileName,
+            totalPages = files.Count,
+            size = pdfBytes.Length,
+            success = true
+        });
     }
 
     /// <summary>
