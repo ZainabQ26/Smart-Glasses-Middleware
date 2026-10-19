@@ -141,6 +141,17 @@ services:
     networks:
       - localstack-network
 
+  # Cloudflare Tunnel for secure HTTPS access (camera/mic on phone/Beam without flags)
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: localstack-tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --url http://api:5000
+    depends_on:
+      - api
+    networks:
+      - localstack-network
+
 networks:
   localstack-network:
     driver: bridge

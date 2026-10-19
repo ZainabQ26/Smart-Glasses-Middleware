@@ -15,20 +15,38 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-echo Starting Docker containers...
-docker compose -f docker-compose.localstack.yml up --build -d
+echo Starting Docker containers (API + Database + HTTPS Tunnel)...
+docker compose -f docker-compose.localstack.yml up -d
 
 echo.
 echo ===================================================
-echo   App is starting up!
-echo   Opening http://localhost:5000 in your browser...
+echo   Waiting for services and secure HTTPS link...
+echo ===================================================
+timeout /t 6 >nul
+
+:: Extract the Cloudflare HTTPS Tunnel URL
+set TUNNEL_URL=
+for /f "usebackq tokens=*" %%U in (`powershell -NoProfile -Command "$m = (docker logs localstack-tunnel 2>&1 | Select-String 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' | Select-Object -First 1); if ($m) { $m.Matches[0].Value }"`) do (
+    set TUNNEL_URL=%%U
+)
+
+echo.
+echo ===================================================
+echo   App is Ready!
+echo ===================================================
+echo   PC Local:        http://localhost:5000/
+if defined TUNNEL_URL (
+    echo   Phone / Beam:    %TUNNEL_URL%
+    echo                    ^(Secure HTTPS - Camera works automatically!^)
+) else (
+    echo   Phone / Beam:    Run 'docker logs localstack-tunnel' to view HTTPS link
+)
 echo ===================================================
 echo.
-timeout /t 5 >nul
+
 start http://localhost:5000/
+
 echo.
 echo Press any key to exit this window (app will keep running in Docker).
-echo.
-echo TIP: First time using camera on the Beam?
-echo   Run beam-camera-fix.bat (connect Beam via USB first)
+echo Run stop.bat when you are done.
 pause
