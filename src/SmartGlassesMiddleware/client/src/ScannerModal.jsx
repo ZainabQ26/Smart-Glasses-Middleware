@@ -21,6 +21,37 @@ function formatCameraLabel(d, i) {
   return label ? `📷 ${label}` : `Camera ${i + 1}`;
 }
 
+// A camera is "built-in" if its label clearly says front/back/rear/user/environment/beam.
+function isBuiltInCamera(d) {
+  const l = (d?.label || "").toLowerCase();
+  return (
+    l.includes("front") || l.includes("back") || l.includes("rear") ||
+    l.includes("user") || l.includes("environment") || l.includes("beam")
+  );
+}
+
+// External = XREAL / UVC / USB / External / glass, OR any device that is not clearly built-in.
+function isExternalCamera(d) {
+  const l = (d?.label || "").toLowerCase();
+  if (l.includes("eye") || l.includes("xreal") || l.includes("uvc") || l.includes("usb") ||
+      l.includes("external") || l.includes("glass")) {
+    return !l.includes("beam");
+  }
+  return !isBuiltInCamera(d);
+}
+
+function pickBestCamera(videoInputs) {
+  return (
+    videoInputs.find(d => (d.label || "").toLowerCase().includes("eye")) ||
+    videoInputs.find(isExternalCamera) ||
+    videoInputs.find(d => {
+      const l = (d.label || "").toLowerCase();
+      return !l.includes("front") && !l.includes("user");
+    }) ||
+    videoInputs[0]
+  );
+}
+
 export default function ScannerModal({ isOpen, onClose, onComplete, addLog }) {
   const [videoDevices, setVideoDevices] = useState([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState("");
@@ -63,6 +94,7 @@ export default function ScannerModal({ isOpen, onClose, onComplete, addLog }) {
 
         setIsInsecureContext(false);
 
+        // Prompt for permission first so enumerateDevices() returns real labels + all devices.
         let initialStream = null;
         try {
           initialStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
@@ -73,33 +105,13 @@ export default function ScannerModal({ isOpen, onClose, onComplete, addLog }) {
           initialStream.getTracks().forEach(t => t.stop());
         }
 
+        // Keep EVERY videoinput (including unlabeled / unidentified USB ones).
         const videoInputs = devices.filter(d => d.kind === "videoinput");
         if (!active) return;
 
         setVideoDevices(videoInputs);
 
-        // 1. Highest priority: XREAL Eye camera accessory on the glasses
-        const xrealEyeCamera = videoInputs.find(d => {
-          const label = (d.label || "").toLowerCase();
-          return label.includes("eye");
-        });
-
-        // 2. Second priority: External USB / UVC / XREAL glasses camera (NOT the handheld Beam/phone body)
-        const externalGlassesCamera = videoInputs.find(d => {
-          const label = (d.label || "").toLowerCase();
-          const isExternal = label.includes("uvc") || label.includes("usb") || label.includes("external") || (label.includes("xreal") && !label.includes("beam")) || label.includes("glass");
-          const isInternal = label.includes("front") || label.includes("user") || label.includes("beam");
-          return isExternal && !isInternal;
-        });
-
-        // 3. Fallback: If no external camera is identified yet, check for non-front camera or first device
-        const fallbackCamera = videoInputs.find(d => {
-          const label = (d.label || "").toLowerCase();
-          return !label.includes("front") && !label.includes("user");
-        }) || videoInputs[0];
-
-        const chosen = xrealEyeCamera || externalGlassesCamera || fallbackCamera;
-
+        const chosen = pickBestCamera(videoInputs);
         if (chosen) {
           setSelectedDeviceId(chosen.deviceId);
         }
@@ -111,8 +123,29 @@ export default function ScannerModal({ isOpen, onClose, onComplete, addLog }) {
 
     initCameras();
 
+    // Auto-refresh when USB glasses are plugged / unplugged (no permission prompt, no stream restart).
+    async function onDeviceChange() {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        if (!active) return;
+        const videoInputs = devices.filter(d => d.kind === "videoinput");
+        setVideoDevices(prev => {
+          const prevIds = new Set(prev.map(p => p.deviceId));
+          const newExternal = videoInputs.find(d => !prevIds.has(d.deviceId) && isExternalCamera(d));
+          if (newExternal) setSelectedDeviceId(newExternal.deviceId);
+          return videoInputs;
+        });
+      } catch (_) {}
+    }
+    if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+      navigator.mediaDevices.addEventListener("devicechange", onDeviceChange);
+    }
+
     return () => {
       active = false;
+      if (navigator.mediaDevices && navigator.mediaDevices.removeEventListener) {
+        navigator.mediaDevices.removeEventListener("devicechange", onDeviceChange);
+      }
     };
   }, [isOpen, retryCount]);
 
@@ -140,14 +173,27 @@ export default function ScannerModal({ isOpen, onClose, onComplete, addLog }) {
           return;
         }
 
-        const constraints = {
-          video: selectedDeviceId
-            ? { deviceId: { exact: selectedDeviceId }, width: { ideal: 1920 }, height: { ideal: 1080 } }
-            : { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } },
-          audio: false
-        };
-
-        localStream = await navigator.mediaDevices.getUserMedia(constraints);
+        // Never force facingMode when a specific device is chosen (USB/UVC cameras have none).
+        if (selectedDeviceId) {
+          try {
+            localStream = await navigator.mediaDevices.getUserMedia({
+              video: { deviceId: { exact: selectedDeviceId }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+              audio: false
+            });
+          } catch (firstErr) {
+            if (firstErr.name === "NotAllowedError" || firstErr.name === "PermissionDeniedError") throw firstErr;
+            // External cameras often reject resolution hints: retry with the bare exact deviceId.
+            localStream = await navigator.mediaDevices.getUserMedia({
+              video: { deviceId: { exact: selectedDeviceId } },
+              audio: false
+            });
+          }
+        } else {
+          localStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+            audio: false
+          });
+        }
         if (!active) {
           localStream.getTracks().forEach(t => t.stop());
           return;
@@ -354,6 +400,15 @@ export default function ScannerModal({ isOpen, onClose, onComplete, addLog }) {
               </select>
             )}
 
+            <button
+              style={styles.closeBtn}
+              onClick={() => { setCameraError(null); setRetryCount(c => c + 1); }}
+              disabled={processing}
+              title="Refresh Cameras (after plugging in the glasses)"
+            >
+              🔄
+            </button>
+
             <button style={styles.closeBtn} onClick={onClose} disabled={processing}>
               ✕
             </button>
@@ -371,7 +426,10 @@ export default function ScannerModal({ isOpen, onClose, onComplete, addLog }) {
                     Camera blocked — HTTP not allowed
                   </div>
                   <div style={{ ...styles.errorSub, textAlign: "left", maxWidth: 340 }}>
-                    <p style={{ margin: "0 0 10px" }}>Chrome blocks camera on plain <code style={styles.inlineCode}>http://</code> pages. Fix it on this device in 3 steps:</p>
+                    <p style={{ margin: "0 0 10px", color: "#4ade80", fontWeight: 600 }}>
+                      Easiest fix: open the app via the secure <code style={styles.inlineCode}>https://…trycloudflare.com</code> link shown by start.bat — no flags needed.
+                    </p>
+                    <p style={{ margin: "0 0 10px" }}>Chrome blocks camera on plain <code style={styles.inlineCode}>http://</code> pages. Or fix it on this device in 3 steps:</p>
                     <ol style={{ margin: 0, paddingLeft: 18, lineHeight: 1.8 }}>
                       <li>Open a new tab and go to:<br/>
                         <code style={{ ...styles.inlineCode, display: "block", marginTop: 4, wordBreak: "break-all", userSelect: "all" }}>

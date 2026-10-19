@@ -11,16 +11,16 @@ echo   Configures Chrome on Beam to trust this server
 echo ===================================================
 echo.
 
-:: Auto-detect PC local IP (avoid using TMP as variable name - it shadows %%TMP%%)
+:: Auto-detect the PC IP on the ACTIVE network (the adapter that has the default gateway),
+:: so this follows school Wi-Fi / home Wi-Fi / hotspot. No IP is hardcoded.
 set LOCAL_IP=
-for /f "tokens=2 delims=:" %%A in ('ipconfig ^| findstr /i "IPv4" ^| findstr /v "169\."') do (
-    if not defined LOCAL_IP (
-        set IPVAL=%%A
-        set IPVAL=!IPVAL: =!
-        if not "!IPVAL!"=="" set LOCAL_IP=!IPVAL!
-    )
+for /f "usebackq delims=" %%A in (`powershell -NoProfile -Command "(Get-NetIPConfiguration | Where-Object { $_.IPv4DefaultGateway -ne $null -and $_.NetAdapter.Status -eq 'Up' } | Select-Object -First 1).IPv4Address.IPAddress"`) do (
+    if not defined LOCAL_IP set LOCAL_IP=%%A
 )
-if not defined LOCAL_IP set LOCAL_IP=66.71.37.204
+if not defined LOCAL_IP (
+    echo Could not auto-detect this PC's IP address.
+    set /p LOCAL_IP=Enter this PC's current IP ^(run ipconfig to find it^): 
+)
 
 echo Detected PC IP : %LOCAL_IP%
 echo App URL        : http://%LOCAL_IP%:%PORT%
