@@ -80,7 +80,7 @@ public class AdvancedTaskHandler : ITaskHandler
 
     private async Task<string?> TryGroqCompletionAsync(string prompt)
     {
-        var apiKey = _configuration["AI:Groq:ApiKey"]?.Trim();
+        var apiKey = (_configuration["AI:Groq:ApiKey"] ?? Environment.GetEnvironmentVariable("GROQ_API_KEY"))?.Trim();
         if (string.IsNullOrWhiteSpace(apiKey)) return null;
 
         var candidateModels = new[]

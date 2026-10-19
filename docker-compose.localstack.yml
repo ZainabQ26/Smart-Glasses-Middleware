@@ -121,7 +121,8 @@ services:
         condition: service_completed_successfully
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
-      - AI__Groq__ApiKey=REMOVED
+      - AI__Groq__ApiKey=${GROQ_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
       - AWS_REGION=us-east-1
       - AWS_ACCESS_KEY_ID=test
       - AWS_SECRET_ACCESS_KEY=test

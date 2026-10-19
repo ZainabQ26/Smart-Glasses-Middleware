@@ -126,6 +126,10 @@ test_*.txt
 !package.json
 !package-lock.json
 !appsettings*.json
+appsettings.Development.json
+**/appsettings.Development.json
+appsettings.*.Local.json
+**/appsettings.*.Local.json
 !tsconfig*.json
 !*.csproj
 

@@ -65,6 +65,13 @@ if (args is { Length: > 0 })
     builder.Configuration.AddCommandLine(args);
 }
 
+// Fallback lookup: if GROQ_API_KEY environment variable is present, ensure AI:Groq:ApiKey is populated
+var envGroqKey = Environment.GetEnvironmentVariable("GROQ_API_KEY")?.Trim();
+if (!string.IsNullOrWhiteSpace(envGroqKey) && string.IsNullOrWhiteSpace(builder.Configuration["AI:Groq:ApiKey"]))
+{
+    builder.Configuration["AI:Groq:ApiKey"] = envGroqKey;
+}
+
 // Configure QuestPDF license for community usage to avoid runtime license validation errors
 QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
 

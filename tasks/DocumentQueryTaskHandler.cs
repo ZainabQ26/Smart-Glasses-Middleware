@@ -45,7 +45,7 @@ public class DocumentQueryTaskHandler : ITaskHandler
         {
             _logger.LogInformation("Processing document query: {Query}", input);
 
-            var apiKey = _configuration["AI:Groq:ApiKey"]?.Trim();
+            var apiKey = (_configuration["AI:Groq:ApiKey"] ?? Environment.GetEnvironmentVariable("GROQ_API_KEY"))?.Trim();
             if (!string.IsNullOrWhiteSpace(apiKey))
             {
                 using var http = new HttpClient();

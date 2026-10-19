@@ -94,7 +94,7 @@ public class BedrockChatCompletionService : IChatCompletionService
 
     private async Task<string?> TryGroqCompletionAsync(ChatHistory chatHistory, CancellationToken cancellationToken)
     {
-        var apiKey = _config["AI:Groq:ApiKey"]?.Trim();
+        var apiKey = (_config["AI:Groq:ApiKey"] ?? Environment.GetEnvironmentVariable("GROQ_API_KEY"))?.Trim();
         if (string.IsNullOrWhiteSpace(apiKey)) return null;
 
         var candidateModels = new[]

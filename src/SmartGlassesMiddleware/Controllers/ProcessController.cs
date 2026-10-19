@@ -54,7 +54,7 @@ public class ProcessController : ControllerBase
         if (audio is null || audio.Length == 0)
             return BadRequest(new { error = "Audio is required" });
 
-        var apiKey = Configuration["AI:Groq:ApiKey"]?.Trim();
+        var apiKey = (Configuration["AI:Groq:ApiKey"] ?? Environment.GetEnvironmentVariable("GROQ_API_KEY"))?.Trim();
         if (string.IsNullOrWhiteSpace(apiKey))
             return StatusCode(503, new { error = "Groq transcription is not configured" });
 

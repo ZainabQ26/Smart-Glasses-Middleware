@@ -101,7 +101,7 @@ public class BedrockPageSummaryService : IPageSummaryService
 
     private async Task<string?> TryGroqPageSummaryAsync(string compactText, string documentLabel, string pageLabel, CancellationToken cancellationToken)
     {
-        var apiKey = _configuration["AI:Groq:ApiKey"]?.Trim();
+        var apiKey = (_configuration["AI:Groq:ApiKey"] ?? Environment.GetEnvironmentVariable("GROQ_API_KEY"))?.Trim();
         if (string.IsNullOrWhiteSpace(apiKey)) return null;
 
         var candidateModels = new[]
