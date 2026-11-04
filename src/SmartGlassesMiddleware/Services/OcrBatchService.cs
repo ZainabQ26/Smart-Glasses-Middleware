@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Processing;
 using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing.Processors.Normalization;
 using Tesseract;
 using iText.Kernel.Pdf;
 using iText.Kernel.Pdf.Canvas;
@@ -66,6 +67,80 @@ public class OcrBatchService : IOcrBatchService
         _logger.LogInformation("OcrBatchService initialized with tessdata path: {Path}", _tessDataPath);
     }
 
+    private const int MaxLongSide = 3200;
+    private const int TargetLongSide = 2800;
+
+    private static (string Text, List<OcrWordBox> Words, double Score) RunOcr(TesseractEngine engine, byte[] pngBytes, double ocrScale)
+    {
+        var words = new List<OcrWordBox>();
+        double score = 0;
+
+        using var pix = Pix.LoadFromMemory(pngBytes);
+        using var page = engine.Process(pix);
+        var text = page.GetText()?.Trim() ?? string.Empty;
+
+        using var iter = page.GetIterator();
+        iter.Begin();
+        do
+        {
+            if (!iter.TryGetBoundingBox(PageIteratorLevel.Word, out Rect rect)) continue;
+            var wordText = iter.GetText(PageIteratorLevel.Word)?.Trim();
+            if (string.IsNullOrEmpty(wordText)) continue;
+
+            float conf = iter.GetConfidence(PageIteratorLevel.Word);
+            if (conf >= 30) score += conf;
+
+            // Map OCR-image coordinates back to PDF-page coordinates
+            words.Add(new OcrWordBox
+            {
+                Text = wordText,
+                X = (int)(rect.X1 / ocrScale),
+                Y = (int)(rect.Y1 / ocrScale),
+                Width = Math.Max(1, (int)(rect.Width / ocrScale)),
+                Height = Math.Max(1, (int)(rect.Height / ocrScale))
+            });
+        } while (iter.Next(PageIteratorLevel.Word));
+
+        return (text, words, score);
+    }
+
+    /// <summary>
+    /// Estimates page skew in degrees (positive = text slopes clockwise) by maximising the
+    /// variance of horizontal ink projections over a small downscaled binary copy.
+    /// </summary>
+    private static double EstimateSkewDegrees(SixLabors.ImageSharp.Image<Rgba32> source)
+    {
+        const int probeWidth = 640;
+        double scale = Math.Min(1.0, (double)probeWidth / source.Width);
+        using var probe = source.Clone(ctx =>
+        {
+            ctx.Resize((int)(source.Width * scale), (int)(source.Height * scale)).Grayscale().AdaptiveThreshold();
+        });
+
+        double bestAngle = 0, bestScore = double.MinValue;
+        for (double angle = -10; angle <= 10.0001; angle += 0.5)
+        {
+            using var rotated = probe.Clone(ctx => ctx.Rotate((float)angle).BackgroundColor(Color.White));
+            var rows = new double[rotated.Height];
+            rotated.ProcessPixelRows(accessor =>
+            {
+                for (int y = 0; y < accessor.Height; y++)
+                {
+                    var row = accessor.GetRowSpan(y);
+                    int dark = 0;
+                    for (int x = 0; x < row.Length; x++)
+                        if (row[x].R < 128) dark++;
+                    rows[y] = dark;
+                }
+            });
+
+            double mean = rows.Average();
+            double variance = rows.Sum(r => (r - mean) * (r - mean));
+            if (variance > bestScore) { bestScore = variance; bestAngle = angle; }
+        }
+        return bestAngle;
+    }
+
     public Task<PageOcrData> ProcessSinglePageAsync(byte[] imageBytes, int pageIndex)
     {
         return Task.Run(() =>
@@ -76,70 +151,90 @@ public class OcrBatchService : IOcrBatchService
                 OriginalImageBytes = imageBytes
             };
 
-            // 1. Image Preprocessing with SixLabors.ImageSharp
-            byte[] ocrReadyBytes;
+            // 1. Image preprocessing with SixLabors.ImageSharp
+            byte[] enhancedBytes;
+            byte[] binarizedBytes;
+            double ocrScale = 1.0; // OCR-image pixels per PDF-page pixel (word boxes are divided by this)
+
             using (var image = SixLabors.ImageSharp.Image.Load<Rgba32>(imageBytes))
             {
                 // Auto-orient based on EXIF metadata
                 image.Mutate(ctx => ctx.AutoOrient());
 
-                // Cap max dimension to 2400 to prevent excessive memory usage
+                // Cap very large images to limit memory; 3200px keeps small print legible
                 int maxDim = Math.Max(image.Width, image.Height);
-                if (maxDim > 2400)
+                if (maxDim > MaxLongSide)
                 {
-                    double scale = 2400.0 / maxDim;
-                    image.Mutate(ctx => ctx.Resize((int)(image.Width * scale), (int)(image.Height * scale)));
+                    double down = (double)MaxLongSide / maxDim;
+                    image.Mutate(ctx => ctx.Resize((int)(image.Width * down), (int)(image.Height * down)));
+                }
+
+                // Deskew (projection-profile search). Applied to the page image itself so the
+                // searchable-PDF text layer stays aligned with what is embedded.
+                double skew = EstimateSkewDegrees(image);
+                if (Math.Abs(skew) >= 0.5)
+                {
+                    image.Mutate(ctx => ctx.Rotate((float)skew).BackgroundColor(Color.White));
+                    using var deskewed = new MemoryStream();
+                    image.SaveAsJpeg(deskewed, new SixLabors.ImageSharp.Formats.Jpeg.JpegEncoder { Quality = 92 });
+                    pageData.OriginalImageBytes = deskewed.ToArray();
+                    _logger.LogInformation("Page {PageIndex} deskewed by {Skew:F1} degrees", pageIndex, skew);
                 }
 
                 pageData.ImageWidth = image.Width;
                 pageData.ImageHeight = image.Height;
 
-                // Create enhanced image for OCR: Grayscale + Contrast + Sharpen
-                using var ocrImage = image.Clone(ctx =>
+                // Upscale small captures so glyphs reach ~30px x-height (Tesseract's sweet spot)
+                int longSide = Math.Max(image.Width, image.Height);
+                int targetW = image.Width, targetH = image.Height;
+                if (longSide < TargetLongSide)
                 {
+                    ocrScale = (double)TargetLongSide / longSide;
+                    targetW = (int)(image.Width * ocrScale);
+                    targetH = (int)(image.Height * ocrScale);
+                }
+
+                // Variant A: grayscale + adaptive (CLAHE) contrast. Handles uneven lighting without
+                // the clipped highlights a global Contrast() causes.
+                using var enhanced = image.Clone(ctx =>
+                {
+                    if (ocrScale > 1.0)
+                        ctx.Resize(new ResizeOptions { Size = new SixLabors.ImageSharp.Size(targetW, targetH), Sampler = KnownResamplers.Lanczos3 });
                     ctx.Grayscale()
-                       .Contrast(1.35f)
-                       .GaussianSharpen(0.75f);
+                       .HistogramEqualization(new HistogramEqualizationOptions
+                       {
+                           Method = HistogramEqualizationMethod.AdaptiveTileInterpolation,
+                           ClipHistogram = true,
+                           NumberOfTiles = 8
+                       });
                 });
 
-                using var ms = new MemoryStream();
-                ocrImage.SaveAsPng(ms);
-                ocrReadyBytes = ms.ToArray();
-                pageData.PreprocessedImageBytes = ocrReadyBytes;
+                // Variant B: denoise + adaptive (Bradley) binarization. Rescues shadowed regions.
+                using var binarized = enhanced.Clone(ctx => ctx.GaussianBlur(0.7f).AdaptiveThreshold());
+
+                using (var ms = new MemoryStream()) { enhanced.SaveAsPng(ms); enhancedBytes = ms.ToArray(); }
+                using (var ms = new MemoryStream()) { binarized.SaveAsPng(ms); binarizedBytes = ms.ToArray(); }
+                pageData.PreprocessedImageBytes = enhancedBytes;
             }
 
-            // 2. OCR with Tesseract
+            // 2. OCR with Tesseract: run both variants, keep whichever reads more confident words
             try
             {
                 using var engine = new TesseractEngine(_tessDataPath, "eng", EngineMode.Default);
-                using var pix = Pix.LoadFromMemory(ocrReadyBytes);
-                using var page = engine.Process(pix);
+                engine.DefaultPageSegMode = PageSegMode.Auto;          // full automatic layout analysis
+                engine.SetVariable("user_defined_dpi", "300");         // camera JPEGs carry no DPI metadata
+                engine.SetVariable("preserve_interword_spaces", "1");
 
-                pageData.ExtractedText = page.GetText()?.Trim() ?? string.Empty;
+                var a = RunOcr(engine, enhancedBytes, ocrScale);
+                var b = RunOcr(engine, binarizedBytes, ocrScale);
+                var best = b.Score > a.Score ? b : a;
 
-                using var iter = page.GetIterator();
-                iter.Begin();
+                pageData.ExtractedText = best.Text;
+                pageData.Words = best.Words;
 
-                do
-                {
-                    if (iter.TryGetBoundingBox(PageIteratorLevel.Word, out Rect rect))
-                    {
-                        var wordText = iter.GetText(PageIteratorLevel.Word)?.Trim();
-                        if (!string.IsNullOrEmpty(wordText))
-                        {
-                            pageData.Words.Add(new OcrWordBox
-                            {
-                                Text = wordText,
-                                X = rect.X1,
-                                Y = rect.Y1,
-                                Width = rect.Width,
-                                Height = rect.Height
-                            });
-                        }
-                    }
-                } while (iter.Next(PageIteratorLevel.Word));
-
-                _logger.LogInformation("Page {PageIndex} OCR complete: {WordCount} words extracted", pageIndex, pageData.Words.Count);
+                _logger.LogInformation(
+                    "Page {PageIndex} OCR complete: {WordCount} words (enhanced score {A:F0}, binarized score {B:F0})",
+                    pageIndex, pageData.Words.Count, a.Score, b.Score);
             }
             catch (Exception ex)
             {

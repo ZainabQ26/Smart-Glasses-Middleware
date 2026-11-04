@@ -41,15 +41,19 @@ function isExternalCamera(d) {
 }
 
 function pickBestCamera(videoInputs) {
-  return (
+  const byLabel =
     videoInputs.find(d => (d.label || "").toLowerCase().includes("eye")) ||
-    videoInputs.find(isExternalCamera) ||
-    videoInputs.find(d => {
-      const l = (d.label || "").toLowerCase();
-      return !l.includes("front") && !l.includes("user");
-    }) ||
-    videoInputs[0]
-  );
+    videoInputs.find(isExternalCamera);
+  if (byLabel) return byLabel;
+
+  // With "Capture with Glasses" ON the glasses can show up as a secondary / virtual camera.
+  // Prefer the highest-index device that is not the primary front sensor.
+  const nonFront = videoInputs.filter(d => {
+    const l = (d.label || "").toLowerCase();
+    return !l.includes("front") && !l.includes("user");
+  });
+  if (nonFront.length > 1) return nonFront[nonFront.length - 1];
+  return nonFront[0] || videoInputs[0];
 }
 
 export default function ScannerModal({ isOpen, onClose, onComplete, addLog }) {
@@ -63,14 +67,94 @@ export default function ScannerModal({ isOpen, onClose, onComplete, addLog }) {
   const [cameraError, setCameraError] = useState(null);
   const [isInsecureContext, setIsInsecureContext] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
+  // Stream must not start until device enumeration finished (prevents two concurrent getUserMedia calls)
+  const [camerasReady, setCamerasReady] = useState(false);
+  // Bumped to force a fresh getUserMedia when the track dies (USB unplug, tab suspended, OS reclaim)
+  const [streamNonce, setStreamNonce] = useState(0);
 
   const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const streamStateRef = useRef(null);
+
+  // Keep streamRef in sync with stream state
+  useEffect(() => {
+    streamRef.current = stream;
+    streamStateRef.current = stream;
+  }, [stream]);
+
+  const attachStream = useCallback((video, s) => {
+    if (!video) return;
+    if (!s) {
+      video.srcObject = null;
+      return;
+    }
+    if (video.srcObject !== s) video.srcObject = s;
+    video.playsInline = true;
+    video.muted = true;
+    const p = video.play();
+    if (p !== undefined) p.catch(() => {});
+  }, []);
+
+  // Callback ref: the <video> unmounts while an error panel is shown and remounts on retry.
+  // Re-attach the live stream every time the element is (re)created, otherwise it stays black.
+  const setVideoEl = useCallback((el) => {
+    videoRef.current = el;
+    if (el) attachStream(el, streamStateRef.current);
+  }, [attachStream]);
+
+  // Keep video element playing the active stream
+  useEffect(() => {
+    attachStream(videoRef.current, stream);
+    if (!stream) return;
+    const t = setTimeout(() => attachStream(videoRef.current, stream), 150);
+    return () => clearTimeout(t);
+  }, [stream, currentSnapshot, isOpen, attachStream]);
+
+  // Self-heal: restart the stream if the camera track ends or the tab returns from background
+  useEffect(() => {
+    if (!isOpen || !stream) return;
+    const tracks = stream.getVideoTracks();
+    const onEnded = () => setStreamNonce(n => n + 1);
+    tracks.forEach(t => t.addEventListener("ended", onEnded));
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      const live = stream.getVideoTracks().some(t => t.readyState === "live");
+      if (!live) setStreamNonce(n => n + 1);
+      else attachStream(videoRef.current, stream);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      tracks.forEach(t => t.removeEventListener("ended", onEnded));
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [isOpen, stream, attachStream]);
+
+  // Release the (already stopped) stream when the modal closes so reopening never reuses a dead stream
+  useEffect(() => {
+    if (!isOpen) {
+      setStream(null);
+      setCamerasReady(false);
+    }
+  }, [isOpen]);
+
+  // Watchdog: If camera view is visible and video paused unexpectedly, auto-resume
+  useEffect(() => {
+    if (!isOpen || !stream || currentSnapshot) return;
+    const interval = setInterval(() => {
+      const v = videoRef.current;
+      if (v && v.paused && v.srcObject) {
+        v.play().catch(() => {});
+      }
+    }, 800);
+    return () => clearInterval(interval);
+  }, [isOpen, stream, currentSnapshot]);
 
   // 1. Enumerate video devices and select the smart glasses / external camera by default
   useEffect(() => {
     if (!isOpen) return;
     setCameraError(null);
     setIsInsecureContext(false);
+    setCamerasReady(false);
 
     let active = true;
 
@@ -94,15 +178,22 @@ export default function ScannerModal({ isOpen, onClose, onComplete, addLog }) {
 
         setIsInsecureContext(false);
 
-        // Prompt for permission first so enumerateDevices() returns real labels + all devices.
-        let initialStream = null;
-        try {
-          initialStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-        } catch (_) {}
+        // Check if devices already have labels (permission already granted in WebView / browser)
+        let devices = await navigator.mediaDevices.enumerateDevices();
+        const hasLabels = devices.some(d => d.kind === "videoinput" && !!d.label);
 
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        if (initialStream) {
-          initialStream.getTracks().forEach(t => t.stop());
+        // Only probe if enumerateDevices() has NO labels (first-time permission prompt)
+        if (!hasLabels) {
+          let probe = null;
+          try {
+            probe = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+          } catch (_) {}
+          if (probe) {
+            probe.getTracks().forEach(t => t.stop());
+            // Wait 250ms for Android camera service to fully release the hardware sensor
+            await new Promise(r => setTimeout(r, 250));
+          }
+          devices = await navigator.mediaDevices.enumerateDevices();
         }
 
         // Keep EVERY videoinput (including unlabeled / unidentified USB ones).
@@ -113,8 +204,12 @@ export default function ScannerModal({ isOpen, onClose, onComplete, addLog }) {
 
         const chosen = pickBestCamera(videoInputs);
         if (chosen) {
+          // Deviceids can change after a refresh; always re-pick from the fresh list.
           setSelectedDeviceId(chosen.deviceId);
+        } else {
+          setSelectedDeviceId("");
         }
+        setCamerasReady(true);
       } catch (err) {
         if (!active) return;
         setCameraError(err.message || "Failed to initialize camera devices.");
@@ -151,7 +246,7 @@ export default function ScannerModal({ isOpen, onClose, onComplete, addLog }) {
 
   // 2. Start stream whenever selectedDeviceId changes
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || !camerasReady) return;
 
     let active = true;
     let localStream = null;
@@ -159,8 +254,12 @@ export default function ScannerModal({ isOpen, onClose, onComplete, addLog }) {
     async function startStream() {
       try {
         setCameraError(null);
-        if (stream) {
-          stream.getTracks().forEach(t => t.stop());
+
+        // Cleanly stop any existing stream and wait for camera HAL release
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach(t => t.stop());
+          streamRef.current = null;
+          await new Promise(r => setTimeout(r, 200));
         }
 
         // Guard: navigator.mediaDevices is undefined in non-HTTPS contexts or
@@ -182,15 +281,23 @@ export default function ScannerModal({ isOpen, onClose, onComplete, addLog }) {
             });
           } catch (firstErr) {
             if (firstErr.name === "NotAllowedError" || firstErr.name === "PermissionDeniedError") throw firstErr;
-            // External cameras often reject resolution hints: retry with the bare exact deviceId.
-            localStream = await navigator.mediaDevices.getUserMedia({
-              video: { deviceId: { exact: selectedDeviceId } },
-              audio: false
-            });
+            try {
+              // External cameras often reject resolution hints: retry with the bare exact deviceId.
+              localStream = await navigator.mediaDevices.getUserMedia({
+                video: { deviceId: { exact: selectedDeviceId } },
+                audio: false
+              });
+            } catch (_) {
+              // Fallback if deviceId was remapped
+              localStream = await navigator.mediaDevices.getUserMedia({
+                video: { deviceId: { ideal: selectedDeviceId } },
+                audio: false
+              });
+            }
           }
         } else {
           localStream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+            video: { width: { ideal: 1920 }, height: { ideal: 1080 } },
             audio: false
           });
         }
@@ -199,10 +306,8 @@ export default function ScannerModal({ isOpen, onClose, onComplete, addLog }) {
           return;
         }
 
+        streamRef.current = localStream;
         setStream(localStream);
-        if (videoRef.current) {
-          videoRef.current.srcObject = localStream;
-        }
       } catch (err) {
         if (!active) return;
         const msg = err.message || "";
@@ -227,23 +332,52 @@ export default function ScannerModal({ isOpen, onClose, onComplete, addLog }) {
         localStream.getTracks().forEach(t => t.stop());
       }
     };
-  }, [isOpen, selectedDeviceId]);
+  }, [isOpen, selectedDeviceId, camerasReady, streamNonce]);
 
-  // Clean up captured preview URLs on unmount/close
+  const allUrlsRef = useRef(new Set());
+
+  const registerUrl = useCallback((url) => {
+    allUrlsRef.current.add(url);
+    return url;
+  }, []);
+
+  const revokeUrl = useCallback((url) => {
+    if (url && allUrlsRef.current.has(url)) {
+      URL.revokeObjectURL(url);
+      allUrlsRef.current.delete(url);
+    }
+  }, []);
+
+  // Clean up all preview URLs only when modal closes or unmounts
   useEffect(() => {
+    if (!isOpen) {
+      allUrlsRef.current.forEach(u => URL.revokeObjectURL(u));
+      allUrlsRef.current.clear();
+    }
     return () => {
-      capturedPages.forEach(p => URL.revokeObjectURL(p.previewUrl));
-      if (currentSnapshot) URL.revokeObjectURL(currentSnapshot.previewUrl);
+      allUrlsRef.current.forEach(u => URL.revokeObjectURL(u));
+      allUrlsRef.current.clear();
     };
-  }, [capturedPages, currentSnapshot]);
+  }, [isOpen]);
 
   // Snap photo from live video stream
   const handleSnap = useCallback(async () => {
-    if (!videoRef.current) return;
     const video = videoRef.current;
+    if (!video) return;
+
+    if (video.paused) {
+      try {
+        await video.play();
+      } catch (_) {}
+    }
 
     const width = video.videoWidth || 1920;
     const height = video.videoHeight || 1080;
+
+    if (!video.videoWidth || !video.videoHeight) {
+      if (addLog) addLog("⚠️ Camera frame not ready yet, retrying...", "warn");
+      return;
+    }
 
     const canvas = document.createElement("canvas");
     canvas.width = width;
@@ -256,10 +390,10 @@ export default function ScannerModal({ isOpen, onClose, onComplete, addLog }) {
     const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", 0.95));
     if (!blob) return;
 
-    const previewUrl = URL.createObjectURL(blob);
+    const previewUrl = registerUrl(URL.createObjectURL(blob));
     setCurrentSnapshot({ blob, previewUrl, width, height });
     if (addLog) addLog(`📸 Captured frame (${width}×${height})`, "info");
-  }, [addLog]);
+  }, [addLog, registerUrl]);
 
   // "Add Page" / "Capture Another"
   const handleAddPage = useCallback(() => {
@@ -281,19 +415,19 @@ export default function ScannerModal({ isOpen, onClose, onComplete, addLog }) {
   // "Retake"
   const handleRetake = useCallback(() => {
     if (currentSnapshot) {
-      URL.revokeObjectURL(currentSnapshot.previewUrl);
+      revokeUrl(currentSnapshot.previewUrl);
       setCurrentSnapshot(null);
     }
-  }, [currentSnapshot]);
+  }, [currentSnapshot, revokeUrl]);
 
   // Remove a page from batch
   const handleRemovePage = useCallback((indexToRemove) => {
     setCapturedPages(prev => {
       const target = prev[indexToRemove];
-      if (target) URL.revokeObjectURL(target.previewUrl);
+      if (target) revokeUrl(target.previewUrl);
       return prev.filter((_, idx) => idx !== indexToRemove);
     });
-  }, []);
+  }, [revokeUrl]);
 
   // "Complete" / "Process" (Finalize batch and run OCR pipeline)
   const handleProcessBatch = useCallback(async () => {
@@ -356,35 +490,35 @@ export default function ScannerModal({ isOpen, onClose, onComplete, addLog }) {
 
   if (!isOpen) return null;
 
-  const selectedDevice = videoDevices.find(d => d.deviceId === selectedDeviceId);
-
   return (
     <div style={styles.overlay}>
+      <style>{`
+        video::-webkit-media-controls { display: none !important; -webkit-appearance: none !important; }
+        video::-webkit-media-controls-enclosure { display: none !important; }
+        video::-webkit-media-controls-panel { display: none !important; }
+        video::-webkit-media-controls-play-button { display: none !important; -webkit-appearance: none !important; }
+        video::-webkit-media-controls-overlay-play-button { display: none !important; -webkit-appearance: none !important; }
+        video::-webkit-media-controls-start-playback-button { display: none !important; -webkit-appearance: none !important; }
+      `}</style>
       <div style={styles.modal}>
-        {/* Header */}
+        {/* Top Header (Both Screens) */}
         <div style={styles.header}>
-          <div style={styles.headerTitleRow}>
-            <span style={styles.headerIcon}>👓</span>
-            <div>
-              <h2 style={styles.title}>XREAL Eye Document Scanner</h2>
-              <div style={styles.subtitle}>
-                {selectedDevice ? (
-                  <span style={styles.connectedBadge}>
-                    🟢 {formatCameraLabel(selectedDevice, 0)}
-                  </span>
-                ) : videoDevices.length > 0 ? (
-                  <span style={styles.connectedBadge}>
-                    🟢 Connected ({videoDevices.length} {videoDevices.length === 1 ? "camera" : "cameras"})
-                  </span>
-                ) : (
-                  <span style={styles.connectingBadge}>🟡 Initializing camera...</span>
-                )}
-              </div>
-            </div>
+          {/* Line 1: XREAL Eye Document Scanner (keep on a single line) */}
+          <div style={styles.headerLine1}>
+            <h2 style={styles.titleSingleLine}>XREAL Eye Document Scanner</h2>
+            <button
+              style={styles.closeBtn}
+              onClick={onClose}
+              disabled={processing}
+              title="Close Scanner"
+            >
+              ✕
+            </button>
           </div>
 
-          <div style={styles.headerActions}>
-            {videoDevices.length > 0 && (
+          {/* Line 2: Device dropdown centered directly below it */}
+          {videoDevices.length > 0 && (
+            <div style={styles.headerLine2}>
               <select
                 style={styles.cameraSelect}
                 value={selectedDeviceId}
@@ -398,21 +532,8 @@ export default function ScannerModal({ isOpen, onClose, onComplete, addLog }) {
                   </option>
                 ))}
               </select>
-            )}
-
-            <button
-              style={styles.closeBtn}
-              onClick={() => { setCameraError(null); setRetryCount(c => c + 1); }}
-              disabled={processing}
-              title="Refresh Cameras (after plugging in the glasses)"
-            >
-              🔄
-            </button>
-
-            <button style={styles.closeBtn} onClick={onClose} disabled={processing}>
-              ✕
-            </button>
-          </div>
+            </div>
+          )}
         </div>
 
         {/* Viewfinder / Preview Body */}
@@ -468,37 +589,61 @@ export default function ScannerModal({ isOpen, onClose, onComplete, addLog }) {
                 </>
               )}
             </div>
-          ) : currentSnapshot ? (
-            <div style={styles.previewContainer}>
-              <img
-                src={currentSnapshot.previewUrl}
-                alt="Captured document page"
-                style={styles.previewImage}
-              />
-              <div style={styles.previewBadge}>
-                Page {capturedPages.length + 1} Preview (Ready)
-              </div>
-            </div>
           ) : (
-            <div style={styles.viewfinderContainer}>
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                style={styles.videoStream}
-              />
+            <>
+              {/* Live viewfinder is permanently mounted and kept playing */}
+              <div
+                style={styles.viewfinderContainer}
+                onClick={() => {
+                  if (videoRef.current && videoRef.current.paused) {
+                    videoRef.current.play().catch(() => {});
+                  }
+                }}
+              >
+                <video
+                  ref={setVideoEl}
+                  autoPlay
+                  playsInline
+                  webkit-playsinline="true"
+                  muted
+                  controls={false}
+                  onLoadedMetadata={e => e.target.play().catch(() => {})}
+                  onCanPlay={e => e.target.play().catch(() => {})}
+                  onPause={e => {
+                    if (e.target.srcObject && !currentSnapshot) {
+                      e.target.play().catch(() => {});
+                    }
+                  }}
+                  style={styles.videoStream}
+                />
 
-              <div style={styles.alignmentGuide}>
-                <div style={styles.cornerTL} />
-                <div style={styles.cornerTR} />
-                <div style={styles.cornerBL} />
-                <div style={styles.cornerBR} />
-                <div style={styles.alignmentPrompt}>
-                  Align document page inside frame
-                </div>
+                {!currentSnapshot && (
+                  <div style={styles.alignmentGuide}>
+                    <div style={styles.cornerTL} />
+                    <div style={styles.cornerTR} />
+                    <div style={styles.cornerBL} />
+                    <div style={styles.cornerBR} />
+                    <div style={styles.alignmentPrompt}>
+                      Align document page inside frame
+                    </div>
+                  </div>
+                )}
               </div>
-            </div>
+
+              {/* Preview screen overlay: stacks directly on top to fill all reclaimed vertical room */}
+              {currentSnapshot && (
+                <div style={styles.previewContainer}>
+                  <img
+                    src={currentSnapshot.previewUrl}
+                    alt="Captured document page"
+                    style={styles.previewImage}
+                  />
+                  <div style={styles.previewBadge}>
+                    Page {capturedPages.length + 1} Preview (Ready)
+                  </div>
+                </div>
+              )}
+            </>
           )}
 
           {processing && (
@@ -510,8 +655,8 @@ export default function ScannerModal({ isOpen, onClose, onComplete, addLog }) {
           )}
         </div>
 
-        {/* Multi-Page Tray (Thumbnails of added pages) */}
-        {capturedPages.length > 0 && !processing && (
+        {/* Multi-Page Tray (Thumbnails of added pages) - shown only in viewfinder mode to maximize preview space */}
+        {capturedPages.length > 0 && !processing && !currentSnapshot && (
           <div style={styles.tray}>
             <div style={styles.trayHeader}>
               <span>Batch Pages ({capturedPages.length})</span>
@@ -542,46 +687,55 @@ export default function ScannerModal({ isOpen, onClose, onComplete, addLog }) {
                 style={styles.shutterBtn}
                 onClick={handleSnap}
                 disabled={processing || !!cameraError}
+                title="Tap to capture page"
               >
                 <div style={styles.shutterInner} />
               </button>
-              <div style={styles.shutterLabel}>Tap to Capture Page</div>
+
+              <div style={styles.shutterInfoCol}>
+                <span style={styles.shutterLabel}>Tap to Capture</span>
+                {capturedPages.length > 0 && !processing && (
+                  <button
+                    style={styles.finishBtnCompact}
+                    onClick={handleProcessBatch}
+                  >
+                    ✓ Complete ({capturedPages.length})
+                  </button>
+                )}
+              </div>
             </div>
           ) : (
-            <div style={styles.decisionControls}>
+            <div style={styles.previewButtonRow}>
               <button
-                style={styles.retakeBtn}
-                onClick={handleRetake}
-                disabled={processing}
-              >
-                🔄 Retake
-              </button>
-
-              <button
-                style={styles.addPageBtn}
+                style={styles.previewBtnAdd}
                 onClick={handleAddPage}
                 disabled={processing}
+                title="Add Page to batch"
               >
-                ➕ Add Page / Capture Another
+                <span style={styles.btnIcon}>+</span>
+                <span style={styles.btnText}>(Add Page)</span>
               </button>
 
               <button
-                style={styles.completeBtn}
+                style={styles.previewBtnComplete}
                 onClick={handleProcessBatch}
                 disabled={processing}
+                title="Complete document batch"
               >
-                ✨ Complete & Process ({capturedPages.length + 1} {capturedPages.length === 0 ? "Page" : "Pages"})
+                <span style={styles.btnIcon}>✓</span>
+                <span style={styles.btnText}>(Complete)</span>
+              </button>
+
+              <button
+                style={styles.previewBtnRetake}
+                onClick={handleRetake}
+                disabled={processing}
+                title="Retake photo"
+              >
+                <span style={styles.btnIcon}>↺</span>
+                <span style={styles.btnText}>(Retake)</span>
               </button>
             </div>
-          )}
-
-          {!currentSnapshot && capturedPages.length > 0 && !processing && (
-            <button
-              style={styles.floatingCompleteBtn}
-              onClick={handleProcessBatch}
-            >
-              Finish & Process ({capturedPages.length} Pages) ➔
-            </button>
           )}
         </div>
       </div>
@@ -593,95 +747,98 @@ const styles = {
   overlay: {
     position: "fixed",
     inset: 0,
-    background: "rgba(0, 0, 0, 0.85)",
-    backdropFilter: "blur(8px)",
+    background: "#000000",
     zIndex: 9999,
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    padding: "16px",
+    padding: 0,
     fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
   },
   modal: {
     width: "100%",
-    maxWidth: "680px",
-    height: "92vh",
-    maxHeight: "860px",
-    background: "#121820",
-    border: "1px solid #283e58",
-    borderRadius: "18px",
+    maxWidth: "100%",
+    height: "100%",
+    maxHeight: "100%",
+    background: "#05080e",
+    border: "none",
+    borderRadius: 0,
     display: "flex",
     flexDirection: "column",
-    overflow: "hidden",
-    boxShadow: "0 20px 60px rgba(0,0,0,0.8)"
+    overflow: "hidden"
   },
   header: {
     display: "flex",
-    justifyContent: "space-between",
+    flexDirection: "column",
     alignItems: "center",
-    padding: "14px 20px",
-    borderBottom: "1px solid #1f3044",
-    background: "#182330"
+    padding: "6px 12px 6px",
+    borderBottom: "1px solid #141e2b",
+    background: "#0d1520",
+    flexShrink: 0,
+    width: "100%"
   },
-  headerTitleRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: "12px"
-  },
-  headerIcon: {
-    fontSize: "1.6rem"
-  },
-  title: {
-    margin: 0,
-    fontSize: "1.1rem",
-    fontWeight: 700,
-    color: "#f0f4f8"
-  },
-  subtitle: {
-    marginTop: "2px"
-  },
-  connectedBadge: {
-    fontSize: "0.75rem",
-    color: "#4ade80",
-    fontWeight: 600
-  },
-  connectingBadge: {
-    fontSize: "0.75rem",
-    color: "#facc15"
-  },
-  headerActions: {
-    display: "flex",
-    alignItems: "center",
-    gap: "10px"
-  },
-  cameraSelect: {
-    background: "#0d141e",
-    color: "#e2e8f0",
-    border: "1px solid #2d4663",
-    borderRadius: "8px",
-    padding: "6px 10px",
-    fontSize: "0.8rem",
-    outline: "none",
-    maxWidth: "180px"
-  },
-  closeBtn: {
-    background: "transparent",
-    border: "none",
-    color: "#94a3b8",
-    fontSize: "1.2rem",
-    cursor: "pointer",
-    padding: "6px 10px",
-    borderRadius: "6px",
-    transition: "background 0.2s"
-  },
-  body: {
-    flex: 1,
+  headerLine1: {
     position: "relative",
-    background: "#080c12",
+    width: "100%",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    overflow: "hidden"
+    minHeight: "26px"
+  },
+  titleSingleLine: {
+    margin: 0,
+    fontSize: "0.92rem",
+    fontWeight: 700,
+    color: "#f0f4f8",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    textAlign: "center",
+    paddingLeft: "30px",
+    paddingRight: "30px"
+  },
+  closeBtn: {
+    position: "absolute",
+    right: 0,
+    top: "50%",
+    transform: "translateY(-50%)",
+    background: "transparent",
+    border: "none",
+    color: "#94a3b8",
+    fontSize: "1.15rem",
+    cursor: "pointer",
+    padding: "2px 6px",
+    borderRadius: "4px",
+    lineHeight: 1
+  },
+  headerLine2: {
+    width: "100%",
+    display: "flex",
+    justifyContent: "center",
+    marginTop: "3px"
+  },
+  cameraSelect: {
+    background: "#080d14",
+    color: "#e2e8f0",
+    border: "1px solid #1f3044",
+    borderRadius: "6px",
+    padding: "3px 8px",
+    fontSize: "0.75rem",
+    outline: "none",
+    maxWidth: "260px",
+    textAlign: "center"
+  },
+  body: {
+    flex: 1,
+    minHeight: 0,
+    position: "relative",
+    background: "#000000",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+    width: "100%",
+    height: "100%"
   },
   viewfinderContainer: {
     width: "100%",
@@ -689,97 +846,107 @@ const styles = {
     position: "relative",
     display: "flex",
     alignItems: "center",
-    justifyContent: "center"
+    justifyContent: "center",
+    background: "#000000",
+    overflow: "hidden"
   },
   videoStream: {
     width: "100%",
     height: "100%",
-    objectFit: "contain"
+    objectFit: "contain",
+    display: "block"
   },
   alignmentGuide: {
     position: "absolute",
-    width: "82%",
-    height: "82%",
-    border: "1px dashed rgba(56, 189, 248, 0.4)",
-    borderRadius: "12px",
+    width: "92%",
+    height: "92%",
+    border: "1px dashed rgba(56, 189, 248, 0.45)",
+    borderRadius: "10px",
     pointerEvents: "none",
     display: "flex",
     alignItems: "flex-end",
     justifyContent: "center",
-    paddingBottom: "16px"
+    paddingBottom: "10px"
   },
   cornerTL: {
     position: "absolute",
     top: "-2px",
     left: "-2px",
-    width: "28px",
-    height: "28px",
-    borderTop: "4px solid #38bdf8",
-    borderLeft: "4px solid #38bdf8",
-    borderTopLeftRadius: "8px"
+    width: "24px",
+    height: "24px",
+    borderTop: "3px solid #38bdf8",
+    borderLeft: "3px solid #38bdf8",
+    borderTopLeftRadius: "6px"
   },
   cornerTR: {
     position: "absolute",
     top: "-2px",
     right: "-2px",
-    width: "28px",
-    height: "28px",
-    borderTop: "4px solid #38bdf8",
-    borderRight: "4px solid #38bdf8",
-    borderTopRightRadius: "8px"
+    width: "24px",
+    height: "24px",
+    borderTop: "3px solid #38bdf8",
+    borderRight: "3px solid #38bdf8",
+    borderTopRightRadius: "6px"
   },
   cornerBL: {
     position: "absolute",
     bottom: "-2px",
     left: "-2px",
-    width: "28px",
-    height: "28px",
-    borderBottom: "4px solid #38bdf8",
-    borderLeft: "4px solid #38bdf8",
-    borderBottomLeftRadius: "8px"
+    width: "24px",
+    height: "24px",
+    borderBottom: "3px solid #38bdf8",
+    borderLeft: "3px solid #38bdf8",
+    borderBottomLeftRadius: "6px"
   },
   cornerBR: {
     position: "absolute",
     bottom: "-2px",
     right: "-2px",
-    width: "28px",
-    height: "28px",
-    borderBottom: "4px solid #38bdf8",
-    borderRight: "4px solid #38bdf8",
-    borderBottomRightRadius: "8px"
+    width: "24px",
+    height: "24px",
+    borderBottom: "3px solid #38bdf8",
+    borderRight: "3px solid #38bdf8",
+    borderBottomRightRadius: "6px"
   },
   alignmentPrompt: {
-    background: "rgba(15, 23, 42, 0.75)",
+    background: "rgba(15, 23, 42, 0.8)",
     color: "#e2e8f0",
-    padding: "6px 14px",
-    borderRadius: "20px",
-    fontSize: "0.8rem",
-    letterSpacing: "0.5px"
+    padding: "4px 10px",
+    borderRadius: "14px",
+    fontSize: "0.72rem",
+    letterSpacing: "0.4px"
   },
   previewContainer: {
+    position: "absolute",
+    inset: 0,
+    zIndex: 10,
     width: "100%",
     height: "100%",
-    position: "relative",
     display: "flex",
     alignItems: "center",
-    justifyContent: "center"
+    justifyContent: "center",
+    background: "#000000",
+    overflow: "hidden"
   },
   previewImage: {
+    width: "100%",
+    height: "100%",
     maxWidth: "100%",
     maxHeight: "100%",
     objectFit: "contain",
-    borderRadius: "6px"
+    display: "block"
   },
   previewBadge: {
     position: "absolute",
-    top: "14px",
-    left: "14px",
-    background: "rgba(37, 99, 235, 0.85)",
+    top: "8px",
+    left: "8px",
+    background: "rgba(37, 99, 235, 0.9)",
     color: "#fff",
-    padding: "6px 12px",
-    borderRadius: "8px",
-    fontSize: "0.8rem",
-    fontWeight: 600
+    padding: "3px 8px",
+    borderRadius: "4px",
+    fontSize: "0.72rem",
+    fontWeight: 600,
+    zIndex: 15
   },
   processingOverlay: {
     position: "absolute",
@@ -790,7 +957,7 @@ const styles = {
     alignItems: "center",
     justifyContent: "center",
     gap: "14px",
-    zIndex: 10
+    zIndex: 20
   },
   spinner: {
     width: "48px",
@@ -810,31 +977,32 @@ const styles = {
     color: "#94a3b8"
   },
   tray: {
-    background: "#0f1722",
-    borderTop: "1px solid #1e2c3c",
-    padding: "10px 16px"
+    background: "#080c14",
+    borderTop: "1px solid #141e2b",
+    padding: "3px 8px",
+    flexShrink: 0
   },
   trayHeader: {
-    fontSize: "0.75rem",
+    fontSize: "0.65rem",
     color: "#94a3b8",
-    marginBottom: "8px",
+    marginBottom: "2px",
     textTransform: "uppercase",
     letterSpacing: "0.5px",
     fontWeight: 600
   },
   thumbnailsScroll: {
     display: "flex",
-    gap: "10px",
+    gap: "6px",
     overflowX: "auto",
-    paddingBottom: "4px"
+    paddingBottom: "2px"
   },
   thumbWrapper: {
     position: "relative",
-    width: "60px",
-    height: "80px",
-    borderRadius: "6px",
+    width: "36px",
+    height: "48px",
+    borderRadius: "4px",
     overflow: "hidden",
-    border: "1px solid #334155",
+    border: "1px solid #28374a",
     flexShrink: 0
   },
   thumbImg: {
@@ -844,114 +1012,151 @@ const styles = {
   },
   thumbIndex: {
     position: "absolute",
-    bottom: 2,
-    left: 2,
-    background: "rgba(0,0,0,0.7)",
+    bottom: 1,
+    left: 1,
+    background: "rgba(0,0,0,0.75)",
     color: "#fff",
-    fontSize: "0.65rem",
-    padding: "1px 4px",
-    borderRadius: "3px"
+    fontSize: "0.55rem",
+    padding: "1px 2px",
+    borderRadius: "2px"
   },
   thumbRemove: {
     position: "absolute",
-    top: 2,
-    right: 2,
+    top: 1,
+    right: 1,
     background: "rgba(239, 68, 68, 0.85)",
     color: "#fff",
     border: "none",
-    width: "16px",
-    height: "16px",
+    width: "14px",
+    height: "14px",
     borderRadius: "50%",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    fontSize: "0.6rem",
+    fontSize: "0.5rem",
     cursor: "pointer"
   },
   footer: {
-    padding: "16px 20px",
-    background: "#182330",
-    borderTop: "1px solid #1f3044",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center"
-  },
-  controlRowCenter: {
+    padding: "6px 10px",
+    background: "#0d1520",
+    borderTop: "1px solid #141e2b",
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
-    gap: "8px"
+    flexShrink: 0
+  },
+  controlRowCenter: {
+    display: "flex",
+    alignItems: "center",
+    gap: "10px",
+    justifyContent: "center"
   },
   shutterBtn: {
-    width: "72px",
-    height: "72px",
+    width: "48px",
+    height: "48px",
     borderRadius: "50%",
-    border: "4px solid #38bdf8",
+    border: "3px solid #38bdf8",
     background: "transparent",
     cursor: "pointer",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
+    padding: 0,
     transition: "transform 0.15s"
   },
   shutterInner: {
-    width: "56px",
-    height: "56px",
+    width: "34px",
+    height: "34px",
     borderRadius: "50%",
     background: "#38bdf8"
   },
+  shutterInfoCol: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "2px"
+  },
   shutterLabel: {
     color: "#94a3b8",
-    fontSize: "0.8rem",
+    fontSize: "0.72rem",
     fontWeight: 500
   },
-  decisionControls: {
-    display: "flex",
-    gap: "10px",
-    width: "100%",
-    justifyContent: "center",
-    flexWrap: "wrap"
-  },
-  retakeBtn: {
-    padding: "10px 16px",
-    borderRadius: "8px",
-    border: "1px solid #475569",
-    background: "#1e293b",
-    color: "#cbd5e1",
-    fontSize: "0.85rem",
+  finishBtnCompact: {
+    background: "#10b981",
+    border: "none",
+    color: "#ffffff",
+    padding: "4px 10px",
+    borderRadius: "12px",
+    fontSize: "0.7rem",
     fontWeight: 600,
-    cursor: "pointer"
+    cursor: "pointer",
+    whiteSpace: "nowrap"
   },
-  addPageBtn: {
-    padding: "10px 18px",
+  previewButtonRow: {
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "6px",
+    width: "100%",
+    maxWidth: "460px",
+    margin: "0 auto"
+  },
+  previewBtnAdd: {
+    flex: 1,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "4px",
+    padding: "9px 4px",
     borderRadius: "8px",
     border: "1px solid #2563eb",
     background: "#1d4ed8",
     color: "#ffffff",
-    fontSize: "0.85rem",
+    fontSize: "0.76rem",
     fontWeight: 600,
-    cursor: "pointer"
+    cursor: "pointer",
+    whiteSpace: "nowrap"
   },
-  completeBtn: {
-    padding: "10px 22px",
+  previewBtnComplete: {
+    flex: 1,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "4px",
+    padding: "9px 4px",
     borderRadius: "8px",
     border: "none",
     background: "#10b981",
     color: "#ffffff",
-    fontSize: "0.85rem",
+    fontSize: "0.76rem",
     fontWeight: 700,
-    cursor: "pointer"
+    cursor: "pointer",
+    whiteSpace: "nowrap"
   },
-  floatingCompleteBtn: {
-    marginTop: "10px",
-    background: "transparent",
-    border: "1px solid #10b981",
-    color: "#10b981",
-    padding: "6px 16px",
-    borderRadius: "20px",
-    fontSize: "0.8rem",
+  previewBtnRetake: {
+    flex: 1,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "4px",
+    padding: "9px 4px",
+    borderRadius: "8px",
+    border: "1px solid #475569",
+    background: "#1e293b",
+    color: "#cbd5e1",
+    fontSize: "0.76rem",
     fontWeight: 600,
-    cursor: "pointer"
+    cursor: "pointer",
+    whiteSpace: "nowrap"
+  },
+  btnIcon: {
+    fontSize: "0.95rem",
+    fontWeight: "bold",
+    lineHeight: 1
+  },
+  btnText: {
+    fontSize: "0.76rem",
+    fontWeight: 600
   },
   errorBox: {
     display: "flex",

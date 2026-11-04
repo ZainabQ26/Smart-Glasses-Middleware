@@ -1488,10 +1488,37 @@ export default function App({ mode = "voice", language = "en" }) {
       let lastDiagTime = Date.now();
       let micInitializedAt = Date.now();
 
+      // Digital-silence watchdog state (exact 0.0 samples = muted / silenced capture, not a quiet room)
+      let peakSinceDiag = 0;
+      let zeroSince = 0;
+      let nativeActive = false;
+      let webRetried = false;
+      let usingWebMic = false;
+      const SILENT_FALLBACK_MS = 6000;
+
       function processAudioSamples(samples) {
-          if (disposed || !samples) return;
-          const rms = Math.sqrt(samples.reduce((s, v) => s + v * v, 0) / samples.length);
+          if (disposed || !samples || samples.length === 0) return;
+          let sumSq = 0;
+          let peak = 0;
+          for (let i = 0; i < samples.length; i++) {
+            const v = samples[i];
+            sumSq += v * v;
+            const a = v < 0 ? -v : v;
+            if (a > peak) peak = a;
+          }
+          const rms = Math.sqrt(sumSq / samples.length);
           const now = Date.now();
+
+          if (peak > peakSinceDiag) peakSinceDiag = peak;
+          if (peak === 0) {
+            if (!zeroSince) zeroSince = now;
+            else if (now - zeroSince > SILENT_FALLBACK_MS) {
+              zeroSince = now;
+              void handleSilentCapture();
+            }
+          } else {
+            zeroSince = 0;
+          }
 
           // Hard-stop command capture if it runs too long (usually caused by sustained background noise).
           if (activatedRef.current && commandStartedAt > 0) {
@@ -1511,7 +1538,8 @@ export default function App({ mode = "voice", language = "en" }) {
 
           // Periodic diagnostic: log every 10 seconds to show audio is flowing
           if (now - lastDiagTime > 10000) {
-            addLog(`🔈 Audio flowing — RMS: ${rms.toFixed(4)}, speech bursts: ${speechBurstCount}, activated: ${activatedRef.current}`, "info");
+            addLog(`🔈 Audio flowing (${nativeActive ? "native" : "web"}) — RMS: ${rms.toFixed(4)}, peak(10s): ${peakSinceDiag.toFixed(4)}, speech bursts: ${speechBurstCount}, activated: ${activatedRef.current}`, "info");
+            peakSinceDiag = 0;
             lastDiagTime = now;
             speechBurstCount = 0;
           }
@@ -1600,62 +1628,146 @@ export default function App({ mode = "voice", language = "en" }) {
           }
       }
 
+      function teardownWebMic() {
+        try {
+          if (processorRef.current) {
+            processorRef.current.port.onmessage = null;
+            processorRef.current.disconnect();
+          }
+        } catch (_) {}
+        try { audioCtxRef.current?.close(); } catch (_) {}
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach(t => t.stop());
+          streamRef.current = null;
+        }
+        audioCtxRef.current = null;
+        processorRef.current = null;
+      }
+
+      // Web (getUserMedia) capture. `strict` = tuned constraints; otherwise bare {audio:true}.
+      async function startWebMic(strict) {
+        usingWebMic = true;
+        nativeActive = false;
+        zeroSince = 0;
+        try {
+          const audioConstraints = strict
+            ? {
+                channelCount: 1,
+                echoCancellation: true,   // keeps TTS/speaker out of the wake-word path
+                noiseSuppression: false,  // suppression gates quiet far-field speech to 0 on some Android HALs
+                autoGainControl: true     // boosts low-level glasses/phone mics
+              }
+            : true;
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+          if (disposed) { stream.getTracks().forEach(t => t.stop()); return; }
+          addLog("✅ Mic permission granted", "info");
+
+          const track = stream.getAudioTracks()[0];
+          if (track) {
+            addLog(`🎙️ Input: "${track.label || "unknown"}", muted=${track.muted}, enabled=${track.enabled}, state=${track.readyState}`, "info");
+            track.onmute   = () => addLog("⚠️ Mic track muted by OS/another app", "warn");
+            track.onunmute = () => addLog("🎙️ Mic track unmuted", "info");
+            track.onended  = () => {
+              if (disposed) return;
+              addLog("⚠️ Mic track ended — restarting microphone", "warn");
+              teardownWebMic();
+              setTimeout(() => { if (!disposed) void startWebMic(strict); }, 500);
+            };
+          }
+
+          streamRef.current = stream;
+          const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
+          audioCtxRef.current = ctx;
+          addLog(`🔊 AudioContext state: ${ctx.state}, sampleRate: ${ctx.sampleRate}`, "info");
+
+          const resumeCtx = async () => {
+            if (ctx.state === "suspended" || ctx.state === "interrupted") {
+              try { await ctx.resume(); } catch (_) {}
+              addLog(`🔊 AudioContext resume → ${ctx.state}`, "info");
+            }
+          };
+          await resumeCtx();
+          ctx.onstatechange = () => { if (!disposed && ctx.state !== "running") void resumeCtx(); };
+          // If autoplay policy still blocks resume, retry on the very next touch/click.
+          if (ctx.state !== "running") {
+            const gesture = () => { void resumeCtx(); };
+            document.addEventListener("touchstart", gesture, { once: true, passive: true });
+            document.addEventListener("click", gesture, { once: true });
+          }
+
+          const source = ctx.createMediaStreamSource(stream);
+          await ctx.audioWorklet.addModule("/audioProcessor.js");
+          const processor = new AudioWorkletNode(ctx, "audio-processor", { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
+          processorRef.current = processor;
+
+          // Route through a muted gain node: keeps the graph "pulled" (so process() runs on Android)
+          // without echoing the mic to the speaker.
+          const mute = ctx.createGain();
+          mute.gain.value = 0;
+          source.connect(processor);
+          processor.connect(mute);
+          mute.connect(ctx.destination);
+
+          processor.port.onmessage = (ev) => { processAudioSamples(ev.data); };
+
+          if (!disposed) {
+            setWakeWordReady(true);
+            addLog(`🎤 Microphone ready — say "${activationWordRef.current}"`, "info");
+          }
+        } catch (err) {
+          if (!disposed) {
+            addLog(`❌ Mic error: ${err.message || err}`, "error");
+            setWakeWordReady(false);
+          }
+        }
+      }
+
+      // Called when the active capture path delivers exact-zero samples for several seconds.
+      async function handleSilentCapture() {
+        if (disposed) return;
+        if (nativeActive) {
+          addLog("⚠️ Native mic is returning digital silence — switching to browser microphone.", "warn");
+          try { window.AndroidMic.stopNativeMic(); } catch (_) {}
+          window.onNativeAudioChunk = null;
+          nativeActive = false;
+          await startWebMic(true);
+        } else if (usingWebMic && !webRetried) {
+          webRetried = true;
+          addLog("⚠️ Browser mic is silent — re-acquiring with default constraints.", "warn");
+          teardownWebMic();
+          await startWebMic(false);
+        } else if (usingWebMic) {
+          addLog("⚠️ Mic still silent. Check: another app using the mic, glasses/Beam audio routing, or Android mic privacy toggle.", "error");
+        }
+      }
+
       // ─── Native Android Bridge (bypasses browser origin security & hardware routing) ───
       if (typeof window !== 'undefined' && window.AndroidMic && typeof window.AndroidMic.startNativeMic === 'function') {
-        addLog("⚡ Native Android Mic Bridge connected (0.001s)", "info");
         window.onNativeAudioChunk = (pcmArray) => {
           if (disposed) return;
           processAudioSamples(new Float32Array(pcmArray));
         };
-        window.AndroidMic.startNativeMic();
-        if (!disposed) {
-          setWakeWordReady(true);
-          addLog(`🎤 Microphone ready — say "${activationWordRef.current}"`, "info");
+        let nativeOk = true;
+        try {
+          // New APK returns false if the mic could not be opened; old APK returns undefined (treated as ok).
+          const r = window.AndroidMic.startNativeMic();
+          nativeOk = r !== false;
+        } catch (_) { nativeOk = false; }
+
+        if (nativeOk) {
+          nativeActive = true;
+          addLog("⚡ Native Android Mic Bridge connected", "info");
+          if (!disposed) {
+            setWakeWordReady(true);
+            addLog(`🎤 Microphone ready — say "${activationWordRef.current}"`, "info");
+          }
+          return;
         }
-        return;
+        addLog("⚠️ Native mic unavailable (permission/hardware) — using browser microphone.", "warn");
+        window.onNativeAudioChunk = null;
       }
 
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        if (disposed) { stream.getTracks().forEach(t => t.stop()); return; }
-        addLog("✅ Mic permission granted", "info");
-
-        streamRef.current = stream;
-        const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
-        audioCtxRef.current = ctx;
-        addLog(`🔊 AudioContext state: ${ctx.state}, sampleRate: ${ctx.sampleRate}`, "info");
-
-        // Mobile Chrome requires explicit resume after user gesture (getUserMedia)
-        if (ctx.state === 'suspended') {
-          addLog("⏸️ AudioContext suspended — resuming...", "warn");
-          await ctx.resume();
-          addLog(`🔊 AudioContext resumed — state: ${ctx.state}`, "info");
-        }
-
-        const source    = ctx.createMediaStreamSource(stream);
-
-        // Add AudioWorklet module
-        await ctx.audioWorklet.addModule('/audioProcessor.js');
-        const processor = new AudioWorkletNode(ctx, 'audio-processor');
-        processorRef.current = processor;
-
-        source.connect(processor);
-        processor.connect(ctx.destination);
-
-        processor.port.onmessage = (ev) => {
-          processAudioSamples(ev.data);
-        };
-
-        if (!disposed) {
-          setWakeWordReady(true);
-          addLog(`🎤 Microphone ready — say "${activationWordRef.current}"`, "info");
-        }
-      } catch (err) {
-        if (!disposed) {
-          addLog(`❌ Mic error: ${err.message || err}`, "error");
-          setWakeWordReady(false);
-        }
-      }
+      await startWebMic(true);
     }
 
     startMic();
@@ -1698,6 +1810,11 @@ export default function App({ mode = "voice", language = "en" }) {
 
   // ── Manual tap button ─────────────────────────────────────────────────────
   const handleMicButton = () => {
+    // A tap is a user gesture: guarantees a suspended mobile AudioContext can start producing samples.
+    try {
+      const c = audioCtxRef.current;
+      if (c && c.state !== "running") c.resume().catch(() => {});
+    } catch (_) {}
     if (status === "idle") {
       if (!wakeWordReady) {
         addLog("⚠️ Microphone not ready yet.", "warn");

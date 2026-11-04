@@ -490,16 +490,17 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
   <meta charset="utf-8"/>
   <title>${safeTitle}</title>
   <style>
-    @page { size: auto; margin: 0mm; }
+    @page { size: auto; margin: 8mm; }
+    html, body { width:100%; height:100%; }
     * { margin:0; padding:0; box-sizing:border-box; }
     body { background:#fff; margin:0; padding:0; }
-    .page { page-break-after: always; text-align:center; margin:0; padding:0; }
-    .page:last-child { page-break-after: avoid; }
-    .page img { width:100%; height:auto; display:block; }
+    .page { display:flex; align-items:center; justify-content:center; width:100%; height:calc(100vh - 2px); overflow:hidden; margin:0; padding:0; page-break-after: always; break-after: page; page-break-inside: avoid; break-inside: avoid; }
+    .page:last-child { page-break-after: auto; break-after: auto; }
+    .page img { max-width:100%; max-height:100%; width:auto; height:auto; object-fit:contain; display:block; page-break-inside: avoid; break-inside: avoid; }
     @media print {
       body { margin:0; }
-      .page { page-break-after: always; }
-      .page:last-child { page-break-after: avoid; }
+      .page { page-break-after: always; break-after: page; break-inside: avoid; }
+      .page:last-child { page-break-after: auto; break-after: auto; }
     }
   </style>
 </head>
@@ -605,16 +606,17 @@ const PdfViewer = memo(forwardRef(function PdfViewerComponent(
   <meta charset="utf-8"/>
   <title>${jobTitle}</title>
   <style>
-    @page { size: auto; margin: 0mm; }
+    @page { size: auto; margin: 8mm; }
+    html, body { width:100%; height:100%; }
     * { margin:0; padding:0; box-sizing:border-box; }
     body { background:#fff; margin:0; padding:0; }
-    .page { page-break-after: always; text-align:center; margin:0; padding:0; }
-    .page:last-child { page-break-after: avoid; }
-    .page img { width:100%; height:auto; display:block; }
+    .page { display:flex; align-items:center; justify-content:center; width:100%; height:calc(100vh - 2px); overflow:hidden; margin:0; padding:0; page-break-after: always; break-after: page; page-break-inside: avoid; break-inside: avoid; }
+    .page:last-child { page-break-after: auto; break-after: auto; }
+    .page img { max-width:100%; max-height:100%; width:auto; height:auto; object-fit:contain; display:block; page-break-inside: avoid; break-inside: avoid; }
     @media print {
       body { margin:0; }
-      .page { page-break-after: always; }
-      .page:last-child { page-break-after: avoid; }
+      .page { page-break-after: always; break-after: page; break-inside: avoid; }
+      .page:last-child { page-break-after: auto; break-after: auto; }
     }
   </style>
 </head>

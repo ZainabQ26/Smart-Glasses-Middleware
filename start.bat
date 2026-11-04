@@ -16,7 +16,7 @@ if %errorlevel% neq 0 (
 )
 
 echo Starting Docker containers (API + Database + HTTPS Tunnel)...
-docker compose -f docker-compose.localstack.yml up -d
+docker compose -f docker-compose.localstack.yml up -d --build
 
 echo.
 echo ===================================================
