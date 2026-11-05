@@ -45,8 +45,8 @@ class MainActivity : AppCompatActivity() {
     private val localBase = "http://localhost:5000"
     private val localUrl = "$localBase/"
     private var currentUrlToLoad = localUrl
-    // Optional hints only. The real PC address is auto-discovered on whatever Wi-Fi the phone is on (see discoverLanHosts).
-    private val defaultPcHosts = ""
+    // Optional hints only. Fallback to known campus IP, or auto-discovered on whatever Wi-Fi the phone is on.
+    private val defaultPcHosts = "66.71.37.204"
     private var localForwarder: LocalForwarder? = null
     private var pendingWebPermission: PermissionRequest? = null
 
@@ -177,7 +177,7 @@ class MainActivity : AppCompatActivity() {
         localForwarder = LocalForwarder(5000, 5000) {
             val configured = (prefs.getString("pc_hosts", null) ?: defaultPcHosts)
                 .split(",").map { it.trim() }.filter { it.isNotEmpty() }
-            (configured + discoverLanHosts(5000)).distinct()
+            if (configured.isNotEmpty()) configured else discoverLanHosts(5000)
         }.also { it.start() }
 
         webView.loadUrl(currentUrlToLoad)
@@ -403,7 +403,7 @@ class MainActivity : AppCompatActivity() {
                 if (!nif.isUp || nif.isLoopback) return@forEach
                 nif.interfaceAddresses.forEach { ia ->
                     val a = ia.address
-                    if (a is java.net.Inet4Address && a.isSiteLocalAddress) {
+                    if (a is java.net.Inet4Address && !a.isLoopbackAddress && !a.isLinkLocalAddress) {
                         prefixes += a.hostAddress!!.substringBeforeLast('.')
                     }
                 }
@@ -428,7 +428,18 @@ class MainActivity : AppCompatActivity() {
         return discoveredHosts
     }
 
-    override fun onDestroy() {        super.onDestroy()
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        intent?.getStringExtra("pc_hosts")?.takeIf { it.isNotBlank() }?.let { hosts ->
+            getSharedPreferences("smartglasses", Context.MODE_PRIVATE)
+                .edit().putString("pc_hosts", hosts).apply()
+            webView.reload()
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
         localForwarder?.stop()
         isRecording = false
         try {
